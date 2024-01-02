@@ -1,0 +1,36 @@
+{
+    "name": "carmelosantana/plugin-template-composer",
+    "description": "Plugin template with composer support.",
+    "type": "wordpress-plugin",
+    "license": "GNU General Public License v2",
+    "authors": [
+        {
+            "name": "Carmelo Santana",
+            "email": "me@carmelosantana.com"
+        }
+    ],
+    "autoload": {
+        "psr-4": {
+            "CarmeloSantana\\PluginTemplate\\": "src/"
+        }
+    },
+    "require": {
+        "php": "^8.1",
+        "htmlburger/carbon-fields": "^3.3",
+        "spatie/ray": "^1.35",
+        "composer/installers": "^2.2"
+    },
+    "scripts": {
+        "bento": [
+            "CarmeloSantana\\ReleaseBento\\Package::build"
+        ]
+    },
+    "require-dev": {
+        "carmelosantana/release-bento": "^0.1.0"
+    },
+    "config": {
+        "allow-plugins": {
+            "composer/installers": true
+        }
+    }
+}

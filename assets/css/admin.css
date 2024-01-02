@@ -1,0 +1,4 @@
+/*Hide hidden fields*/
+.cf-container .cf-container__fields .cf-hidden {
+    display: none;
+}
