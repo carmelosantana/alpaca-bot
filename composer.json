@@ -1,6 +1,6 @@
 {
-    "name": "carmelosantana/plugin-template-composer",
-    "description": "Plugin template with composer support.",
+    "name": "carmelosantana/ollama-press",
+    "description": "🚀 Boost your WordPress website with instant AI-powered content creation and coding assistance! 💥",
     "type": "wordpress-plugin",
     "license": "GNU General Public License v2",
     "authors": [
@@ -11,12 +11,11 @@
     ],
     "autoload": {
         "psr-4": {
-            "CarmeloSantana\\PluginTemplate\\": "src/"
+            "CarmeloSantana\\OllamaPress\\": "src/"
         }
     },
     "require": {
         "php": "^8.1",
-        "htmlburger/carbon-fields": "^3.3",
         "spatie/ray": "^1.35",
         "composer/installers": "^2.2"
     },

@@ -1,18 +1,18 @@
-# Plugin Template
+# Ollama Press
 
-> WordPress plugin ...
+🧱 A privately hosted WordPress chatbot plugin for quick content creation and code completion. 🌟
+
+> Made possible by [ollama](https://github.com/jmorganca/ollama) and the research behind these open source [Large Language Models](https://ollama.ai/library) (LLMs).
 
 - [Features](#features)
 - [Requirements](#requirements)
 - [Installation](#installation)
-- [Support](#support)
 - [Funding](#funding)
 - [License](#license)
 
 ## Features
 
-- Thing 1
-- Thing 2
+- ...
 
 ## Requirements
 
@@ -20,21 +20,17 @@
 
 ## Installation
 
-1. Download the latest release from the [releases page](https://github.com/carmelosantana/plugin-template-composer/releases).
+1. Download the latest release from the [releases page](https://github.com/carmelosantana/ollama-press/releases).
 2. Upload the plugin to your WordPress site.
 3. Activate the plugin.
-
-## Support
-
-💎 Premium support can be booked through [calendly](https://calendly.com/carmelosantana/).
 
 ## Funding
 
 If you find this project useful or use it in a commercial environment please consider donating today with one of the following options.
 
-- [PayPal](https://www.paypal.com/donate/?business=PWVK9L8VGN4VA&no_recurring=0&currency_code=USD)
 - Bitcoin `bc1qhxu9yf9g5jkazy6h4ux6c2apakfr90g2rkwu45`
 - Ethereum `0x9f5D6dd018758891668BF2AC547D38515140460f`
+- [PayPal](https://www.paypal.com/donate/?business=PWVK9L8VGN4VA&no_recurring=0&currency_code=USD)
 
 ## License
 
