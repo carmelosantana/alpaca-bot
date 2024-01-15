@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace CarmeloSantana\OllamaPress\Chat;
 
-use CarmeloSantana\OllamaPress\API\HTMX;
+use CarmeloSantana\OllamaPress\Api\Htmx;
 
 class Screen
 {
@@ -12,15 +12,10 @@ class Screen
 
     public function __construct()
     {
-        add_filter('admin_footer_text', [$this, 'footerText']);
+        add_filter('admin_footer_text', [$this, 'outputFooterText']);
 
-        $this->htmx = new HTMX();
+        $this->htmx = new Htmx();
         $this->outputHTML();
-    }
-
-    public function footerText()
-    {
-        echo 'Always verify important information to ensure accuracy.';
     }
 
     public function outputHTML()
@@ -71,5 +66,10 @@ class Screen
         </script>
         <script type="module" src="<?php echo OP_DIR_URL . 'assets/js/zero-md.min.js'; ?>"></script>
 <?php
+    }
+
+    public function outputFooterText()
+    {
+        echo 'Always verify important information to ensure accuracy.';
     }
 }
