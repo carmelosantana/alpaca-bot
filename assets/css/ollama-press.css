@@ -1,0 +1,313 @@
+:root {
+    /* Color */
+    --text-color: #343541;
+    --icon-color: #a9a9bc;
+    --icon-hover: #0a4b78;
+    --icon-hover-bg: #f1f1f3;
+    --placeholder-color: #6c6c6c;
+    --outgoing-chat-bg: #FFFFFF;
+    --incoming-chat-bg: #F7F7F8;
+    --outgoing-chat-border: #FFFFFF;
+    --incoming-chat-border: #D9D9E3;
+
+    /* Size */
+    --max-container-width: 800px;
+}
+
+/* Basic animation */
+.fadeOut {
+    visibility: hidden;
+    opacity: 0;
+    transition: visibility 0s 2s, opacity 2s ease-in-out;
+}
+
+/* WordPress: Add padding to wp-footer to view above textarea */
+.toplevel_page_ollama-press #footer-left {
+    padding-bottom: 75px !important;
+}
+
+/* Custom admin menu icons */
+#toplevel_page_ollama-press .wp-menu-image img {
+    width: 20px;
+    height: 20px;
+    filter: invert(100%);
+}
+
+/* Chatbox CSS */
+#op-chat-container {
+    margin-bottom: 50px;
+    min-height: 50vh;
+}
+
+#op-hello p {
+    color: #646970;
+    font-size: 1.5rem;
+    font-style: normal;
+    margin: 0;
+    text-align: center;
+}
+
+#op-hello img {
+    padding: 2em;
+    display: block;
+    margin: 0 auto;
+    width: 128px;
+    height: 128px;
+    border-radius: 50%;
+}
+
+#indicator {
+    padding: 2em;
+    display: block;
+    margin: 1em auto;
+    width: 28px;
+    height: 28px;
+}
+
+.op-toolbar {
+    margin: 1.2em 0 1em 0;
+}
+
+/* first level children */
+.op-toolbar>* {
+    display: inline-block;
+    margin-right: 0.2em;
+}
+
+.op-toolbar select {
+    font-size: 1.1em;
+    width: 240px;
+    height: 35px;
+    border: 1px solid #ccc;
+    border-radius: 5px;
+    vertical-align: top;
+}
+
+/* P tag inside op.toolbar next to a select field */
+.op-toolbar p {
+    display: block;
+    margin: 0.75em 0 0 0.5em;
+    font-size: .95em;
+    color: var(--text-color);
+    opacity: 0.7;
+    transition: opacity 0.3s ease-in-out;
+}
+
+/* hover p */
+.op-toolbar p:hover {
+    opacity: 1;
+    transition: opacity 0.2s ease-in-out;
+}
+
+/* move second select to the right */
+.op-toolbar #chat_log_id {
+    float: right;
+}
+
+.op-toolbar button {
+    border: 1px solid #ccc;
+    border-radius: 5px;
+    vertical-align: top;
+    padding: 3px 5px 2px 5px;
+}
+
+#op-response {
+    max-width: var(--max-container-width);
+    margin: 0 auto;
+}
+
+.op-chat-message-user .op-chat-message-response {
+    opacity: 0.8;
+}
+
+.op-chat-message-user .op-chat-message-response:hover {
+    opacity: 1;
+    transition: opacity 0.3s ease-in-out;
+}
+
+.toplevel_page_ollama-press #wpfooter #footer-left {
+    color: var(--icon-color);
+    font-size: .75rem;
+}
+
+.htmx-indicator {
+    display: none;
+}
+
+.htmx-request .htmx-indicator {
+    display: inline;
+}
+
+.htmx-request.htmx-indicator {
+    display: inline;
+}
+
+.op-chat-message {
+    padding-top: 1em;
+    margin-bottom: 1.2em;
+}
+
+.op-chat-message-gravatar {
+    /* width: 40px; */
+    height: 100%;
+    float: left;
+    margin-right: 1em;
+}
+
+.op-chat-message-gravatar img {
+    width: 38px;
+    height: 38px;
+    border-radius: 50%;
+}
+
+.op-chat-message-username {
+    font-weight: bold;
+    text-transform: capitalize;
+}
+
+.op-chat-message-username .model {
+    font-weight: normal;
+    text-transform: none;
+    color: #999;
+}
+
+.op-chat-message-user .op-chat-message-response {
+    color: var(--placeholder-color);
+}
+
+/*
+    Typing container styling
+    https://emma-delaney.medium.com/how-to-create-your-own-chatgpt-in-html-css-and-javascript-78e32b70b4be 
+*/
+.typing-container {
+    position: fixed;
+    bottom: 0;
+    width: 100%;
+    display: flex;
+    padding: 10px 10px;
+    margin-left: -20px;
+    justify-content: center;
+    background: var(--outgoing-chat-bg);
+    border-top: 1px solid var(--incoming-chat-border);
+    z-index: 10;
+}
+
+.typing-container .typing-content {
+    display: flex;
+    max-width: var(--max-container-width);
+    width: 100%;
+    align-items: flex-end;
+    margin-left: -160px !important;
+}
+
+.folded .typing-container .typing-content {
+    margin-left: 0px !important;
+}
+
+.typing-container .typing-textarea {
+    width: 100%;
+    display: flex;
+    position: relative;
+}
+
+.typing-textarea textarea {
+    resize: none;
+    height: 55px;
+    width: 100%;
+    border: none;
+    padding: 5px 45px 5px 10px;
+    color: var(--text-color);
+    font-size: 1rem;
+    border-radius: 4px;
+    max-height: 250px;
+    overflow-y: auto;
+    background: var(--incoming-chat-bg);
+    outline: 1px solid var(--incoming-chat-border);
+}
+
+.typing-textarea textarea::placeholder {
+    color: var(--placeholder-color);
+}
+
+.typing-content span {
+    width: 56px;
+    height: 56px;
+    display: flex;
+    font-size: 1.56rem;
+    align-items: center;
+    justify-content: center;
+    color: var(--icon-color);
+    cursor: pointer;
+}
+
+.typing-textarea span {
+    position: absolute;
+    right: 0;
+    bottom: 0;
+    color: var(--icon-hover-bg);
+}
+
+.typing-textarea textarea:valid~span {
+    color: var(--placeholder-color);
+}
+
+/* on hover and when disabled  */
+.typing-textarea span:hover {
+    color: var(--icon-hover);
+}
+
+.typing-textarea span:disabled {
+    color: var(--incoming-chat-border);
+    cursor: not-allowed;
+}
+
+.typing-textarea span:hover {
+    color: var(--icon-hover);
+}
+
+/* Responsive Media Query */
+@media screen and (max-width: 600px) {
+    .default-text h1 {
+        font-size: 2.3rem;
+    }
+
+    :where(.default-text p, textarea, .chat p) {
+        font-size: 0.95rem !important;
+    }
+
+    .chat-container .chat {
+        padding: 20px 10px;
+    }
+
+    .chat-container .chat img {
+        height: 32px;
+        width: 32px;
+    }
+
+    .chat-container .chat p {
+        padding: 0 20px;
+    }
+
+    .chat .chat-content:not(:has(.typing-animation), :has(.error)) span {
+        visibility: visible;
+    }
+
+    .typing-container {
+        padding: 15px 10px;
+    }
+
+    .typing-textarea textarea {
+        height: 45px;
+        padding: 10px 40px 10px 10px;
+    }
+
+    .typing-content span {
+        height: 45px;
+        width: 45px;
+        margin-left: 5px;
+    }
+
+    span.material-symbols-rounded {
+        font-size: 1.25rem !important;
+    }
+}
