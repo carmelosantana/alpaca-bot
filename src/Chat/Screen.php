@@ -41,7 +41,6 @@ class Screen
                         <p>How can I help you today?</p>
                     </div>
                     <div id="op-response">
-                        <div type="hidden" id="op-dialog"></div>
                     </div>
                     <img id="indicator" class="htmx-indicator" src="<?php echo OP_DIR_URL . 'assets/img/grid.svg'; ?>">
                 </div>
