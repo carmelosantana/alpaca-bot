@@ -22,7 +22,7 @@
 }
 
 /* WordPress: Add padding to wp-footer to view above textarea */
-#footer-left {
+.toplevel_page_ollama-press #footer-left {
     padding-bottom: 75px !important;
 }
 
