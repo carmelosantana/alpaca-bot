@@ -12,6 +12,9 @@ class OllamaPress
         add_action('admin_enqueue_scripts', [$this, 'adminEnqueueStyles']);
         add_action('admin_menu', [$this, 'addAdminMenu']);
         add_action('plugins_loaded', [$this, 'init']);
+
+        // Load chat log post type early
+        new Chat\Post();
     }
 
     public function addAdminMenu()
@@ -24,6 +27,16 @@ class OllamaPress
             [$this, 'chat'],
             OP_DIR_URL . 'assets/img/icon-80.png',
             4
+        );
+
+        // Add submenu page to replace the default menu page
+        add_submenu_page(
+            OP_SLUG,
+            'Chat',
+            'Chat',
+            'manage_options',
+            OP_SLUG,
+            [$this, 'chat']
         );
     }
 
@@ -48,7 +61,6 @@ class OllamaPress
     public function init()
     {
         new Api\Htmx();
-        new Chat\Post();
         new Editor\Screen();
     }
 }
