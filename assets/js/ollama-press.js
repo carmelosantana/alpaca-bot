@@ -7,6 +7,7 @@ const submit = document.querySelector("#submit");
 const welcome = document.querySelector("#op-hello");
 
 // HTMx
+htmx.config.defaultFocusScroll = true;
 htmx.config.ignoreTitle = true;
 
 // Render markdown to HTML per request
@@ -29,23 +30,8 @@ async function render(opts = {}) {
 }
 
 // After submit 
-// - Scroll to the second to last op-chat-message element in op-response
-// - Replace remove op-dialog ID, add div field with op-dialog ID to #op-response
-// - Clear prompt
 function afterSubmit() {
-    bumpDialog();
     clearPrompt();
-}
-
-// Replace remove op-dialog ID, add div field with op-dialog ID to #op-response
-function bumpDialog() {
-    // Remove op-dialog ID
-    var opDialog = document.querySelector("#op-dialog");
-    opDialog.removeAttribute("id");
-
-    // Append to end of response
-    var opResponse = document.querySelector("#op-response");
-    opResponse.innerHTML += '<div id="op-dialog"></div>';
 }
 
 function clearChat() {
@@ -83,30 +69,7 @@ function isBlank(str) {
     return (!str || /^\s*$/.test(str));
 }
 
-// find element by class and scroll to it, parameter is the class name
-function scrollToClass(className) {
-    // fine the last class .op-dialog element in op-response and scroll to it
-    var opResponse = document.querySelector("#op-response");
-    var opDialog = opResponse.querySelector(className);
-    console.log(opDialog);
-    opDialog.scrollIntoView();
-}
-
-// If the Enter key is pressed without Shift and the window width is large "enough"
-message.addEventListener("keydown", (e) => {
-    if (e.key === "Enter" && !e.shiftKey && window.innerWidth > 640) {
-        e.preventDefault();
-        submit.click();
-    };
-});
-
-// On submit click
-submit.addEventListener('click', function () {
-    // Do not submit if the message is empty
-    if (isBlank(message.value)) {
-        return;
-    }
-
+function onClickChange() {
     htmx.onLoad(function (content) {
         // If the content is a form, clear the prompt and scroll to the bottom
         afterSubmit();
@@ -117,6 +80,65 @@ submit.addEventListener('click', function () {
 
     // Copy message to prompt, clear message
     copyMessage();
+}
+
+// find element by class and scroll to it, parameter is the class name
+function smoothScrollTo(selector = "dialog", behavior = 'smooth', block = 'start') {
+    switch (selector) {
+        case "dialog":
+            var opResponse = document.querySelector("#op-response");
+            var opDialogs = opResponse.querySelectorAll('.op-dialog');
+            var lastOpDialog = opDialogs[opDialogs.length - 1];
+            var element = lastOpDialog ? lastOpDialog.id : null;
+
+            // if there is no element with class of .op-dialog, scroll to the bottom
+            if (element == null) {
+                element = opResponse;
+            } else {
+                element = document.querySelector("#" + element);
+            }
+            element.scrollIntoView({ behavior: behavior, block: block });
+            break;
+
+        case 'bottom':
+            element = document.querySelector("#op-response");
+            block = 'end';
+            break;
+
+        case 'loading':
+            element = document.querySelector("#indicator");
+            break;
+
+        default:
+            element = document.querySelector(selector);
+            break;
+    }
+    element.scrollIntoView({ behavior: behavior, block: block });
+    console.log(element.id);
+}
+
+// If the Enter key is pressed without Shift and the window width is large "enough"
+message.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !e.shiftKey && window.innerWidth > 640) {
+        e.preventDefault();
+        if (!isBlank(message.value)) {
+            submit.click();
+        }
+    };
+});
+
+// On submit click
+submit.addEventListener('click', function () {
+    // Do not submit if the message is empty
+    if (isBlank(message.value)) {
+        return;
+    }
+
+    // Scroll to indicator
+    smoothScrollTo('loading');
+
+    // Submit form
+    onClickChange();
 });
 
 // On #chat_log_id select change
@@ -126,10 +148,10 @@ chat_log_id.addEventListener('change', function () {
         return;
     }
 
-    // Clear welcome screen
-    clearHome();
+    // Submit form
+    onClickChange();
 
-    // Clear chat messages
+    // Clear chat
     clearChat();
 });
 
