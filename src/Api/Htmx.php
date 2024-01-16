@@ -201,10 +201,8 @@ class Htmx
 			'timeout' => $this->timeout,
 		];
 
-		// Start dialog HTML
-		$op_time = time();
-		$class = 'op-dialog-' . $op_time;
-		$this->outputHtmlTag('start', 'div', $class);
+		// Open wrapper and dialog
+		$this->outputDialogStart();
 
 		// add user chat message to body
 		$this->outputUserMessage($prompt);
@@ -225,12 +223,35 @@ class Htmx
 		// Save messages to chat log
 		$post_id = $this->addChatLog($body, $json, $post_id);
 
-		// End dialog HTML
-		$this->outputPostScript($class);
-		$this->outputHtmlTag('end');
+		// Close dialog and wrapper
+		$this->outputDialogEnd();
 
 		// We also output hidden field for replacement
 		$this->outputHiddenFields($post_id);
+	}
+
+	public function outputDialogEnd()
+	{
+		// End .op-dialog
+		$this->outputHtmlTag(false);
+		$this->outputPostScript();
+
+		// End #op-response
+		$this->outputHtmlTag(false);
+	}
+
+	// Add #op-response wrapper used for innerHTML replacement and opens .op-dialog
+	public function outputDialogStart()
+	{
+		$this->outputHtmlTag([
+			'id' => 'op-response',
+		]);
+
+		// add user chat message to body
+		$this->outputHtmlTag([
+			'class' => 'op-dialog',
+			'id' => 'op-dialog-' . time(),
+		]);
 	}
 
 	public function outputAssistantError($message = '', $model = '', $role = 'System')
@@ -270,8 +291,8 @@ class Htmx
 		// Get post_content
 		$messages = json_decode($post->post_content, true);
 
-		// Start dialog HTML
-		$this->outputHtmlTag('start');
+		// Open wrapper and dialog
+		$this->outputDialogStart();
 
 		// Check if $messages is valid array
 		if (is_array($messages)) {
@@ -289,8 +310,10 @@ class Htmx
 			return;
 		}
 
-		// End dialog HTML
-		$this->outputHtmlTag('end');
+		// Close dialog and wrapper
+		$this->outputDialogEnd();
+
+		// We also output hidden field for replacement
 		$this->outputHiddenFields($post_id);
 	}
 
@@ -349,23 +372,39 @@ class Htmx
 		}
 	}
 
-	public function outputPostScript($class)
+	public function outputPostScript($class = '')
 	{
-		echo '<script type="text/javascript">';
-		echo 'document.querySelector(".' . $class . '").scrollIntoView({behavior: "smooth", block: "end", inline: "nearest"});';
-		echo '</script>';
+		echo '<script type="text/javascript">smoothScrollTo(' . $class . ');</script>';
 	}
 
-	public function outputHtmlTag($action = 'start', $tag = 'div', $class = 'op-dialog', $id = 'op-dialog',)
+	public function outputHtmlTag($attributes = [])
 	{
-		switch ($action) {
-			case 'start':
-				echo '<' . $tag . ' id="' . $id . '" class="' . $class . '">';
-				break;
+		$defaults = [
+			'element' => true,
+			'tag' => 'div',
+			'class' => null,
+			'id' => null,
+		];
 
-			case 'end':
-				echo '</' . $tag . '>';
-				break;
+		if (!is_array($attributes) and !$attributes) {
+			$attributes = [
+				'element' => false,
+			];
+		}
+
+		$attributes = wp_parse_args($attributes, $defaults);
+
+		// Extract $attributes_options as variables
+		extract($attributes);
+
+		if ($element) {
+			// only output id= or class= if values are not empty
+			$id = !empty($id) ? ' id="' . $id . '"' : null;
+			$class = !empty($class) ? ' class="' . $class . '"' : null;
+
+			echo '<' . $tag . $id . $class . '>';
+		} else {
+			echo '</' . $tag . '>';
 		}
 	}
 
@@ -376,7 +415,7 @@ class Htmx
 
 	public function outputHxMultiSwapLoadChat(string $endpoint = 'chat', string $trigger = 'click')
 	{
-		echo 'hx-post="' . $this->getRenderEndpoint($endpoint) . '" hx-trigger="' . $trigger . '" hx-ext="multi-swap" hx-swap="multi:#op-dialog:outerHTML,#chat_id:outerHTML" hx-disabled-elt="this" hx-indicator="#indicator"';
+		echo 'hx-post="' . $this->getRenderEndpoint($endpoint) . '" hx-trigger="' . $trigger . '" hx-ext="multi-swap" hx-swap="multi:#op-response:beforeend,#chat_id:outerHTML" hx-disabled-elt="this" hx-indicator="#indicator"';
 	}
 
 	public function outputRenderEndpoint($endpoint)
@@ -474,16 +513,10 @@ class Htmx
 
 	private function outputDebug()
 	{
-		// ray($_SERVER)->label('$_SERVER')->orange();
+		// chat post_type count
 		// ray($_POST)->label('$_POST')->orange();
 		// ray($_GET)->label('$_GET')->orange();
-		// ray($_REQUEST)->label('$_REQUEST')->orange();
-		// ray($_FILES)->label('$_FILES')->orange();
-		// ray($_COOKIE)->label('$_COOKIE')->orange();
-		// ray($_ENV)->label('$_ENV')->orange();
-		// ray($_SESSION)->label('$_SESSION')->orange()
-
-		// chat post_type count
+		// ray($_SERVER)->label('$_SERVER')->orange();
 		$count = wp_count_posts('chat');
 		ray($count->publish)->label('chat post_type count')->orange();
 	}
