@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace CarmeloSantana\OllamaPress\Chat;
 
+use CarmeloSantana\OllamaPress\Options;
+
 class Post
 {
     public function __construct()
@@ -14,7 +16,7 @@ class Post
 
     public function addMenu()
     {
-        if (WP_DEBUG) {
+        if (Options::get('debug', false)) {
             add_submenu_page(
                 OP_SLUG,
                 __('Chats', OP_SLUG),
@@ -29,16 +31,15 @@ class Post
     {
         register_post_type('chat', [
             'delete_with_user' => true,
-            'public' => WP_DEBUG,
             'supports' => [
                 'title',
-                'editor',
                 'excerpt',
-                'author',
             ],
             'show_in_rest' => false,
             'exclude_from_search' => true,
-            'show_in_menu' => 'admin.php?page=ollama-press',
+            // Debug
+            'public' => Options::get('debug', false),
+            'show_in_menu' => (Options::get('debug', false) ? 'admin.php?page=ollama-press' : false),
         ]);
     }
 }
