@@ -55,16 +55,14 @@ class Htmx
 			];
 		}
 
-		$body['messages'][] = [
-			'role' => $json['message']['role'],
-			'content' => $json['message']['content'],
+		// build user message matching api response
+		$user_message = [
+			'model' => $body['model'],
+			'message' => [
+				'role' => get_current_user_id(),
+				'content' => $body['message']['content'],
+			]
 		];
-
-		// add chat log to post_content
-		ray($body['messages'])->label('body[\'messages\']');
-		$post['post_content'] = json_encode($body['messages']);
-
-		ray($post)->label('addChatLog() $post')->red();
 
 		if ($post_id > 0) {
 			$post_id = wp_update_post($post);
@@ -72,7 +70,17 @@ class Htmx
 			$post_id = wp_insert_post($post);
 		}
 
+		// pull existing meta, add new meta, update meta
+		$meta = get_post_meta($post_id, 'messages', true);
+
+		if (!is_array($meta)) $meta = [];
+
+		$meta[] = $user_message;
+		$meta[] = $json;
+
 		ray($post_id)->label('addChatLog() $post_id');
+		ray($meta)->label('addChatLog() $meta');
+		update_post_meta($post_id, 'messages', $meta);
 
 		if (is_wp_error($post_id)) {
 			return false;
@@ -150,19 +158,26 @@ class Htmx
 		// Choose completion type
 		switch ($endpoint) {
 			case 'chat':
-				$post_id = (int) sanitize_text_field((int)$_POST['chat_id'] > 0 ? $_POST['chat_id'] : 0);
+				$post_id = (int) sanitize_text_field($_POST['chat_id'] ?? 0);
 				ray($post_id)->label('outputGenerate() $post_id');
-
-				$messages = [];
 
 				// if post_id > 0 then get post_content and add to messages
 				if ($post_id > 0) {
 					$post = get_post($post_id);
+					$messages_raw = get_post_meta($post_id, 'messages', true);
+					ray($messages_raw)->label('outputGenerate() $messages_raw');
+				}
 
-					if (!empty($post->post_content)) {
-						$messages = json_decode($post->post_content, true);
-						ray($messages)->label('outputGenerate() $messages');
+				// process messages to match api request
+				if (isset($messages_raw) and is_array($messages_raw)) {
+					foreach ($messages_raw as $message) {
+						$messages[] = [
+							'role' => (is_int($message['message']['role']) ? 'user' : 'assistant'),
+							'content' => $message['message']['content'],
+						];
 					}
+				} else {
+					$messages = [];
 				}
 
 				$message = [
@@ -177,7 +192,7 @@ class Htmx
 					'messages' => $messages,
 					'stream' => false,
 				];
-
+				ray($body)->label('outputGenerate() $body');
 				break;
 
 			case 'generate':
@@ -205,23 +220,20 @@ class Htmx
 		$this->outputDialogStart();
 
 		// add user chat message to body
-		$this->outputUserMessage($prompt);
+		$this->outputChatMessage(['message' => ['role' => get_current_user_id(), 'content' => $prompt]]);
 
 		// get assistant response
 		$json = $this->ollama->decodeRemoteBody($options);
 
-		// Choose completion output
-		$response = $json['response'] ?? $json['message']['content'] ?? null;
-
 		// add assistant response to body
-		if ($response) {
-			$this->outputAssistantResponse($response, $model);
+		if ($json) {
+			$this->outputChatMessage($json);
 		} else {
 			$this->outputAssistantError();
 		}
 
 		// Save messages to chat log
-		$post_id = $this->addChatLog($body, $json, $post_id);
+		$post_id = $this->addChatLog(['model' => $model, 'message' => $message], $json, $post_id);
 
 		// Close dialog and wrapper
 		$this->outputDialogEnd();
@@ -256,18 +268,17 @@ class Htmx
 
 	public function outputAssistantError($message = '', $model = '', $role = 'System')
 	{
-		$this->outputAssistantResponse('Sorry but an error occurred during your last request.', $model, $role);
-	}
+		if (empty($message)) {
+			$message = 'Sorry but an error occurred during your last request.';
+		}
 
-	public function outputAssistantResponse(string $response, string $model = '', string $role = 'Ollama')
-	{
-		$out = '<div class="op-chat-message op-chat-message-assistant">';
-		$out .= '<div class="op-chat-message-gravatar">' . $this->getAssistantAvatarImg($role) . '</div>';
-		$out .= '<div class="op-chat-message-username">' . $role . ' ' . $this->getAssistantModel($model) . '</div>';
-		$out .= '<div class="op-chat-message-response">' . $this->zeroScript($response) . '</div>';
-		$out .= '</div>';
-
-		echo $out;
+		$this->outputChatMessage([
+			'message' => [
+				'role' => $role,
+				'content' => $message,
+			],
+			'model' => $model,
+		]);
 	}
 
 	public function outputChatLoad()
@@ -288,8 +299,8 @@ class Htmx
 			return;
 		}
 
-		// Get post_content
-		$messages = json_decode($post->post_content, true);
+		// Get post_meta messages
+		$messages = get_post_meta($post_id, 'messages', true);
 
 		// Open wrapper and dialog
 		$this->outputDialogStart();
@@ -298,12 +309,7 @@ class Htmx
 		if (is_array($messages)) {
 			// Loop through messages
 			foreach ($messages as $message) {
-				// Check if message is from user or assistant
-				if ($message['role'] == 'user') {
-					$this->outputUserMessage($message['content']);
-				} else {
-					$this->outputAssistantResponse($message['content']);
-				}
+				$this->outputChatMessage($message);
 			}
 		} else {
 			$this->outputAssistantError('Error loading chat log, log may be corrupted.');
@@ -372,6 +378,49 @@ class Htmx
 		}
 	}
 
+	public function outputChatMessage(array $message)
+	{
+		$out = '';
+
+		// is_chat
+		if (isset($message['message'])) {
+			if (is_int($message['message']['role'])) {
+				$role = 'user';
+			} else {
+				$role = strtolower($message['message']['role']);
+			}
+			$response = $message['message']['content'];
+		} else {
+			$role = 'system';
+			$response = $message['response'];
+		}
+
+		switch ($role) {
+			case 'user':
+				$user = get_user_by('id', $message['message']['role']);
+				$gravatar = get_avatar_url($user->user_email, ['size' => 128]);
+				$user_name = $user->user_login;
+				// $user_name = get_the_author_meta('display_name', $message['message']['role']);
+				break;
+
+			default:
+				$gravatar = $this->getAssistantAvatarUrl($message['message']['role']);
+				$user_name = $message['message']['role'];
+				if (!empty($message['model'])) $user_name .= ' ' . $this->getAssistantModel($message['model']);
+				break;
+		}
+
+		$class = 'op-chat-message-' . $role;
+
+		$out .= '<div class="op-chat-message ' . $class . '">';
+		$out .= '<div class="op-chat-message-gravatar"><img src="' . $gravatar . '" alt="gravatar"></div>';
+		$out .= '<div class="op-chat-message-username">' . $user_name . '</div>';
+		$out .= '<div class="op-chat-message-response">' . $this->zeroScript($response) . '</div>';
+		$out .= '</div>';
+
+		echo $out;
+	}
+
 	public function outputPostScript($class = '')
 	{
 		echo '<script type="text/javascript">smoothScrollTo(' . $class . ');</script>';
@@ -421,20 +470,6 @@ class Htmx
 	public function outputRenderEndpoint($endpoint)
 	{
 		echo $this->getRenderEndpoint($endpoint);
-	}
-
-	public function outputUserMessage(string $message)
-	{
-		$user = wp_get_current_user();
-		$gravatar = get_avatar_url($user->user_email, ['size' => 128]);
-
-		$out = '<div class="op-chat-message op-chat-message-user">';
-		$out .= '<div class="op-chat-message-gravatar"><img src="' . $gravatar . '" alt="gravatar"></div>';
-		$out .= '<div class="op-chat-message-username">' . $user->user_login . '</div>';
-		$out .= '<div class="op-chat-message-response">' . $this->zeroScript($message) . '</div>';
-		$out .= '</div>';
-
-		echo $out;
 	}
 
 	public function outputTags($tag = 'option')
@@ -618,6 +653,12 @@ class Htmx
 		return vsprintf('%s%s-%s-%s-%s-%s%s%s', str_split(bin2hex($data), 4));
 	}
 
+	/**
+	 * Adds zero-md script for markdown rendering post response.
+	 *
+	 * @param  string $message
+	 * @return string
+	 */
 	private function zeroScript(string $message): string
 	{
 		return '<zero-md><script type="text/markdown">' . $message . '</script></zero-md>';
