@@ -61,6 +61,5 @@ class OllamaPress
     public function init()
     {
         new Api\Htmx();
-        new Editor\Screen();
     }
 }
