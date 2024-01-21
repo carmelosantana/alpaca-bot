@@ -10,7 +10,7 @@ class Ollama
 {
     private function getApiUrl()
     {
-        return Options::get('ollama_api_url') ?: getenv('OLLAMA_API_URL') ?: (defined('OLLAMA_API_URL') ? OLLAMA_API_URL : false);
+        return Options::get('api_url');
     }
 
     public function decodeRemoteBody(array $options = [])
