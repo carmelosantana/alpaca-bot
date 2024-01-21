@@ -11,7 +11,7 @@ License URI: http://www.gnu.org/licenses/gpl-2.0.html
 */
 
 // Defines
-define('OP_SLUG', 'ollama-press');
+define('OP', 'ollama-press');
 define('OP_TITLE', 'Ollama Press');
 define('OP_PLUGIN_FILE', __FILE__);
 define('OP_DIR_PATH', plugin_dir_path(__FILE__));
@@ -24,7 +24,7 @@ if (!file_exists($composer = plugin_dir_path(__FILE__) . 'vendor/autoload.php'))
     trigger_error(
         sprintf(
             /* translators: %s: plugin name */
-            __('Error locating %s autoloader. Please run <code>composer install</code>.', OP_SLUG),
+            __('Error locating %s autoloader. Please run <code>composer install</code>.', OP),
             OP_TITLE
         ),
         E_USER_ERROR
