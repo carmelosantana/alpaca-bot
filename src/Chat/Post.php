@@ -11,20 +11,6 @@ class Post
     public function __construct()
     {
         add_action('init', [$this, 'register']);
-        add_action('admin_menu', [$this, 'addMenu']);
-    }
-
-    public function addMenu()
-    {
-        if (Options::get('debug', false)) {
-            add_submenu_page(
-                OP_SLUG,
-                __('Chats', OP_SLUG),
-                __('Chats', OP_SLUG),
-                'manage_options',
-                'edit.php?post_type=chat'
-            );
-        }
     }
 
     public function register(): void
@@ -38,8 +24,8 @@ class Post
             'show_in_rest' => false,
             'exclude_from_search' => true,
             // Debug
-            'public' => Options::get('debug', false),
-            'show_in_menu' => (Options::get('debug', false) ? 'admin.php?page=ollama-press' : false),
+            'public' => false,
+            'show_in_menu' => false,
         ]);
     }
 }

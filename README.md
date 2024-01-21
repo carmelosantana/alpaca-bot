@@ -1,17 +1,12 @@
 # Ollama Press
 
-<center>
-
 ### 🌟 **Privately** hosted WordPress chatbot! ⚡️
 
-*WordPress plugin for quick content creation and code completion! ✨Train✨ models and provide your editors with a conversational interface to your private LLM.*
-
-
-[![Ollama Press](https://ollama.press/wp-content/uploads/2024/01/app-icon-1024-8bit.png)](https://ollama.press)
 
 [![Discord](https://img.shields.io/discord/1198290062316683275?logo=discord&label=Discord)](https://discord.gg/DqAUPAVhnR)
+*WordPress plugin for quick content creation and code completion! ✨Train✨ models and provide your editors with a conversational interface to your private LLM.*
 
-</center>
+[![Ollama Press](https://ollama.press/wp-content/uploads/2024/01/app-icon-512.png)](https://ollama.press)
 
 > This plugin is in early development and is not ready for production use.
 
@@ -50,7 +45,7 @@
 1. Define the Ollama API URL in your `wp-config.php` file.
 
 ```php
-define('OLLAMA_API', 'http://localhost:11434');
+define('OLLAMA_API_URL', 'http://localhost:11434');
 ```
 
 ## Funding
