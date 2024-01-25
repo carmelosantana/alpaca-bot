@@ -4,22 +4,23 @@ declare(strict_types=1);
 
 namespace CarmeloSantana\OllamaPress\Chat;
 
-use CarmeloSantana\OllamaPress\Api\Htmx;
+use CarmeloSantana\OllamaPress\Api\Render;
 
 class Screen
 {
-    private object $htmx;
-
     public function __construct()
     {
-        add_filter('admin_footer_text', [$this, 'outputFooterText']);
-
-        $this->htmx = new Htmx();
-        $this->outputHTML();
     }
 
-    public function outputHTML()
-    { ?>
+    static public function outputHTML()
+    {
+        // Apply to footer only on this page
+        add_filter('admin_footer_text', function () {
+            echo 'Always verify important information to ensure accuracy.';
+        });
+
+        // Load HTMX renderer
+        $htmx = new Render(); ?>
         <form id="op-chat-form">
             <div id="op-chat-container" class="wrap nosubsub">
                 <h1 class="wp-heading-inline"><?php esc_html_e('Ollama Press'); ?></h1>
@@ -30,14 +31,14 @@ class Screen
                         <div>
                             <select name="model" id="model"></select>
                             <br>
-                            <p hx-post="<?php $this->htmx->outputRenderEndpoint('wp/user/update'); ?>" hx-vals='{"set_default_model": true}' id="set_default_model">Set as default</p>
+                            <p <?php echo $htmx->outputWpNonce('wp/user/update'); ?> hx-post="<?php $htmx->outputRenderEndpoint('wp/user/update'); ?>" hx-vals='{"set_default_model": true}' id="set_default_model">Set as default</p>
                         </div>
-                        <input type="hidden" hx-get="<?php $this->htmx->outputRenderEndpoint('tags'); ?>" hx-trigger="load" hx-target="#model">
-                        <select name="chat_log_id" id="chat_log_id" <?php $this->htmx->outputHxMultiSwapLoadChat('wp/chat', 'change'); ?>></select>
-                        <input type="hidden" hx-get="<?php $this->htmx->outputRenderEndpoint('wp/chats'); ?>" hx-trigger="load" hx-target="#chat_log_id">
+                        <input <?php echo $htmx->outputWpNonce('htmx/tags'); ?> type="hidden" hx-get="<?php $htmx->outputRenderEndpoint('htmx/tags'); ?>" hx-trigger="load" hx-target="#model">
+                        <select name="chat_log_id" id="chat_log_id" <?php $htmx->outputHxMultiSwapLoadChat('wp/chat', 'change'); ?>></select>
+                        <input <?php echo $htmx->outputWpNonce('wp/chats'); ?> type="hidden" hx-get="<?php $htmx->outputRenderEndpoint('wp/chats'); ?>" hx-trigger="load" hx-target="#chat_log_id">
                     </div>
                     <div id="op-hello">
-                        <?php echo $this->htmx->getAssistantAvatarImg('system'); ?>
+                        <?php echo $htmx->getAssistantAvatarImg('system'); ?>
                         <p>How can I help you today?</p>
                     </div>
                     <div id="op-response">
@@ -51,7 +52,7 @@ class Screen
                         <textarea name="message" id="message" spellcheck="false" placeholder="Start chatting with Ollama" required></textarea>
                         <input type="hidden" name="prompt" id="prompt">
                         <input type="hidden" name="chat_id" id="chat_id" value="0">
-                        <span class="material-symbols-outlined" id="submit" <?php $this->htmx->outputHxMultiSwapLoadChat(); ?>>arrow_circle_up</span>
+                        <span class="material-symbols-outlined" id="submit" <?php $htmx->outputHxMultiSwapLoadChat('htmx/chat'); ?>>arrow_circle_up</span>
                     </div>
                 </div>
             </div>
@@ -68,7 +69,6 @@ class Screen
     }
 
     public function outputFooterText()
-    {
-        echo 'Always verify important information to ensure accuracy.';
+    {;
     }
 }
