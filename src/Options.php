@@ -32,7 +32,6 @@ class Options
             'api_key' => [
                 'description' => __('API key (leave blank if not needed)', OP),
                 'type' => 'text',
-                'placeholder' => '',
                 'section' => 'api',
             ],
             'default_model' => [
@@ -70,7 +69,6 @@ class Options
     public static function get(string $key)
     {
         $value = get_option(self::appendPrefix($key), (self::default()[$key]['env'] ?: self::default()[$key]['default'] ?: self::default()[$key]['placeholder'] ?: null));
-        ray($value);
         return apply_filters(self::appendPrefix($key), $value);
     }
 }

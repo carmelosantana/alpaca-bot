@@ -3,7 +3,7 @@
 Plugin Name: Ollama Press
 Plugin URI: https://github.com/carmelosantana/ollama-press
 Description: 🚀 Boost your website with instant AI-powered content creation and coding assistance! 💥
-Version: 0.1.0-alpha.1
+Version: 0.1.0-alpha.2
 Author: Carmelo Santana
 Author URI: https://carmelosantana.com/
 License: GNU General Public License v2 or later
