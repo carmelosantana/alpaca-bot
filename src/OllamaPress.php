@@ -11,9 +11,10 @@ class OllamaPress
         add_action('admin_enqueue_scripts', [$this, 'adminEnqueueScripts']);
         add_action('admin_enqueue_scripts', [$this, 'adminEnqueueStyles']);
         add_action('admin_menu', [$this, 'addAdminMenu']);
-        add_action('plugins_loaded', [$this, 'init']);
+        add_action('admin_notices', [$this, 'adminNotices']);
 
         // Load chat log post type early
+        new Api\Htmx();
         new Chat\Post();
     }
 
@@ -24,7 +25,7 @@ class OllamaPress
             OP_TITLE,
             'manage_options',
             OP,
-            [$this, 'chat'],
+            [__NAMESPACE__ . '\Chat\Screen', 'outputHTML'],
             OP_DIR_URL . 'assets/img/icon-80.png',
             4
         );
@@ -36,7 +37,7 @@ class OllamaPress
             'Chat',
             'manage_options',
             OP,
-            [$this, 'chat']
+            [__NAMESPACE__ . '\Chat\Screen', 'outputHTML']
         );
     }
 
@@ -53,13 +54,23 @@ class OllamaPress
         wp_enqueue_style('materialsymbolsrounded', OP_DIR_URL . 'assets/css/Material-Symbols-Outlined.css', [], OP_VERSION);
     }
 
-    public function chat()
+    public function adminNotices()
     {
-        new Chat\Screen();
-    }
+        $notices = [
+            'permalinks' => [
+                'message' => 'Ollama Press requires permalinks to be enabled. Please enable them in <a href="' . admin_url('options-permalink.php') . '">Settings > Permalinks</a>.',
+                'condition' => get_option('permalink_structure') === false or get_option('permalink_structure') === ''
+            ],
+            'api_url' => [
+                'message' => 'Ollama Press requires the <code>OLLAMA_API_URL</code> constant to be defined. Please define it in wp-config.php.',
+                'condition' => !defined('OLLAMA_API_URL')
+            ],
+        ];
 
-    public function init()
-    {
-        new Api\Htmx();
+        foreach ($notices as $notice) {
+            if ($notice['condition']) {
+                echo '<div class="notice notice-error is-dismissible"><p>' . $notice['message'] . '</p></div>';
+            }
+        }
     }
 }
