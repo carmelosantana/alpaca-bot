@@ -33,6 +33,7 @@
 - Access to [Ollama](https://github.com/jmorganca/ollama) API
 - PHP `^8.1`
 - WordPress `^6.0`
+  - Permalinks enabled
 
 ## Installation
 
