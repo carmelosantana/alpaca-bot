@@ -20,11 +20,9 @@ class Render
 
 	private int $timeout = 60;
 
-	private int $user_id = 0;
-
 	private string $user_settings_meta_key = 'ollama_user_settings';
 
-	public function __construct()
+	public function __construct(private int $user_id, object $request = null)
 	{
 		$this->ollama = new Ollama();
 	}

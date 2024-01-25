@@ -20,7 +20,7 @@ class Screen
         });
 
         // Load HTMX renderer
-        $htmx = new Render(); ?>
+        $htmx = new Render(get_current_user_id()); ?>
         <form id="op-chat-form">
             <div id="op-chat-container" class="wrap nosubsub">
                 <h1 class="wp-heading-inline"><?php esc_html_e('Ollama Press'); ?></h1>

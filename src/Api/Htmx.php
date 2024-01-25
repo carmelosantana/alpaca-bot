@@ -35,6 +35,11 @@ class Htmx extends Base
 		return $this->user_id;
 	}
 
+	public function getCachedUserId()
+	{
+		return $this->user_id;
+	}
+
 	public function getOrSetCurrentUserId()
 	{
 		// If user is NOT set
@@ -89,7 +94,7 @@ class Htmx extends Base
 		header_remove('Content-Type');
 
 		// setup render object
-		$this->render = new Render();
+		$this->render = new Render($this->user_id);
 
 		switch ($request->get_route()) {
 			case self::NAMESPACE . '/htmx/chat':
