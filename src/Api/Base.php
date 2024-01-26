@@ -11,7 +11,7 @@ use \WP_REST_Response;
 
 abstract class Base
 {
-    public const NAMESPACE = '/' . OP . '/v1';
+    public const NAMESPACE = '/' . OP_SLUG . '/v1';
 
     public const PERMISSION_READ = 'read';
 

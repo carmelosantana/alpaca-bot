@@ -490,7 +490,7 @@ class Render
 
 	public function getRenderEndpoint($endpoint)
 	{
-		return get_bloginfo('url') . '/wp-json/' . OP . '/v1/' . $endpoint;
+		return get_bloginfo('url') . '/wp-json/' . OP_SLUG . '/v1/' . $endpoint;
 	}
 
 	public function isRunning()
