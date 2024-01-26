@@ -8,10 +8,6 @@ use CarmeloSantana\OllamaPress\Api\Render;
 
 class Screen
 {
-    public function __construct()
-    {
-    }
-
     static public function outputHTML()
     {
         // Apply to footer only on this page
@@ -66,9 +62,5 @@ class Screen
         </script>
         <script type="module" src="<?php echo OP_DIR_URL . 'assets/js/zero-md.min.js'; ?>"></script>
 <?php
-    }
-
-    public function outputFooterText()
-    {;
     }
 }
