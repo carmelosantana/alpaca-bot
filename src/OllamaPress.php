@@ -13,7 +13,8 @@ class OllamaPress
         add_action('admin_menu', [$this, 'addAdminMenu']);
         add_action('admin_notices', [$this, 'adminNotices']);
 
-        // Load chat log post type early
+        // Load with plugin
+        (new Options())->addActions();
         new Api\Htmx();
         new Chat\Post();
     }
@@ -52,7 +53,7 @@ class OllamaPress
     public function adminEnqueueStyles()
     {
         wp_enqueue_style(OP_SLUG, OP_DIR_URL . 'assets/css/ollama-press.css', [], OP_VERSION);
-        wp_enqueue_style('materialsymbolsrounded', OP_DIR_URL . 'assets/css/Material-Symbols-Outlined.css', [], OP_VERSION);
+        wp_enqueue_style('materialsymbolsoutlined', OP_DIR_URL . 'assets/css/Material-Symbols-Outlined.css', [], OP_VERSION);
     }
 
     public function adminNotices()
@@ -63,8 +64,8 @@ class OllamaPress
                 'condition' => get_option('permalink_structure') === false or get_option('permalink_structure') === ''
             ],
             'api_url' => [
-                'message' => 'Ollama Press requires the <code>OLLAMA_API_URL</code> constant to be defined. Please define it in wp-config.php.',
-                'condition' => !defined('OLLAMA_API_URL')
+                'message' => 'Ollama Press requires an API URL to be set. Please set it in <a href="' . admin_url('admin.php?page=' . OP_SLUG . '-options') . '">Settings > Ollama Press</a>.',
+                'condition' => Options::get('api_url') === false
             ],
         ];
 
