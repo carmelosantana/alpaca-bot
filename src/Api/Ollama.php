@@ -10,7 +10,14 @@ class Ollama
 {
     private function getApiUrl()
     {
-        return Options::get('api_url');
+        $url = Options::get('api_url');
+        
+        // check for trailing slash, add if missing
+        if (substr($url, -1) !== '/') {
+            $url .= '/';
+        }
+
+        return $url;
     }
 
     public function decodeRemoteBody(array $options = [])
@@ -26,7 +33,6 @@ class Ollama
         $response = wp_remote_request($url, $options);
 
         if (is_wp_error($response)) {
-            ray($options, $url, $response)->label('decodeRemoteBody')->red();
             return false;
         }
 
