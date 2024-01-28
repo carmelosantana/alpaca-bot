@@ -2,11 +2,11 @@
 
 ### 🌟 **Privately** hosted WordPress chatbot! ⚡️
 
-
 [![Discord](https://img.shields.io/discord/1198290062316683275?logo=discord&label=Discord)](https://discord.gg/DqAUPAVhnR)
+
 *WordPress plugin for quick content creation and code completion! ✨Train✨ models and provide your editors with a conversational interface to your private LLM.*
 
-[![Ollama Press](https://ollama.press/wp-content/uploads/2024/01/app-icon-512.png)](https://ollama.press)
+[![Ollama Press](https://ollama.press/wp-content/uploads/2024/01/ollama-press-256-icon.png)](https://ollama.press)
 
 > This plugin is in early development and is not ready for production use.
 
@@ -43,11 +43,12 @@
 
 ## Setup
 
-1. Define the Ollama API URL in your `wp-config.php` file.
-
-```php
-define('OLLAMA_API_URL', 'http://localhost:11434');
-```
+1. Setup your [Ollama](https://github.com/ollama/ollama) instance or sign up for a free account at [Ollama Press](https://ollama.press).
+2. Add your Ollama API URL to the settings page.
+   1. Navigate to `Ollama Press > Settings` in your WordPress admin dashboard.
+   2. Enter your Ollama API URL.
+      1. Add your [Ollama Press](https://ollama.press/) API Token if you are using the hosted service.
+   3. Click `Save Changes`.
 
 ## Funding
 
@@ -58,7 +59,7 @@ If you find this project useful or use it in a commercial environment please con
 
 ## Made Possible By
 
-- [Ollama](https://github.com/jmorganca/ollama) and the research behind these great open source [Large Language Models](https://ollama.ai/library) (LLMs).
+- [Ollama](https://github.com/ollama/ollama) and the research behind these great open source [Large Language Models](https://ollama.ai/library) (LLMs).
 - [Emma Delaney](https://emma-delaney.medium.com/how-to-create-your-own-chatgpt-in-html-css-and-javascript-78e32b70b4be) *How to Create Your Own ChatGPT in HTML CSS and JavaScript*
 
 ## License
