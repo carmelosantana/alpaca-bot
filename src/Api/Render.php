@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace CarmeloSantana\OllamaPress\Api;
 
 use CarmeloSantana\OllamaPress\Api\Ollama;
+use CarmeloSantana\OllamaPress\Options;
 use PhpScience\TextRank\TextRankFacade;
 use PhpScience\TextRank\Tool\StopWords\English;
 
@@ -87,15 +88,35 @@ class Render
 
 	public function checkUserInputs(array $inputs = ['model', 'prompt'])
 	{
+		// Model should not be set if user cannot change model
+		// TODO: Improve how we check for inputs.
+		if (Options::get('user_can_change_model') == false) {
+			unset($_POST['model']);
+		}
+
 		// Check for input errors
 		if (!isset($_POST['model']) and !isset($_POST['prompt'])) {
-			$this->outputAssistantError('Please select a model and enter a prompt.');
+			$this->outputAssistantErrorDialog('Please select a model and enter a prompt.');
 			return false;
 		} elseif (!isset($_POST['model'])) {
-			$this->outputAssistantError('Please select a model.');
-			return false;
+			if (Options::get('user_can_change_model') == true) {
+				$this->outputAssistantErrorDialog('Please select a model.');
+				return false;
+			} else {
+				// get user default model
+				$model = Options::get('default_model');
+
+				// if no default model set then output error
+				if (!$model) {
+					$this->outputAssistantErrorDialog('Ask your system administrator to select a default model.');
+					return false;
+				}
+
+				// set model
+				$_POST['model'] = $model;
+			}
 		} elseif (!isset($_POST['prompt'])) {
-			$this->outputAssistantError('Please enter a prompt.');
+			$this->outputAssistantErrorDialog('Please enter a prompt.');
 			return false;
 		}
 
@@ -119,11 +140,11 @@ class Render
 		switch (strtolower($role)) {
 			case 'assistant':
 			case 'ollama':
-				$url = OP_DIR_URL . 'assets/img/ollama-256.png';
+				$url = OP_DIR_URL . 'assets/img/ollama-large.png';
 				break;
 
 			default:
-				$url = OP_DIR_URL . 'assets/img/ollama-press-256.png';
+				$url = OP_DIR_URL . 'assets/img/ollama-press-460.png';
 				break;
 		}
 
@@ -215,7 +236,9 @@ class Render
 		}
 
 		// Save messages to chat log
-		$post_id = $this->addChatLog(['model' => $model, 'message' => $message], $json, $post_id);
+		if (Options::get('save_chat_history')) {
+			$post_id = $this->addChatLog(['model' => $model, 'message' => $message], $json, $post_id);
+		}
 
 		// Close dialog and wrapper
 		$this->outputDialogEnd();
@@ -263,11 +286,26 @@ class Render
 		]);
 	}
 
+	public function outputAssistantErrorDialog($message = '', $model = '', $role = 'System')
+	{
+		// Open wrapper and dialog
+		$this->outputDialogStart();
+
+		// Output error message
+		$this->outputAssistantError($message, $model, $role);
+
+		// Close dialog and wrapper
+		$this->outputDialogEnd();
+	}
+
 	public function outputChatLoad()
 	{
 		// Quick input validation
 		if (!isset($_POST['chat_id']))
 			return;
+
+		// Open wrapper and dialog
+		$this->outputDialogStart();
 
 		// Sanitize inputs
 		$post_id = (int) sanitize_text_field($_POST['chat_log_id']);
@@ -283,9 +321,6 @@ class Render
 
 		// Get post_meta messages
 		$messages = get_post_meta($post_id, 'messages', true);
-
-		// Open wrapper and dialog
-		$this->outputDialogStart();
 
 		// Check if $messages is valid array
 		if (is_array($messages)) {
