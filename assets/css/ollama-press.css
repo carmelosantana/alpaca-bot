@@ -72,6 +72,7 @@
 .op-toolbar>* {
     display: inline-block;
     margin-right: 0.2em;
+    min-height: 35px;
 }
 
 .op-toolbar select {
@@ -173,6 +174,21 @@
 
 .op-chat-message-user .op-chat-message-response {
     color: var(--placeholder-color);
+}
+
+/* material-symbols-outlined icons and span elements in p=class description under ollama-press-options apply vertical-align=middle */
+#ollama-press-options p.description span {
+    /* font-size: 2rem; */
+    vertical-align: middle;
+    margin-right: .3em;
+}
+
+#ollama-press-options p.description span.label-success {
+    color: #46B450;
+}
+
+#ollama-press-options p.description span.label-error {
+    color: #dc3232;
 }
 
 /*
