@@ -9,6 +9,22 @@
     --incoming-chat-bg: #F7F7F8;
     --outgoing-chat-border: #FFFFFF;
     --incoming-chat-border: #D9D9E3;
+    --console: #1EFF00;
+
+    /* WordPress colors */
+    --wp-blue: #0073aa;
+    --wp-medium-blue: #00a0d2;
+    --wp-ultra-dark-gray: #191e23;
+    --wp-dark-gray: #23282d;
+    --wp-base-gray: #32373c;
+    --wp-dark-silver-gray: #82878c;
+    --wp-silver-gray: #a0a5aa;
+    --wp-light-silver-gray: #b4b9be;
+    --wp-accent-red: #dc3232;
+    --wp-accent-orange: #f56e28;
+    --wp-accent-yellow: #ffb900;
+    --wp-accent-green: #46B450;
+    --wp-accent-purple: #826eb4;
 
     /* Size */
     --max-container-width: 800px;
@@ -176,19 +192,32 @@
     color: var(--placeholder-color);
 }
 
-/* material-symbols-outlined icons and span elements in p=class description under ollama-press-options apply vertical-align=middle */
-#ollama-press-options p.description span {
-    /* font-size: 2rem; */
+.ollama-press-options p.description {
+    margin: .6em 0;
+}
+
+.ollama-press-options p.description span {
     vertical-align: middle;
     margin-right: .3em;
 }
 
-#ollama-press-options p.description span.label-success {
+.ollama-press-options p.description span.label-success {
     color: #46B450;
 }
 
-#ollama-press-options p.description span.label-error {
+.ollama-press-options p.description span.label-error {
     color: #dc3232;
+}
+
+.ollama-press-options pre.console {
+    background-color: var(--wp-ultra-dark-gray);
+    padding: 1em;
+    border-radius: 5px;
+    font-family: monospace;
+    font-weight: bold;
+    color: limegreen;
+    text-shadow: 0px 0px .8em var(--console);
+    cursor: pointer;
 }
 
 /*
