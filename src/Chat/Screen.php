@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace CarmeloSantana\OllamaPress\Chat;
 
+use CarmeloSantana\OllamaPress\Options;
 use CarmeloSantana\OllamaPress\Api\Render;
 
 class Screen
@@ -24,18 +25,22 @@ class Screen
                 <hr class="wp-header-end">
                 <div class="op-chat">
                     <div class="op-toolbar">
-                        <div>
-                            <select name="model" id="model"></select>
-                            <br>
-                            <p <?php echo $htmx->outputWpNonce('wp/user/update'); ?> hx-post="<?php $htmx->outputRenderEndpoint('wp/user/update'); ?>" hx-vals='{"set_default_model": true}' id="set_default_model">Set as default</p>
+                        <div class="op-tags">
+                            <?php if (Options::getDefault('user_can_change_model') == true) { ?>
+                                <select name="model" id="model"></select>
+                                <br>
+                                <p <?php echo $htmx->outputWpNonce('wp/user/update'); ?> hx-post="<?php $htmx->outputRenderEndpoint('wp/user/update'); ?>" hx-vals='{"set_default_model": true}' id="set_default_model">Set as default</p>
+                                <input <?php echo $htmx->outputWpNonce('htmx/tags'); ?> type="hidden" hx-get="<?php $htmx->outputRenderEndpoint('htmx/tags'); ?>" hx-trigger="load" hx-target="#model">
+                            <?php } ?>
                         </div>
-                        <input <?php echo $htmx->outputWpNonce('htmx/tags'); ?> type="hidden" hx-get="<?php $htmx->outputRenderEndpoint('htmx/tags'); ?>" hx-trigger="load" hx-target="#model">
-                        <select name="chat_log_id" id="chat_log_id" <?php $htmx->outputHxMultiSwapLoadChat('wp/chat', 'change'); ?>></select>
-                        <input <?php echo $htmx->outputWpNonce('wp/chats'); ?> type="hidden" hx-get="<?php $htmx->outputRenderEndpoint('wp/chats'); ?>" hx-trigger="load" hx-target="#chat_log_id">
+                        <?php if (Options::getDefault('save_chat_history')) { ?>
+                            <select name="chat_log_id" id="chat_log_id" <?php $htmx->outputHxMultiSwapLoadChat('wp/chat', 'change'); ?>></select>
+                            <input <?php echo $htmx->outputWpNonce('wp/chats'); ?> type="hidden" hx-get="<?php $htmx->outputRenderEndpoint('wp/chats'); ?>" hx-trigger="load" hx-target="#chat_log_id">
+                        <?php } ?>
                     </div>
                     <div id="op-hello">
                         <?php echo $htmx->getAssistantAvatarImg('system'); ?>
-                        <p>How can I help you today?</p>
+                        <p><?php echo Options::getPlaceholder('default_system_message'); ?></p>
                     </div>
                     <div id="op-response">
                     </div>
@@ -45,7 +50,7 @@ class Screen
             <div class="typing-container">
                 <div class="typing-content">
                     <div class="typing-textarea">
-                        <textarea name="message" id="message" spellcheck="false" placeholder="Start chatting with Ollama" required></textarea>
+                        <textarea name="message" id="message" spellcheck="false" placeholder="<?php echo Options::getPlaceholder('default_message_placeholder'); ?>" required></textarea>
                         <input type="hidden" name="prompt" id="prompt">
                         <input type="hidden" name="chat_id" id="chat_id" value="0">
                         <span class="material-symbols-outlined" id="submit" <?php $htmx->outputHxMultiSwapLoadChat('htmx/chat'); ?>>arrow_circle_up</span>

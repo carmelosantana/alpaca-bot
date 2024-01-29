@@ -6,12 +6,160 @@ namespace CarmeloSantana\OllamaPress;
 
 class Options
 {
-    public function getSections()
+
+    public function addActions()
     {
-        return [
-            'api' => __('API', OP_SLUG),
-            'chat' => __('Chat', OP_SLUG),
+        add_action('admin_init', function () {
+            $menu_id = OP_SLUG . '-options';
+            self::registerSettings(self::getFields(), self::getSections(), $menu_id);
+        });
+        add_action('admin_menu', [$this, 'addAdminMenu']);
+    }
+
+    public function addAdminMenu()
+    {
+        add_submenu_page(
+            OP_SLUG,
+            __('Settings', OP_SLUG),
+            __('Settings', OP_SLUG),
+            'manage_options',
+            OP_SLUG . '-options',
+            function () {
+                $menu_id = OP_SLUG . '-options';
+                self::renderOptionsPage(self::getFields(), self::getSections(), $menu_id, __('Settings', OP_SLUG));
+            }
+        );
+    }
+
+    public static function registerSettings(array $options = [], array $sections = [], string $id = '')
+    {
+        if (empty($name)) {
+            $name = md5(json_encode($options));
+        }
+
+        $default_option = [
+            'default' => false,
+            'description' => null,
+            'description_callback' => false,
+            'field_callback' => null,
+            'label' => '',
+            'placeholder' => null,
+            'type' => 'text',
         ];
+
+        foreach ($sections as $key => $section) {
+            $_id_key = $id . '-' . $key;
+
+            add_settings_section(
+                $_id_key,
+                $section['title'],
+                function () use ($section) {
+                    echo '<p>' . $section['description'] . '</p>';
+                },
+                $_id_key
+            );
+
+            foreach ($options as $key2 => $option) {
+                $option = wp_parse_args($option, $default_option);
+
+                if ($option['section'] == $key) {
+                    add_settings_field(
+                        self::appendPrefix($key2),
+                        $option['label'],
+                        function () use ($key2, $option) {
+                            $value = get_option(self::appendPrefix($key2), $option['default']);
+                            switch ($option['type']) {
+                                case 'callback':
+                                    call_user_func($option['field_callback']);
+                                    break;
+
+                                case 'checkbox':
+                                    echo '<input type="checkbox" name="' . self::appendPrefix($key2) . '" value="true" ' . ($value ? 'checked' : '') . '>';
+                                    break;
+
+                                case 'radio':
+                                    foreach ($option['options'] as $key3 => $option2) {
+                                        echo '<label><input type="radio" name="' . self::appendPrefix($key2) . '" value="' . $key3 . '" ' . ($value == $key3 ? 'checked' : '') . '> ' . $option2 . '</label><br>';
+                                    }
+                                    break;
+
+                                case 'select':
+                                    echo '<select name="' . self::appendPrefix($key2) . '">';
+                                    foreach ($option['options'] as $key3 => $option2) {
+                                        echo '<option value="' . $key3 . '" ' . ($value == $key3 ? 'selected' : '') . '>' . $option2 . '</option>';
+                                    }
+                                    echo '</select>';
+                                    break;
+
+                                case 'text':
+                                    echo '<input type="text" name="' . self::appendPrefix($key2) . '" value="' . $value . '" placeholder="' . ($option['placeholder'] ?? null) . '" class="regular-text">';
+                                    break;
+
+                                case 'textarea':
+                                    echo '<textarea name="' . self::appendPrefix($key2) . '" placeholder="' . ($option['placeholder'] ?? null) . '" class="regular-text">' . $value . '</textarea>';
+                                    break;
+                            }
+
+                            if ($option['description']) {
+                                echo '<p class="description">' . $option['description'] . '</p>';
+                            }
+
+                            if ($option['description_callback']) {
+                                call_user_func($option['description_callback']);
+                            }
+                        },
+                        $_id_key,
+                        $_id_key
+                    );
+                    register_setting($id, self::appendPrefix($key2));
+                }
+            }
+        }
+    }
+
+    public static function renderOptionsPage(array $options = [], array $sections = [], string $id = '', string $title = OP_TITLE)
+    {
+        if (empty($name)) {
+            $name = md5(json_encode($options));
+        }
+
+        // get active tab, or first tab
+        $active_tab = isset($_GET['tab']) ? $_GET['tab'] : array_key_first($sections); ?>
+        <div class="wrap <?php echo OP_SLUG; ?> <?php echo OP_SLUG . '-options'; ?> <?php echo $active_tab; ?>" id="<?php echo $id; ?>">
+            <h1><?php echo $title; ?></h1>
+            <h2 class="nav-tab-wrapper">
+                <?php foreach ($sections as $key => $section) : ?>
+                    <a href="?page=<?php echo $id; ?>&tab=<?php echo $key; ?>" class="nav-tab <?php echo $active_tab == $key ? 'nav-tab-active' : ''; ?>"><?php echo $section['title']; ?></a>
+                <?php endforeach; ?>
+            </h2>
+            <form method="post" action="options.php">
+                <?php
+                settings_fields($id);
+                do_settings_sections($id . '-' . $active_tab);
+                // display none other settings
+                foreach ($options as $key => $option) {
+                    $default_option = [
+                        'default' => false,
+                    ];
+                    $option = wp_parse_args($option, $default_option);
+                    if ($option['section'] != $active_tab) {
+                        switch ($option['type'] ?? null) {
+                            case 'callback':
+                            case 'codemirror':
+                            case 'textarea':
+                                echo '<textarea name="' . self::appendPrefix($key) . '" class="hidden">' . get_option(self::appendPrefix($key), $option['default']) . '</textarea>';
+                                break;
+                            default:
+                                echo '<input type="hidden" name="' . self::appendPrefix($key) . '" value="' . get_option(self::appendPrefix($key), $option['default']) . '">';
+                                break;
+                        }
+                    }
+                }
+                submit_button();
+                ?>
+            </form>
+        </div>
+<?php
     }
 
     public static function appendPrefix(string $key)
@@ -19,56 +167,161 @@ class Options
         return 'ollama_' . $key;
     }
 
-    public static function default()
+    public static function getFields()
     {
         return [
             'api_url' => [
-                'description' => __('Ollama API URL', OP_SLUG),
-                'type' => 'text',
+                'label' => __('Ollama API URL', OP_SLUG),
+                'description' => __('The URL of your <a href="https://github.com/ollama/ollama">Ollama</a> installation.', OP_SLUG),
                 'placeholder' => 'http://localhost:11434',
                 'section' => 'api',
-                'env' => defined('OLLAMA_API_URL') ? OLLAMA_API_URL : null,
+                'description_callback' => [__CLASS__, 'fieldApiUrlValidate'],
             ],
-            'api_key' => [
-                'description' => __('API key (leave blank if not needed)', OP_SLUG),
-                'type' => 'text',
+            'api_token' => [
+                'label' => __('API Token', OP_SLUG),
+                'description' => __('This is optional.', OP_SLUG),
                 'section' => 'api',
             ],
             'default_model' => [
-                'description' => __('Default model', OP_SLUG),
+                'label' => __('Default Model', OP_SLUG),
                 'type' => 'select',
-                'options' => $models ?? [],
+                'options' => self::getModels(),
                 'section' => 'chat',
             ],
             'user_can_change_model' => [
-                'description' => __('Can users change model?', OP_SLUG),
+                'label' => __('Can users change model?', OP_SLUG),
                 'type' => 'radio',
                 'options' => [
                     'true' => __('Yes', OP_SLUG),
                     'false' => __('No', OP_SLUG),
                 ],
                 'section' => 'chat',
-                'default' => 'true',
+                'default' => true,
+            ],
+            'save_chat_history' => [
+                'label' => __('Save chat history?', OP_SLUG),
+                'type' => 'radio',
+                'options' => [
+                    'true' => __('Yes', OP_SLUG),
+                    'false' => __('No', OP_SLUG),
+                ],
+                'section' => 'chat',
+                'default' => true,
             ],
             'default_system_message' => [
-                'description' => __('Default system message', OP_SLUG),
-                'type' => 'text',
+                'label' => __('Default system message', OP_SLUG),
                 'placeholder' => __('How can I help you today?', OP_SLUG),
                 'section' => 'chat',
             ],
             'default_message_placeholder' => [
-                'description' => __('Default message placeholder', OP_SLUG),
-                'type' => 'text',
+                'label' => __('Default message placeholder', OP_SLUG),
                 'placeholder' => __('Start chatting with Ollama', OP_SLUG),
                 'section' => 'chat',
             ],
         ];
     }
 
-    // get option, check default and placeholder values using collapsing, apply any filters, and return
-    public static function get(string $key)
+    public static function getModels()
     {
-        $value = get_option(self::appendPrefix($key), (self::default()[$key]['env'] ?: self::default()[$key]['default'] ?: self::default()[$key]['placeholder'] ?: null));
-        return apply_filters(self::appendPrefix($key), $value);
+        if (self::get('api_url')) {
+            // get transient
+            $models = get_transient('ollama_models');
+
+            if ($models) {
+                return $models;
+            }
+
+            $url = self::get('api_url') . '/api/tags';
+            $response = wp_remote_get($url);
+
+            $body = wp_remote_retrieve_body($response);
+            $body = json_decode($body, true);
+
+            // if ['models'] exists loop and set each key value to model[name]
+            if (isset($body['models'])) {
+                $models = [];
+                foreach ($body['models'] as $model) {
+                    $models[$model['name']] = $model['name'];
+                }
+                set_transient('ollama_models', $models, 60 * 60 * 5);
+            }
+        } else {
+            $models = [];
+        }
+
+        return $models;
+    }
+
+    public static function getSections()
+    {
+        return [
+            'api' => [
+                'title' => __('API', OP_SLUG),
+                'description' => __('Configure your <a href="https://github.com/ollama/ollama">Ollama</a> settings.', OP_SLUG),
+            ],
+            'chat' => [
+                'title' => __('Chat', OP_SLUG),
+                'description' => __('Customize the user experience.', OP_SLUG),
+            ],
+        ];
+    }
+
+    public static function fieldApiUrlValidate()
+    {
+        $api_url = self::get('api_url');
+
+        if ($api_url and !empty($api_url)) {
+            $response = wp_remote_get($api_url);
+            $body = wp_remote_retrieve_body($response);
+            $header_x_ollama = wp_remote_retrieve_header($response, 'x-ollama-proxy');
+
+            if (is_wp_error($response)) {
+                echo '<p class="description">' . __('Invalid URL', OP_SLUG) . '</p>';
+                // $body == '"Ollama is running"' or $body == 'Ollama is running' in regex
+            } elseif (preg_match('/^"?(Ollama is running)"?$/', $body)) {
+                if ($header_x_ollama) {
+                    echo '<p class="description"><span class="material-symbols-outlined label-success">verified</span><span>' . __('Ollama Press Proxy connection established.', OP_SLUG) . '</span></p>';
+                } else {
+                    echo '<p class="description"><span class="material-symbols-outlined label-success">check_circle</span><span>' . __('Verified connection.', OP_SLUG) . '</span></p>';
+                }
+            } else {
+                echo '<p class="description"><span class="material-symbols-outlined label-error">error</span><span>' . __('Invalid response.', OP_SLUG) . '</span></p>';
+            }
+        } elseif (empty($api_url)) {
+            echo '<p class="description"><span class="material-symbols-outlined">edit</span><span>' . __('Please enter a URL.', OP_SLUG) . '</span></p>';
+        }
+    }
+
+    public static function get(string $key, $default = null, $placeholder = false)
+    {
+        $value = get_option(self::appendPrefix($key), $default);
+
+        if (is_string($value) and in_array(strtolower($value), ['true', 'false'])) {
+            $value = filter_var($value, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
+        } elseif (is_string($value) and empty($value)) {
+            $value = false;
+        }
+
+        if (!$value and $default !== null) {
+            $options = self::getFields();
+            $value = $options[$key]['default'] ?? false;
+
+            if ($placeholder and isset($options[$key]['placeholder'])) {
+                $value = $options[$key]['placeholder'];
+            }
+        }
+
+        return $value;
+    }
+
+    public static function getDefault(string $key, $default = false, $placeholder = false)
+    {
+        return self::get($key, $default, $placeholder);
+    }
+
+
+    public static function getPlaceholder(string $key, $default = false)
+    {
+        return self::get($key, $default, true);
     }
 }

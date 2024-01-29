@@ -90,8 +90,10 @@ class Htmx extends Base
 
 	public function renderOutput(\WP_REST_Request $request)
 	{
-		// remove application header type
+		// remove REST API JSON content type
 		header_remove('Content-Type');
+		// add text/html content type
+		header('Content-Type: text/html; charset=' . get_option('blog_charset'), true);
 
 		// setup render object
 		$this->render = new Render($this->user_id);
@@ -121,7 +123,6 @@ class Htmx extends Base
 				$this->render->userSettingsUpdate();
 				break;
 		}
-		do_action('shutdown');
 		exit();
 	}
 }

@@ -12,7 +12,7 @@ htmx.config.ignoreTitle = true;
 
 // Render markdown to HTML per request
 async function render(opts = {}) {
-    // Ensure everything is initialised
+    // Ensure everything is initialized
     await this.waitForReady()
 
     // Start generating markdown HTML string in parallel
