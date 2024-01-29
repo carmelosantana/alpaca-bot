@@ -90,7 +90,7 @@ class Render
 	{
 		// Model should not be set if user cannot change model
 		// TODO: Improve how we check for inputs.
-		if (Options::get('user_can_change_model') == false) {
+		if (Options::getDefault('user_can_change_model') == false) {
 			unset($_POST['model']);
 		}
 
@@ -99,7 +99,7 @@ class Render
 			$this->outputAssistantErrorDialog('Please select a model and enter a prompt.');
 			return false;
 		} elseif (!isset($_POST['model'])) {
-			if (Options::get('user_can_change_model') == true) {
+			if (Options::getDefault('user_can_change_model') == true) {
 				$this->outputAssistantErrorDialog('Please select a model.');
 				return false;
 			} else {
@@ -236,7 +236,7 @@ class Render
 		}
 
 		// Save messages to chat log
-		if (Options::get('save_chat_history')) {
+		if (Options::getDefault('save_chat_history')) {
 			$post_id = $this->addChatLog(['model' => $model, 'message' => $message], $json, $post_id);
 		}
 
