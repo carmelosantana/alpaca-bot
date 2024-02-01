@@ -24,7 +24,7 @@ class OllamaPress
         add_menu_page(
             OP_TITLE,
             OP_TITLE,
-            'publish_posts',
+            'edit_posts',
             OP_SLUG,
             [__NAMESPACE__ . '\Chat\Screen', 'outputHTML'],
             OP_DIR_URL . 'assets/img/icon-80.png',
@@ -36,7 +36,7 @@ class OllamaPress
             OP_SLUG,
             'Chat',
             'Chat',
-            'publish_posts',
+            'edit_posts',
             OP_SLUG,
             [__NAMESPACE__ . '\Chat\Screen', 'outputHTML'],
             0
