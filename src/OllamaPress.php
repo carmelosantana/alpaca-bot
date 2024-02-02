@@ -53,6 +53,7 @@ class OllamaPress
     public function adminEnqueueStyles()
     {
         wp_enqueue_style(OP_SLUG, OP_DIR_URL . 'assets/css/ollama-press.css', [], OP_VERSION);
+        wp_enqueue_style('hint', OP_DIR_URL . 'assets/css/hint.min.css', [], OP_VERSION);
         wp_enqueue_style('materialsymbolsoutlined', OP_DIR_URL . 'assets/css/Material-Symbols-Outlined.css', [], OP_VERSION);
     }
 
