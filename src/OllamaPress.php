@@ -43,8 +43,22 @@ class OllamaPress
         );
     }
 
+    public function adminCheckScreen()
+    {
+        // check page for ollama-press
+        if (strpos($_SERVER['REQUEST_URI'], 'admin.php?page=' . OP_SLUG) === false) {
+            return false;
+        }
+
+        return true;
+    }
+
     public function adminEnqueueScripts()
     {
+        if (!$this->adminCheckScreen()) {
+            return;
+        }
+
         wp_enqueue_script('htmx', OP_DIR_URL . 'assets/js/htmx.min.js', [], '1.9.10');
         wp_enqueue_script('htmx-multi-swap', OP_DIR_URL . 'assets/js/multi-swap.js', [], '1');
         wp_enqueue_script(OP_SLUG, OP_DIR_URL . 'assets/js/ollama-press.js', [], OP_VERSION, true);
