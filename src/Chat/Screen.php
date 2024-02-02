@@ -16,6 +16,13 @@ class Screen
             echo 'Always verify important information to ensure accuracy.';
         });
 
+        // Change the footer version to the plugin version
+        add_filter('update_footer', function ($footer) {
+            // add url to ollama.press
+            $footer = '<a href="https://ollama.press" target="_blank">Ollama Press</a>'  . ' v' . OP_VERSION;
+            return $footer;
+        }, 11);
+
         // Load HTMX renderer
         $htmx = new Render(get_current_user_id()); ?>
         <form id="op-chat-form">
