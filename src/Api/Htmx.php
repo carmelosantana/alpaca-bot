@@ -4,10 +4,6 @@ declare(strict_types=1);
 
 namespace CarmeloSantana\OllamaPress\Api;
 
-use CarmeloSantana\OllamaPress\Api\Ollama;
-use PhpScience\TextRank\TextRankFacade;
-use PhpScience\TextRank\Tool\StopWords\English;
-
 /**
  * HTMX API
  * 
@@ -65,13 +61,25 @@ class Htmx extends Base
 				'methods' => 'POST',
 				'permission_callback' => [$this, 'update_item_permissions_check'],
 			],
+			'/htmx/regenerate' => [
+				'methods' => 'POST',
+				'permission_callback' => [$this, 'update_item_permissions_check'],
+			],
 			'/htmx/tags' => [],
 			'/wp/chat' => [
 				'methods' => 'POST',
 				'permission_callback' => [$this, 'update_item_permissions_check'],
 			],
-			'/wp/chats' => [],
+			'/wp/history' => [],
 			'/wp/user/update' => [
+				'methods' => 'POST',
+				'permission_callback' => [$this, 'update_item_permissions_check'],
+			],
+			'/wp/page/insert' => [
+				'methods' => 'POST',
+				'permission_callback' => [$this, 'update_item_permissions_check'],
+			],
+			'/wp/post/insert' => [
 				'methods' => 'POST',
 				'permission_callback' => [$this, 'update_item_permissions_check'],
 			],
@@ -107,6 +115,10 @@ class Htmx extends Base
 				$this->render->outputGenerate();
 				break;
 
+			case self::NAMESPACE . '/htmx/regenerate':
+				$this->render->outputGenerate('regenerate');
+				break;
+
 			case self::NAMESPACE . '/htmx/tags':
 				$this->render->outputTags();
 				break;
@@ -115,8 +127,16 @@ class Htmx extends Base
 				$this->render->outputChatLoad();
 				break;
 
-			case self::NAMESPACE . '/wp/chats':
-				$this->render->outputChatLogs();
+			case self::NAMESPACE . '/wp/history':
+				$this->render->outputChatHistory();
+				break;
+
+			case self::NAMESPACE . '/wp/page/insert':
+				$this->render->outputPostInsert('page');
+				break;
+
+			case self::NAMESPACE . '/wp/post/insert':
+				$this->render->outputPostInsert();
 				break;
 
 			case self::NAMESPACE . '/wp/user/update':
