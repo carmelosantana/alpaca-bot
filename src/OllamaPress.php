@@ -24,7 +24,7 @@ class OllamaPress
         add_menu_page(
             OP_TITLE,
             OP_TITLE,
-            'publish_posts',
+            'edit_posts',
             OP_SLUG,
             [__NAMESPACE__ . '\Chat\Screen', 'outputHTML'],
             OP_DIR_URL . 'assets/img/icon-80.png',
@@ -36,15 +36,29 @@ class OllamaPress
             OP_SLUG,
             'Chat',
             'Chat',
-            'publish_posts',
+            'edit_posts',
             OP_SLUG,
             [__NAMESPACE__ . '\Chat\Screen', 'outputHTML'],
             0
         );
     }
 
+    public function adminCheckScreen()
+    {
+        // check page for ollama-press
+        if (strpos($_SERVER['REQUEST_URI'], 'admin.php?page=' . OP_SLUG) === false) {
+            return false;
+        }
+
+        return true;
+    }
+
     public function adminEnqueueScripts()
     {
+        if (!$this->adminCheckScreen()) {
+            return;
+        }
+
         wp_enqueue_script('htmx', OP_DIR_URL . 'assets/js/htmx.min.js', [], '1.9.10');
         wp_enqueue_script('htmx-multi-swap', OP_DIR_URL . 'assets/js/multi-swap.js', [], '1');
         wp_enqueue_script(OP_SLUG, OP_DIR_URL . 'assets/js/ollama-press.js', [], OP_VERSION, true);
@@ -53,6 +67,7 @@ class OllamaPress
     public function adminEnqueueStyles()
     {
         wp_enqueue_style(OP_SLUG, OP_DIR_URL . 'assets/css/ollama-press.css', [], OP_VERSION);
+        wp_enqueue_style('hint', OP_DIR_URL . 'assets/css/hint.min.css', [], OP_VERSION);
         wp_enqueue_style('materialsymbolsoutlined', OP_DIR_URL . 'assets/css/Material-Symbols-Outlined.css', [], OP_VERSION);
     }
 

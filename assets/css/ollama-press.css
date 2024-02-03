@@ -37,6 +37,51 @@
     transition: visibility 0s 2s, opacity 2s ease-in-out;
 }
 
+/* https://stackoverflow.com/a/17260048/1007492 */
+.clipOut {
+    clip: rect(auto, auto, 0, auto);
+    transition-property: clip;
+    transition-duration: 0.46s;
+    transition-timing-function: cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+.maxHeightOut {
+    max-height: 0;
+    transition: max-height 0.26s ease-out;
+    overflow: hidden;
+}
+
+/* https://jsfiddle.net/dotnetCarpenter/PhyQc/9/ */
+.scaleY {
+    -webkit-transform: scaleY(0);
+    -o-transform: scaleY(0);
+    -ms-transform: scaleY(0);
+    transform: scaleY(0);
+
+    -webkit-transform-origin: top;
+    -o-transform-origin: top;
+    -ms-transform-origin: top;
+    transform-origin: top;
+
+    -webkit-transition: -webkit-transform 0.26s ease-out;
+    -o-transition: -o-transform 0.26s ease;
+    -ms-transition: -ms-transform 0.26s ease;
+    transition: transform 0.26s ease;
+}
+
+/* https://stackoverflow.com/a/30531678/1007492 */
+.shrinkOut {
+    margin: 0;
+    opacity: 0;
+    padding: 0;
+    /* fade out, then shrink */
+    transition: opacity .25s,
+        font-size .5s .25s,
+        margin .5s .25s,
+        visibility 0s 2s,
+        padding .5s .25s;
+}
+
 /* WordPress: Add padding to wp-footer to view above textarea */
 .toplevel_page_ollama-press #footer-left {
     padding-bottom: 75px !important;
@@ -160,14 +205,17 @@
 }
 
 .op-chat-message {
-    padding-top: 1em;
-    margin-bottom: 1.2em;
+    margin: .6em 0;
 }
 
+.op-chat-message .notice {
+    margin: 1em 0;
+}
+
+/* gravatar column should stretch to the bottom, forcing all elements to line up against */
 .op-chat-message-gravatar {
-    /* width: 40px; */
-    height: 100%;
     float: left;
+    height: 100%;
     margin-right: 1em;
 }
 
@@ -175,6 +223,44 @@
     width: 38px;
     height: 38px;
     border-radius: 50%;
+}
+
+.op-chat-message-parts {
+    margin-left: 38px;
+}
+
+/* .op-chat-message-tools needs to make space for gravatar on left 38px */
+.op-chat-message-tools {
+    /* lower opacity when not hover */
+    opacity: 0.05;
+    margin: 1em 1em 1em 1em;
+    justify-content: space-between;
+    transition: opacity 0.3s ease-in;
+    transition: opacity 0.1s ease-out;
+}
+
+/* increase opacity on tools when hovering over parent message */
+.op-chat-message:hover .op-chat-message-tools {
+    opacity: 1;
+}
+
+/* transition tool span changes */
+.op-chat-message-tools span.tools {
+    font-size: 1.2rem;
+    color: var(--wp-dark-silver-gray);
+    cursor: pointer;
+    transition: color 0.3s ease-in-out;
+    margin-right: .3em;
+}
+
+.op-chat-message-tools span:hover {
+    color: var(--wp-dark-gray);
+}
+
+.op-chat-message-tools span.rotate-push-pin {
+    transform: rotate(33deg);
+    /* font-size: 20px;
+    width: 20px; */
 }
 
 .op-chat-message-username {
@@ -193,12 +279,18 @@
 }
 
 .ollama-press-options p.description {
-    margin: .6em 0;
+    margin: .6em .3em;
+}
+
+.ollama-press-options p.description.inline {
+    display: inline;
 }
 
 .ollama-press-options p.description span {
     vertical-align: middle;
-    margin-right: .3em;
+    margin-right: .1em;
+    position: relative;
+    display: inline-block;
 }
 
 .ollama-press-options p.description span.label-success {

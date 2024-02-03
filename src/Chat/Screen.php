@@ -16,6 +16,13 @@ class Screen
             echo 'Always verify important information to ensure accuracy.';
         });
 
+        // Change the footer version to the plugin version
+        add_filter('update_footer', function ($footer) {
+            // add url to ollama.press
+            $footer = '<a href="https://ollama.press" target="_blank">Ollama Press</a>'  . ' v' . OP_VERSION;
+            return $footer;
+        }, 11);
+
         // Load HTMX renderer
         $htmx = new Render(get_current_user_id()); ?>
         <form id="op-chat-form">
@@ -35,7 +42,7 @@ class Screen
                         </div>
                         <?php if (Options::getDefault('save_chat_history')) { ?>
                             <select name="chat_log_id" id="chat_log_id" <?php $htmx->outputHxMultiSwapLoadChat('wp/chat', 'change'); ?>></select>
-                            <input <?php echo $htmx->outputWpNonce('wp/chats'); ?> type="hidden" hx-get="<?php $htmx->outputRenderEndpoint('wp/chats'); ?>" hx-trigger="load" hx-target="#chat_log_id">
+                            <input <?php echo $htmx->outputWpNonce('wp/history'); ?> type="hidden" hx-get="<?php $htmx->outputRenderEndpoint('wp/history'); ?>" hx-trigger="load" hx-target="#chat_log_id">
                         <?php } ?>
                     </div>
                     <div id="op-hello">

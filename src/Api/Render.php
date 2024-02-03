@@ -28,22 +28,39 @@ class Render
 		$this->ollama = new Ollama();
 	}
 
+	public function getSummarizedTitle(string $message, $title_prefix = 'Chat Log')
+	{
+		$message = wp_strip_all_tags($message);
+		$summary = $this->getSummary($message);
+
+		return !empty($summary) ? array_shift($summary) : $title_prefix . ' ' . date('Y-m-d H:i:s');
+	}
+
+	public function getSummary(string $message)
+	{
+		$text_rank = new TextRankFacade();
+		$stop_words = new English();
+		$text_rank->setStopWords($stop_words);
+
+		$stripped_json = wp_strip_all_tags($message);
+
+		return $text_rank->summarizeTextBasic($stripped_json);
+	}
+
 	public function addChatLog($body, $json, int $post_id)
 	{
+		// check if saving is enabled
+		if (!Options::getDefault('save_chat_history')) {
+			return $post_id;
+		}
+
 		if ($post_id > 0) {
 			$post = [
 				'ID' => $post_id,
 			];
 		} else {
-			$text_rank = new TextRankFacade();
-			$stop_words = new English();
-			$text_rank->setStopWords($stop_words);
-
+			$post_title = $this->getSummarizedTitle($json['message']['content']);
 			$stripped_json = wp_strip_all_tags($json['message']['content']);
-
-			$summary = $text_rank->summarizeTextBasic($stripped_json);
-
-			$post_title = !empty($summary) ? array_shift($summary) : 'Chat Log ' . date('Y-m-d H:i:s');
 
 			$post = [
 				'post_title' => $post_title,
@@ -164,6 +181,7 @@ class Render
 		// Choose completion type
 		switch ($endpoint) {
 			case 'chat':
+			case 'regenerate':
 				$post_id = (int) sanitize_text_field($_POST['chat_id'] ?? 0);
 
 				// if post_id > 0 then get post_content and add to messages
@@ -208,6 +226,21 @@ class Render
 				break;
 		}
 
+		// Open wrapper and dialog
+		$dialog_id = $this->outputDialogStart();
+
+		// add user chat message to body
+		switch ($endpoint) {
+			case 'chat':
+			case 'generate':
+				$this->outputChatMessage(['message' => ['role' => get_current_user_id(), 'content' => $prompt, 'dialog_id' => $dialog_id]]);
+				break;
+
+			case 'regenerate':
+				$endpoint = 'chat';
+				break;
+		}
+
 		// Build request options
 		$options = [
 			'endpoint' => $endpoint,
@@ -218,12 +251,6 @@ class Render
 			],
 			'timeout' => $this->timeout,
 		];
-
-		// Open wrapper and dialog
-		$this->outputDialogStart();
-
-		// add user chat message to body
-		$this->outputChatMessage(['message' => ['role' => get_current_user_id(), 'content' => $prompt]]);
 
 		// get assistant response
 		$json = $this->ollama->decodeRemoteBody($options);
@@ -236,9 +263,7 @@ class Render
 		}
 
 		// Save messages to chat log
-		if (Options::getDefault('save_chat_history')) {
-			$post_id = $this->addChatLog(['model' => $model, 'message' => $message], $json, $post_id);
-		}
+		$post_id = $this->addChatLog(['model' => $model, 'message' => $message], $json, $post_id);
 
 		// Close dialog and wrapper
 		$this->outputDialogEnd();
@@ -260,6 +285,8 @@ class Render
 	// Add #op-response wrapper used for innerHTML replacement and opens .op-dialog
 	public function outputDialogStart()
 	{
+		$time = time();
+
 		$this->outputHtmlTag([
 			'id' => 'op-response',
 		]);
@@ -267,8 +294,10 @@ class Render
 		// add user chat message to body
 		$this->outputHtmlTag([
 			'class' => 'op-dialog',
-			'id' => 'op-dialog-' . time(),
+			'id' => 'op-dialog-' . $time,
 		]);
+
+		return $time;
 	}
 
 	public function outputAssistantError($message = '', $model = '', $role = 'System')
@@ -326,7 +355,12 @@ class Render
 		if (is_array($messages)) {
 			// Loop through messages
 			foreach ($messages as $message) {
-				$this->outputChatMessage($message);
+				if (is_array($message))
+					$this->outputChatMessage($message);
+				else {
+					$this->outputAssistantError('Error loading chat log, log may be corrupted.');
+					// return;
+				}
 			}
 		} else {
 			$this->outputAssistantError('Error loading chat log, log may be corrupted.');
@@ -340,7 +374,7 @@ class Render
 		$this->outputHiddenFields($post_id);
 	}
 
-	public function outputChatLogs()
+	public function outputChatHistory()
 	{
 		// get posts by current user
 		$posts = get_posts([
@@ -349,7 +383,7 @@ class Render
 			'numberposts' => -1,
 
 		]);
-		ray(get_current_user_id())->label('outputChatLogs');
+		ray(get_current_user_id())->label('outputChatHistory');
 
 		// if posts output chat logs in foreach loop for select items, if not output empty disabled select option
 		echo '<option value="" disabled>Chat History</option>';
@@ -398,7 +432,10 @@ class Render
 
 	public function outputChatMessage(array $message)
 	{
-		$out = '';
+		$out = $tools = '';
+		// php function uuid
+		$uuid = 'a' . uniqid();
+		$response_id = 'response-' . $uuid;
 
 		// is_chat
 		if (isset($message['message'])) {
@@ -413,30 +450,75 @@ class Render
 			$response = $message['response'];
 		}
 
+
+		// Copy
+		$tools .= '<span aria-label="Copy to clipboard" id="copy-' . $uuid . '" class="tools hint--bottom hint--rounded material-symbols-outlined" onclick="copyToClipboard(\'' . $uuid . '\')">';
+		$tools .= 'content_paste';
+		$tools .= '</span>';
+
 		switch ($role) {
 			case 'user':
 				// if ID is 0, we load the current user, otherwise we load the user by ID
 				$user = $message['message']['role'] == 0 ? get_user_by('id', $this->user_id) : get_user_by('id', $message['message']['role']);
 				$gravatar = get_avatar_url($user->user_email, ['size' => 128]);
 				$user_name = $user->user_login;
+
+				// regenerate response, send previous message again
+				$tools .= '<span aria-label="Regenerate response" class="tools hint--bottom hint--rounded material-symbols-outlined" ' . $this->getHxMultiSwapLoadChat('htmx/regenerate', 'click') . ' onclick="resubmitPrompt(\'' . $response_id . '\')">';
+				$tools .= 'autorenew';
+				$tools .= '</span>';
 				break;
+
+			case 'assistant':
+				// on click get innerhtml from response and send to wp/post/insert
+				$tools .= '<span aria-label="Save to post" class="hint--bottom hint--rounded">';
+				$tools .= '<span class="tools material-symbols-outlined rotate-push-pin" ' . $this->getWpNonce('wp/post/insert') . ' hx-post="' . $this->getRenderEndpoint('wp/post/insert') . '" hx-vars="post_content:getResponseInnerHTML(\'' . $response_id . '\')" hx-target="#' . $response_id . '" hx-swap="afterend">';
+				$tools .= 'push_pin';
+				$tools .= '</span>';
+				$tools .= '</span>';
+
+				// add page with note_add icon
+				$tools .= '<span aria-label="Save to page" class="tools hint--bottom hint--rounded material-symbols-outlined" ' . $this->getWpNonce('wp/page/insert') . ' hx-post="' . $this->getRenderEndpoint('wp/page/insert') . '" hx-vars="post_content:getResponseInnerHTML(\'' . $response_id . '\')" hx-target="#' . $response_id . '" hx-swap="afterend">';
+				$tools .= 'content_copy';
+				$tools .= '</span>';
 
 			default:
 				$gravatar = $this->getAssistantAvatarUrl($message['message']['role']);
 				$user_name = $message['message']['role'];
-				if (!empty($message['model'])) $user_name .= ' ' . $this->getAssistantModel($message['model']);
+				if (!empty($message['model'])) {
+					$user_name .= ' ' . $this->getAssistantModel($message['model']);
+				}
 				break;
 		}
 
 		$class = 'op-chat-message-' . $role;
 
-		$out .= '<div class="op-chat-message ' . $class . '">';
+		$out .= '<div class="op-chat-message ' . $class . '" id="op-chat-message-' . $uuid . '">';
 		$out .= '<div class="op-chat-message-gravatar"><img src="' . $gravatar . '" alt="gravatar"></div>';
+		$out .= '<div class="op-chat-message-parts">';
 		$out .= '<div class="op-chat-message-username">' . $user_name . '</div>';
-		$out .= '<div class="op-chat-message-response">' . $this->zeroScript($response) . '</div>';
-		$out .= '</div>';
+		$out .= '<div class="op-chat-message-response" id="' . $response_id . '">' . $this->zeroScript($response) . '</div>';
+		$out .= '<div class="op-chat-message-tools">';
+		$out .= $tools;
+		$out .= '</div>';	// .op-chat-message-tools
+		$out .= '</div>';	// .op-chat-message-parts
+		$out .= '</div>';	// .op-chat-message
 
 		echo $out;
+	}
+
+	public function getToolTip($message = '', $class = 'op-tooltip-text')
+	{
+		return '<div class="' . $class . '">' . $message . '</div>';
+	}
+
+	public function getAdminNotice($message = '', $class = 'notice-success')
+	{
+		$id = 'op-notice-' . uniqid();
+
+		$out = '<div class="notice ' . $class . ' is-dismissible" id="' . $id . '"><p>' . $message . '</p></div>';
+
+		return $out;
 	}
 
 	public function outputPostScript($class = '')
@@ -480,9 +562,15 @@ class Render
 		echo '<input type="hidden" name="chat_id" id="chat_id" value="' . (string) $post_id . '">';
 	}
 
+	public function getHxMultiSwapLoadChat(string $endpoint, string $trigger)
+	{
+		return $this->getWpNonce($endpoint) . ' hx-post="' . $this->getRenderEndpoint($endpoint) . '" hx-trigger="' . $trigger . '" hx-ext="multi-swap" hx-swap="multi:#op-response:beforeend,#chat_id:outerHTML" hx-disabled-elt="this" hx-indicator="#indicator"';
+	}
+
+
 	public function outputHxMultiSwapLoadChat(string $endpoint = 'htmx/chat', string $trigger = 'click')
 	{
-		echo $this->outputWpNonce($endpoint) . ' hx-post="' . $this->getRenderEndpoint($endpoint) . '" hx-trigger="' . $trigger . '" hx-ext="multi-swap" hx-swap="multi:#op-response:beforeend,#chat_id:outerHTML" hx-disabled-elt="this" hx-indicator="#indicator"';
+		echo $this->getHxMultiSwapLoadChat($endpoint, $trigger);
 	}
 
 	public function outputRenderEndpoint($endpoint)
@@ -491,10 +579,42 @@ class Render
 		echo $endpoint;
 	}
 
-	public function outputWpNonce($action = -1, $key = 'wp_rest',)
+	public function outputPostInsert($post_type = 'post')
+	{
+		// check if post_content is set	and not empty
+		if (!isset($_POST['post_content']) or empty($_POST['post_content'])) {
+			echo $this->getAdminNotice('Post content is empty.', 'notice-error');
+			return;
+		}
+
+		// insert into post as draft
+		$post_content = sanitize_text_field($_POST['post_content']);
+		$post_id = wp_insert_post([
+			'post_content' => $post_content,
+			'post_title' => $this->getSummarizedTitle($post_content),
+			'post_status' => 'draft',
+			'post_type' => $post_type,
+		]);
+
+		// if post_id is not an integer then output error
+		if (!is_int($post_id)) {
+			echo $this->getAdminNotice('Error inserting post.', 'notice-error');
+			return;
+		}
+
+		// output success message with link to post
+		echo $this->getAdminNotice(ucfirst($post_type) . ' drafted. <a href="' . get_edit_post_link($post_id) . '">Edit ' . ucfirst($post_type) . '</a>');
+	}
+
+	public function getWpNonce($action = -1, $key = 'wp_rest',)
 	{
 		$nonce = wp_create_nonce($key, $action);
-		echo 'hx-headers=\'{"X-WP-Nonce": "' . $nonce . '"}\'';
+		return 'hx-headers=\'{"X-WP-Nonce": "' . $nonce . '"}\'';
+	}
+
+	public function outputWpNonce($action = -1, $key = 'wp_rest',)
+	{
+		echo $this->getWpNonce($action, $key);
 	}
 
 	public function outputTags($tag = 'option')

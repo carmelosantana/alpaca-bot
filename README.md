@@ -61,6 +61,7 @@ If you find this project useful or use it in a commercial environment please con
 
 - [Ollama](https://github.com/ollama/ollama) and the research behind these great open source [Large Language Models](https://ollama.ai/library) (LLMs).
 - [Emma Delaney](https://emma-delaney.medium.com/how-to-create-your-own-chatgpt-in-html-css-and-javascript-78e32b70b4be) *How to Create Your Own ChatGPT in HTML CSS and JavaScript*
+- [Hint.css](https://github.com/chinchang/hint.css) A CSS only tooltip library for your lovely websites.
 
 ## License
 
