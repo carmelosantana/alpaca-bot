@@ -116,21 +116,11 @@ class Render
 			$this->outputAssistantErrorDialog('Please select a model and enter a prompt.');
 			return false;
 		} elseif (!isset($_POST['model'])) {
-			if (Options::getDefault('user_can_change_model') == true) {
-				$this->outputAssistantErrorDialog('Please select a model.');
-				return false;
+			if (Options::getDefault('user_can_change_model') and Options::get('default_model')) {
+				$_POST['model'] = Options::get('default_model');
 			} else {
-				// get user default model
-				$model = Options::get('default_model');
-
-				// if no default model set then output error
-				if (!$model) {
-					$this->outputAssistantErrorDialog('Ask your system administrator to select a default model.');
-					return false;
-				}
-
-				// set model
-				$_POST['model'] = $model;
+				$this->outputAssistantErrorDialog('Ask your system administrator to select a default model.');
+				return false;
 			}
 		} elseif (!isset($_POST['prompt'])) {
 			$this->outputAssistantErrorDialog('Please enter a prompt.');
