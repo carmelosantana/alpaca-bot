@@ -94,12 +94,13 @@
     filter: invert(100%);
 }
 
-/* Chatbox CSS */
+/* Primary wrap */
 #op-chat-container {
     margin-bottom: 50px;
     min-height: 50vh;
 }
 
+/* Welcome message */
 #op-hello p {
     color: #646970;
     font-size: 1.5rem;
@@ -117,6 +118,7 @@
     border-radius: 50%;
 }
 
+/* Loading indicator */
 #indicator {
     padding: 2em;
     display: block;
@@ -125,15 +127,10 @@
     height: 28px;
 }
 
+/* Toolbar (model select, chat history select) */
 .op-toolbar {
-    margin: 1.2em 0 1em 0;
-}
-
-/* first level children */
-.op-toolbar>* {
-    display: inline-block;
-    margin-right: 0.2em;
-    min-height: 35px;
+    min-height: 40px;
+    margin: 1em 0 1em 0;
 }
 
 .op-toolbar select {
@@ -145,7 +142,6 @@
     vertical-align: top;
 }
 
-/* P tag inside op.toolbar next to a select field */
 .op-toolbar p {
     display: block;
     margin: 0.75em 0 0 0.5em;
@@ -155,22 +151,27 @@
     transition: opacity 0.3s ease-in-out;
 }
 
-/* hover p */
 .op-toolbar p:hover {
     opacity: 1;
     transition: opacity 0.2s ease-in-out;
 }
 
-/* move second select to the right */
-.op-toolbar #chat_log_id {
+.op-toolbar .op-tags {
+    float: left;
+}
+
+.op-toolbar .op-chat-logs,
+#set_default_model {
     float: right;
 }
 
-.op-toolbar button {
-    border: 1px solid #ccc;
-    border-radius: 5px;
-    vertical-align: top;
-    padding: 3px 5px 2px 5px;
+.op-toolbar p,
+.op-toolbar select {
+    display: inline-block;
+}
+
+.op-toolbar p {
+    margin-right: .5em;
 }
 
 #op-response {
@@ -196,10 +197,7 @@
     display: none;
 }
 
-.htmx-request .htmx-indicator {
-    display: inline;
-}
-
+.htmx-request .htmx-indicator,
 .htmx-request.htmx-indicator {
     display: inline;
 }
@@ -402,49 +400,82 @@
     color: var(--icon-hover);
 }
 
+#op-hello {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    width: 100%;
+}
+
+#set_default_model {
+    visibility: hidden;
+}
+
+/* When screen is less than 900 change width of textbox to fit */
+@media screen and (max-width: 928px) {
+    .typing-container .typing-content {
+        max-width: 600px;
+    }
+}
+
 /* Responsive Media Query */
-@media screen and (max-width: 600px) {
-    .default-text h1 {
-        font-size: 2.3rem;
+@media screen and (max-width: 768px) {
+    .typing-container .typing-content {
+        margin-left: 0px !important;
+        padding: 0em .6em;
     }
 
-    :where(.default-text p, textarea, .chat p) {
-        font-size: 0.95rem !important;
+    .op-toolbar {
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        width: 100%;
     }
 
-    .chat-container .chat {
-        padding: 20px 10px;
+    .op-toolbar div {
+        margin: 0.5em 0;
     }
 
-    .chat-container .chat img {
-        height: 32px;
-        width: 32px;
+    .op-toolbar code,
+    .op-toolbar select {
+        float: right;
     }
 
-    .chat-container .chat p {
-        padding: 0 20px;
+    #set_default_model {
+        display: none;
     }
 
-    .chat .chat-content:not(:has(.typing-animation), :has(.error)) span {
-        visibility: visible;
+    .op-chat-message-username,
+    .op-chat-message-username .model {
+        display: block;
+        margin-bottom: .3em;
     }
 
-    .typing-container {
-        padding: 15px 10px;
+    .op-chat-message-parts,
+    .op-chat-message-tools {
+        margin-left: 0;
     }
 
-    .typing-textarea textarea {
-        height: 45px;
-        padding: 10px 40px 10px 10px;
+    .op-chat-message-response {
+        margin-top: .8em;
+    }
+}
+
+@media screen and (max-width: 360px) {
+    .op-toolbar select {
+        margin-top: 0em;
+        width: 100%;
+    }
+}
+
+@media screen and (max-width: 255px) {
+    .op-toolbar {
+        margin-top: 0em;
     }
 
-    .typing-content span {
-        height: 45px;
-        width: 45px;
-        margin-left: 5px;
-    }
-
-    span.material-symbols-rounded {
-        font-size: 1.25rem !important;
+    #op-chat-container .page-title-action {
+        width: 100%;
     }
 }
