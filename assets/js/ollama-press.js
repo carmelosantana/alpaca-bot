@@ -150,6 +150,12 @@ function resubmitPrompt(id) {
     onClickChange();
 }
 
+// only show set_default_model after #model is clicked
+function setDefaultModel() {
+    var defaultModel = document.querySelector("#set_default_model");
+    defaultModel.style.visibility = 'visible';
+}
+
 // find element by class and scroll to it, parameter is the class name
 function smoothScrollTo(selector = "dialog", behavior = 'smooth', block = 'start') {
     switch (selector) {
