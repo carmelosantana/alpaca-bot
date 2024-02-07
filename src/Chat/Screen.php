@@ -34,18 +34,22 @@ class Screen
                     <div class="op-toolbar">
                         <div class="op-tags">
                             <?php if (Options::get('user_can_change_model')) { ?>
-                                <select name="model" id="model"></select>
-                                <br>
+                                <p><strong>Model</strong></p>
                                 <p <?php echo $htmx->outputWpNonce('wp/user/update'); ?> hx-post="<?php $htmx->outputRenderEndpoint('wp/user/update'); ?>" hx-vals='{"set_default_model": true}' id="set_default_model">Set as default</p>
+                                <!-- onclick setDefaultModel -->
+                                <select name="model" id="model" onclick="setDefaultModel()"></select>
                                 <input <?php echo $htmx->outputWpNonce('htmx/tags'); ?> type="hidden" hx-get="<?php $htmx->outputRenderEndpoint('htmx/tags'); ?>" hx-trigger="load" hx-target="#model">
                             <?php } else { ?>
-                                <p><strong>Model</strong> <code><?php echo Options::get('default_model'); ?></code></p>
+                                <p><strong>Model</strong></p><code><?php echo Options::get('default_model'); ?></code>
                             <?php } ?>
                         </div>
-                        <?php if (Options::getDefault('save_chat_history')) { ?>
-                            <select name="chat_log_id" id="chat_log_id" <?php $htmx->outputHxMultiSwapLoadChat('wp/chat', 'change'); ?>></select>
-                            <input <?php echo $htmx->outputWpNonce('wp/history'); ?> type="hidden" hx-get="<?php $htmx->outputRenderEndpoint('wp/history'); ?>" hx-trigger="load" hx-target="#chat_log_id">
-                        <?php } ?>
+                        <div class="op-chat-logs">
+                            <?php if (Options::getDefault('save_chat_history')) { ?>
+                                <p><strong>Chat History</strong></p>
+                                <select name="chat_log_id" id="chat_log_id" <?php $htmx->outputHxMultiSwapLoadChat('wp/chat', 'change'); ?>></select>
+                                <input <?php echo $htmx->outputWpNonce('wp/history'); ?> type="hidden" hx-get="<?php $htmx->outputRenderEndpoint('wp/history'); ?>" hx-trigger="load" hx-target="#chat_log_id">
+                            <?php } ?>
+                        </div>
                     </div>
                     <div id="op-hello">
                         <?php echo $htmx->getAssistantAvatarImg('system'); ?>
