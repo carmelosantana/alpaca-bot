@@ -1,15 +1,9 @@
 :root {
-    /* Color */
-    --text-color: #343541;
-    --icon-color: #a9a9bc;
-    --icon-hover: #0a4b78;
-    --icon-hover-bg: #f1f1f3;
-    --placeholder-color: #6c6c6c;
-    --outgoing-chat-bg: #FFFFFF;
-    --incoming-chat-bg: #F7F7F8;
-    --outgoing-chat-border: #FFFFFF;
-    --incoming-chat-border: #D9D9E3;
+    /* Colors */
+    --chat-container-bg: #FFFFFF;
+    --chat-textarea-bg: #F7F7F8;
     --console: #1EFF00;
+    --lighter-gray: #D9D9E3;
 
     /* WordPress colors */
     --wp-blue: #0073aa;
@@ -137,7 +131,7 @@
     font-size: 1.1em;
     width: 240px;
     height: 35px;
-    border: 1px solid #ccc;
+    border: 1px solid var(--wp-light-silver-gray);
     border-radius: 5px;
     vertical-align: top;
 }
@@ -146,7 +140,7 @@
     display: block;
     margin: 0.75em 0 0 0.5em;
     font-size: .95em;
-    color: var(--text-color);
+    color: var(--wp-base-gray);
     opacity: 0.7;
     transition: opacity 0.3s ease-in-out;
 }
@@ -179,17 +173,8 @@
     margin: 0 auto;
 }
 
-.op-chat-message-user .op-chat-message-response {
-    opacity: 0.8;
-}
-
-.op-chat-message-user .op-chat-message-response:hover {
-    opacity: 1;
-    transition: opacity 0.3s ease-in-out;
-}
-
 .toplevel_page_ollama-press #wpfooter #footer-left {
-    color: var(--icon-color);
+    color: var(--wp-silver-gray);
     font-size: .75rem;
 }
 
@@ -273,7 +258,7 @@
 }
 
 .op-chat-message-user .op-chat-message-response {
-    color: var(--placeholder-color);
+    color: var(--wp-dark-silver-gray);
 }
 
 .ollama-press-options p.description {
@@ -322,8 +307,8 @@
     padding: 10px 10px;
     margin-left: -20px;
     justify-content: center;
-    background: var(--outgoing-chat-bg);
-    border-top: 1px solid var(--incoming-chat-border);
+    background: var(--chat-container-bg);
+    border-top: 1px solid var(--lighter-gray);
     z-index: 10;
 }
 
@@ -351,17 +336,17 @@
     width: 100%;
     border: none;
     padding: 5px 45px 5px 10px;
-    color: var(--text-color);
+    color: var(--wp-base-gray);
     font-size: 1rem;
     border-radius: 4px;
     max-height: 250px;
     overflow-y: auto;
-    background: var(--incoming-chat-bg);
-    outline: 1px solid var(--incoming-chat-border);
+    background: var(--chat-textarea-bg);
+    outline: 1px solid var(--lighter-gray);
 }
 
 .typing-textarea textarea::placeholder {
-    color: var(--placeholder-color);
+    color: var(--wp-dark-silver-gray);
 }
 
 .typing-content span {
@@ -371,7 +356,7 @@
     font-size: 1.56rem;
     align-items: center;
     justify-content: center;
-    color: var(--icon-color);
+    color: var(--wp-silver-gray);
     cursor: pointer;
 }
 
@@ -379,25 +364,25 @@
     position: absolute;
     right: 0;
     bottom: 0;
-    color: var(--icon-hover-bg);
+    color: var(--wp-light-silver-gray);
 }
 
 .typing-textarea textarea:valid~span {
-    color: var(--placeholder-color);
+    color: var(--wp-dark-silver-gray);
 }
 
 /* on hover and when disabled  */
 .typing-textarea span:hover {
-    color: var(--icon-hover);
+    color: var(--wp-blue);
 }
 
 .typing-textarea span:disabled {
-    color: var(--incoming-chat-border);
+    color: var(--lighter-gray);
     cursor: not-allowed;
 }
 
 .typing-textarea span:hover {
-    color: var(--icon-hover);
+    color: var(--wp-blue);
 }
 
 #op-hello {
