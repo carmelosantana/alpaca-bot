@@ -2,16 +2,16 @@
 
 declare(strict_types=1);
 
-namespace CarmeloSantana\OllamaPress\Api;
+namespace CarmeloSantana\AlpacaBot\Api;
 
-use CarmeloSantana\OllamaPress\Api\Status;
+use CarmeloSantana\AlpacaBot\Api\Status;
 use \WP_Error;
 use \WP_REST_Request;
 use \WP_REST_Response;
 
 abstract class Base
 {
-    public const NAMESPACE = '/' . OP_SLUG . '/v1';
+    public const NAMESPACE = '/' . AB_SLUG . '/v1';
 
     public const PERMISSION_READ = 'read';
 

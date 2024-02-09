@@ -2,10 +2,10 @@
 
 declare(strict_types=1);
 
-namespace CarmeloSantana\OllamaPress\Chat;
+namespace CarmeloSantana\AlpacaBot\Chat;
 
-use CarmeloSantana\OllamaPress\Options;
-use CarmeloSantana\OllamaPress\Api\Render;
+use CarmeloSantana\AlpacaBot\Options;
+use CarmeloSantana\AlpacaBot\Api\Render;
 
 class Screen
 {
@@ -18,8 +18,8 @@ class Screen
 
         // Change the footer version to the plugin version
         add_filter('update_footer', function ($footer) {
-            // add url to ollama.press
-            $footer = '<a href="https://ollama.press" target="_blank">Ollama Press</a>'  . ' v' . OP_VERSION;
+            // add url to alpaca.bot
+            $footer = '<a href="https://alpaca.bot" target="_blank">Alpaca Bot</a>'  . ' v' . AB_VERSION;
             return $footer;
         }, 11);
 
@@ -27,8 +27,8 @@ class Screen
         $htmx = new Render(get_current_user_id()); ?>
         <form id="op-chat-form">
             <div id="op-chat-container" class="wrap nosubsub">
-                <h1 class="wp-heading-inline"><?php esc_html_e('Ollama Press'); ?></h1>
-                <a href="<?php echo esc_url(admin_url('admin.php?page=ollama-press')); ?>" class="page-title-action"><?php echo esc_html__('New Chat'); ?></a>
+                <h1 class="wp-heading-inline"><?php esc_html_e('Alpaca Bot'); ?></h1>
+                <a href="<?php echo esc_url(admin_url('admin.php?page=alpaca-bot')); ?>" class="page-title-action"><?php echo esc_html__('New Chat'); ?></a>
                 <hr class="wp-header-end">
                 <div class="op-chat">
                     <div class="op-toolbar">
@@ -57,7 +57,7 @@ class Screen
                     </div>
                     <div id="op-response">
                     </div>
-                    <img id="indicator" class="htmx-indicator" src="<?php echo OP_DIR_URL . 'assets/img/grid.svg'; ?>">
+                    <img id="indicator" class="htmx-indicator" src="<?php echo AB_DIR_URL . 'assets/img/grid.svg'; ?>">
                 </div>
             </div>
             <div class="typing-container">
@@ -73,12 +73,12 @@ class Screen
         </form>
         <script>
             window.ZeroMdConfig = {
-                markedUrl: '<?php echo OP_DIR_URL . 'assets/js/marked.min.js'; ?>',
-                prismUrl: '<?php echo OP_DIR_URL . 'assets/js/prism.min.js'; ?>',
-                cssUrls: ['<?php echo OP_DIR_URL . 'assets/css/github-markdown.css'; ?>', '<?php echo OP_DIR_URL . 'assets/css/prism.css'; ?>'],
+                markedUrl: '<?php echo AB_DIR_URL . 'assets/js/marked.min.js'; ?>',
+                prismUrl: '<?php echo AB_DIR_URL . 'assets/js/prism.min.js'; ?>',
+                cssUrls: ['<?php echo AB_DIR_URL . 'assets/css/github-markdown.css'; ?>', '<?php echo AB_DIR_URL . 'assets/css/prism.css'; ?>'],
             }
         </script>
-        <script type="module" src="<?php echo OP_DIR_URL . 'assets/js/zero-md.min.js'; ?>"></script>
+        <script type="module" src="<?php echo AB_DIR_URL . 'assets/js/zero-md.min.js'; ?>"></script>
 <?php
     }
 }

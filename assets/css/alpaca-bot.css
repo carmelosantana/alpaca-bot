@@ -77,12 +77,12 @@
 }
 
 /* WordPress: Add padding to wp-footer to view above textarea */
-.toplevel_page_ollama-press #footer-left {
+.toplevel_page_alpaca-bot #footer-left {
     padding-bottom: 75px !important;
 }
 
 /* Custom admin menu icons */
-#toplevel_page_ollama-press .wp-menu-image img {
+#toplevel_page_alpaca-bot .wp-menu-image img {
     width: 20px;
     height: 20px;
     filter: invert(100%);
@@ -173,7 +173,7 @@
     margin: 0 auto;
 }
 
-.toplevel_page_ollama-press #wpfooter #footer-left {
+.toplevel_page_alpaca-bot #wpfooter #footer-left {
     color: var(--wp-silver-gray);
     font-size: .75rem;
 }
@@ -261,30 +261,30 @@
     color: var(--wp-dark-silver-gray);
 }
 
-.ollama-press-options p.description {
+.alpaca-bot-options p.description {
     margin: .6em .3em;
 }
 
-.ollama-press-options p.description.inline {
+.alpaca-bot-options p.description.inline {
     display: inline;
 }
 
-.ollama-press-options p.description span {
+.alpaca-bot-options p.description span {
     vertical-align: middle;
     margin-right: .1em;
     position: relative;
     display: inline-block;
 }
 
-.ollama-press-options p.description span.label-success {
+.alpaca-bot-options p.description span.label-success {
     color: #46B450;
 }
 
-.ollama-press-options p.description span.label-error {
+.alpaca-bot-options p.description span.label-error {
     color: #dc3232;
 }
 
-.ollama-press-options pre.console {
+.alpaca-bot-options pre.console {
     background-color: var(--wp-ultra-dark-gray);
     padding: 1em;
     border-radius: 5px;

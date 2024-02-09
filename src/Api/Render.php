@@ -2,17 +2,17 @@
 
 declare(strict_types=1);
 
-namespace CarmeloSantana\OllamaPress\Api;
+namespace CarmeloSantana\AlpacaBot\Api;
 
-use CarmeloSantana\OllamaPress\Api\Ollama;
-use CarmeloSantana\OllamaPress\Options;
+use CarmeloSantana\AlpacaBot\Api\Ollama;
+use CarmeloSantana\AlpacaBot\Options;
 use PhpScience\TextRank\TextRankFacade;
 use PhpScience\TextRank\Tool\StopWords\English;
 
 /**
  * HTMX API
  * 
- * @package OllamaPress
+ * @package AlpacaBot
  * @since 0.1.0
  */
 class Render
@@ -147,11 +147,11 @@ class Render
 		switch (strtolower($role)) {
 			case 'assistant':
 			case 'ollama':
-				$url = OP_DIR_URL . 'assets/img/ollama-large.png';
+				$url = AB_DIR_URL . 'assets/img/ollama-large.png';
 				break;
 
 			default:
-				$url = OP_DIR_URL . 'assets/img/ollama-press-460.png';
+				$url = AB_DIR_URL . 'assets/img/alpaca-bot-512.png';
 				break;
 		}
 
@@ -635,7 +635,7 @@ class Render
 
 	public function getRenderEndpoint($endpoint)
 	{
-		return get_bloginfo('url') . '/wp-json/' . OP_SLUG . '/v1/' . $endpoint;
+		return get_bloginfo('url') . '/wp-json/' . AB_SLUG . '/v1/' . $endpoint;
 	}
 
 	public function isRunning()

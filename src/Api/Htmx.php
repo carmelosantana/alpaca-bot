@@ -2,12 +2,12 @@
 
 declare(strict_types=1);
 
-namespace CarmeloSantana\OllamaPress\Api;
+namespace CarmeloSantana\AlpacaBot\Api;
 
 /**
  * HTMX API
  * 
- * @package OllamaPress
+ * @package AlpacaBot
  * @since 0.1.0
  */
 class Htmx extends Base

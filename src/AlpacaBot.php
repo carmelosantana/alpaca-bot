@@ -2,9 +2,9 @@
 
 declare(strict_types=1);
 
-namespace CarmeloSantana\OllamaPress;
+namespace CarmeloSantana\AlpacaBot;
 
-class OllamaPress
+class AlpacaBot
 {
     public function __construct()
     {
@@ -22,22 +22,22 @@ class OllamaPress
     public function addAdminMenu()
     {
         add_menu_page(
-            OP_TITLE,
-            OP_TITLE,
+            AB_TITLE,
+            AB_TITLE,
             'edit_posts',
-            OP_SLUG,
+            AB_SLUG,
             [__NAMESPACE__ . '\Chat\Screen', 'outputHTML'],
-            OP_DIR_URL . 'assets/img/icon-80.png',
+            AB_DIR_URL . 'assets/img/icon-80.png',
             4
         );
 
         // Add submenu page to replace the default menu page
         add_submenu_page(
-            OP_SLUG,
+            AB_SLUG,
             'Chat',
             'Chat',
             'edit_posts',
-            OP_SLUG,
+            AB_SLUG,
             [__NAMESPACE__ . '\Chat\Screen', 'outputHTML'],
             0
         );
@@ -45,8 +45,8 @@ class OllamaPress
 
     public function adminCheckScreen()
     {
-        // check page for ollama-press
-        if (strpos($_SERVER['REQUEST_URI'], 'admin.php?page=' . OP_SLUG) === false) {
+        // check page for alpaca-bot
+        if (strpos($_SERVER['REQUEST_URI'], 'admin.php?page=' . AB_SLUG) === false) {
             return false;
         }
 
@@ -59,27 +59,27 @@ class OllamaPress
             return;
         }
 
-        wp_enqueue_script('htmx', OP_DIR_URL . 'assets/js/htmx.min.js', [], '1.9.10');
-        wp_enqueue_script('htmx-multi-swap', OP_DIR_URL . 'assets/js/multi-swap.js', [], '1');
-        wp_enqueue_script(OP_SLUG, OP_DIR_URL . 'assets/js/ollama-press.js', [], OP_VERSION, true);
+        wp_enqueue_script('htmx', AB_DIR_URL . 'assets/js/htmx.min.js', [], '1.9.10');
+        wp_enqueue_script('htmx-multi-swap', AB_DIR_URL . 'assets/js/multi-swap.js', [], '1');
+        wp_enqueue_script(AB_SLUG, AB_DIR_URL . 'assets/js/alpaca-bot.js', [], AB_VERSION, true);
     }
 
     public function adminEnqueueStyles()
     {
-        wp_enqueue_style(OP_SLUG, OP_DIR_URL . 'assets/css/ollama-press.css', [], OP_VERSION);
-        wp_enqueue_style('hint', OP_DIR_URL . 'assets/css/hint.min.css', [], OP_VERSION);
-        wp_enqueue_style('materialsymbolsoutlined', OP_DIR_URL . 'assets/css/Material-Symbols-Outlined.css', [], OP_VERSION);
+        wp_enqueue_style(AB_SLUG, AB_DIR_URL . 'assets/css/alpaca-bot.css', [], AB_VERSION);
+        wp_enqueue_style('hint', AB_DIR_URL . 'assets/css/hint.min.css', [], AB_VERSION);
+        wp_enqueue_style('materialsymbolsoutlined', AB_DIR_URL . 'assets/css/Material-Symbols-Outlined.css', [], AB_VERSION);
     }
 
     public function adminNotices()
     {
         $notices = [
             'permalinks' => [
-                'message' => 'Ollama Press requires pretty permalinks to be enabled. Please enable them in <a href="' . admin_url('options-permalink.php') . '">Settings > Permalinks</a>.',
+                'message' => 'Alpaca Bot requires pretty permalinks to be enabled. Please enable them in <a href="' . admin_url('options-permalink.php') . '">Settings > Permalinks</a>.',
                 'condition' => get_option('permalink_structure') === false or get_option('permalink_structure') === ''
             ],
             'api_url' => [
-                'message' => 'Ollama Press requires an API URL to be set. Please set it in <a href="' . admin_url('admin.php?page=' . OP_SLUG . '-options') . '">Settings > Ollama Press</a>.',
+                'message' => 'Alpaca Bot requires an API URL to be set. Please set it in <a href="' . admin_url('admin.php?page=' . AB_SLUG . '-options') . '">Settings > Alpaca Bot</a>.',
                 'condition' => Options::get('api_url') === false
             ],
         ];

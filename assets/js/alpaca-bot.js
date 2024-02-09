@@ -59,7 +59,9 @@ function copyMessage() {
 
     // Clear message
     message.value = '';
-    message.placeholder = 'Message Ollama...';
+    
+    // Say hello to Abie
+    message.placeholder = 'Message Abie...';
     message.focus();
 }
 

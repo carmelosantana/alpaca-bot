@@ -1,4 +1,4 @@
-# Ollama Press
+# Alpaca Bot
 
 ### 🌟 **Privately** hosted WordPress chatbot! ⚡️
 
@@ -6,7 +6,9 @@
 
 *WordPress plugin for quick content creation and code completion! ✨Train✨ models and provide your editors with a conversational interface to your private LLM.*
 
-[![Ollama Press](https://ollama.press/wp-content/uploads/2024/01/ollama-press-256-icon.png)](https://ollama.press)
+<div align="center">
+  <img src="https://alpaca.bot/wp-content/uploads/2024/01/alpaca-bot-512-icon.png" alt="Alpaca Bot" width="256px">
+</div>
 
 > This plugin is in early development and is not ready for production use.
 
@@ -37,17 +39,17 @@
 
 ## Installation
 
-1. Download the latest release from the [releases page](https://github.com/carmelosantana/ollama-press/releases).
+1. Download the latest release from the [releases page](https://github.com/carmelosantana/alpaca-bot/releases).
 2. Upload the plugin to your WordPress site.
 3. Activate the plugin.
 
 ## Setup
 
-1. Setup your [Ollama](https://github.com/ollama/ollama) instance or sign up for a free account at [Ollama Press](https://ollama.press).
+1. Setup your [Ollama](https://github.com/ollama/ollama) instance or sign up for a free account at [Alpaca Bot](https://alpaca.bot).
 2. Add your Ollama API URL to the settings page.
-   1. Navigate to `Ollama Press > Settings` in your WordPress admin dashboard.
+   1. Navigate to `Alpaca Bot > Settings` in your WordPress admin dashboard.
    2. Enter your Ollama API URL.
-      1. Add your [Ollama Press](https://ollama.press/) API Token if you are using the hosted service.
+      1. Add your [Alpaca Bot](https://alpaca.bot/) API Token if you are using the hosted service.
    3. Click `Save Changes`.
 
 ## Funding

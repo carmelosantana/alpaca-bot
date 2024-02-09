@@ -2,9 +2,9 @@
 
 declare(strict_types=1);
 
-namespace CarmeloSantana\OllamaPress\Api;
+namespace CarmeloSantana\AlpacaBot\Api;
 
-use CarmeloSantana\OllamaPress\Options;
+use CarmeloSantana\AlpacaBot\Options;
 
 class Ollama
 {

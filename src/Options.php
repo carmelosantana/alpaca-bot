@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace CarmeloSantana\OllamaPress;
+namespace CarmeloSantana\AlpacaBot;
 
 class Options
 {
@@ -10,7 +10,7 @@ class Options
     public function addActions()
     {
         add_action('admin_init', function () {
-            $menu_id = OP_SLUG . '-options';
+            $menu_id = AB_SLUG . '-options';
             self::registerSettings(self::getFields(), self::getSections(), $menu_id);
         });
         add_action('admin_menu', [$this, 'addAdminMenu']);
@@ -19,14 +19,14 @@ class Options
     public function addAdminMenu()
     {
         add_submenu_page(
-            OP_SLUG,
-            __('Settings', OP_SLUG),
-            __('Settings', OP_SLUG),
+            AB_SLUG,
+            __('Settings', AB_SLUG),
+            __('Settings', AB_SLUG),
             'manage_options',
-            OP_SLUG . '-options',
+            AB_SLUG . '-options',
             function () {
-                $menu_id = OP_SLUG . '-options';
-                self::renderOptionsPage(self::getFields(), self::getSections(), $menu_id, __('Settings', OP_SLUG));
+                $menu_id = AB_SLUG . '-options';
+                self::renderOptionsPage(self::getFields(), self::getSections(), $menu_id, __('Settings', AB_SLUG));
             }
         );
     }
@@ -117,7 +117,7 @@ class Options
         }
     }
 
-    public static function renderOptionsPage(array $options = [], array $sections = [], string $id = '', string $title = OP_TITLE)
+    public static function renderOptionsPage(array $options = [], array $sections = [], string $id = '', string $title = AB_TITLE)
     {
         if (empty($name)) {
             $name = md5(json_encode($options));
@@ -125,7 +125,7 @@ class Options
 
         // get active tab, or first tab
         $active_tab = isset($_GET['tab']) ? $_GET['tab'] : array_key_first($sections); ?>
-        <div class="wrap <?php echo OP_SLUG; ?> <?php echo OP_SLUG . '-options'; ?> <?php echo $active_tab; ?>" id="<?php echo $id; ?>">
+        <div class="wrap <?php echo AB_SLUG; ?> <?php echo AB_SLUG . '-options'; ?> <?php echo $active_tab; ?>" id="<?php echo $id; ?>">
             <h1><?php echo $title; ?></h1>
             <h2 class="nav-tab-wrapper">
                 <?php foreach ($sections as $key => $section) : ?>
@@ -171,51 +171,51 @@ class Options
     {
         return [
             'api_url' => [
-                'label' => __('Ollama API URL', OP_SLUG),
-                'description' => __('The URL of your <a href="https://github.com/ollama/ollama">Ollama</a> installation.', OP_SLUG),
+                'label' => __('Ollama API URL', AB_SLUG),
+                'description' => __('The URL of your <a href="https://github.com/ollama/ollama">Ollama</a> installation.', AB_SLUG),
                 'placeholder' => 'http://localhost:11434',
                 'section' => 'api',
                 'description_callback' => [__CLASS__, 'fieldApiUrlValidate'],
             ],
             'api_token' => [
-                'label' => __('API Token', OP_SLUG),
-                'description' => __('This is optional.', OP_SLUG),
+                'label' => __('API Token', AB_SLUG),
+                'description' => __('This is optional.', AB_SLUG),
                 'section' => 'api',
             ],
             'default_model' => [
-                'label' => __('Default Model', OP_SLUG),
+                'label' => __('Default Model', AB_SLUG),
                 'type' => 'select',
                 'options' => self::getModels(),
                 'section' => 'chat',
             ],
             'user_can_change_model' => [
-                'label' => __('Can users change model?', OP_SLUG),
+                'label' => __('Can users change model?', AB_SLUG),
                 'type' => 'radio',
                 'options' => [
-                    'true' => __('Yes', OP_SLUG),
-                    'false' => __('No', OP_SLUG),
+                    'true' => __('Yes', AB_SLUG),
+                    'false' => __('No', AB_SLUG),
                 ],
                 'section' => 'chat',
                 'default' => true,
             ],
             'save_chat_history' => [
-                'label' => __('Save chat history?', OP_SLUG),
+                'label' => __('Save chat history?', AB_SLUG),
                 'type' => 'radio',
                 'options' => [
-                    'true' => __('Yes', OP_SLUG),
-                    'false' => __('No', OP_SLUG),
+                    'true' => __('Yes', AB_SLUG),
+                    'false' => __('No', AB_SLUG),
                 ],
                 'section' => 'chat',
                 'default' => true,
             ],
             'default_system_message' => [
-                'label' => __('Default system message', OP_SLUG),
-                'placeholder' => __('How can I help you today?', OP_SLUG),
+                'label' => __('Default system message', AB_SLUG),
+                'placeholder' => __('How can I help you today?', AB_SLUG),
                 'section' => 'chat',
             ],
             'default_message_placeholder' => [
-                'label' => __('Default message placeholder', OP_SLUG),
-                'placeholder' => __('Start chatting with Ollama', OP_SLUG),
+                'label' => __('Default message placeholder', AB_SLUG),
+                'placeholder' => __('Start chatting with Abie', AB_SLUG),
                 'section' => 'chat',
             ],
         ];
@@ -256,12 +256,12 @@ class Options
     {
         return [
             'api' => [
-                'title' => __('API', OP_SLUG),
-                'description' => __('Configure your <a href="https://github.com/ollama/ollama">Ollama</a> settings.', OP_SLUG),
+                'title' => __('API', AB_SLUG),
+                'description' => __('Configure your <a href="https://github.com/ollama/ollama">Ollama</a> settings.', AB_SLUG),
             ],
             'chat' => [
-                'title' => __('Chat', OP_SLUG),
-                'description' => __('Customize the user experience.', OP_SLUG),
+                'title' => __('Chat', AB_SLUG),
+                'description' => __('Customize the user experience.', AB_SLUG),
             ],
         ];
     }
@@ -276,19 +276,19 @@ class Options
             $header_x_ollama = wp_remote_retrieve_header($response, 'x-ollama-proxy');
 
             if (is_wp_error($response)) {
-                echo '<p class="description">' . __('Invalid URL', OP_SLUG) . '</p>';
+                echo '<p class="description">' . __('Invalid URL', AB_SLUG) . '</p>';
                 // $body == '"Ollama is running"' or $body == 'Ollama is running' in regex
             } elseif (preg_match('/^"?(Ollama is running)"?$/', $body)) {
                 if ($header_x_ollama) {
-                    echo '<p class="description"><span class="material-symbols-outlined label-success">verified</span><span>' . __('Ollama Press Proxy connection established.', OP_SLUG) . '</span></p>';
+                    echo '<p class="description"><span class="material-symbols-outlined label-success">verified</span><span>' . __('Alpaca Bot Proxy connection established.', AB_SLUG) . '</span></p>';
                 } else {
-                    echo '<p class="description"><span class="material-symbols-outlined label-success">check_circle</span><span>' . __('Verified connection.', OP_SLUG) . '</span></p>';
+                    echo '<p class="description"><span class="material-symbols-outlined label-success">check_circle</span><span>' . __('Verified connection.', AB_SLUG) . '</span></p>';
                 }
             } else {
-                echo '<p class="description"><span class="material-symbols-outlined label-error">error</span><span>' . __('Invalid response.', OP_SLUG) . '</span></p>';
+                echo '<p class="description"><span class="material-symbols-outlined label-error">error</span><span>' . __('Invalid response.', AB_SLUG) . '</span></p>';
             }
         } elseif (empty($api_url)) {
-            echo '<p class="description"><span class="material-symbols-outlined">edit</span><span>' . __('Please enter a URL.', OP_SLUG) . '</span></p>';
+            echo '<p class="description"><span class="material-symbols-outlined">edit</span><span>' . __('Please enter a URL.', AB_SLUG) . '</span></p>';
         }
     }
 
