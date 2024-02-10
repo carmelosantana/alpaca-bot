@@ -1,16 +1,15 @@
 # Alpaca Bot
 
-### 🌟 **Privately** hosted WordPress chatbot! ⚡️
-
-[![Discord](https://img.shields.io/discord/1198290062316683275?logo=discord&label=Discord)](https://discord.gg/DqAUPAVhnR)
-
-*WordPress plugin for quick content creation and code completion! ✨Train✨ models and provide your editors with a conversational interface to your private LLM.*
-
 <div align="center">
-  <img src="https://alpaca.bot/wp-content/uploads/2024/01/alpaca-bot-512-icon.png" alt="Alpaca Bot" width="256px">
+  
+  ### 🌟 A privately hosted WordPress AI agent.💡
+  
+  <img src="https://alpaca.bot/wp-content/uploads/2024/02/alpaca-bot-icon-1006.png" alt="Alpaca Bot" width="256px">
+
+  [![Discord](https://img.shields.io/discord/1198290062316683275?logo=discord&label=Discord)](https://discord.gg/DqAUPAVhnR)
 </div>
 
-> This plugin is in early development and is not ready for production use.
+*WordPress plugin for quick content creation and code completion! ✨Train✨ models and provide your editors with a conversational interface to your private LLM.*
 
 ---
 
@@ -45,7 +44,10 @@
 
 ## Setup
 
-1. Setup your [Ollama](https://github.com/ollama/ollama) instance or sign up for a free account at [Alpaca Bot](https://alpaca.bot).
+1. Setup your [Ollama](https://github.com/ollama/ollama) instance in one of the following ways:
+   - Install [Ollama](https://github.com/ollama/ollama) on your localhost or server.
+   - ⭐️ **Subscribe** to [Alpaca Bot](https://alpaca.bot/) for premium API features and accelerated GPU processing. 🚀
+   - Check out [Ollama Press](https://ollama.press/) for CPU only pool processing.
 2. Add your Ollama API URL to the settings page.
    1. Navigate to `Alpaca Bot > Settings` in your WordPress admin dashboard.
    2. Enter your Ollama API URL.
