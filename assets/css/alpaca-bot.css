@@ -1,15 +1,9 @@
 :root {
-    /* Color */
-    --text-color: #343541;
-    --icon-color: #a9a9bc;
-    --icon-hover: #0a4b78;
-    --icon-hover-bg: #f1f1f3;
-    --placeholder-color: #6c6c6c;
-    --outgoing-chat-bg: #FFFFFF;
-    --incoming-chat-bg: #F7F7F8;
-    --outgoing-chat-border: #FFFFFF;
-    --incoming-chat-border: #D9D9E3;
+    /* Colors */
+    --chat-container-bg: #FFFFFF;
+    --chat-textarea-bg: #F7F7F8;
     --console: #1EFF00;
+    --lighter-gray: #D9D9E3;
 
     /* WordPress colors */
     --wp-blue: #0073aa;
@@ -83,25 +77,25 @@
 }
 
 /* WordPress: Add padding to wp-footer to view above textarea */
-.toplevel_page_ollama-press #footer-left {
+.toplevel_page_alpaca-bot #footer-left {
     padding-bottom: 75px !important;
 }
 
 /* Custom admin menu icons */
-#toplevel_page_ollama-press .wp-menu-image img {
+#toplevel_page_alpaca-bot .wp-menu-image img {
     width: 20px;
     height: 20px;
     filter: invert(100%);
 }
 
 /* Primary wrap */
-#op-chat-container {
+#ab-chat-container {
     margin-bottom: 50px;
     min-height: 50vh;
 }
 
 /* Welcome message */
-#op-hello p {
+#ab-hello p {
     color: #646970;
     font-size: 1.5rem;
     font-style: normal;
@@ -109,7 +103,7 @@
     text-align: center;
 }
 
-#op-hello img {
+#ab-hello img {
     padding: 2em;
     display: block;
     margin: 0 auto;
@@ -128,68 +122,59 @@
 }
 
 /* Toolbar (model select, chat history select) */
-.op-toolbar {
+.ab-toolbar {
     min-height: 40px;
     margin: 1em 0 1em 0;
 }
 
-.op-toolbar select {
+.ab-toolbar select {
     font-size: 1.1em;
     width: 240px;
     height: 35px;
-    border: 1px solid #ccc;
+    border: 1px solid var(--wp-light-silver-gray);
     border-radius: 5px;
     vertical-align: top;
 }
 
-.op-toolbar p {
+.ab-toolbar p {
     display: block;
     margin: 0.75em 0 0 0.5em;
     font-size: .95em;
-    color: var(--text-color);
+    color: var(--wp-base-gray);
     opacity: 0.7;
     transition: opacity 0.3s ease-in-out;
 }
 
-.op-toolbar p:hover {
+.ab-toolbar p:hover {
     opacity: 1;
     transition: opacity 0.2s ease-in-out;
 }
 
-.op-toolbar .op-tags {
+.ab-toolbar .ab-tags {
     float: left;
 }
 
-.op-toolbar .op-chat-logs,
+.ab-toolbar .ab-chat-logs,
 #set_default_model {
     float: right;
 }
 
-.op-toolbar p,
-.op-toolbar select {
+.ab-toolbar p,
+.ab-toolbar select {
     display: inline-block;
 }
 
-.op-toolbar p {
+.ab-toolbar p {
     margin-right: .5em;
 }
 
-#op-response {
+#ab-response {
     max-width: var(--max-container-width);
     margin: 0 auto;
 }
 
-.op-chat-message-user .op-chat-message-response {
-    opacity: 0.8;
-}
-
-.op-chat-message-user .op-chat-message-response:hover {
-    opacity: 1;
-    transition: opacity 0.3s ease-in-out;
-}
-
-.toplevel_page_ollama-press #wpfooter #footer-left {
-    color: var(--icon-color);
+.toplevel_page_alpaca-bot #wpfooter #footer-left {
+    color: var(--wp-silver-gray);
     font-size: .75rem;
 }
 
@@ -202,33 +187,33 @@
     display: inline;
 }
 
-.op-chat-message {
+.ab-chat-message {
     margin: .6em 0;
 }
 
-.op-chat-message .notice {
+.ab-chat-message .notice {
     margin: 1em 0;
 }
 
 /* gravatar column should stretch to the bottom, forcing all elements to line up against */
-.op-chat-message-gravatar {
+.ab-chat-message-gravatar {
     float: left;
     height: 100%;
     margin-right: 1em;
 }
 
-.op-chat-message-gravatar img {
+.ab-chat-message-gravatar img {
     width: 38px;
     height: 38px;
     border-radius: 50%;
 }
 
-.op-chat-message-parts {
+.ab-chat-message-parts {
     margin-left: 38px;
 }
 
-/* .op-chat-message-tools needs to make space for gravatar on left 38px */
-.op-chat-message-tools {
+/* .ab-chat-message-tools needs to make space for gravatar on left 38px */
+.ab-chat-message-tools {
     /* lower opacity when not hover */
     opacity: 0.05;
     margin: 1em 1em 1em 1em;
@@ -238,12 +223,12 @@
 }
 
 /* increase opacity on tools when hovering over parent message */
-.op-chat-message:hover .op-chat-message-tools {
+.ab-chat-message:hover .ab-chat-message-tools {
     opacity: 1;
 }
 
 /* transition tool span changes */
-.op-chat-message-tools span.tools {
+.ab-chat-message-tools span.tools {
     font-size: 1.2rem;
     color: var(--wp-dark-silver-gray);
     cursor: pointer;
@@ -251,55 +236,57 @@
     margin-right: .3em;
 }
 
-.op-chat-message-tools span:hover {
+.ab-chat-message-tools span:hover {
     color: var(--wp-dark-gray);
 }
 
-.op-chat-message-tools span.rotate-push-pin {
+.ab-chat-message-tools span.rotate-push-pin {
     transform: rotate(33deg);
     /* font-size: 20px;
     width: 20px; */
 }
 
-.op-chat-message-username {
+.ab-chat-message-username {
+    font-size: 1.1em;
     font-weight: bold;
+    line-height: 1.3em;
     text-transform: capitalize;
 }
 
-.op-chat-message-username .model {
+.ab-chat-message-username .model {
     font-weight: normal;
     text-transform: none;
     color: #999;
 }
 
-.op-chat-message-user .op-chat-message-response {
-    color: var(--placeholder-color);
+.ab-chat-message-user .ab-chat-message-response {
+    color: var(--wp-dark-silver-gray);
 }
 
-.ollama-press-options p.description {
+.alpaca-bot-options p.description {
     margin: .6em .3em;
 }
 
-.ollama-press-options p.description.inline {
+.alpaca-bot-options p.description.inline {
     display: inline;
 }
 
-.ollama-press-options p.description span {
+.alpaca-bot-options p.description span {
     vertical-align: middle;
     margin-right: .1em;
     position: relative;
     display: inline-block;
 }
 
-.ollama-press-options p.description span.label-success {
+.alpaca-bot-options p.description span.label-success {
     color: #46B450;
 }
 
-.ollama-press-options p.description span.label-error {
+.alpaca-bot-options p.description span.label-error {
     color: #dc3232;
 }
 
-.ollama-press-options pre.console {
+.alpaca-bot-options pre.console {
     background-color: var(--wp-ultra-dark-gray);
     padding: 1em;
     border-radius: 5px;
@@ -322,8 +309,8 @@
     padding: 10px 10px;
     margin-left: -20px;
     justify-content: center;
-    background: var(--outgoing-chat-bg);
-    border-top: 1px solid var(--incoming-chat-border);
+    background: var(--chat-container-bg);
+    border-top: 1px solid var(--lighter-gray);
     z-index: 10;
 }
 
@@ -351,17 +338,17 @@
     width: 100%;
     border: none;
     padding: 5px 45px 5px 10px;
-    color: var(--text-color);
+    color: var(--wp-base-gray);
     font-size: 1rem;
     border-radius: 4px;
     max-height: 250px;
     overflow-y: auto;
-    background: var(--incoming-chat-bg);
-    outline: 1px solid var(--incoming-chat-border);
+    background: var(--chat-textarea-bg);
+    outline: 1px solid var(--lighter-gray);
 }
 
 .typing-textarea textarea::placeholder {
-    color: var(--placeholder-color);
+    color: var(--wp-dark-silver-gray);
 }
 
 .typing-content span {
@@ -371,7 +358,7 @@
     font-size: 1.56rem;
     align-items: center;
     justify-content: center;
-    color: var(--icon-color);
+    color: var(--wp-silver-gray);
     cursor: pointer;
 }
 
@@ -379,28 +366,28 @@
     position: absolute;
     right: 0;
     bottom: 0;
-    color: var(--icon-hover-bg);
+    color: var(--wp-light-silver-gray);
 }
 
 .typing-textarea textarea:valid~span {
-    color: var(--placeholder-color);
+    color: var(--wp-dark-silver-gray);
 }
 
 /* on hover and when disabled  */
 .typing-textarea span:hover {
-    color: var(--icon-hover);
+    color: var(--wp-blue);
 }
 
 .typing-textarea span:disabled {
-    color: var(--incoming-chat-border);
+    color: var(--lighter-gray);
     cursor: not-allowed;
 }
 
 .typing-textarea span:hover {
-    color: var(--icon-hover);
+    color: var(--wp-blue);
 }
 
-#op-hello {
+#ab-hello {
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -427,19 +414,19 @@
         padding: 0em .6em;
     }
 
-    .op-toolbar {
+    .ab-toolbar {
         display: flex;
         flex-direction: column;
         justify-content: center;
         width: 100%;
     }
 
-    .op-toolbar div {
+    .ab-toolbar div {
         margin: 0.5em 0;
     }
 
-    .op-toolbar code,
-    .op-toolbar select {
+    .ab-toolbar code,
+    .ab-toolbar select {
         float: right;
     }
 
@@ -447,35 +434,43 @@
         display: none;
     }
 
-    .op-chat-message-username,
-    .op-chat-message-username .model {
-        display: block;
-        margin-bottom: .3em;
+    .ab-chat-message-username {
+        font-size: 1.15em;
+        line-height: 1.4em;
+        min-height: 40px;
     }
 
-    .op-chat-message-parts,
-    .op-chat-message-tools {
+    .ab-chat-message-username,
+    .ab-chat-message-username .model {
+        display: block;
+        margin-bottom: .8em;
+    }
+
+    .ab-chat-message-parts,
+    .ab-chat-message-tools {
         margin-left: 0;
     }
 
-    .op-chat-message-response {
+    .ab-chat-message-response {
+        font-size: 1.25em;
+        line-height: 1.4em;
         margin-top: .8em;
     }
 }
 
 @media screen and (max-width: 360px) {
-    .op-toolbar select {
+    .ab-toolbar select {
         margin-top: 0em;
         width: 100%;
     }
 }
 
 @media screen and (max-width: 255px) {
-    .op-toolbar {
+    .ab-toolbar {
         margin-top: 0em;
     }
 
-    #op-chat-container .page-title-action {
+    #ab-chat-container .page-title-action {
         width: 100%;
     }
 }

@@ -2,9 +2,9 @@
 
 declare(strict_types=1);
 
-namespace CarmeloSantana\OllamaPress\Chat;
+namespace CarmeloSantana\AlpacaBot\Chat;
 
-use CarmeloSantana\OllamaPress\Options;
+use CarmeloSantana\AlpacaBot\Options;
 
 class Post
 {

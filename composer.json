@@ -1,5 +1,5 @@
 {
-    "name": "carmelosantana/ollama-press",
+    "name": "carmelosantana/alpaca-bot",
     "description": "🚀 Boost your WordPress website with instant AI-powered content creation and coding assistance! 💥",
     "type": "wordpress-plugin",
     "license": "GNU General Public License v2",
@@ -11,7 +11,7 @@
     ],
     "autoload": {
         "psr-4": {
-            "CarmeloSantana\\OllamaPress\\": "src/"
+            "CarmeloSantana\\AlpacaBot\\": "src/"
         }
     },
     "require": {

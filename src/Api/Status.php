@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace CarmeloSantana\OllamaPress\Api;
+namespace CarmeloSantana\AlpacaBot\Api;
 
 class Status
 {
