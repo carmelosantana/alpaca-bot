@@ -264,27 +264,27 @@ class Render
 
 	public function outputDialogEnd()
 	{
-		// End .op-dialog
+		// End .ab-dialog
 		$this->outputHtmlTag(false);
 		$this->outputPostScript();
 
-		// End #op-response
+		// End #ab-response
 		$this->outputHtmlTag(false);
 	}
 
-	// Add #op-response wrapper used for innerHTML replacement and opens .op-dialog
+	// Add #ab-response wrapper used for innerHTML replacement and opens .ab-dialog
 	public function outputDialogStart()
 	{
 		$time = time();
 
 		$this->outputHtmlTag([
-			'id' => 'op-response',
+			'id' => 'ab-response',
 		]);
 
 		// add user chat message to body
 		$this->outputHtmlTag([
-			'class' => 'op-dialog',
-			'id' => 'op-dialog-' . $time,
+			'class' => 'ab-dialog',
+			'id' => 'ab-dialog-' . $time,
 		]);
 
 		return $time;
@@ -481,30 +481,30 @@ class Render
 				break;
 		}
 
-		$class = 'op-chat-message-' . $role;
+		$class = 'ab-chat-message-' . $role;
 
-		$out .= '<div class="op-chat-message ' . $class . '" id="op-chat-message-' . $uuid . '">';
-		$out .= '<div class="op-chat-message-gravatar"><img src="' . $gravatar . '" alt="gravatar"></div>';
-		$out .= '<div class="op-chat-message-parts">';
-		$out .= '<div class="op-chat-message-username">' . $user_name . '</div>';
-		$out .= '<div class="op-chat-message-response" id="' . $response_id . '">' . $this->zeroScript($response) . '</div>';
-		$out .= '<div class="op-chat-message-tools">';
+		$out .= '<div class="ab-chat-message ' . $class . '" id="ab-chat-message-' . $uuid . '">';
+		$out .= '<div class="ab-chat-message-gravatar"><img src="' . $gravatar . '" alt="gravatar"></div>';
+		$out .= '<div class="ab-chat-message-parts">';
+		$out .= '<div class="ab-chat-message-username">' . $user_name . '</div>';
+		$out .= '<div class="ab-chat-message-response" id="' . $response_id . '">' . $this->zeroScript($response) . '</div>';
+		$out .= '<div class="ab-chat-message-tools">';
 		$out .= $tools;
-		$out .= '</div>';	// .op-chat-message-tools
-		$out .= '</div>';	// .op-chat-message-parts
-		$out .= '</div>';	// .op-chat-message
+		$out .= '</div>';	// .ab-chat-message-tools
+		$out .= '</div>';	// .ab-chat-message-parts
+		$out .= '</div>';	// .ab-chat-message
 
 		echo $out;
 	}
 
-	public function getToolTip($message = '', $class = 'op-tooltip-text')
+	public function getToolTip($message = '', $class = 'ab-tooltip-text')
 	{
 		return '<div class="' . $class . '">' . $message . '</div>';
 	}
 
 	public function getAdminNotice($message = '', $class = 'notice-success')
 	{
-		$id = 'op-notice-' . uniqid();
+		$id = 'ab-notice-' . uniqid();
 
 		$out = '<div class="notice ' . $class . ' is-dismissible" id="' . $id . '"><p>' . $message . '</p></div>';
 
@@ -554,7 +554,7 @@ class Render
 
 	public function getHxMultiSwapLoadChat(string $endpoint, string $trigger)
 	{
-		return $this->getWpNonce($endpoint) . ' hx-post="' . $this->getRenderEndpoint($endpoint) . '" hx-trigger="' . $trigger . '" hx-ext="multi-swap" hx-swap="multi:#op-response:beforeend,#chat_id:outerHTML" hx-disabled-elt="this" hx-indicator="#indicator"';
+		return $this->getWpNonce($endpoint) . ' hx-post="' . $this->getRenderEndpoint($endpoint) . '" hx-trigger="' . $trigger . '" hx-ext="multi-swap" hx-swap="multi:#ab-response:beforeend,#chat_id:outerHTML" hx-disabled-elt="this" hx-indicator="#indicator"';
 	}
 
 

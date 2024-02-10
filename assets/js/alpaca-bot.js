@@ -2,9 +2,9 @@ const chat_log_id = document.querySelector("#chat_log_id");
 const message = document.querySelector("#message");
 const models = document.querySelector("#model");
 const prompt = document.querySelector("#prompt");
-const response = document.querySelector("#op-response");
+const response = document.querySelector("#ab-response");
 const submit = document.querySelector("#submit");
-const welcome = document.querySelector("#op-hello");
+const welcome = document.querySelector("#ab-hello");
 
 // HTMx
 htmx.config.defaultFocusScroll = true;
@@ -36,12 +36,12 @@ function afterSubmit() {
 
 function clearChat() {
     // Append to end of response
-    var opResponse = document.querySelector("#op-response");
-    opResponse.innerHTML = '<div id="op-dialog"></div>';
+    var opResponse = document.querySelector("#ab-response");
+    opResponse.innerHTML = '<div id="ab-dialog"></div>';
 }
 
 function clearHome() {
-    // if op-response is not empty, hide welcome message
+    // if ab-response is not empty, hide welcome message
     if (response.innerHTML != '') {
         welcome.style.display = 'none';
     }
@@ -162,12 +162,12 @@ function setDefaultModel() {
 function smoothScrollTo(selector = "dialog", behavior = 'smooth', block = 'start') {
     switch (selector) {
         case "dialog":
-            var opResponse = document.querySelector("#op-response");
-            var opDialogs = opResponse.querySelectorAll('.op-dialog');
+            var opResponse = document.querySelector("#ab-response");
+            var opDialogs = opResponse.querySelectorAll('.ab-dialog');
             var lastOpDialog = opDialogs[opDialogs.length - 1];
             var element = lastOpDialog ? lastOpDialog.id : null;
 
-            // if there is no element with class of .op-dialog, scroll to the bottom
+            // if there is no element with class of .ab-dialog, scroll to the bottom
             if (element == null) {
                 element = opResponse;
             } else {
@@ -177,7 +177,7 @@ function smoothScrollTo(selector = "dialog", behavior = 'smooth', block = 'start
             break;
 
         case 'bottom':
-            element = document.querySelector("#op-response");
+            element = document.querySelector("#ab-response");
             block = 'end';
             break;
 
