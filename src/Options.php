@@ -164,7 +164,7 @@ class Options
 
     public static function appendPrefix(string $key)
     {
-        return 'ollama_' . $key;
+        return AB_SLUG . '_' . $key;
     }
 
     public static function getFields()
