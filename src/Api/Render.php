@@ -176,7 +176,6 @@ class Render
 
 				// if post_id > 0 then get post_content and add to messages
 				if ($post_id > 0) {
-					$post = get_post($post_id);
 					$messages_raw = get_post_meta($post_id, 'messages', true);
 				}
 
