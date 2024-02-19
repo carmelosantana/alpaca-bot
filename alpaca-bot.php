@@ -34,4 +34,4 @@ require $composer;
 
 add_action('plugins_loaded', function () {
     new \CarmeloSantana\AlpacaBot\AlpacaBot();
-}, 0);
+}, 9);
