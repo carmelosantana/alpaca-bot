@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace CarmeloSantana\AlpacaBot;
 
+use CarmeloSantana\AlpacaBot\Api\Cache;
 use CarmeloSantana\AlpacaBot\Api\Ollama;
 
 class Agents
@@ -13,9 +14,9 @@ class Agents
     public function __construct()
     {
         add_action('admin_menu', [$this, 'adminPageAdd']);
-        add_filter('alpaca_user_prompt', [$this, 'hookUserPrompt']);
-        add_shortcode('agent', [$this, 'routerAgent']);
-        add_shortcode('alpaca', [$this, 'routerAlpaca']);
+        add_filter(Options::prefixUnderscore('user_prompt'), [$this, 'hookUserPrompt']);
+        add_shortcode('agent', [$this, 'router']);
+        add_shortcode('alpaca', [$this, 'router']);
 
         // Core agents
         (new Agents\Get())->init();
@@ -29,7 +30,7 @@ class Agents
             'Agents',
             'Agents',
             'manage_options',
-            AB_SLUG . '-agents',
+            Options::prefixDash('agents'),
             [$this, 'adminPageRender'],
             1
         );
@@ -38,21 +39,24 @@ class Agents
     // adminPageRender using accordion from pulling $this->getAgents()
     public function adminPageRender()
     {
-        echo '<div class="wrap">';
+        // Scripts
+        wp_enqueue_script('prism', AB_DIR_URL . 'assets/js/prism.min.js', [], '1.29.0', true);
+        wp_enqueue_style('prism', AB_DIR_URL . 'assets/css/prism.css', [], '1.29.0');
+
+        // HTML
+        echo '<div class="wrap ' . AB_SLUG  . ' ' . Options::prefixDash('options') . '">';
         echo '<h1>Agents</h1>';
         echo '<p>Agents are shortcodes that help Alpaca Bot perform tasks.</p>';
-        echo '<div id="accordion">';
+        echo '<div class="ab-accordion">';
 
         $agents = $this->getAgents();
 
         foreach ($agents as $slug => $agent) {
-
-            // icon <span class="material-symbols-outlined">summarize</span>
             $icon = $agent['icon'] ?? 'person_apron';
             $icon = '<span class="material-symbols-outlined">' . $icon . '</span>';
-            echo '<button class="accordion">' . $icon . ' ' . $agent['title'] . '</button>';
+
+            echo '<button class="accordion-btn">' . $icon . ' <code>[' . $slug . ']</code> ' . $agent['description'] . '</button>';
             echo '<div class="panel">';
-            echo '<p>' . $agent['description'] . '</p>';
 
             if (isset($agent['arguments'])) {
                 echo '<h3>Arguments</h3>';
@@ -67,7 +71,7 @@ class Agents
                 echo '<h3>Examples</h3>';
 
                 foreach ($agent['examples'] as $example) {
-                    echo '<pre>' . $example[0] . '</pre>';
+                    echo '<pre><code class="language-shortcode">' . $example[0] . '</code></pre>';
                     echo '<p>' . $example[1] . '</p>';
                     echo '<hr>';
                 }
@@ -98,12 +102,12 @@ class Agents
 
     public function getCoreAgents()
     {
-        return apply_filters('alpaca_bot_core_agents', []);
+        return apply_filters(Options::prefixUnderscore('core_agents'), []);
     }
 
     public function getCustomAgents()
     {
-        return apply_filters('alpaca_bot_custom_agents', []);
+        return apply_filters(Options::prefixUnderscore('custom_agents'), []);
     }
 
     public function hookUserPrompt($prompt)
@@ -112,25 +116,55 @@ class Agents
         return $out;
     }
 
+    public function router($atts, $content = '', $tag = '')
+    {
+        $cache = new Cache($atts, $content, $tag);
+
+        $response = $cache->get();
+
+        if ($response) {
+            return $response;
+        }
+
+        switch ($tag) {
+            case 'agent':
+                $response = $this->routerAgent($atts, $content, $tag);
+                break;
+            case 'alpaca':
+                $response = $this->routerAlpaca($atts, $content, $tag);
+                break;
+            default:
+                return 'Error: Tag not found.';
+        }
+
+        $cache->set($response);
+
+        return $response;
+    }
+
     public function routerAgent($atts, $content = '', $tag = '')
     {
         $agents = $this->getAgents();
 
-        if (isset($agents[$atts[0]])) {
+        // Check if agent is the first argument
+        if (isset($agents[$atts[0] ?? null])) {
             $agent = $agents[$atts[0]];
         } elseif (isset($agents[$atts['agent'] ?? null])) {
             $agent = $agents[$atts['agent']];
+        } elseif (isset($agents[$atts['name'] ?? null])) {
+            $agent = $agents[$atts['name']];
         } else {
             return 'Error: Agent not found.';
         }
 
+        // set defaults
         foreach ($agent['arguments'] as $name => $arg) {
             if (isset($arg['default'])) {
                 $atts[$name] = $atts[$name] ?? $arg['default'];
             }
         }
 
-        // remove atts that dont belong
+        // remove atts that don't belong
         foreach ($atts as $key => $value) {
             if (!isset($agent['arguments'][$key])) {
                 unset($atts[$key]);
@@ -148,65 +182,26 @@ class Agents
     public function routerAlpaca($atts, $content = '', $tag = '')
     {
         $def = [
-            'cache' => 'postmeta',
+            'cache' => 0,
             'model' => Options::get('default_model'),
             'prompt' => do_shortcode($content),
         ];
 
         $atts = wp_parse_args($atts, $def);
 
-        // create key from $atts
-        $args_key = md5(json_encode($atts));
-        $cache_key = 'alpaca_cache_' . $args_key;
+        $cache = new Cache($atts, $content, $tag);
 
-        // if we're in a post, and no cache is set, default to postmeta
-        if (empty($atts['cache']) && is_singular()) {
-            $atts['cache'] = 'postmeta';
-        }
+        $response = $cache->get();
 
-        // if cache is numeric, set transient
-        if (is_numeric($atts['cache']) and (int) $atts['cache'] > 0) {
-            $timeout = $atts['cache'];
-            $atts['cache'] = 'transient';
-        }
-
-        switch ($atts['cache']) {
-            case 'postmeta':
-                $cache = get_post_meta(get_the_ID(), $cache_key, true);
-                break;
-
-            case 'transient':
-                $cache = get_transient($cache_key);
-                break;
-
-            default:
-                $cache = get_option($cache_key);
-                break;
-        }
-
-        if ($cache) {
-            return $cache;
+        if ($response) {
+            return $response;
         }
 
         $ollama = new Ollama();
 
         $response = $ollama->generate($atts);
 
-        if ($response) {
-            switch ($atts['cache']) {
-                case 'postmeta':
-                    update_post_meta(get_the_ID(), $cache_key, $response);
-                    break;
-
-                case 'transient':
-                    set_transient($cache_key, $response, $timeout);
-                    break;
-
-                default:
-                    update_option($cache_key, $response);
-                    break;
-            }
-        }
+        $cache->set($response);
 
         return $response;
     }
