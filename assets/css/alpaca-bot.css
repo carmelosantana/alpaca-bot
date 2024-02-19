@@ -286,7 +286,7 @@
     color: #dc3232;
 }
 
-.alpaca-bot-options pre.console {
+.alpaca-bot-options pre.console, .toplevel_page_alpaca-bot .console {
     background-color: var(--wp-ultra-dark-gray);
     padding: 1em;
     border-radius: 5px;
@@ -398,6 +398,73 @@
 
 #set_default_model {
     visibility: hidden;
+}
+
+.alpaca-bot-options .accordion-btn {
+    background-color: var(--wp-dark-gray);
+    color: var(--lighter-gray);
+    cursor: pointer;
+    padding: 18px;
+    width: 100%;
+    border: none;
+    text-align: left;
+    outline: none;
+    font-size: 15px;
+    transition: 0.4s;
+    display: flex;
+    align-items: center;
+    border-bottom: 1px solid var(--wp-ultra-dark-gray);
+}
+
+.alpaca-bot-options .accordion-btn code {
+    margin-right: .5em;
+}
+
+.alpaca-bot-options .panel code {
+    padding: 0;
+}
+
+.ab-accordian .active,
+.alpaca-bot-options .accordion-btn:hover {
+    background-color: var(--wp-blue);
+    color: var(--chat-container-bg);
+    border-bottom: 1px solid var(--wp-medium-blue);
+}
+
+.alpaca-bot-options .accordion-btn:after {
+    content: '\002B';
+    color: var(--wp-light-silver-gray);
+    font-weight: bold;
+    margin-left: auto;
+}
+
+.ab-accordian .active:after {
+    content: "\2212";
+}
+
+.alpaca-bot-options .panel {
+    padding: 0 18px;
+    background-color: var(--chat-textarea-bg);
+    max-height: 0;
+    overflow: hidden;
+    transition: max-height 0.2s ease-out;
+}
+
+.alpaca-bot-options .panel ul a {
+    text-decoration: none;
+}
+
+.alpaca-bot-shortcode-processed {
+    font-size: .8em;
+    background-color: var(--wp-ultra-dark-gray);
+    margin: .8em 0;
+    padding: .4em .6em;
+    border-radius: 5px;
+    font-family: monospace;
+    font-weight: bold;
+    color: var(--console);
+    text-shadow: 0px 0px .7em var(--console);
+    cursor: pointer;
 }
 
 /* When screen is less than 900 change width of textbox to fit */
