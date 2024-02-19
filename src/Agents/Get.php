@@ -4,11 +4,14 @@ declare(strict_types=1);
 
 namespace CarmeloSantana\AlpacaBot\Agents;
 
+use CarmeloSantana\AlpacaBot\Options;
+use CarmeloSantana\AlpacaBot\Api\Render;
+
 class Get extends Agent
 {
-    public function job($args = [], $user_content = ''): string
+    public function job($atts = [], $content = ''): string
     {
-        $url = $args['url'] ?? '';
+        $url = $atts['url'] ?? '';
 
         $response = wp_remote_get($url);
 
@@ -36,7 +39,25 @@ class Get extends Agent
         $content = $meta_tags;
         $content .= 'Body: ' . PHP_EOL . $body;
 
-        // return content
+        // wrap content in div to toggle visibility
+        $id = 'shortcode-' . md5(json_encode($atts));
+
+        // Output raw data to Alpaca or HTML to end user
+        switch ($atts['raw'] ?? false) {
+            case true:
+                return $content;
+                break;
+
+            default:
+                // add show/hide content
+                $content = '<div class="' . Options::prefixDash('shortcode-processed') . '" id="' . $id . '" data-url="' . $url . '" style="display: none;">' . $content . '</div>';
+
+                // Close and reopen zero so we can manipulate the incoming content
+                $content = '<button onclick="showHide(\'' . $id . '\')">Show Work</button>' . Render::zeroScript('', 'close') . $content . Render::zeroScript('', 'open');
+                break;
+        }
+
+        // return output
         return $content;
     }
 
@@ -55,14 +76,14 @@ class Get extends Agent
             'callback' => [$this, 'job'],
             'examples' => [
                 [
-                    '[agent get url="https://example.com"]',
+                    '[agent name=get url=https://example.com]',
                     'Retrieves the <code>body</code> content and <code>metadata</code> from the <i>url</i> provided.'
                 ],
                 [
                     '[alpaca model=llama2]
-    What do you think of this webpage? [agent get url="https://example.com"]
+    What do you think of this webpage? [agent name=get url=https://example.com]
 [/alpaca]',
-                    'Retrieves the <code>body</code> content and <code>metadata</code> from the <i>url</i> provided and passes it to the <i>llama2</i> model.'
+                    'Retrieves the <code>body</code> content and <code>metadata</code> from the <i>url</i> provided and passes it to the <strong>llama2</strong> <i>model</i>.'
                 ],
             ],
             'references' => [
