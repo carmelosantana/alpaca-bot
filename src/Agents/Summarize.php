@@ -5,13 +5,14 @@ declare(strict_types=1);
 namespace CarmeloSantana\AlpacaBot\Agents;
 
 use CarmeloSantana\AlpacaBot\Agents\Get;
+use CarmeloSantana\AlpacaBot\Api\Ollama;
 
 class Summarize extends Agent
 {
-    public function job($args = [], $content = ''): string
+    public function job($atts = [], $content = ''): string
     {
         // use actionWpRemoteGet
-        $summary = (new Get)->job($args);
+        $summary = (new Get)->job($atts);
 
         // if error pass along 'Error: '
         if (strpos($summary, 'Error: ') === 0) {
@@ -19,17 +20,30 @@ class Summarize extends Agent
         }
 
         // starting prompt
-        $prompt = 'Please summarize this ' . $this->getArg($args, 'content') . ' from ' . $this->getArg($args, 'url');
+        $prompt = 'Please summarize this ' . $this->getArg($atts, 'content') . ' from ' . $this->getArg($atts, 'url');
 
         // add length to prompt
-        if (!empty($args['length'])) {
-            $prompt .= ' in ' . $args['length'];
+        if (!empty($atts['length'])) {
+            $prompt .= ' in ' . $atts['length'];
         }
 
         // add text to prompt
         $prompt .= ': ' . $summary;
 
-        return $prompt;
+        // Build args for Ollama
+        $args = [
+            'prompt' => $prompt,
+        ];
+
+        // Do we have models?
+        if (!empty($att['model'])) {
+            $args['model'] = $atts['model'];
+        }
+
+        // send prompt to Ollama
+        $content = (new Ollama)->generate($args);
+
+        return $content ? $content : 'Error: No content returned from Ollama.';
     }
 
     // list of filterable agents
@@ -58,11 +72,11 @@ class Summarize extends Agent
             'callback' => [$this, 'job'],
             'examples' => [
                 [
-                    '[agent summarize url="https://example.com" length="2 paragraphs" format="text"]',
+                    '[agent name=summarize url=https://example.com length="2 paragraphs"]',
                     'Summarize the content of the <i>url</i> provided and pass it to the next agent or prompt.'
                 ],
                 [
-                    '[alpaca agent=summarize url="https://example.com" length="2" format="list"]',
+                    '[agent name=summarize url=https://example.com length="3 bullet points"]',
                     'Call the Summarize agent outside of chat.'
                 ]
             ],
