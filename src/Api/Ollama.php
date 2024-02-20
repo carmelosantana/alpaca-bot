@@ -20,6 +20,60 @@ class Ollama
         return $url;
     }
 
+    public function generate($args = [])
+    {
+        $url = $this->getEndpoint('generate');
+
+        if (!$url) {
+            return false;
+        }
+
+        // user args
+        $def = [
+            'model' => Options::get('default_model'),
+            'prompt' => '',
+        ];
+        $args = wp_parse_args($args, $def);
+
+        // convert booleans
+        $args = array_map(function ($value) {
+            if ($value === 'true') {
+                return true;
+            } elseif ($value === 'false') {
+                return false;
+            } else {
+                return $value;
+            }
+        }, $args);
+
+        // hardcode
+        $hardcode = [
+            'stream' => false,
+            'keep_alive' => '5m',
+        ];
+        $args = wp_parse_args($hardcode, $args);
+
+        // remove empty args
+        $args = array_filter($args, function ($value) {
+            return $value !== '';
+        });
+
+        $response = wp_remote_post($url, [
+            'body' => json_encode($args),
+            'headers' => [
+                'Content-Type' => 'application/json',
+            ],
+        ]);
+
+        if (is_wp_error($response)) {
+            return false;
+        }
+
+        $response = json_decode(wp_remote_retrieve_body($response), true);
+
+        return $response['response'];
+    }
+
     public function decodeRemoteBody(array $options = [])
     {
         // WP extract args from $options array

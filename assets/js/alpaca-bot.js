@@ -59,7 +59,7 @@ function copyMessage() {
 
     // Clear message
     message.value = '';
-    
+
     // Say hello to Abie
     message.placeholder = 'Message Abie...';
     message.focus();
@@ -238,3 +238,27 @@ if (message) {
         message.focus();
     }
 }
+
+var acc = document.getElementsByClassName('accordion-btn');
+var i;
+
+for (i = 0; i < acc.length; i++) {
+    acc[i].addEventListener('click', function () {
+        this.classList.toggle('active');
+        var panel = this.nextElementSibling;
+        if (panel.style.maxHeight) {
+            panel.style.maxHeight = null;
+        } else {
+            panel.style.maxHeight = panel.scrollHeight + 'px';
+        }
+    });
+}
+
+function showHide(id) {
+    var element = document.getElementById(id);
+    if (element.style.display === "none") {
+        element.style.display = "block";
+    } else {
+        element.style.display = "none";
+    }
+} 

@@ -10,7 +10,7 @@ class Options
     public function addActions()
     {
         add_action('admin_init', function () {
-            $menu_id = AB_SLUG . '-options';
+            $menu_id = Options::prefixDash('options');
             self::registerSettings(self::getFields(), self::getSections(), $menu_id);
         });
         add_action('admin_menu', [$this, 'addAdminMenu']);
@@ -23,11 +23,12 @@ class Options
             __('Settings', AB_SLUG),
             __('Settings', AB_SLUG),
             'manage_options',
-            AB_SLUG . '-options',
+            Options::prefixDash('options'),
             function () {
-                $menu_id = AB_SLUG . '-options';
+                $menu_id = Options::prefixDash('options');
                 self::renderOptionsPage(self::getFields(), self::getSections(), $menu_id, __('Settings', AB_SLUG));
-            }
+            },
+            10
         );
     }
 
@@ -125,7 +126,7 @@ class Options
 
         // get active tab, or first tab
         $active_tab = isset($_GET['tab']) ? $_GET['tab'] : array_key_first($sections); ?>
-        <div class="wrap <?php echo AB_SLUG; ?> <?php echo AB_SLUG . '-options'; ?> <?php echo $active_tab; ?>" id="<?php echo $id; ?>">
+        <div class="wrap <?php echo AB_SLUG; ?> <?php echo Options::prefixDash('options'); ?> <?php echo $active_tab; ?>" id="<?php echo $id; ?>">
             <h1><?php echo $title; ?></h1>
             <h2 class="nav-tab-wrapper">
                 <?php foreach ($sections as $key => $section) : ?>
@@ -162,9 +163,19 @@ class Options
 <?php
     }
 
-    public static function appendPrefix(string $key)
+    public static function appendPrefix(string $key = '', string $separator = '_')
     {
-        return AB_SLUG . '_' . $key;
+        return str_replace('-', $separator, AB_SLUG . (!empty($key) ? $separator . $key : ''));
+    }
+
+    public static function prefixDash(string $key = '')
+    {
+        return self::appendPrefix($key, '-');
+    }
+
+    public static function prefixUnderscore(string $key = '')
+    {
+        return self::appendPrefix($key, '_');
     }
 
     public static function getFields()
@@ -277,7 +288,6 @@ class Options
 
             if (is_wp_error($response)) {
                 echo '<p class="description">' . __('Invalid URL', AB_SLUG) . '</p>';
-                // $body == '"Ollama is running"' or $body == 'Ollama is running' in regex
             } elseif (preg_match('/^"?(Ollama is running)"?$/', $body)) {
                 if ($header_x_ollama) {
                     echo '<p class="description"><span class="material-symbols-outlined label-success">verified</span><span>' . __('Alpaca Bot Proxy connection established.', AB_SLUG) . '</span></p>';
@@ -294,17 +304,13 @@ class Options
 
     public static function get(string $key, $default = null, $placeholder = false)
     {
-        $value = get_option(self::appendPrefix($key), $default);
+        $value = get_option(self::appendPrefix($key));
 
-        if (is_string($value) and in_array(strtolower($value), ['true', 'false'])) {
-            $value = filter_var($value, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
-        } elseif (is_string($value) and empty($value)) {
-            $value = false;
-        }
+        $value = self::validateValue($value);
 
         if (!$value and $default !== null) {
             $options = self::getFields();
-            $value = $options[$key]['default'] ?? false;
+            $value = $default ? $default : $options[$key]['default'] ?? false;
 
             if ($placeholder and isset($options[$key]['placeholder'])) {
                 $value = $options[$key]['placeholder'];
@@ -314,14 +320,25 @@ class Options
         return $value;
     }
 
-    public static function getDefault(string $key, $default = false, $placeholder = false)
+    public static function getDefault(string $key, $default = false)
     {
-        return self::get($key, $default, $placeholder);
+        return self::get($key, $default);
     }
 
 
     public static function getPlaceholder(string $key, $default = false)
     {
         return self::get($key, $default, true);
+    }
+
+    public static function validateValue($value)
+    {
+        if (is_string($value) and in_array(strtolower($value), ['true', 'false'])) {
+            return filter_var($value, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
+        } elseif (is_string($value) and empty($value)) {
+            return false;
+        }
+
+        return $value;
     }
 }

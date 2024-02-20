@@ -21,10 +21,11 @@ class Render
 
 	private int $timeout = 60;
 
-	private string $user_settings_meta_key = 'ollama_user_settings';
+	private string $user_settings_meta_key;
 
 	public function __construct(private int $user_id, object $request = null)
 	{
+		$this->user_settings_meta_key = Options::prefixUnderscore('user_settings');
 		$this->ollama = new Ollama();
 	}
 
@@ -166,7 +167,10 @@ class Render
 
 		// Sanitize inputs
 		$model = sanitize_text_field($_POST['model']);
-		$prompt = sanitize_text_field($_POST['prompt']);
+		$original_prompt = sanitize_text_field($_POST['prompt']);
+
+		// Filter prompt
+		$prompt = apply_filters(Options::prefixUnderscore('user_prompt'), stripslashes($original_prompt));
 
 		// Choose completion type
 		switch ($endpoint) {
@@ -176,7 +180,6 @@ class Render
 
 				// if post_id > 0 then get post_content and add to messages
 				if ($post_id > 0) {
-					$post = get_post($post_id);
 					$messages_raw = get_post_meta($post_id, 'messages', true);
 				}
 
@@ -487,7 +490,7 @@ class Render
 		$out .= '<div class="ab-chat-message-gravatar"><img src="' . $gravatar . '" alt="gravatar"></div>';
 		$out .= '<div class="ab-chat-message-parts">';
 		$out .= '<div class="ab-chat-message-username">' . $user_name . '</div>';
-		$out .= '<div class="ab-chat-message-response" id="' . $response_id . '">' . $this->zeroScript($response) . '</div>';
+		$out .= '<div class="ab-chat-message-response" id="' . $response_id . '">' . self::zeroScript($response) . '</div>';
 		$out .= '<div class="ab-chat-message-tools">';
 		$out .= $tools;
 		$out .= '</div>';	// .ab-chat-message-tools
@@ -511,9 +514,14 @@ class Render
 		return $out;
 	}
 
-	public function outputPostScript($class = '')
+	public function outputPostScript(string $class = '')
 	{
 		echo '<script type="text/javascript">smoothScrollTo(' . $class . ');</script>';
+	}
+
+	public function outputScriptShowHide(string $id)
+	{
+		echo '<script type="text/javascript">showHide(' . $id . ');</script>';
 	}
 
 	public function outputHtmlTag($attributes = [])
@@ -612,7 +620,7 @@ class Render
 		$json = $this->ollama->decodeRemoteBody(['endpoint' => 'tags']);
 
 		// get user default model
-		$default_model = $this->getUserSetting('default_model');
+		$default_model = $this->getUserSetting('default_model', Options::get('default_model'));
 
 		// if no models found then output disabled option
 		if (!isset($json['models']) or empty($json['models'])) {
@@ -647,7 +655,7 @@ class Render
 		}
 	}
 
-	// Store user settings in ollama_user_settings serialized array in user meta
+	// Store user settings in alpaca_bot_user_settings serialized array in user meta
 	public function userSettingsUpdate()
 	{
 		// Check if user is logged in
@@ -716,7 +724,14 @@ class Render
 	{
 		$user_id = get_current_user_id();
 		$user_settings = get_user_meta($user_id, $this->user_settings_meta_key, true);
-		return $user_settings[$option] ?? null;
+
+		$value = Options::validateValue($user_settings[$option] ?? '');
+
+		if ($value) {
+			return $value;
+		}
+
+		return $default;
 	}
 
 	// https://www.uuidgenerator.net/dev-corner/php
@@ -741,8 +756,20 @@ class Render
 	 * @param  string $message
 	 * @return string
 	 */
-	private function zeroScript(string $message): string
+	public static function zeroScript(string $message, string $position = ''): string
 	{
-		return '<zero-md><script type="text/markdown">' . $message . '</script></zero-md>';
+		switch ($position) {
+			case 'open':
+				return '<zero-md><script type="text/markdown">';
+				break;
+
+			case 'close':
+				return '</script></zero-md>';
+				break;
+
+			default:
+				return '<zero-md><script type="text/markdown">' . $message . '</script></zero-md>';
+				break;
+		}
 	}
 }

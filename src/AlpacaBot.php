@@ -15,6 +15,7 @@ class AlpacaBot
 
         // Load with plugin
         (new Options())->addActions();
+        new Agents();
         new Api\Htmx();
         new Chat\Post();
     }
@@ -74,17 +75,23 @@ class AlpacaBot
     public function adminNotices()
     {
         $notices = [
-            'permalinks' => [
+            [
                 'message' => 'Alpaca Bot requires pretty permalinks to be enabled. Please enable them in <a href="' . admin_url('options-permalink.php') . '">Settings > Permalinks</a>.',
                 'condition' => get_option('permalink_structure') === false or get_option('permalink_structure') === ''
             ],
-            'api_url' => [
-                'message' => 'Alpaca Bot requires an API URL to be set. Please set it in <a href="' . admin_url('admin.php?page=' . AB_SLUG . '-options') . '">Settings > Alpaca Bot</a>.',
+            [
+                'message' => 'Alpaca Bot requires an Ollama API URL to be set. Please set it in <a href="' . admin_url('admin.php?page=' . Options::prefixDash('options')) . '">Settings > Alpaca Bot</a>.',
                 'condition' => Options::get('api_url') === false
-            ],
+            ]
+        ];
+
+        $default = [
+            'message' => '',
+            'condition' => false,
         ];
 
         foreach ($notices as $notice) {
+            $notice = wp_parse_args($notice, $default);
             if ($notice['condition']) {
                 echo '<div class="notice notice-error is-dismissible"><p>' . $notice['message'] . '</p></div>';
             }
