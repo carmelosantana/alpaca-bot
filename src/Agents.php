@@ -118,6 +118,16 @@ class Agents
 
     public function router($atts, $content = '', $tag = '')
     {
+        // Do not process during autosave (this may not be necessary)
+        if (defined('DOING_AUTOSAVE') and DOING_AUTOSAVE) {
+            return;
+        }
+
+        // Do not process during post save
+        if (current_action() === 'render_block_core/shortcode' and did_action('save_post') >= 1) {
+            return;
+        }
+
         $cache = new Cache($atts, $content, $tag);
 
         $response = $cache->get();
@@ -182,7 +192,6 @@ class Agents
     public function routerAlpaca($atts, $content = '', $tag = '')
     {
         $def = [
-            'cache' => 0,
             'model' => Options::get('default_model'),
             'prompt' => do_shortcode($content),
         ];
