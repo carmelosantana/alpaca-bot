@@ -21,7 +21,7 @@ class Cache
     private string $cache_key;
 
     private string $store;
-    
+
     /**
      * Shortcode caching.
      *
@@ -34,10 +34,6 @@ class Cache
     {
         // build settings
         $this->cache = $atts['cache'] ?? '';
-
-        // create key from $this->atts
-        $this->args_key = md5(json_encode($atts) . $content . $tag);
-        $this->cache_key = Options::prefixUnderscore('cache_' . $this->args_key);
 
         // if no storage is set, and we're in_the_loop(), set storage to postmeta
         if (empty($this->cache) and in_the_loop()) {
@@ -53,12 +49,17 @@ class Cache
             $this->store = 'option';
         }
 
-        // if store ends in s change, remove s
-        if (substr($this->store, -1) === 's' and strlen($this->store) > 1) {
-            $this->store = substr($this->store, 0, -1);
-        }
-
         if ($this->store) {
+            // if store ends in s change, remove s
+            if (substr($this->store, -1) === 's' and strlen($this->store) > 1) {
+                $this->store = substr($this->store, 0, -1);
+            }
+
+            // create key from $this->atts
+            $this->args_key = md5(json_encode($atts) . $content . $tag . ($GLOBALS['post']->ID ?? 0));
+            $this->cache_key = Options::prefixUnderscore('cache_' . $this->args_key);
+
+            // set active
             $this->active = true;
         }
     }
