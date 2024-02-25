@@ -102,4 +102,25 @@ class AlpacaBot
             }
         }
     }
+
+    public function options()
+    {
+        // Options
+        $options = new Options;
+
+        // Set fields
+        $options->setFields(Define::fields());
+        $options->setSections(Define::sections());
+
+        // Setup menu and page
+        $options->setMenuSlug(Options::appendPrefix('settings', '-'));
+        $options->setMenuTitle('Settings');
+        $options->setPageTitle('Settings');
+        $options->setParentSlug(AB_SLUG);
+        $options->addPageWrapClass(AB_SLUG);
+        $options->addPageWrapClass(Options::appendPrefix('options', '-'));
+
+        // Register and create options page
+        $options->register();
+    }
 }
