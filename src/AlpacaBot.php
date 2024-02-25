@@ -4,6 +4,11 @@ declare(strict_types=1);
 
 namespace CarmeloSantana\AlpacaBot;
 
+use CarmeloSantana\AlpacaBot\Define;
+use CarmeloSantana\AlpacaBot\Utils\Options;
+
+const VERSION = '0.4.0';
+
 class AlpacaBot
 {
     public function __construct()

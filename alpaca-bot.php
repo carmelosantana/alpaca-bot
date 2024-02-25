@@ -16,7 +16,6 @@ define('AB_TITLE', 'Alpaca Bot');
 define('AB_PLUGIN_FILE', __FILE__);
 define('AB_DIR_PATH', plugin_dir_path(__FILE__));
 define('AB_DIR_URL', plugin_dir_url(__FILE__));
-define('AB_VERSION', '0.3.0');
 
 // Composer
 if (!file_exists($composer = plugin_dir_path(__FILE__) . 'vendor/autoload.php')) {
