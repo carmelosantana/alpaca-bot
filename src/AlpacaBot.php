@@ -4,6 +4,11 @@ declare(strict_types=1);
 
 namespace CarmeloSantana\AlpacaBot;
 
+use CarmeloSantana\AlpacaBot\Define;
+use CarmeloSantana\AlpacaBot\Utils\Options;
+
+const VERSION = '0.4.0';
+
 class AlpacaBot
 {
     public function __construct()
@@ -13,8 +18,10 @@ class AlpacaBot
         add_action('admin_menu', [$this, 'addAdminMenu']);
         add_action('admin_notices', [$this, 'adminNotices']);
 
+        // Setup options
+        $this->options();
+
         // Load with plugin
-        (new Options())->addActions();
         new Agents();
         new Api\Htmx();
         new Chat\Post();
@@ -62,14 +69,14 @@ class AlpacaBot
 
         wp_enqueue_script('htmx', AB_DIR_URL . 'assets/js/htmx.min.js', [], '1.9.10');
         wp_enqueue_script('htmx-multi-swap', AB_DIR_URL . 'assets/js/multi-swap.js', [], '1');
-        wp_enqueue_script(AB_SLUG, AB_DIR_URL . 'assets/js/alpaca-bot.js', [], AB_VERSION, true);
+        wp_enqueue_script(AB_SLUG, AB_DIR_URL . 'assets/js/alpaca-bot.js', [], VERSION, true);
     }
 
     public function adminEnqueueStyles()
     {
-        wp_enqueue_style(AB_SLUG, AB_DIR_URL . 'assets/css/alpaca-bot.css', [], AB_VERSION);
-        wp_enqueue_style('hint', AB_DIR_URL . 'assets/css/hint.min.css', [], AB_VERSION);
-        wp_enqueue_style('materialsymbolsoutlined', AB_DIR_URL . 'assets/css/Material-Symbols-Outlined.css', [], AB_VERSION);
+        wp_enqueue_style(AB_SLUG, AB_DIR_URL . 'assets/css/alpaca-bot.css', [], VERSION);
+        wp_enqueue_style('hint', AB_DIR_URL . 'assets/css/hint.min.css', [], VERSION);
+        wp_enqueue_style('materialsymbolsoutlined', AB_DIR_URL . 'assets/css/Material-Symbols-Outlined.css', [], VERSION);
     }
 
     public function adminNotices()
@@ -80,7 +87,7 @@ class AlpacaBot
                 'condition' => get_option('permalink_structure') === false or get_option('permalink_structure') === ''
             ],
             [
-                'message' => 'Alpaca Bot requires an Ollama API URL to be set. Please set it in <a href="' . admin_url('admin.php?page=' . Options::prefixDash('options')) . '">Settings > Alpaca Bot</a>.',
+                'message' => 'Alpaca Bot requires an Ollama API URL to be set. Please set it in <a href="' . admin_url('admin.php?page=' . Options::appendPrefix('options', '-')) . '">Settings > Alpaca Bot</a>.',
                 'condition' => Options::get('api_url') === false
             ]
         ];
@@ -96,5 +103,26 @@ class AlpacaBot
                 echo '<div class="notice notice-error is-dismissible"><p>' . $notice['message'] . '</p></div>';
             }
         }
+    }
+
+    public function options()
+    {
+        // Options
+        $options = new Options;
+
+        // Set fields
+        $options->setFields(Define::fields());
+        $options->setSections(Define::sections());
+
+        // Setup menu and page
+        $options->setMenuSlug(Options::appendPrefix('settings', '-'));
+        $options->setMenuTitle('Settings');
+        $options->setPageTitle('Settings');
+        $options->setParentSlug(AB_SLUG);
+        $options->addPageWrapClass(AB_SLUG);
+        $options->addPageWrapClass(Options::appendPrefix('options', '-'));
+
+        // Register and create options page
+        $options->register();
     }
 }

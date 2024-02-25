@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace CarmeloSantana\AlpacaBot\Api;
 
-use CarmeloSantana\AlpacaBot\Options;
+use CarmeloSantana\AlpacaBot\Utils\Options;
 
 class Cache
 {
@@ -57,7 +57,7 @@ class Cache
 
             // create key from $this->atts
             $this->args_key = md5(json_encode($atts) . $content . $tag . ($GLOBALS['post']->ID ?? 0));
-            $this->cache_key = Options::prefixUnderscore('cache_' . $this->args_key);
+            $this->cache_key = Options::appendPrefix('cache_' . $this->args_key);
 
             // set active
             $this->active = true;

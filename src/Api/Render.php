@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace CarmeloSantana\AlpacaBot\Api;
 
 use CarmeloSantana\AlpacaBot\Api\Ollama;
-use CarmeloSantana\AlpacaBot\Options;
+use CarmeloSantana\AlpacaBot\Utils\Options;
 use PhpScience\TextRank\TextRankFacade;
 use PhpScience\TextRank\Tool\StopWords\English;
 
@@ -25,7 +25,7 @@ class Render
 
 	public function __construct(private int $user_id, object $request = null)
 	{
-		$this->user_settings_meta_key = Options::prefixUnderscore('user_settings');
+		$this->user_settings_meta_key = Options::appendPrefix('user_settings');
 		$this->ollama = new Ollama();
 	}
 
@@ -170,7 +170,7 @@ class Render
 		$original_prompt = sanitize_text_field($_POST['prompt']);
 
 		// Filter prompt
-		$prompt = apply_filters(Options::prefixUnderscore('user_prompt'), stripslashes($original_prompt));
+		$prompt = apply_filters(Options::appendPrefix('user_prompt'), stripslashes($original_prompt));
 
 		// Choose completion type
 		switch ($endpoint) {
