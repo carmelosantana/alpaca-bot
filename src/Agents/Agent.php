@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace CarmeloSantana\AlpacaBot\Agents;
 
-use CarmeloSantana\AlpacaBot\Options;
+use CarmeloSantana\AlpacaBot\Utils\Options;
 
 abstract class Agent implements AgentInterface
 {
@@ -17,7 +17,7 @@ abstract class Agent implements AgentInterface
 
     public function init()
     {
-        add_filter(Options::prefixUnderscore('core_agents'), [$this, 'schema']);
+        add_filter(Options::appendPrefix('core_agents'), [$this, 'schema']);
     }
 
     public function job($args = [], $content = ''): string

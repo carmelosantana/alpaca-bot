@@ -4,8 +4,9 @@ declare(strict_types=1);
 
 namespace CarmeloSantana\AlpacaBot\Chat;
 
-use CarmeloSantana\AlpacaBot\Options;
+use CarmeloSantana\AlpacaBot\Define;
 use CarmeloSantana\AlpacaBot\Api\Render;
+use CarmeloSantana\AlpacaBot\Utils\Options;
 
 class Screen
 {
@@ -53,7 +54,7 @@ class Screen
                     </div>
                     <div id="ab-hello">
                         <?php echo $htmx->getAssistantAvatarImg('system'); ?>
-                        <p><?php echo Options::getPlaceholder('default_system_message'); ?></p>
+                        <p><?php echo Options::getPlaceholder('default_system_message', Define::fields()); ?></p>
                     </div>
                     <div id="ab-response">
                     </div>
@@ -63,7 +64,7 @@ class Screen
             <div class="typing-container">
                 <div class="typing-content">
                     <div class="typing-textarea">
-                        <textarea name="message" id="message" spellcheck="false" placeholder="<?php echo Options::getPlaceholder('default_message_placeholder'); ?>" required></textarea>
+                        <textarea name="message" id="message" spellcheck="false" placeholder="<?php echo Options::getPlaceholder('default_message_placeholder', Define::fields()); ?>" required></textarea>
                         <input type="hidden" name="prompt" id="prompt">
                         <input type="hidden" name="chat_id" id="chat_id" value="0">
                         <span class="material-symbols-outlined" id="submit" <?php $htmx->outputHxMultiSwapLoadChat('htmx/chat'); ?>>arrow_circle_up</span>

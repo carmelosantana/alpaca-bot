@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace CarmeloSantana\AlpacaBot\Agents;
 
-use CarmeloSantana\AlpacaBot\Options;
+use CarmeloSantana\AlpacaBot\Utils\Options;
 use CarmeloSantana\AlpacaBot\Api\Render;
 
 class Get extends Agent
@@ -50,7 +50,7 @@ class Get extends Agent
 
             default:
                 // add show/hide content
-                $content = '<div class="' . Options::prefixDash('shortcode-processed') . '" id="' . $id . '" data-url="' . $url . '" style="display: none;">' . $content . '</div>';
+                $content = '<div class="' . Options::appendPrefix('shortcode-processed', '-') . '" id="' . $id . '" data-url="' . $url . '" style="display: none;">' . $content . '</div>';
 
                 // Close and reopen zero so we can manipulate the incoming content
                 $content = '<button onclick="showHide(\'' . $id . '\')">Show Work</button>' . Render::zeroScript('', 'close') . $content . Render::zeroScript('', 'open');

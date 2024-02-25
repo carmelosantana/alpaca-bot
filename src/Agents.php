@@ -6,6 +6,7 @@ namespace CarmeloSantana\AlpacaBot;
 
 use CarmeloSantana\AlpacaBot\Api\Cache;
 use CarmeloSantana\AlpacaBot\Api\Ollama;
+use CarmeloSantana\AlpacaBot\Utils\Options;
 
 class Agents
 {
@@ -14,7 +15,7 @@ class Agents
     public function __construct()
     {
         add_action('admin_menu', [$this, 'adminPageAdd']);
-        add_filter(Options::prefixUnderscore('user_prompt'), [$this, 'hookUserPrompt']);
+        add_filter(Options::appendPrefix('user_prompt'), [$this, 'hookUserPrompt']);
         add_shortcode('agent', [$this, 'router']);
         add_shortcode('alpaca', [$this, 'router']);
 
@@ -30,7 +31,7 @@ class Agents
             'Agents',
             'Agents',
             'manage_options',
-            Options::prefixDash('agents'),
+            Options::appendPrefix('agents', '-'),
             [$this, 'adminPageRender'],
             1
         );
@@ -44,7 +45,7 @@ class Agents
         wp_enqueue_style('prism', AB_DIR_URL . 'assets/css/prism.css', [], '1.29.0');
 
         // HTML
-        echo '<div class="wrap ' . AB_SLUG  . ' ' . Options::prefixDash('options') . '">';
+        echo '<div class="wrap ' . AB_SLUG  . ' ' . Options::appendPrefix('options', '-') . '">';
         echo '<h1>Agents</h1>';
         echo '<p>Agents are shortcodes that help Alpaca Bot perform tasks.</p>';
         echo '<div class="ab-accordion">';
@@ -102,12 +103,12 @@ class Agents
 
     public function getCoreAgents()
     {
-        return apply_filters(Options::prefixUnderscore('core_agents'), []);
+        return apply_filters(Options::appendPrefix('core_agents'), []);
     }
 
     public function getCustomAgents()
     {
-        return apply_filters(Options::prefixUnderscore('custom_agents'), []);
+        return apply_filters(Options::appendPrefix('custom_agents'), []);
     }
 
     public function hookUserPrompt($prompt)

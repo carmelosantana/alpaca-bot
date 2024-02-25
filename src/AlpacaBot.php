@@ -18,8 +18,10 @@ class AlpacaBot
         add_action('admin_menu', [$this, 'addAdminMenu']);
         add_action('admin_notices', [$this, 'adminNotices']);
 
+        // Setup options
+        $this->options();
+
         // Load with plugin
-        (new Options())->addActions();
         new Agents();
         new Api\Htmx();
         new Chat\Post();
