@@ -71,7 +71,6 @@ abstract class Base
 
         $data = (array) $response->get_data();
 
-        // TODO: Good place to hook _links.
         return $data;
     }
 }
