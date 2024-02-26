@@ -75,8 +75,13 @@ class Define
                 'section' => 'api',
                 'description_callback' => [__CLASS__, 'fieldApiUrlValidate'],
             ],
-            'api_token' => [
-                'label' => __('API Token', AB_SLUG),
+            'api_username' => [
+                'label' => __('API Username', AB_SLUG),
+                'description' => __('This is optional.', AB_SLUG),
+                'section' => 'api',
+            ],            
+            'api_password' => [
+                'label' => __('API Application Password', AB_SLUG),
                 'description' => __('This is optional.', AB_SLUG),
                 'section' => 'api',
             ],
