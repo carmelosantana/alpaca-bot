@@ -3,7 +3,7 @@
 Plugin Name: Alpaca Bot
 Plugin URI: https://github.com/carmelosantana/alpaca-bot
 Description: 🚀 Boost your website with AI automated work flows, coding assistance and content creation! 💥
-Version: 0.4.2
+Version: 0.4.3
 Author: Carmelo Santana
 Author URI: https://carmelosantana.com/
 License: GNU General Public License v2 or later

@@ -51,7 +51,7 @@ class Render
 	public function addChatLog($body, $json, int $post_id)
 	{
 		// check if saving is enabled
-		if (!Options::getDefault('save_chat_history')) {
+		if (!Options::get('save_chat_history')) {
 			return $post_id;
 		}
 
@@ -107,8 +107,7 @@ class Render
 	public function checkUserInputs(array $inputs = ['model', 'prompt'])
 	{
 		// Model should not be set if user cannot change model
-		// TODO: Improve how we check for inputs.
-		if (Options::getDefault('user_can_change_model') == false) {
+		if (Options::get('user_can_change_model') == false) {
 			unset($_POST['model']);
 		}
 
@@ -117,7 +116,7 @@ class Render
 			$this->outputAssistantErrorDialog('Please select a model and enter a prompt.');
 			return false;
 		} elseif (!isset($_POST['model'])) {
-			if (Options::getDefault('user_can_change_model') and Options::get('default_model')) {
+			if (Options::get('user_can_change_model') and Options::get('default_model')) {
 				$_POST['model'] = Options::get('default_model');
 			} else {
 				$this->outputAssistantErrorDialog('Ask your system administrator to select a default model.');
