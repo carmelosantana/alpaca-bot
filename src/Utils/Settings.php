@@ -22,7 +22,7 @@ class Settings
 
     private string $page_title;
 
-    private string $prefix = 'custom';
+    private string $prefix = '_';
 
     private string $menu_slug;
 
@@ -52,7 +52,7 @@ class Settings
     {
         // Add classes
         if (!empty($this->page_wrap_class)) {
-            $this->page_wrap_class[] = $this->prefix . '-options-page';
+            $this->page_wrap_class[] = ($this->prefix != '_' ? $this->prefix : 'custom') . 'options-page';
             $this->page_wrap_class = array_unique($this->page_wrap_class);
         }
 
