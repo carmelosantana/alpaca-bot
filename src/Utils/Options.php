@@ -25,14 +25,6 @@ class Options extends Settings
         return $value ? $value : $default;
     }
 
-
-    public static function getDefault(string $key)
-    {
-        $value = self::get($key);
-
-        return $value ? $value : Define::fields()[$key]['default'] ?? $value;
-    }
-
     public static function getPlaceholder(string $key)
     {
         $value = self::get($key);
