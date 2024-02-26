@@ -52,47 +52,56 @@ class Htmx extends Base
 	public function registerRoutes(\WP_REST_Server $server)
 	{
 		// foreach loop for endpoints
-		$endpoints = [
+		$routes = [
 			'/htmx/chat' => [
-				'methods' => 'POST',
+				'callback' => [$this, 'renderOutput'],
+				'methods' => $server::CREATABLE,
 				'permission_callback' => [$this, 'update_item_permissions_check'],
 			],
 			'/htmx/generate' => [
-				'methods' => 'POST',
+				'callback' => [$this, 'renderOutput'],
+				'methods' => $server::CREATABLE,
 				'permission_callback' => [$this, 'update_item_permissions_check'],
 			],
 			'/htmx/regenerate' => [
-				'methods' => 'POST',
+				'callback' => [$this, 'renderOutput'],
+				'methods' => $server::CREATABLE,
 				'permission_callback' => [$this, 'update_item_permissions_check'],
 			],
-			'/htmx/tags' => [],
+			'/htmx/tags' => [
+				'callback' => [$this, 'renderOutput'],
+				'methods' => $server::READABLE,
+				'permission_callback' => [$this, 'update_item_permissions_check'],
+			],
 			'/wp/chat' => [
-				'methods' => 'POST',
+				'callback' => [$this, 'renderOutput'],
+				'methods' => $server::CREATABLE,
 				'permission_callback' => [$this, 'update_item_permissions_check'],
 			],
-			'/wp/history' => [],
+			'/wp/history' => [
+				'callback' => [$this, 'renderOutput'],
+				'methods' => $server::READABLE,
+				'permission_callback' => [$this, 'update_item_permissions_check'],
+			],
 			'/wp/user/update' => [
-				'methods' => 'POST',
+				'callback' => [$this, 'renderOutput'],
+				'methods' => $server::CREATABLE,
 				'permission_callback' => [$this, 'update_item_permissions_check'],
 			],
 			'/wp/page/insert' => [
-				'methods' => 'POST',
+				'callback' => [$this, 'renderOutput'],
+				'methods' => $server::CREATABLE,
 				'permission_callback' => [$this, 'update_item_permissions_check'],
 			],
 			'/wp/post/insert' => [
-				'methods' => 'POST',
+				'callback' => [$this, 'renderOutput'],
+				'methods' => $server::CREATABLE,
 				'permission_callback' => [$this, 'update_item_permissions_check'],
 			],
 		];
 
-		$default = [
-			'callback' => [$this, 'renderOutput'],
-			'permission_callback' => [$this, 'update_item_permissions_check'],
-		];
-
-		foreach ($endpoints as $endpoint => $options) {
-			$options = array_merge($default, $options);
-			register_rest_route(self::NAMESPACE, $endpoint, $options);
+		foreach ($routes as $route => $options) {
+			register_rest_route(self::NAMESPACE, $route, $options);
 		}
 	}
 
@@ -106,7 +115,10 @@ class Htmx extends Base
 		// setup render object
 		$this->render = new Render($this->user_id);
 
-		switch ($request->get_route()) {
+		// normalize URLs, removing trailing and forward slashes from $request->get_route()
+		$request_url = ltrim(rtrim($request->get_route(), '/'), '/');
+
+		switch ($request_url) {
 			case self::NAMESPACE . '/htmx/chat':
 				$this->render->outputGenerate('chat');
 				break;
