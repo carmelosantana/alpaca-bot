@@ -119,6 +119,7 @@ class AlpacaBot
         $options->setMenuTitle('Settings');
         $options->setPageTitle('Settings');
         $options->setParentSlug(AB_SLUG);
+        $options->setPrefix(AB_SLUG);
         $options->addPageWrapClass(AB_SLUG);
         $options->addPageWrapClass(Options::appendPrefix('options', '-'));
 
