@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace CarmeloSantana\AlpacaBot\Api;
 
+use CarmeloSantana\AlpacaBot\Api\Tools;
 use CarmeloSantana\AlpacaBot\Utils\Options;
 
 class Ollama
@@ -11,7 +12,7 @@ class Ollama
     private function getApiUrl()
     {
         $url = Options::get('api_url');
-        
+
         // check for trailing slash, add if missing
         if (substr($url, -1) !== '/') {
             $url .= '/';
@@ -58,11 +59,15 @@ class Ollama
             return $value !== '';
         });
 
+        $headers = [
+            'Content-Type' => 'application/json',
+        ];
+
+        $headers = Tools::addAuth($headers);
+
         $response = wp_remote_post($url, [
             'body' => json_encode($args),
-            'headers' => [
-                'Content-Type' => 'application/json',
-            ],
+            'headers' => $headers,
         ]);
 
         if (is_wp_error($response)) {
@@ -84,8 +89,14 @@ class Ollama
         ]);
 
         $url = $this->getEndpoint($options['endpoint']);
+
+        // add auth to headers
+        $options['headers'] = Tools::addAuth($options['headers']);
+
+        // make request
         $response = wp_remote_request($url, $options);
 
+        // check for errors
         if (is_wp_error($response)) {
             return false;
         }
