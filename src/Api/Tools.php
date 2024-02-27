@@ -14,9 +14,12 @@ class Tools
         $password = Options::get('api_password');
 
         if ($username and $password) {
+            if (!isset($args['headers'])) {
+                $args['headers'] = [];
+            }
             $args['headers']['Authorization'] = 'Basic ' . base64_encode($username . ':' . $password);
         }
-
+        
         return $args;
     }
 }
