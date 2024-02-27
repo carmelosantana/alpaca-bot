@@ -59,15 +59,16 @@ class Ollama
             return $value !== '';
         });
 
-        $headers = [
-            'Content-Type' => 'application/json',
+        $options = [
+            'headers' => [
+                'Content-Type' => 'application/json',
+            ],
         ];
-
-        $headers = Tools::addAuth($headers);
+        $options = Tools::addAuth($options);
 
         $response = wp_remote_post($url, [
             'body' => json_encode($args),
-            'headers' => $headers,
+            $options,
         ]);
 
         if (is_wp_error($response)) {
@@ -91,7 +92,7 @@ class Ollama
         $url = $this->getEndpoint($options['endpoint']);
 
         // add auth to headers
-        $options['headers'] = Tools::addAuth($options['headers']);
+        $options = Tools::addAuth($options);
 
         // make request
         $response = wp_remote_request($url, $options);
