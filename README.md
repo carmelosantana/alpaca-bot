@@ -6,7 +6,7 @@
   
   <img src="https://alpaca.bot/wp-content/uploads/2024/02/alpaca-bot-icon-1006.png" alt="Alpaca Bot" width="256px">
 
-  [![Discord](https://img.shields.io/discord/1198290062316683275?logo=discord&label=Discord)](https://discord.gg/DqAUPAVhnR)
+  [![Discord](https://img.shields.io/discord/1198290062316683275?logo=discord&label=Discord)](https://discord.gg/vWQTHphkVt)
   ![GitHub release (latest by date)](https://img.shields.io/github/v/release/carmelosantana/alpaca-bot?label=Latest%20Release)
   <a href="https://demo.alpaca.bot/">
     <img src="https://img.shields.io/badge/Live-Demo-red" alt="Alpaca Demo">
