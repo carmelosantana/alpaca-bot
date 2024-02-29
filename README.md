@@ -8,22 +8,30 @@
 
   [![Discord](https://img.shields.io/discord/485971823821979648?logo=discord&label=Discord&color=72edad)](https://discord.gg/vWQTHphkVt)
   ![GitHub release (latest by date)](https://img.shields.io/github/v/release/carmelosantana/alpaca-bot?label=Latest%20Release&color=668bf2)
-  <a href="https://demo.alpaca.bot/">
-    <img src="https://img.shields.io/badge/Live-Demo-ed72b1" alt="Alpaca Demo">
+  <a href="https://demo.alpaca.bot/"><img src="https://img.shields.io/badge/Live-Demo-ed72b1" alt="Alpaca Demo">
   </a>
-  <a href="https://www.patreon.com/carmelosantana">
-    <img src="https://img.shields.io/badge/Subscribe-Become%20a%20Patreon-826EB4?logo=patreon" alt="Patreon">
+
+  <a href="https://www.patreon.com/carmelosantana"><img src="https://img.shields.io/badge/Subscribe-Become%20a%20Patreon-826EB4?logo=patreon" alt="Patreon">
   </a>
+
+  **WordPress plugin for quick content creation and workflow automation!**
 </div>
 
-WordPress plugin for quick content creation and code completion! Use `[agent]` to retrieve remote content, summarize webpages and more!
+---
+
+### Features
+
+- Chose to store conversation history **privately** in your `wp_` database or not at all.
+- Use `[agent]` to execute tasks on your behalf, generate dynamic content and more.
+- Chat with dozens of pre-trained LLMs or [train your own](https://github.com/ollama/ollama/blob/main/docs/api.md#generate-embeddings).
+- Switch conversational model on the fly.
+- Create your own custom [system messages](https://github.com/ollama/ollama/blob/main/docs/modelfile.md#system) for highly predictable or formatted responses.
 
 ---
 
 - [Requirements](#requirements)
 - [Installation](#installation)
 - [Setup](#setup)
-- [Features](#features)
 - [Usage](#usage)
   - [Text Completion](#text-completion)
   - [Agents](#agents)
@@ -74,13 +82,6 @@ WordPress plugin for quick content creation and code completion! Use `[agent]` t
 4. Click `Save Changes`.
 
 > [Patreon subscriptions](#support) include support via Discord as well! 🎉
-
-## Features
-
-- Store conversation history **privately** in your `wp_` database.
-- Use `[agent]` to execute tasks on your behalf.
-- Chat with dozens of pre-trained LLMs or train your own.
-- Switch conversational model on the fly.
 
 ## Usage
 
