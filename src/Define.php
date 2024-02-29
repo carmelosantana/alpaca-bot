@@ -9,6 +9,10 @@ use CarmeloSantana\AlpacaBot\Utils\Options;
 
 class Define
 {
+    private string $support_discord = 'https://discord.gg/vWQTHphkVt';
+
+    private string $support_patreon = 'https://www.patreon.com/carmelosantana';
+
     public static function getModels()
     {
         if (Options::get('api_url')) {
@@ -50,7 +54,7 @@ class Define
             $header_x_ollama = wp_remote_retrieve_header($response, 'x-ollama-proxy');
 
             if (is_wp_error($response)) {
-                echo '<p class="description">' . __('Invalid URL', AB_SLUG) . '</p>';
+                echo '<p class="description"><span class="material-symbols-outlined">edit</span><span>' . __('Please enter a valid URL.', AB_SLUG) . '</span></p>';
             } elseif (preg_match('/^"?(Ollama is running)"?$/', $body)) {
                 if ($header_x_ollama) {
                     echo '<p class="description"><span class="material-symbols-outlined label-success">verified</span><span>' . __('Alpaca Bot Proxy connection established.', AB_SLUG) . '</span></p>';
@@ -61,7 +65,7 @@ class Define
                 echo '<p class="description"><span class="material-symbols-outlined label-error">error</span><span>' . __('Invalid response.', AB_SLUG) . '</span></p>';
             }
         } elseif (empty($api_url)) {
-            echo '<p class="description"><span class="material-symbols-outlined">edit</span><span>' . __('Please enter a URL.', AB_SLUG) . '</span></p>';
+            echo '<p class="description"><span>No server? We got you covered! ' . self::supportPatreon() . ' and share our community hosted instances.<span></p>';
         }
     }
 
@@ -79,7 +83,7 @@ class Define
                 'label' => __('API Username', AB_SLUG),
                 'description' => __('This is optional.', AB_SLUG),
                 'section' => 'api',
-            ],            
+            ],
             'api_password' => [
                 'label' => __('API Application Password', AB_SLUG),
                 'description' => __('This is optional.', AB_SLUG),
@@ -140,12 +144,30 @@ class Define
         return [
             'api' => [
                 'title' => __('API', AB_SLUG),
-                'description' => __('Configure your <a href="https://github.com/ollama/ollama">Ollama</a> settings.', AB_SLUG),
+                'description' => __('Configure your <a href="https://github.com/ollama/ollama">Ollama</a> settings. ', AB_SLUG),
             ],
             'chat' => [
                 'title' => __('Chat', AB_SLUG),
                 'description' => __('Customize the user experience.', AB_SLUG),
             ],
         ];
+    }
+
+    public static function support()
+    {
+        $support = [
+            'discord' => [
+                'description' => __('Join our <a href="https://discord.gg/vWQTHphkVt">Discord</a> community.', AB_SLUG),
+                'title' => __('Join our Discord', AB_SLUG),
+                'url' => 'https://discord.gg/vWQTHphkVt',
+            ],
+            'patreon' => [
+                'description' => __('Support the development of this plugin by becoming a <a href="https://www.patreon.com/carmelosantana">Patreon</a>.', AB_SLUG),
+                'title' => __('Become a Patreon', AB_SLUG),
+                'url' => 'https://www.patreon.com/carmelosantana',
+            ]
+        ];
+
+        return $support;
     }
 }
