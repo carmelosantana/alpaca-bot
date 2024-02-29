@@ -111,6 +111,17 @@ class Define
                 'section' => 'chat',
                 'default' => true,
             ],
+            'log_chat_response' => [
+                'label' => __('Log chat response?', AB_SLUG),
+                'description' => __('Log additional information provided by the completion. This does not include conversation history.', AB_SLUG),
+                'type' => 'radio',
+                'options' => [
+                    'true' => __('Yes', AB_SLUG),
+                    'false' => __('No', AB_SLUG),
+                ],
+                'section' => 'chat',
+                'default' => true,
+            ],
             'default_system_message' => [
                 'label' => __('Default system message', AB_SLUG),
                 'placeholder' => __('How can I help you today?', AB_SLUG),
