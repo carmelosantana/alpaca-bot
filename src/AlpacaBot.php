@@ -21,6 +21,11 @@ class AlpacaBot
         // Setup options
         $this->options();
 
+        // Log
+        if (Options::get('log_chat_response')) {
+            new Log\Post();
+        }
+
         // Load with plugin
         new Agents();
         new Api\Htmx();
