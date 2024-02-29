@@ -51,7 +51,7 @@ class Post
     {
         unset($columns['title']);
         unset($columns['date']);
-        
+
         $columns['time'] = __('Time Ago', 'textdomain');
         $columns['model'] = __('Model', 'textdomain');
         $columns['total_duration'] = __('Total Duration', 'textdomain');
@@ -69,8 +69,17 @@ class Post
     public function customColumns($column, $post_id)
     {
         switch ($column) {
+            case 'model':
+                $out = get_post_meta($post_id, 'model', true);
+
+                $out = sprintf(
+                    '<a href="https://ollama.com/library/%s" target="_blank">%s</a>',
+                    $out,
+                    $out
+                );
+                break;
+
             case 'time':
-                // timeago from published date
                 $out = sprintf(
                     '<time class="timeago" datetime="%s">%s</time>',
                     get_the_date('c', $post_id),
@@ -78,16 +87,12 @@ class Post
                 );
                 break;
 
-            case 'model':
-                $out = get_post_meta($post_id, 'model', true);
-                break;
-
-                // durations are in nanoseconds, convert to seconds
             case 'tokens_per_second':
                 $eval_count = (int) get_post_meta($post_id, 'eval_count', true);
                 $eval_duration = (int) get_post_meta($post_id, 'eval_duration', true);
                 $out = $eval_count / ($eval_duration / 1000000000);
-                $out = number_format($out, 2);
+                // https://stackoverflow.com/a/14531760/1007492
+                $out = number_format($out, 1) + 0;
                 break;
 
             default:
