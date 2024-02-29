@@ -9,6 +9,54 @@ use CarmeloSantana\AlpacaBot\Utils\Options;
 
 class Ollama
 {
+    // Add to log post type. save all values as post meta
+    private function addToLog(array $message): int|false
+    {
+        // check if logging is enabled
+        if (!Options::get('log_chat_response')) {
+            return false;
+        }
+
+        // if model is not set, we have an error
+        if (!isset($message['model'])) {
+            return false;
+        }
+
+        $post_id = wp_insert_post([
+            'post_type' => 'log',
+            'post_status' => 'publish',
+        ]);
+
+        $keys = [
+            'model',
+            'total_duration',
+            'load_duration',
+            'prompt_eval_count',
+            'prompt_eval_duration',
+            'eval_count',
+            'eval_duration',
+        ];
+
+        // if no post id, we have an error
+        if (!$post_id) {
+            return false;
+        }
+
+        foreach ($keys as $key) {
+            switch ($key) {
+                case 'model':
+                    $value = $message[$key];
+                    break;
+                default:
+                    $value = (int) $message[$key];
+                    break;
+            }
+            update_post_meta($post_id, $key, $value);
+        }
+
+        return $post_id;
+    }
+
     private function getApiUrl()
     {
         $url = Options::get('api_url');
@@ -76,6 +124,7 @@ class Ollama
         }
 
         $response = json_decode(wp_remote_retrieve_body($response), true);
+        $this->addToLog($response);
 
         return $response['response'];
     }
@@ -102,13 +151,14 @@ class Ollama
             return false;
         }
 
-        $body = wp_remote_retrieve_body($response);
+        $response = wp_remote_retrieve_body($response);
 
         if ($options['json_decode']) {
-            return json_decode($body, true);
-        } else {
-            return $body;
+            $response = json_decode($response, true);
+            $this->addToLog($response);
         }
+
+        return $response;
     }
 
     public function getEndpoint($endpoint)

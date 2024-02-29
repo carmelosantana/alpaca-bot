@@ -7,7 +7,7 @@ namespace CarmeloSantana\AlpacaBot;
 use CarmeloSantana\AlpacaBot\Define;
 use CarmeloSantana\AlpacaBot\Utils\Options;
 
-const VERSION = '0.4.5';
+const VERSION = '0.4.6';
 
 class AlpacaBot
 {
@@ -20,6 +20,11 @@ class AlpacaBot
 
         // Setup options
         $this->options();
+
+        // Log
+        if (Options::get('log_chat_response')) {
+            new Log\Post();
+        }
 
         // Load with plugin
         new Agents();
