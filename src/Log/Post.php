@@ -19,11 +19,11 @@ class Post
     public function register(): void
     {
         $labels = array(
-            'name' => _x('Logs', 'Post type general name', 'textdomain'),
-            'singular_name' => _x('Log', 'Post type singular name', 'textdomain'),
-            'menu_name' => _x('Logs', 'Admin Menu text', 'textdomain'),
-            'name_admin_bar' => _x('Log', 'Add New on Toolbar', 'textdomain'),
-            'all_items' => __('Logs', 'textdomain'),
+            'name' => _x('Logs', 'Post type general name', AB_SLUG),
+            'singular_name' => _x('Log', 'Post type singular name', AB_SLUG),
+            'menu_name' => _x('Logs', 'Admin Menu text', AB_SLUG),
+            'name_admin_bar' => _x('Log', 'Add New on Toolbar', AB_SLUG),
+            'all_items' => __('Logs', AB_SLUG),
         );
 
         $args = array(
@@ -52,15 +52,15 @@ class Post
         unset($columns['title']);
         unset($columns['date']);
 
-        $columns['time'] = __('Time Ago', 'textdomain');
-        $columns['model'] = __('Model', 'textdomain');
-        $columns['total_duration'] = __('Total Duration', 'textdomain');
-        $columns['load_duration'] = __('Load Duration', 'textdomain');
-        $columns['prompt_eval_count'] = __('Prompt Eval Count', 'textdomain');
-        $columns['prompt_eval_duration'] = __('Prompt Eval Duration', 'textdomain');
-        $columns['eval_count'] = __('Eval Count', 'textdomain');
-        $columns['eval_duration'] = __('Eval Duration', 'textdomain');
-        $columns['tokens_per_second'] = __('Tokens Per Second', 'textdomain');
+        $columns['time'] = __('Time Ago', AB_SLUG);
+        $columns['model'] = __('Model', AB_SLUG);
+        $columns['total_duration'] = __('Total Duration', AB_SLUG);
+        $columns['load_duration'] = __('Load Duration', AB_SLUG);
+        $columns['prompt_eval_count'] = __('Prompt Eval Count', AB_SLUG);
+        $columns['prompt_eval_duration'] = __('Prompt Eval Duration', AB_SLUG);
+        $columns['eval_count'] = __('Eval Count', AB_SLUG);
+        $columns['eval_duration'] = __('Eval Duration', AB_SLUG);
+        $columns['tokens_per_second'] = __('Tokens Per Second', AB_SLUG);
 
         return $columns;
     }
