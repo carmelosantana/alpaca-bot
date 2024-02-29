@@ -28,6 +28,7 @@ class AlpacaBot
 
         // Load with plugin
         new Agents();
+        new Help();
         new Api\Htmx();
         new Chat\Post();
     }
@@ -92,7 +93,7 @@ class AlpacaBot
                 'condition' => get_option('permalink_structure') === false or get_option('permalink_structure') === ''
             ],
             [
-                'message' => 'Alpaca Bot requires an Ollama API URL to be set. Please set it in <a href="' . admin_url('admin.php?page=' . Options::appendPrefix('options', '-')) . '">Settings > Alpaca Bot</a>.',
+                'message' => 'Alpaca Bot requires an Ollama API URL to be set. Please set it in <a href="' . admin_url('admin.php?page=' . Options::appendPrefix('settings', '-')) . '">Settings > Alpaca Bot</a>.',
                 'condition' => Options::get('api_url') === false
             ]
         ];
