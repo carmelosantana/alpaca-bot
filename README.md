@@ -6,12 +6,14 @@
   
   <img src="https://alpaca.bot/wp-content/uploads/2024/02/alpaca-bot-icon-1006.png" alt="Alpaca Bot" width="256px">
 
-  [![Discord](https://img.shields.io/discord/1198290062316683275?logo=discord&label=Discord)](https://discord.gg/vWQTHphkVt)
-  ![GitHub release (latest by date)](https://img.shields.io/github/v/release/carmelosantana/alpaca-bot?label=Latest%20Release)
+  [![Discord](https://img.shields.io/discord/485971823821979648?logo=discord&label=Discord&color=72edad)](https://discord.gg/vWQTHphkVt)
+  ![GitHub release (latest by date)](https://img.shields.io/github/v/release/carmelosantana/alpaca-bot?label=Latest%20Release&color=668bf2)
   <a href="https://demo.alpaca.bot/">
-    <img src="https://img.shields.io/badge/Live-Demo-red" alt="Alpaca Demo">
+    <img src="https://img.shields.io/badge/Live-Demo-ed72b1" alt="Alpaca Demo">
   </a>
-  
+  <a href="https://www.patreon.com/carmelosantana">
+    <img src="https://img.shields.io/badge/Subscribe-Become%20a%20Patreon-826EB4?logo=patreon" alt="Patreon">
+  </a>
 </div>
 
 WordPress plugin for quick content creation and code completion! Use `[agent]` to retrieve remote content, summarize webpages and more!
@@ -41,6 +43,7 @@ WordPress plugin for quick content creation and code completion! Use `[agent]` t
     - [Attributes](#attributes-2)
   - [`summarize`](#summarize)
     - [Attributes](#attributes-3)
+- [Support](#support)
 - [Funding](#funding)
 - [Made Possible By](#made-possible-by)
 - [License](#license)
@@ -64,11 +67,13 @@ WordPress plugin for quick content creation and code completion! Use `[agent]` t
 
 1. Setup your [Ollama](https://github.com/ollama/ollama) instance in one of the following ways:
    - Install [Ollama](https://github.com/ollama/ollama) on your localhost or server.
-   - ⭐️ **Subscribe** to [Alpaca Bot](https://alpaca.bot/) for premium API features and accelerated GPU processing. 🚀
-2. Add your Ollama API URL to the settings page by navigating to `Alpaca Bot > Settings` in your WordPress admin dashboard.
-3. Enter your Ollama API URL.
-   - Add your [Alpaca Bot](https://alpaca.bot/) API Token if you are using our hosted service.
+   - ⭐️ **[Become a Patreon](https://www.patreon.com/carmelosantana)** and subscribe to [Alpaca Bot](https://alpaca.bot/) for premium API features and share our community hosted Ollama instances.
+2. Add your [Ollama](https://github.com/ollama/ollama) API URL to the settings page by navigating to `Alpaca Bot > Settings` in your WordPress admin dashboard.
+3. Enter your [Ollama](https://github.com/ollama/ollama) API URL.
+   - Add your [Alpaca Bot](https://app.alpaca.bot/) Username and API Application Password if you are using our hosted service.
 4. Click `Save Changes`.
+
+> [Patreon subscriptions](#support) include support via Discord as well! 🎉
 
 ## Features
 
@@ -83,14 +88,14 @@ WordPress plugin for quick content creation and code completion! Use `[agent]` t
 
 You have two options to communicate with your AI models;
 
-1. **Chat with Abie** by clicking <img src="assets/img/icon-80.png" width="20"> **Alpaca Bot** found in the admin menu, below Dashboard and above Posts.
+1. Click **Alpaca Bot** found in the admin menu, below Dashboard and above Posts.
 2. **Use the shortcode** `[alpaca]` to generate a response within any post or page.
 
 ### Agents
 
 Use the `[agent]` shortcode to execute tasks on your behalf. Agents are a powerful way to empower your AI models to perform tasks on your behalf.
 
-For example, you can use the `[agent]` shortcode to summarize a webpage or retrieve content from a remote source.
+For example, you can use the `[agent]` shortcode to retrieve content from a remote source. `[agent]`s can interact directly with your models and help summarize a webpage or rewrite content.
 
 #### Example
 
@@ -180,12 +185,27 @@ Summarize remote content.
 - `length` - Describe the length of the summary.
 - `content` - The type of content we want to summarize.
 
+## Support
+
+If you need help or have questions, please join our [Discord](https://discord.gg/vWQTHphkVt) community.
+
+Premium support and video calls are available to our [Patreon](https://www.patreon.com/carmelosantana) subscribers. We can help  setup your [Ollama](https://github.com/ollama/ollama) instance, troubleshoot issues, demonstrate shortcode functionality and more.
+
+Patreon's also receive;
+
+- Access to our hosted [Ollama](https:/github.com/ollama/ollama) instances.
+- Priority feature requests.
+- Early access to new features and releases.
+
+Please consider [becoming a Patreon](https://www.patreon.com/carmelosantana) today!
+
 ## Funding
 
 If you find this project useful or use it in a commercial environment please consider donating today with one of the following options.
 
 - Bitcoin `bc1qhxu9yf9g5jkazy6h4ux6c2apakfr90g2rkwu45`
 - Ethereum `0x9f5D6dd018758891668BF2AC547D38515140460f`
+- Patreon [`patreon.com/carmelosantana`](https://www.patreon.com/carmelosantana)
 
 ## Made Possible By
 
