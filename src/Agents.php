@@ -56,7 +56,7 @@ class Agents
             $icon = $agent['icon'] ?? 'person_apron';
             $icon = '<span class="material-symbols-outlined">' . $icon . '</span>';
 
-            echo '<button class="accordion-btn">' . $icon . ' <code>[' . $slug . ']</code> ' . $agent['description'] . '</button>';
+            echo '<button class="accordion-btn">' . $icon . ' <code>' . $slug . '</code> ' . $agent['description'] . '</button>';
             echo '<div class="panel">';
 
             if (isset($agent['arguments'])) {
