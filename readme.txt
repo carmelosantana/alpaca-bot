@@ -13,7 +13,7 @@ A privately hosted WordPress AI chatbot. Chat with your own hosted LLMs and auto
   
 == Description ==
 
-Easily draft a post or page from any conversation. Dynamically create new content on the fly with agents. The plugin offers a familiar chat interface on both desktop and mobile. Seamless chat experience on any device.
+Easily draft a post or page from any conversation. Dynamically create new content on the fly or with remote resources collected via `agents`. **Alpaca Bot** offers a familiar chat interface on both desktop and mobile. You can expect a seamless chat experience on any device!
 
 An [Ollama](https://github.com/ollama/ollama) instance is required. [Ollama](https://github.com/ollama/ollama) makes it incredibly easy to self-host large language models locally or in the cloud.
 
