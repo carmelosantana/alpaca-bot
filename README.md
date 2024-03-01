@@ -2,7 +2,7 @@
 
 <div align="center">
   
-### 🌟 A privately hosted WordPress AI agent.💡
+### A privately hosted WordPress AI Chatbot
   
   <img src="https://alpaca.bot/wp-content/uploads/2024/02/alpaca-bot-icon-1006.png" alt="Alpaca Bot" width="256px">
 
@@ -18,6 +18,12 @@
 </div>
 
 ---
+
+Easily draft a post or page from any conversation. Dynamically create new content on the fly with agents. The plugin offers a familiar chat interface on both desktop and mobile. Seamless chat experience on any device.
+
+An [Ollama](https://github.com/ollama/ollama) instance is required. [Ollama](https://github.com/ollama/ollama) makes it incredibly easy to self-host large language models locally or in the cloud.
+
+If self-hosting isn't for you, please consider [becoming a Patreon](https://www.patreon.com/carmelosantana) for access to our [hosted](https://status.alpaca.bot/) [Ollama](https://github.com/ollama/ollama) instances and premium [Discord](https://discord.gg/vWQTHphkVt) support.
 
 ### Features
 
