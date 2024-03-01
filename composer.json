@@ -1,6 +1,6 @@
 {
     "name": "carmelosantana/alpaca-bot",
-    "description": "🚀 Boost your WordPress website with instant AI-powered content creation and coding assistance! 💥",
+    "description": "A privately hosted WordPress AI chatbot.",
     "type": "wordpress-plugin",
     "license": "GNU General Public License v2",
     "authors": [
