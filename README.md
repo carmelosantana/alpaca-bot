@@ -216,5 +216,4 @@ If you find this project useful or use it in a commercial environment please con
 
 ## License
 
-- The code is licensed [GNU General Public License version 2](http://www.gnu.org/licenses/gpl-2.0.html) or later.
-- The documentation is licensed [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/).
+- [GNU General Public License version 2](http://www.gnu.org/licenses/gpl-2.0.html) or later
