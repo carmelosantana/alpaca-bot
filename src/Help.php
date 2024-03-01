@@ -16,7 +16,6 @@ class Help
         add_filter('plugin_row_meta', [$this, 'addPluginRowMeta'], 10, 2);
     }
 
-
     public function addHelpTabs()
     {
         $screen = get_current_screen();
