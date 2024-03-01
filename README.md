@@ -163,12 +163,11 @@ This can be useful for sharing responses across multiple pages.
 
 #### Disable
 
-The following values can all disable caching. Pick one or use them interchangeably. 🙂
+The following values can disable caching.
 
 - `cache=0` - Disable caching.
+- `cache=disable` - Disable caching.
 - `cache=false` - Disable caching.
-- `cache=none` - Disable caching.
-- `cache=off` - Disable caching.
 
 ## Core Agents
 
