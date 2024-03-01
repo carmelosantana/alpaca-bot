@@ -77,13 +77,6 @@ class Ollama
             return false;
         }
 
-        // user args
-        $def = [
-            'model' => Options::get('default_model'),
-            'prompt' => '',
-        ];
-        $args = wp_parse_args($args, $def);
-
         // convert booleans
         $args = array_map(function ($value) {
             if ($value === 'true') {
