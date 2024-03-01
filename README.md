@@ -87,8 +87,6 @@ If self-hosting isn't for you, please consider [becoming a Patreon](https://www.
    - Add your [Alpaca Bot](https://app.alpaca.bot/) Username and API Application Password if you are using our hosted service.
 4. Click `Save Changes`.
 
-> [Patreon subscriptions](#support) include support via Discord as well! 🎉
-
 ## Usage
 
 ### Text Completion
@@ -114,7 +112,7 @@ Basic webpage summarization:
 
 ## Shortcodes
 
-### 💬 `[alpaca]` - Chat with Alpaca Bot
+### `[alpaca]` - Chat with Alpaca Bot
 
 *Chat with Alpaca Bot from any post or page.*
 
@@ -123,16 +121,17 @@ Basic webpage summarization:
 - `model` - The model to use for the text generation. *(optional)*
 - `system` - Specifies the [system message](https://github.com/ollama/ollama/blob/main/docs/modelfile.md#system) that will be set in the template. *(optional)*
 
-### 👥 `[agent]` - Execute tasks on your behalf
+### `[agent]` - Execute tasks on your behalf
 
 *Execute tasks via Agents.*
 
 #### Attributes
 
-Agents can support a wide rang of attributes. The following are core attributes that are supported by all agents.
+The following are core attributes that are supported by all agents.
 
 - `name` - The agent to execute.
-- `model` - The model to use for the text generation. *(optional)*
+
+Agent's communicating with [Ollama](https:/github.com/ollama/ollama) support `[alpaca]` attributes.
 
 ### Caching
 
