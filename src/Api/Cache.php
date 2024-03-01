@@ -8,7 +8,7 @@ use CarmeloSantana\AlpacaBot\Utils\Options;
 
 class Cache
 {
-    private array $disable = ['none', 'false', '0', 'off'];
+    private array $disable = ['0', 'disable',  'false'];
 
     private bool $active = false;
 
@@ -44,7 +44,7 @@ class Cache
             $this->timeout = (int) $this->cache;
             $this->store = 'transient';
         } elseif (in_array(strtolower($this->cache), $this->disable)) {
-            $this->store = false;
+            $this->store = '';
         } else {
             $this->store = 'option';
         }

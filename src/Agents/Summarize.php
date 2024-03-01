@@ -6,6 +6,7 @@ namespace CarmeloSantana\AlpacaBot\Agents;
 
 use CarmeloSantana\AlpacaBot\Agents\Get;
 use CarmeloSantana\AlpacaBot\Api\Ollama;
+use CarmeloSantana\AlpacaBot\Utils\Options;
 
 class Summarize extends Agent
 {
@@ -33,13 +34,9 @@ class Summarize extends Agent
         // Build args for Ollama
         $args = [
             'prompt' => $prompt,
+            'model' => $atts['model'] ?? Options::get('default_model'),
         ];
-
-        // Do we have models?
-        if (!empty($att['model'])) {
-            $args['model'] = $atts['model'];
-        }
-
+        
         // send prompt to Ollama
         $content = (new Ollama)->generate($args);
 
@@ -62,6 +59,11 @@ class Summarize extends Agent
                     'type' => 'string',
                     'default' => '',
                     'description' => 'Describe the length of the summary. (2 sentences, 3 paragraphs, 200 words, 5 bullet points)'
+                ],
+                'model' => [
+                    'type' => 'string',
+                    'default' => '',
+                    'description' => 'The model to use for summarization.'
                 ],
                 'url' => [
                     'type' => 'string',

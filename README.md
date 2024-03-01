@@ -2,7 +2,7 @@
 
 <div align="center">
   
-### 🌟 A privately hosted WordPress AI agent.💡
+### A privately hosted WordPress AI Chatbot
   
   <img src="https://alpaca.bot/wp-content/uploads/2024/02/alpaca-bot-icon-1006.png" alt="Alpaca Bot" width="256px">
 
@@ -18,6 +18,12 @@
 </div>
 
 ---
+
+Easily draft a post or page from any conversation. Dynamically create new content on the fly with agents. The plugin offers a familiar chat interface on both desktop and mobile. Seamless chat experience on any device.
+
+An [Ollama](https://github.com/ollama/ollama) instance is required. [Ollama](https://github.com/ollama/ollama) makes it incredibly easy to self-host large language models locally or in the cloud.
+
+If self-hosting isn't for you, please consider [becoming a Patreon](https://www.patreon.com/carmelosantana) for access to our [hosted](https://status.alpaca.bot/) [Ollama](https://github.com/ollama/ollama) instances and premium [Discord](https://discord.gg/vWQTHphkVt) support.
 
 ### Features
 
@@ -37,9 +43,9 @@
   - [Agents](#agents)
     - [Example](#example)
 - [Shortcodes](#shortcodes)
-  - [💬 `[alpaca]` - Chat with Alpaca Bot](#-alpaca---chat-with-alpaca-bot)
+  - [`[alpaca]` - Chat with Alpaca Bot](#alpaca---chat-with-alpaca-bot)
     - [Attributes](#attributes)
-  - [👥 `[agent]` - Execute tasks on your behalf](#-agent---execute-tasks-on-your-behalf)
+  - [`[agent]` - Execute tasks on your behalf](#agent---execute-tasks-on-your-behalf)
     - [Attributes](#attributes-1)
   - [Caching](#caching)
     - [Transient](#transient)
@@ -81,8 +87,6 @@
    - Add your [Alpaca Bot](https://app.alpaca.bot/) Username and API Application Password if you are using our hosted service.
 4. Click `Save Changes`.
 
-> [Patreon subscriptions](#support) include support via Discord as well! 🎉
-
 ## Usage
 
 ### Text Completion
@@ -108,7 +112,7 @@ Basic webpage summarization:
 
 ## Shortcodes
 
-### 💬 `[alpaca]` - Chat with Alpaca Bot
+### `[alpaca]` - Chat with Alpaca Bot
 
 *Chat with Alpaca Bot from any post or page.*
 
@@ -117,16 +121,17 @@ Basic webpage summarization:
 - `model` - The model to use for the text generation. *(optional)*
 - `system` - Specifies the [system message](https://github.com/ollama/ollama/blob/main/docs/modelfile.md#system) that will be set in the template. *(optional)*
 
-### 👥 `[agent]` - Execute tasks on your behalf
+### `[agent]` - Execute tasks on your behalf
 
 *Execute tasks via Agents.*
 
 #### Attributes
 
-Agents can support a wide rang of attributes. The following are core attributes that are supported by all agents.
+The following are core attributes that are supported by all agents.
 
 - `name` - The agent to execute.
-- `model` - The model to use for the text generation. *(optional)*
+
+Agent's communicating with [Ollama](https:/github.com/ollama/ollama) support `[alpaca]` attributes.
 
 ### Caching
 
@@ -157,12 +162,11 @@ This can be useful for sharing responses across multiple pages.
 
 #### Disable
 
-The following values can all disable caching. Pick one or use them interchangeably. 🙂
+The following values can disable caching.
 
 - `cache=0` - Disable caching.
+- `cache=disable` - Disable caching.
 - `cache=false` - Disable caching.
-- `cache=none` - Disable caching.
-- `cache=off` - Disable caching.
 
 ## Core Agents
 
@@ -216,5 +220,4 @@ If you find this project useful or use it in a commercial environment please con
 
 ## License
 
-- The code is licensed [GNU General Public License version 2](http://www.gnu.org/licenses/gpl-2.0.html) or later.
-- The documentation is licensed [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/).
+- [GNU General Public License version 2](http://www.gnu.org/licenses/gpl-2.0.html) or later

@@ -77,13 +77,6 @@ class Ollama
             return false;
         }
 
-        // user args
-        $def = [
-            'model' => Options::get('default_model'),
-            'prompt' => '',
-        ];
-        $args = wp_parse_args($args, $def);
-
         // convert booleans
         $args = array_map(function ($value) {
             if ($value === 'true') {
@@ -126,7 +119,7 @@ class Ollama
         $response = json_decode(wp_remote_retrieve_body($response), true);
         $this->addToLog($response);
 
-        return $response['response'];
+        return $response['response'] ?? (isset($response['error']) ? 'Error: ' . $response['error'] : 'Error: No response from Ollama.');
     }
 
     public function decodeRemoteBody(array $options = [])
