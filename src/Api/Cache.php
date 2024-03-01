@@ -8,7 +8,7 @@ use CarmeloSantana\AlpacaBot\Utils\Options;
 
 class Cache
 {
-    private array $disable = ['none', 'false', '0', 'off'];
+    private array $disable = ['0', 'disable',  'false'];
 
     private bool $active = false;
 
