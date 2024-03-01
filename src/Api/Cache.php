@@ -44,7 +44,7 @@ class Cache
             $this->timeout = (int) $this->cache;
             $this->store = 'transient';
         } elseif (in_array(strtolower($this->cache), $this->disable)) {
-            $this->store = false;
+            $this->store = '';
         } else {
             $this->store = 'option';
         }
