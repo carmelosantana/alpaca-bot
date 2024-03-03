@@ -143,6 +143,12 @@ class Define
                 'placeholder' => __('Start chatting with Abie', AB_SLUG),
                 'section' => 'chat',
             ],
+            'user_agent' => [
+                'label' => __('User Agent', AB_SLUG),
+                'description' => __('Browser user agent to use when making requests.', AB_SLUG),
+                'section' => 'agents',
+                'placeholder' => 'WordPress/' . get_bloginfo('version') . '; ' . get_bloginfo('url'),
+            ],
         ];
     }
 
