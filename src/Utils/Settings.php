@@ -236,6 +236,10 @@ class Settings
                                     echo '<input type="checkbox" name="' . self::prefix($key2) . '" value="true" ' . ($value ? 'checked' : '') . '>';
                                     break;
 
+                                case 'number':
+                                    echo '<input type="number" name="' . self::prefix($key2) . '" value="' . $value . '" placeholder="' . ($option['placeholder'] ?? null) . '" class="regular-text">';
+                                    break;
+
                                 case 'radio':
                                     foreach ($option['options'] as $key3 => $option2) {
                                         echo '<label><input type="radio" name="' . self::prefix($key2) . '" value="' . $key3 . '" ' . ($value == $key3 ? 'checked' : '') . '> ' . $option2 . '</label><br>';
