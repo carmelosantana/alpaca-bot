@@ -92,7 +92,7 @@ class Ollama
         $hardcode = [
             'stream' => false,
             'keep_alive' => '5m',
-			'timeout' => Options::get('ollama_timeout'),
+            'timeout' => Options::get('ollama_timeout'),
         ];
         $args = wp_parse_args($hardcode, $args);
 
@@ -130,7 +130,7 @@ class Ollama
             'endpoint' => '',
             'json_decode' => true,
             'method' => 'GET',
-			'timeout' => Options::get('ollama_timeout'),
+            'timeout' => Options::get('ollama_timeout'),
         ]);
 
         $url = $this->getEndpoint($options['endpoint']);
