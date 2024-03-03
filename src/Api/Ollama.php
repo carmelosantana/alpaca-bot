@@ -43,15 +43,13 @@ class Ollama
         }
 
         foreach ($keys as $key) {
-            switch ($key) {
-                case 'model':
-                    $value = $message[$key];
-                    break;
-                default:
-                    $value = (int) $message[$key];
-                    break;
+            $value = $message[$key] ?? null;
+            if (Options::validateValue($value)) {
+                if (is_numeric($value)) {
+                    $value = (int) $value;
+                }
+                update_post_meta($post_id, $key, $value);
             }
-            update_post_meta($post_id, $key, $value);
         }
 
         return $post_id;
