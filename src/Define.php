@@ -89,6 +89,13 @@ class Define
                 'description' => __('This is optional.', AB_SLUG),
                 'section' => 'api',
             ],
+            'ollama_timeout' => [
+                'label' => __('Timeout', AB_SLUG),
+                'description' => __('The time in seconds to wait for a response from Ollama.', AB_SLUG),
+                'section' => 'api',
+                'type' => 'number',
+                'default' => 60,
+            ],
             'default_model' => [
                 'label' => __('Default Model', AB_SLUG),
                 'type' => 'select',
