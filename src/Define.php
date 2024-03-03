@@ -150,6 +150,10 @@ class Define
                 'title' => __('Chat', AB_SLUG),
                 'description' => __('Customize the user experience.', AB_SLUG),
             ],
+            'agents' => [
+                'title' => __('Agents', AB_SLUG),
+                'description' => __('Manage your agents.', AB_SLUG),
+            ],
         ];
     }
 
