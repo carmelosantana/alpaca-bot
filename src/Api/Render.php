@@ -241,7 +241,6 @@ class Render
 			'headers' => [
 				'Content-Type' => 'application/json',
 			],
-			'timeout' => $this->timeout,
 		];
 
 		// get assistant response
