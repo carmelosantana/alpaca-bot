@@ -30,8 +30,13 @@ class Cache
      * @param  mixed $tag
      * @return void
      */
-    public function __construct(array $atts = [], $content = '', $tag = '')
+    public function __construct(array|string $atts = [], $content = '', $tag = '')
     {
+        // String is passed during post_content rendering in admin panel, edit pages and customizer
+        if (is_string($atts)) {
+            return;
+        }
+
         // build settings
         $this->cache = $atts['cache'] ?? '';
 
