@@ -149,6 +149,17 @@ class Define
                 'section' => 'agents',
                 'placeholder' => 'WordPress/' . get_bloginfo('version') . '; ' . get_bloginfo('url'),
             ],
+            'spellcheck' => [
+                'label' => __('Spellcheck', AB_SLUG),
+                'description' => __('Enable spellcheck on the chat input.', AB_SLUG),
+                'type' => 'radio',
+                'options' => [
+                    'true' => __('Yes', AB_SLUG),
+                    'false' => __('No', AB_SLUG),
+                ],
+                'section' => 'privacy',
+                'default' => false,
+            ],
         ];
     }
 
@@ -166,6 +177,10 @@ class Define
             'agents' => [
                 'title' => __('Agents', AB_SLUG),
                 'description' => __('Manage your agents.', AB_SLUG),
+            ],
+            'privacy' => [
+                'title' => __('Privacy', AB_SLUG),
+                'description' => __('Privacy settings.', AB_SLUG),
             ],
         ];
     }
