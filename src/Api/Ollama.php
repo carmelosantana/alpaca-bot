@@ -43,15 +43,13 @@ class Ollama
         }
 
         foreach ($keys as $key) {
-            switch ($key) {
-                case 'model':
-                    $value = $message[$key];
-                    break;
-                default:
-                    $value = (int) $message[$key];
-                    break;
+            $value = $message[$key] ?? null;
+            if (Options::validateValue($value)) {
+                if (is_numeric($value)) {
+                    $value = (int) $value;
+                }
+                update_post_meta($post_id, $key, $value);
             }
-            update_post_meta($post_id, $key, $value);
         }
 
         return $post_id;
@@ -92,6 +90,7 @@ class Ollama
         $hardcode = [
             'stream' => false,
             'keep_alive' => '5m',
+            'timeout' => Options::get('ollama_timeout'),
         ];
         $args = wp_parse_args($hardcode, $args);
 
@@ -129,6 +128,7 @@ class Ollama
             'endpoint' => '',
             'json_decode' => true,
             'method' => 'GET',
+            'timeout' => Options::get('ollama_timeout'),
         ]);
 
         $url = $this->getEndpoint($options['endpoint']);

@@ -89,6 +89,13 @@ class Define
                 'description' => __('This is optional.', AB_SLUG),
                 'section' => 'api',
             ],
+            'ollama_timeout' => [
+                'label' => __('Timeout', AB_SLUG),
+                'description' => __('The time in seconds to wait for a response from Ollama.', AB_SLUG),
+                'section' => 'api',
+                'type' => 'number',
+                'default' => 60,
+            ],
             'default_model' => [
                 'label' => __('Default Model', AB_SLUG),
                 'type' => 'select',
@@ -136,6 +143,23 @@ class Define
                 'placeholder' => __('Start chatting with Abie', AB_SLUG),
                 'section' => 'chat',
             ],
+            'user_agent' => [
+                'label' => __('User Agent', AB_SLUG),
+                'description' => __('Browser user agent to use when making requests.', AB_SLUG),
+                'section' => 'agents',
+                'placeholder' => 'WordPress/' . get_bloginfo('version') . '; ' . get_bloginfo('url'),
+            ],
+            'spellcheck' => [
+                'label' => __('Spellcheck', AB_SLUG),
+                'description' => __('Enable spellcheck on the chat input.', AB_SLUG),
+                'type' => 'radio',
+                'options' => [
+                    'true' => __('Yes', AB_SLUG),
+                    'false' => __('No', AB_SLUG),
+                ],
+                'section' => 'privacy',
+                'default' => false,
+            ],
         ];
     }
 
@@ -149,6 +173,14 @@ class Define
             'chat' => [
                 'title' => __('Chat', AB_SLUG),
                 'description' => __('Customize the user experience.', AB_SLUG),
+            ],
+            'agents' => [
+                'title' => __('Agents', AB_SLUG),
+                'description' => __('Manage your agents.', AB_SLUG),
+            ],
+            'privacy' => [
+                'title' => __('Privacy', AB_SLUG),
+                'description' => __('Privacy settings.', AB_SLUG),
             ],
         ];
     }

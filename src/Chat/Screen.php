@@ -64,7 +64,7 @@ class Screen
             <div class="typing-container">
                 <div class="typing-content">
                     <div class="typing-textarea">
-                        <textarea name="message" id="message" spellcheck="false" placeholder="<?php echo Options::getPlaceholder('default_message_placeholder', Define::fields()); ?>" required></textarea>
+                        <textarea name="message" id="message" <?php echo !Options::getPlaceholder('spellcheck') ? ' spellcheck="false" ' : ' '; ?>placeholder="<?php echo Options::getPlaceholder('default_message_placeholder', Define::fields()); ?>" required></textarea>
                         <input type="hidden" name="prompt" id="prompt">
                         <input type="hidden" name="chat_id" id="chat_id" value="0">
                         <span class="material-symbols-outlined" id="submit" <?php $htmx->outputHxMultiSwapLoadChat('htmx/chat'); ?>>arrow_circle_up</span>

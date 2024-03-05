@@ -13,7 +13,13 @@ class Get extends Agent
     {
         $url = $atts['url'] ?? '';
 
-        $response = wp_remote_get($url);
+        $args = [];
+
+        if (Options::get('user_agent')) {
+            $args['user-agent'] = Options::get('user_agent');
+        }
+
+        $response = wp_remote_get($url, $args);
 
         if (is_wp_error($response)) {
             return 'Error: ' . $response->get_error_message();
