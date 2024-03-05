@@ -237,7 +237,7 @@ class Render
 		$options = [
 			'endpoint' => $endpoint,
 			'method' => 'POST',
-			'body' => json_encode($body),
+			'body' => wp_json_encode($body),
 			'headers' => [
 				'Content-Type' => 'application/json',
 			],

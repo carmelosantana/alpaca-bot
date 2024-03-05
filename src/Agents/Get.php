@@ -45,7 +45,7 @@ class Get extends Agent
         $content .= 'Body: ' . PHP_EOL . $body;
 
         // wrap content in div to toggle visibility
-        $id = 'shortcode-' . md5(json_encode($atts));
+        $id = 'shortcode-' . md5(wp_json_encode($atts));
 
         // Output raw data to Alpaca or HTML to end user
         switch ($atts['raw'] ?? false) {

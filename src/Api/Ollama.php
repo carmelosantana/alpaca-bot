@@ -107,7 +107,7 @@ class Ollama
         $options = Tools::addAuth($options);
 
         $response = wp_remote_post($url, [
-            'body' => json_encode($args),
+            'body' => wp_json_encode($args),
             $options,
         ]);
 

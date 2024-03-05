@@ -61,7 +61,7 @@ class Cache
             }
 
             // create key from $this->atts
-            $this->args_key = md5(json_encode($atts) . $content . $tag . ($GLOBALS['post']->ID ?? 0));
+            $this->args_key = md5(wp_json_encode($atts) . $content . $tag . ($GLOBALS['post']->ID ?? 0));
             $this->cache_key = Options::appendPrefix('cache_' . $this->args_key);
 
             // set active
