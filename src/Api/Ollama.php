@@ -23,7 +23,7 @@ class Ollama
         }
 
         $post_id = wp_insert_post([
-            'post_type' => 'log',
+            'post_type' => 'chat_log',
             'post_status' => 'publish',
         ]);
 
