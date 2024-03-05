@@ -12,8 +12,8 @@ class Post
         add_action('admin_head', [$this, 'disableAddNew']);
         add_action('admin_init', [$this, 'redirectToLogs']);
 
-        add_filter('manage_log_posts_columns', [$this, 'registerCustomColumns']);
-        add_action('manage_log_posts_custom_column', [$this, 'customColumns'], 10, 2);
+        add_filter('manage_chat_log_posts_columns', [$this, 'registerCustomColumns']);
+        add_action('manage_chat_log_posts_custom_column', [$this, 'customColumns'], 10, 2);
     }
     // add to alpaca-bot menu
     public function register(): void
@@ -31,9 +31,9 @@ class Post
             'public' => false,
             'publicly_queryable' => false,
             'show_ui' => true,
-            'show_in_menu' => 'alpaca-bot',
+            'show_in_menu' => AB_SLUG,
             'query_var' => true,
-            'rewrite' => ['slug' => 'log'],
+            'rewrite' => ['slug' => 'chat_log'],
             'capability_type' => 'post',
             'has_archive' => true,
             'hierarchical' => false,
@@ -43,7 +43,7 @@ class Post
             ],
         );
 
-        register_post_type('log', $args);
+        register_post_type('chat_log', $args);
     }
 
     // register custom columns to show metadata and tokens per second which is the result of eval_duration / eval_count
@@ -113,7 +113,7 @@ class Post
     {
         // if screen is post_type = log, disable add new
         $post_type = get_current_screen()->post_type ?? false;
-        if ($post_type == 'log') {
+        if ($post_type == 'chat_log') {
             echo '<style>
                 .page-title-action {
                     display: none !important;
@@ -129,8 +129,8 @@ class Post
 
         $post_type = $_GET['post_type'] ?? false;
 
-        if (is_admin() and $pagenow == 'post-new.php' and $post_type == 'log') {
-            wp_redirect(admin_url('edit.php?post_type=log'));
+        if (is_admin() and $pagenow == 'post-new.php' and $post_type == 'chat_log') {
+            wp_redirect(admin_url('edit.php?post_type=chat_log'));
             exit;
         }
     }
