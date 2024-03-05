@@ -34,7 +34,7 @@ class Render
 		$message = wp_strip_all_tags($message);
 		$summary = $this->getSummary($message);
 
-		return !empty($summary) ? array_shift($summary) : $title_prefix . ' ' . date('Y-m-d H:i:s');
+		return !empty($summary) ? array_shift($summary) : $title_prefix . ' ' . gmdate('Y-m-d H:i:s');
 	}
 
 	public function getSummary(string $message)
