@@ -328,7 +328,7 @@ class Render
 		$this->outputDialogStart();
 
 		// Sanitize inputs
-		$post_id = (int) sanitize_text_field($_POST['chat_log_id']);
+		$post_id = (int) sanitize_text_field($_POST['chat_history_id']);
 
 		// Get post
 		$post = get_post($post_id);
