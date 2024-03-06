@@ -86,49 +86,88 @@ class Htmx extends Base
 		// add text/html content type
 		header('Content-Type: text/html; charset=' . get_option('blog_charset'), true);
 
-		// setup render object
-		$this->render = new Render($this->user_id);
-
 		// normalize URLs, removing trailing and forward slashes from $request->get_route()
 		$request_url = ltrim(rtrim($request->get_route(), '/'), '/');
 
+		// setup render object
+		$render = new Render($this->user_id);
+		$render->setPost($this->validatePost($request_url));
+
 		switch ($request_url) {
 			case self::NAMESPACE . '/htmx/chat':
-				$this->render->outputGenerate('chat');
+				$render->outputGenerate('chat');
 				break;
 
 			case self::NAMESPACE . '/htmx/generate':
-				$this->render->outputGenerate();
+				$render->outputGenerate();
 				break;
 
 			case self::NAMESPACE . '/htmx/regenerate':
-				$this->render->outputGenerate('regenerate');
+				$render->outputGenerate('regenerate');
 				break;
 
 			case self::NAMESPACE . '/htmx/tags':
-				$this->render->outputTags();
+				$render->outputTags();
 				break;
 
 			case self::NAMESPACE . '/wp/chat':
-				$this->render->outputChatLoad();
+				$render->outputChatLoad();
 				break;
 
 			case self::NAMESPACE . '/wp/history':
-				$this->render->outputChatHistory();
+				$render->outputChatHistory();
 				break;
 
 			case self::NAMESPACE . '/wp/page/insert':
-				$this->render->outputPostInsert('page');
+				$render->outputPostInsert('page');
 				break;
 
 			case self::NAMESPACE . '/wp/post/insert':
-				$this->render->outputPostInsert();
+				$render->outputPostInsert();
 				break;
 
 			case self::NAMESPACE . '/wp/user/update':
-				$this->render->userSettingsUpdate();
+				$render->userSettingsUpdate();
 				break;
 		}
 		exit();
+	}
+
+	public function validateNonce()
+	{
+		// validate nonce in header
+		if (!isset($_SERVER['HTTP_X_WP_NONCE']) or !wp_verify_nonce(sanitize_text_field($_SERVER['HTTP_X_WP_NONCE']), 'wp_rest')) {
+			return false;
+		}
+
+		return true;
+	}
+
+	public function validatePost()
+	{
+		$allowed_arguments = [
+			'chat_history_id',
+			'chat_id',
+			'model',
+			'post_content',
+			'prompt',
+			'set_default_model',
+		];
+
+		$post = [];
+
+		// validate nonce in header
+		if (!$this->validateNonce()) {
+			wp_send_json_error('Invalid nonce.', 403);
+		}
+
+		// validate post arguments
+		foreach ($allowed_arguments as $arg) {
+			if (isset($_POST[$arg])) {
+				$post[$arg] = sanitize_text_field($_POST[$arg]);
+			}
+		}
+
+		return $post;
 	}
 }
