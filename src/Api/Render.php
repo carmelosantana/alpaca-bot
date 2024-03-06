@@ -23,6 +23,8 @@ class Render
 
 	private string $user_settings_meta_key;
 
+	private array $post = []; // Validated POST data
+
 	public function __construct(private int $user_id, object $request = null)
 	{
 		$this->user_settings_meta_key = Options::appendPrefix('user_settings');
@@ -34,7 +36,7 @@ class Render
 		$message = wp_strip_all_tags($message);
 		$summary = $this->getSummary($message);
 
-		return !empty($summary) ? array_shift($summary) : $title_prefix . ' ' . date('Y-m-d H:i:s');
+		return !empty($summary) ? array_shift($summary) : $title_prefix . ' ' . gmdate('Y-m-d H:i:s');
 	}
 
 	public function getSummary(string $message)
@@ -104,31 +106,33 @@ class Render
 		return $post_id;
 	}
 
-	public function checkUserInputs(array $inputs = ['model', 'prompt'])
+	public function checkUserInputs()
 	{
 		// Model should not be set if user cannot change model
 		if (Options::get('user_can_change_model') == false) {
-			unset($_POST['model']);
+			$this->setPostInput('model', false);
 		}
 
 		// Check for input errors
-		if (!isset($_POST['model']) and !isset($_POST['prompt'])) {
+		if (!$this->getPostInput('model') and !$this->getPostInput('prompt')) {
 			$this->outputAssistantErrorDialog('Please select a model and enter a prompt.');
 			return false;
-		} elseif (!isset($_POST['model'])) {
+		} elseif (!$this->getPostInput('model')) {
 			if (Options::get('user_can_change_model') and Options::get('default_model')) {
-				$_POST['model'] = Options::get('default_model');
+				// If user can change model and default model is set then set model to default model
+				$this->setPostInput('model', Options::get('default_model'));
 			} else {
+				// If user cannot change model and default model is not set then output error
 				$this->outputAssistantErrorDialog('Ask your system administrator to select a default model.');
 				return false;
 			}
-		} elseif (!isset($_POST['prompt'])) {
+		} elseif (!$this->getPostInput('prompt')) {
 			$this->outputAssistantErrorDialog('Please enter a prompt.');
 			return false;
 		}
 
 		// Check if inputs are empty
-		if (empty($_POST['model']) or empty($_POST['prompt'])) {
+		if (empty($this->getPostInput('model')) or empty($this->getPostInput('prompt'))) {
 			return false;
 		}
 
@@ -158,6 +162,11 @@ class Render
 		return $url;
 	}
 
+	public function getPostInput(string $name, $default = false)
+	{
+		return $this->post[$name] ?? $default;
+	}
+
 	public function outputGenerate($endpoint = 'generate')
 	{
 		// Quick input validation
@@ -165,8 +174,8 @@ class Render
 			return;
 
 		// Sanitize inputs
-		$model = sanitize_text_field($_POST['model']);
-		$original_prompt = sanitize_text_field($_POST['prompt']);
+		$model = $this->getPostInput('model');
+		$original_prompt = $this->getPostInput('prompt');
 
 		// Filter prompt
 		$prompt = apply_filters(Options::appendPrefix('user_prompt'), stripslashes($original_prompt));
@@ -175,7 +184,7 @@ class Render
 		switch ($endpoint) {
 			case 'chat':
 			case 'regenerate':
-				$post_id = (int) sanitize_text_field($_POST['chat_id'] ?? 0);
+				$post_id = (int) $this->getPostInput('chat_id', 0);
 
 				// if post_id > 0 then get post_content and add to messages
 				if ($post_id > 0) {
@@ -237,7 +246,7 @@ class Render
 		$options = [
 			'endpoint' => $endpoint,
 			'method' => 'POST',
-			'body' => json_encode($body),
+			'body' => wp_json_encode($body),
 			'headers' => [
 				'Content-Type' => 'application/json',
 			],
@@ -321,14 +330,15 @@ class Render
 	public function outputChatLoad()
 	{
 		// Quick input validation
-		if (!isset($_POST['chat_id']))
+		if (!$this->getPostInput('chat_history_id')) {
 			return;
+		}
 
 		// Open wrapper and dialog
 		$this->outputDialogStart();
 
 		// Sanitize inputs
-		$post_id = (int) sanitize_text_field($_POST['chat_log_id']);
+		$post_id = (int) $this->getPostInput('chat_history_id');
 
 		// Get post
 		$post = get_post($post_id);
@@ -578,13 +588,13 @@ class Render
 	public function outputPostInsert($post_type = 'post')
 	{
 		// check if post_content is set	and not empty
-		if (!isset($_POST['post_content']) or empty($_POST['post_content'])) {
+		if (!$this->getPostInput('post_content')) {
 			echo $this->getAdminNotice('Post content is empty.', 'notice-error');
 			return;
 		}
 
 		// insert into post as draft
-		$post_content = sanitize_text_field($_POST['post_content']);
+		$post_content = $this->getPostInput('post_content');
 		$post_id = wp_insert_post([
 			'post_content' => $post_content,
 			'post_title' => $this->getSummarizedTitle($post_content),
@@ -602,15 +612,15 @@ class Render
 		echo $this->getAdminNotice(ucfirst($post_type) . ' drafted. <a href="' . get_edit_post_link($post_id) . '">Edit ' . ucfirst($post_type) . '</a>');
 	}
 
-	public function getWpNonce($action = -1, $key = 'wp_rest',)
+	public function getWpNonce()
 	{
-		$nonce = wp_create_nonce($key, $action);
+		$nonce = wp_create_nonce('wp_rest');
 		return 'hx-headers=\'{"X-WP-Nonce": "' . $nonce . '"}\'';
 	}
 
-	public function outputWpNonce($action = -1, $key = 'wp_rest',)
+	public function outputWpNonce()
 	{
-		echo $this->getWpNonce($action, $key);
+		echo $this->getWpNonce();
 	}
 
 	public function outputTags($tag = 'option')
@@ -653,11 +663,21 @@ class Render
 		}
 	}
 
+	public function setPost($post)
+	{
+		$this->post = $post;
+	}
+
+	public function setPostInput($name, $value)
+	{
+		$this->post[$name] = $value;
+	}
+
 	// Store user settings in alpaca_bot_user_settings serialized array in user meta
 	public function userSettingsUpdate()
 	{
 		// Check if user is logged in
-		if (!isset($_POST['set_default_model']) or !isset($_POST['model'])) {
+		if (!$this->getPostInput('set_default_model') or !$this->getPostInput('model')) {
 			echo '<span>Error validating entry.</span>';
 			return false;
 		}
@@ -676,7 +696,7 @@ class Render
 		// Get user inputs
 		$inputs = [
 			$this->user_settings_meta_key => [
-				'default_model' => sanitize_text_field($_POST['model'] ?? null),
+				'default_model' => $this->getPostInput('model', null),
 			],
 		];
 

@@ -50,7 +50,7 @@ class Help
         }
 
         // Load README.md
-        $readme = file_get_contents(AB_DIR_PATH . 'README.md');
+        $readme = (new \WP_Filesystem_Direct([]))->get_contents(AB_DIR_PATH . 'README.md');
 
         // Parse README.md
         $parsedown = new Parsedown();

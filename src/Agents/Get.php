@@ -32,8 +32,7 @@ class Get extends Agent
         $body = wp_remote_retrieve_body($response);
 
         // strip all HTML tags
-        $body = wp_strip_all_tags($body);
-        $body = strip_tags($body);
+        $body = wp_strip_all_tags($body, true);
 
         // loop through meta tags and add to content
         $meta_tags = 'Metadata: ' . PHP_EOL;
@@ -46,7 +45,7 @@ class Get extends Agent
         $content .= 'Body: ' . PHP_EOL . $body;
 
         // wrap content in div to toggle visibility
-        $id = 'shortcode-' . md5(json_encode($atts));
+        $id = 'shortcode-' . md5(wp_json_encode($atts));
 
         // Output raw data to Alpaca or HTML to end user
         switch ($atts['raw'] ?? false) {
@@ -94,7 +93,6 @@ class Get extends Agent
             ],
             'references' => [
                 'get_meta_tags' => 'https://www.php.net/manual/en/function.get-meta-tags.php',
-                'strip_tags' => 'https://www.php.net/manual/en/function.strip-tags.php',
                 'wp_remote_get' => 'https://developer.wordpress.org/reference/functions/wp_remote_get/',
                 'wp_strip_all_tags' => 'https://developer.wordpress.org/reference/functions/wp_strip_all_tags/',
             ]

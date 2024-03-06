@@ -1,4 +1,4 @@
-const chat_log_id = document.querySelector("#chat_log_id");
+const chat_history_id = document.querySelector("#chat_history_id");
 const message = document.querySelector("#message");
 const models = document.querySelector("#model");
 const prompt = document.querySelector("#prompt");
@@ -219,10 +219,10 @@ if (message) {
         onClickChange();
     });
 
-    // On #chat_log_id select change
-    chat_log_id.addEventListener('change', function () {
+    // On #chat_history_id select change
+    chat_history_id.addEventListener('change', function () {
         // Do not submit if the message is empty
-        if (isBlank(chat_log_id.value)) {
+        if (isBlank(chat_history_id.value)) {
             return;
         }
 
