@@ -602,15 +602,15 @@ class Render
 		echo $this->getAdminNotice(ucfirst($post_type) . ' drafted. <a href="' . get_edit_post_link($post_id) . '">Edit ' . ucfirst($post_type) . '</a>');
 	}
 
-	public function getWpNonce($action = -1, $key = 'wp_rest',)
+	public function getWpNonce()
 	{
-		$nonce = wp_create_nonce($key, $action);
+		$nonce = wp_create_nonce('wp_rest');
 		return 'hx-headers=\'{"X-WP-Nonce": "' . $nonce . '"}\'';
 	}
 
-	public function outputWpNonce($action = -1, $key = 'wp_rest',)
+	public function outputWpNonce()
 	{
-		echo $this->getWpNonce($action, $key);
+		echo $this->getWpNonce();
 	}
 
 	public function outputTags($tag = 'option')
