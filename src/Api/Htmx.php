@@ -16,37 +16,11 @@ class Htmx extends Base
 
 	private int $user_id = 0;
 
+	private array $post = [];
+
 	public function __construct()
 	{
-		$this->user_id = $this->cacheUserId();	// hack to store user ID for REST API
 		add_action('rest_api_init', [$this, 'registerRoutes']);
-	}
-
-	public function cacheUserId($user_id = 0)
-	{
-		if ($this->user_id == 0 and get_current_user_id() > 0) {
-			$this->user_id = get_current_user_id();
-		}
-
-		return $this->user_id;
-	}
-
-	public function getCachedUserId()
-	{
-		return $this->user_id;
-	}
-
-	public function getOrSetCurrentUserId()
-	{
-		// If user is NOT set
-		if ($user_id = get_current_user_id() == 0) {
-			$user_id = $this->user_id;
-			wp_clear_auth_cookie();
-			wp_set_current_user($user_id); // Set the current user detail
-			wp_set_auth_cookie($user_id); // Set auth details in cookie
-		}
-
-		return get_user_by('id', $this->user_id);
 	}
 
 	public function registerRoutes(\WP_REST_Server $server)
