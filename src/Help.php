@@ -49,8 +49,18 @@ class Help
             return;
         }
 
+        // https://developer.wordpress.org/apis/filesystem/
+        $url = admin_url('admin.php?page=' . AB_SLUG);
+        $creds = request_filesystem_credentials($url, '', false, false, null);
+
+        if (!WP_Filesystem($creds)) {
+            request_filesystem_credentials($url, '', true, false, null);
+            return;
+        }
+        
         // Load README.md
-        $readme = (new \WP_Filesystem_Direct([]))->get_contents(AB_DIR_PATH . 'README.md');
+        global $wp_filesystem;
+        $readme = $wp_filesystem->get_contents(AB_DIR_PATH . 'README.md');
 
         // Parse README.md
         $parsedown = new Parsedown();
