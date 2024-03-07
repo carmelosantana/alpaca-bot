@@ -11,9 +11,10 @@ class Post
         add_action('init', [$this, 'register']);
         add_action('admin_head', [$this, 'disableAddNew']);
         add_action('admin_init', [$this, 'redirectToLogs']);
+        add_action('manage_chat_log_posts_custom_column', [$this, 'customColumns'], 10, 2);
 
         add_filter('manage_chat_log_posts_columns', [$this, 'registerCustomColumns']);
-        add_action('manage_chat_log_posts_custom_column', [$this, 'customColumns'], 10, 2);
+        add_filter('manage_edit-chat_log_sortable_columns', [$this, 'sortableColumns']);
     }
     // add to alpaca-bot menu
     public function register(): void
@@ -55,12 +56,9 @@ class Post
         $columns['time'] = __('Time Ago', AB_SLUG);
         $columns['model'] = __('Model', AB_SLUG);
         $columns['total_duration'] = __('Total Duration', AB_SLUG);
-        $columns['load_duration'] = __('Load Duration', AB_SLUG);
         $columns['prompt_eval_count'] = __('Prompt Eval Count', AB_SLUG);
-        $columns['prompt_eval_duration'] = __('Prompt Eval Duration', AB_SLUG);
         $columns['eval_count'] = __('Eval Count', AB_SLUG);
-        $columns['eval_duration'] = __('Eval Duration', AB_SLUG);
-        $columns['tokens_per_second'] = __('Tokens Per Second', AB_SLUG);
+        $columns['tokens_per_second'] = __('Tokens/s', AB_SLUG);
 
         return $columns;
     }
@@ -133,5 +131,19 @@ class Post
             wp_redirect(admin_url('edit.php?post_type=chat_log'));
             exit;
         }
+    }
+
+    // make custom columns sortable
+    public function sortableColumns($columns)
+    {
+        $columns['total_duration'] = 'total_duration';
+        $columns['load_duration'] = 'load_duration';
+        $columns['prompt_eval_count'] = 'prompt_eval_count';
+        $columns['prompt_eval_duration'] = 'prompt_eval_duration';
+        $columns['eval_count'] = 'eval_count';
+        $columns['eval_duration'] = 'eval_duration';
+        $columns['tokens_per_second'] = 'tokens_per_second';
+
+        return $columns;
     }
 }
