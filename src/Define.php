@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace CarmeloSantana\AlpacaBot;
 
-use CarmeloSantana\AlpacaBot\Api\Ollama;
 use CarmeloSantana\AlpacaBot\Utils\Options;
 
 class Define
@@ -89,6 +88,7 @@ class Define
                 'label' => __('API Application Password', AB_SLUG),
                 'description' => __('This is optional.', AB_SLUG),
                 'section' => 'api',
+                'type' => 'password',
             ],
             'ollama_timeout' => [
                 'label' => __('Timeout', AB_SLUG),
