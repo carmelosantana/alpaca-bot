@@ -65,7 +65,8 @@ class Define
                 echo '<p class="description"><span class="material-symbols-outlined label-error">error</span><span>' . __('Invalid response.', AB_SLUG) . '</span></p>';
             }
         } elseif (empty($api_url)) {
-            echo '<p class="description"><span>No server? We got you covered! ' . self::supportPatreon() . ' and share our community hosted instances.<span></p>';
+            $patreon = '<a href="' . Define::support()['patreon']['url'] . '">' . Define::support()['patreon']['title'] . '</a>';
+            echo '<p class="description"><span>No server? We got you covered! ' . $patreon . ' and share our community hosted instances.<span></p>';
         }
     }
 
@@ -91,7 +92,7 @@ class Define
             ],
             'ollama_timeout' => [
                 'label' => __('Timeout', AB_SLUG),
-                'description' => __('The time in seconds to wait for a response from Ollama.', AB_SLUG),
+                'description' => __('The time in seconds to wait for a response from <a href="https://github.com/ollama/ollama">Ollama</a>.', AB_SLUG),
                 'section' => 'api',
                 'type' => 'number',
                 'default' => 60,
