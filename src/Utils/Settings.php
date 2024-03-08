@@ -284,7 +284,7 @@ class Settings
         }
     }
 
-    private function renderOptionsPage(array $options = [], array $sections = [], string $menu_slug = '', string $title)
+    private function renderOptionsPage(array $options = [], array $sections = [], string $menu_slug = '', string $title = '')
     {
         // get active tab, or first tab
         $active_tab = $this->getActiveTab();
