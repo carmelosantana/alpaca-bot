@@ -53,15 +53,15 @@ class Define
             $header_x_ollama = wp_remote_retrieve_header($response, 'x-ollama-proxy');
 
             if (is_wp_error($response)) {
-                echo '<p class="description"><span class="material-symbols-outlined">edit</span><span>' . __('Please enter a valid URL.', AB_SLUG) . '</span></p>';
+                echo '<p class="description"><span class="material-symbols-outlined">edit</span><span>' . __('Please enter a valid URL.', 'alpaca-bot') . '</span></p>';
             } elseif (preg_match('/^"?(Ollama is running)"?$/', $body)) {
                 if ($header_x_ollama) {
-                    echo '<p class="description"><span class="material-symbols-outlined label-success">verified</span><span>' . __('Alpaca Bot Proxy connection established.', AB_SLUG) . '</span></p>';
+                    echo '<p class="description"><span class="material-symbols-outlined label-success">verified</span><span>' . __('Alpaca Bot Proxy connection established.', 'alpaca-bot') . '</span></p>';
                 } else {
-                    echo '<p class="description"><span class="material-symbols-outlined label-success">check_circle</span><span>' . __('Verified connection.', AB_SLUG) . '</span></p>';
+                    echo '<p class="description"><span class="material-symbols-outlined label-success">check_circle</span><span>' . __('Verified connection.', 'alpaca-bot') . '</span></p>';
                 }
             } else {
-                echo '<p class="description"><span class="material-symbols-outlined label-error">error</span><span>' . __('Invalid response.', AB_SLUG) . '</span></p>';
+                echo '<p class="description"><span class="material-symbols-outlined label-error">error</span><span>' . __('Invalid response.', 'alpaca-bot') . '</span></p>';
             }
         } elseif (empty($api_url)) {
             $patreon = '<a href="' . Define::support()['patreon']['url'] . '">' . Define::support()['patreon']['title'] . '</a>';
@@ -73,90 +73,90 @@ class Define
     {
         return [
             'api_url' => [
-                'label' => __('Ollama API URL', AB_SLUG),
-                'description' => __('The URL of your <a href="https://github.com/ollama/ollama">Ollama</a> installation.', AB_SLUG),
+                'label' => __('Ollama API URL', 'alpaca-bot'),
+                'description' => __('The URL of your <a href="https://github.com/ollama/ollama">Ollama</a> installation.', 'alpaca-bot'),
                 'placeholder' => 'http://localhost:11434',
                 'section' => 'api',
                 'description_callback' => [__CLASS__, 'fieldApiUrlValidate'],
             ],
             'api_username' => [
-                'label' => __('API Username', AB_SLUG),
-                'description' => __('This is optional.', AB_SLUG),
+                'label' => __('API Username', 'alpaca-bot'),
+                'description' => __('This is optional.', 'alpaca-bot'),
                 'section' => 'api',
             ],
             'api_password' => [
-                'label' => __('API Application Password', AB_SLUG),
-                'description' => __('This is optional.', AB_SLUG),
+                'label' => __('API Application Password', 'alpaca-bot'),
+                'description' => __('This is optional.', 'alpaca-bot'),
                 'section' => 'api',
                 'type' => 'password',
             ],
             'ollama_timeout' => [
-                'label' => __('Timeout', AB_SLUG),
-                'description' => __('The time in seconds to wait for a response from <a href="https://github.com/ollama/ollama">Ollama</a>.', AB_SLUG),
+                'label' => __('Timeout', 'alpaca-bot'),
+                'description' => __('The time in seconds to wait for a response from <a href="https://github.com/ollama/ollama">Ollama</a>.', 'alpaca-bot'),
                 'section' => 'api',
                 'type' => 'number',
                 'default' => 60,
             ],
             'default_model' => [
-                'label' => __('Default Model', AB_SLUG),
+                'label' => __('Default Model', 'alpaca-bot'),
                 'type' => 'select',
                 'options' => self::getModels(),
                 'section' => 'chat',
             ],
             'user_can_change_model' => [
-                'label' => __('Can users change model?', AB_SLUG),
+                'label' => __('Can users change model?', 'alpaca-bot'),
                 'type' => 'radio',
                 'options' => [
-                    'true' => __('Yes', AB_SLUG),
-                    'false' => __('No', AB_SLUG),
+                    'true' => __('Yes', 'alpaca-bot'),
+                    'false' => __('No', 'alpaca-bot'),
                 ],
                 'section' => 'chat',
                 'default' => true,
             ],
             'save_chat_history' => [
-                'label' => __('Save chat history?', AB_SLUG),
+                'label' => __('Save chat history?', 'alpaca-bot'),
                 'type' => 'radio',
                 'options' => [
-                    'true' => __('Yes', AB_SLUG),
-                    'false' => __('No', AB_SLUG),
+                    'true' => __('Yes', 'alpaca-bot'),
+                    'false' => __('No', 'alpaca-bot'),
                 ],
                 'section' => 'chat',
                 'default' => true,
             ],
             'log_chat_response' => [
-                'label' => __('Log chat response?', AB_SLUG),
-                'description' => __('Log additional information provided by the completion. This does not include conversation history.', AB_SLUG),
+                'label' => __('Log chat response?', 'alpaca-bot'),
+                'description' => __('Log additional information provided by the completion. This does not include conversation history.', 'alpaca-bot'),
                 'type' => 'radio',
                 'options' => [
-                    'true' => __('Yes', AB_SLUG),
-                    'false' => __('No', AB_SLUG),
+                    'true' => __('Yes', 'alpaca-bot'),
+                    'false' => __('No', 'alpaca-bot'),
                 ],
                 'section' => 'chat',
                 'default' => true,
             ],
             'default_system_message' => [
-                'label' => __('Default system message', AB_SLUG),
-                'placeholder' => __('How can I help you today?', AB_SLUG),
+                'label' => __('Default system message', 'alpaca-bot'),
+                'placeholder' => __('How can I help you today?', 'alpaca-bot'),
                 'section' => 'chat',
             ],
             'default_message_placeholder' => [
-                'label' => __('Default message placeholder', AB_SLUG),
-                'placeholder' => __('Start chatting with Abie', AB_SLUG),
+                'label' => __('Default message placeholder', 'alpaca-bot'),
+                'placeholder' => __('Start chatting with Abie', 'alpaca-bot'),
                 'section' => 'chat',
             ],
             'user_agent' => [
-                'label' => __('User Agent', AB_SLUG),
-                'description' => __('Browser user agent to use when making requests.', AB_SLUG),
+                'label' => __('User Agent', 'alpaca-bot'),
+                'description' => __('Browser user agent to use when making requests.', 'alpaca-bot'),
                 'section' => 'agents',
                 'placeholder' => 'WordPress/' . get_bloginfo('version') . '; ' . get_bloginfo('url'),
             ],
             'spellcheck' => [
-                'label' => __('Spellcheck', AB_SLUG),
-                'description' => __('Enable spellcheck on the chat input.', AB_SLUG),
+                'label' => __('Spellcheck', 'alpaca-bot'),
+                'description' => __('Enable spellcheck on the chat input.', 'alpaca-bot'),
                 'type' => 'radio',
                 'options' => [
-                    'true' => __('Yes', AB_SLUG),
-                    'false' => __('No', AB_SLUG),
+                    'true' => __('Yes', 'alpaca-bot'),
+                    'false' => __('No', 'alpaca-bot'),
                 ],
                 'section' => 'privacy',
                 'default' => false,
@@ -168,20 +168,20 @@ class Define
     {
         return [
             'api' => [
-                'title' => __('API', AB_SLUG),
-                'description' => __('Configure your <a href="https://github.com/ollama/ollama">Ollama</a> settings. ', AB_SLUG),
+                'title' => __('API', 'alpaca-bot'),
+                'description' => __('Configure your <a href="https://github.com/ollama/ollama">Ollama</a> settings. ', 'alpaca-bot'),
             ],
             'chat' => [
-                'title' => __('Chat', AB_SLUG),
-                'description' => __('Customize the user experience.', AB_SLUG),
+                'title' => __('Chat', 'alpaca-bot'),
+                'description' => __('Customize the user experience.', 'alpaca-bot'),
             ],
             'agents' => [
-                'title' => __('Agents', AB_SLUG),
-                'description' => __('Manage your agents.', AB_SLUG),
+                'title' => __('Agents', 'alpaca-bot'),
+                'description' => __('Manage your agents.', 'alpaca-bot'),
             ],
             'privacy' => [
-                'title' => __('Privacy', AB_SLUG),
-                'description' => __('Privacy settings.', AB_SLUG),
+                'title' => __('Privacy', 'alpaca-bot'),
+                'description' => __('Privacy settings.', 'alpaca-bot'),
             ],
         ];
     }
@@ -190,13 +190,13 @@ class Define
     {
         $support = [
             'discord' => [
-                'description' => __('Join our <a href="https://discord.gg/vWQTHphkVt">Discord</a> community.', AB_SLUG),
-                'title' => __('Join our Discord', AB_SLUG),
+                'description' => __('Join our <a href="https://discord.gg/vWQTHphkVt">Discord</a> community.', 'alpaca-bot'),
+                'title' => __('Join our Discord', 'alpaca-bot'),
                 'url' => 'https://discord.gg/vWQTHphkVt',
             ],
             'patreon' => [
-                'description' => __('Support the development of this plugin by becoming a <a href="https://www.patreon.com/carmelosantana">Patreon</a>.', AB_SLUG),
-                'title' => __('Become a Patreon', AB_SLUG),
+                'description' => __('Support the development of this plugin by becoming a <a href="https://www.patreon.com/carmelosantana">Patreon</a>.', 'alpaca-bot'),
+                'title' => __('Become a Patreon', 'alpaca-bot'),
                 'url' => 'https://www.patreon.com/carmelosantana',
             ]
         ];
