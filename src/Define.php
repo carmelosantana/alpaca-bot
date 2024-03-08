@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace CarmeloSantana\AlpacaBot;
 
-use CarmeloSantana\AlpacaBot\Api\Ollama;
 use CarmeloSantana\AlpacaBot\Utils\Options;
 
 class Define
