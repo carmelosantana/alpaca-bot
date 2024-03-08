@@ -89,6 +89,7 @@ class Define
                 'label' => __('API Application Password', AB_SLUG),
                 'description' => __('This is optional.', AB_SLUG),
                 'section' => 'api',
+                'type' => 'password',
             ],
             'ollama_timeout' => [
                 'label' => __('Timeout', AB_SLUG),

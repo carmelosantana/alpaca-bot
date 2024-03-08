@@ -246,6 +246,10 @@ class Settings
                                     }
                                     break;
 
+                                case 'password':
+                                    echo '<input type="password" name="' . self::prefix($key2) . '" value="' . $value . '" placeholder="' . ($option['placeholder'] ?? null) . '" class="regular-text">';
+                                    break;
+
                                 case 'select':
                                     echo '<select name="' . self::prefix($key2) . '">';
                                     foreach ($option['options'] as $key3 => $option2) {
