@@ -1,3 +1,4 @@
+const accordions = document.getElementsByClassName("accordion-btn");
 const chat_history_id = document.querySelector("#chat_history_id");
 const message = document.querySelector("#message");
 const models = document.querySelector("#model");
@@ -158,6 +159,15 @@ function setDefaultModel() {
     defaultModel.style.visibility = 'visible';
 }
 
+function showHide(id) {
+    var element = document.getElementById(id);
+    if (element.style.display === "none") {
+        element.style.display = "block";
+    } else {
+        element.style.display = "none";
+    }
+}
+
 // find element by class and scroll to it, parameter is the class name
 function smoothScrollTo(selector = "dialog", behavior = 'smooth', block = 'start') {
     switch (selector) {
@@ -191,6 +201,22 @@ function smoothScrollTo(selector = "dialog", behavior = 'smooth', block = 'start
     }
     element.scrollIntoView({ behavior: behavior, block: block });
     console.log(element.id);
+}
+
+if (accordions) {
+    var i;
+
+    for (i = 0; i < accordions.length; i++) {
+        accordions[i].addEventListener('click', function () {
+            this.classList.toggle('active');
+            var panel = this.nextElementSibling;
+            if (panel.style.maxHeight) {
+                panel.style.maxHeight = null;
+            } else {
+                panel.style.maxHeight = panel.scrollHeight + 'px';
+            }
+        });
+    }
 }
 
 if (message) {
@@ -238,27 +264,3 @@ if (message) {
         message.focus();
     }
 }
-
-var acc = document.getElementsByClassName('accordion-btn');
-var i;
-
-for (i = 0; i < acc.length; i++) {
-    acc[i].addEventListener('click', function () {
-        this.classList.toggle('active');
-        var panel = this.nextElementSibling;
-        if (panel.style.maxHeight) {
-            panel.style.maxHeight = null;
-        } else {
-            panel.style.maxHeight = panel.scrollHeight + 'px';
-        }
-    });
-}
-
-function showHide(id) {
-    var element = document.getElementById(id);
-    if (element.style.display === "none") {
-        element.style.display = "block";
-    } else {
-        element.style.display = "none";
-    }
-} 
