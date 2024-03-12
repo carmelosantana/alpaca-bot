@@ -28,7 +28,7 @@ class Settings
 
     private string $menu_title;
 
-    public function getActiveTab(string $default = ''): string
+    public function getActiveTab(string $default = ' '): string
     {
         if (!isset($this->sections)) {
             return $default;
@@ -262,7 +262,7 @@ class Settings
                 $_id_key,
                 $section['title'],
                 function () use ($section) {
-                    echo '<p>' . $section['description'] . '</p>';
+                    echo '<p>' . wp_kses($section['description'], self::getAllowedTags()) . '</p>';
                 },
                 $_id_key
             );
@@ -282,42 +282,42 @@ class Settings
                                     break;
 
                                 case 'checkbox':
-                                    echo '<input type="checkbox" name="' . self::prefix($key2) . '" value="true" ' . ($value ? 'checked' : '') . '>';
+                                    echo '<input type="checkbox" name="' . esc_attr(self::prefix($key2)) . '" value="true" ' . ($value ? 'checked' : '') . '>';
                                     break;
 
                                 case 'number':
-                                    echo '<input type="number" name="' . self::prefix($key2) . '" value="' . $value . '" placeholder="' . ($option['placeholder'] ?? null) . '" class="regular-text">';
+                                    echo '<input type="number" name="' . esc_attr(self::prefix($key2)) . '" value="' . esc_attr($value) . '" placeholder="' . esc_attr($option['placeholder']) . '" class="regular-text">';
                                     break;
 
                                 case 'radio':
                                     foreach ($option['options'] as $key3 => $option2) {
-                                        echo '<label><input type="radio" name="' . self::prefix($key2) . '" value="' . $key3 . '" ' . ($value == $key3 ? 'checked' : '') . '> ' . $option2 . '</label><br>';
+                                        echo '<label><input type="radio" name="' . esc_attr(self::prefix($key2)) . '" value="' . esc_attr($key3) . '" ' . ($value == $key3 ? 'checked' : '') . '> ' . esc_html($option2) . '</label><br>';
                                     }
                                     break;
 
                                 case 'password':
-                                    echo '<input type="password" name="' . self::prefix($key2) . '" value="' . $value . '" placeholder="' . ($option['placeholder'] ?? null) . '" class="regular-text">';
+                                    echo '<input type="password" name="' . esc_attr(self::prefix($key2)) . '" value="' . esc_attr($value) . '" placeholder="' . esc_attr($option['placeholder']) . '" class="regular-text">';
                                     break;
 
                                 case 'select':
-                                    echo '<select name="' . self::prefix($key2) . '">';
+                                    echo '<select name="' . esc_attr(self::prefix($key2)) . '">';
                                     foreach ($option['options'] as $key3 => $option2) {
-                                        echo '<option value="' . $key3 . '" ' . ($value == $key3 ? 'selected' : '') . '>' . $option2 . '</option>';
+                                        echo '<option value="' . esc_attr($key3) . '" ' . ($value == $key3 ? 'selected' : '') . '>' . esc_html($option2) . '</option>';
                                     }
                                     echo '</select>';
                                     break;
 
                                 case 'text':
-                                    echo '<input type="text" name="' . self::prefix($key2) . '" value="' . $value . '" placeholder="' . ($option['placeholder'] ?? null) . '" class="regular-text">';
+                                    echo '<input type="text" name="' . esc_attr(self::prefix($key2)) . '" value="' . esc_attr($value) . '" placeholder="' . esc_attr($option['placeholder']) . '" class="regular-text">';
                                     break;
 
                                 case 'textarea':
-                                    echo '<textarea name="' . self::prefix($key2) . '" placeholder="' . ($option['placeholder'] ?? null) . '" class="regular-text">' . $value . '</textarea>';
+                                    echo '<textarea name="' . esc_attr(self::prefix($key2)) . '" placeholder="' . esc_attr($option['placeholder']) . '" class="regular-text">' . esc_html($value) . '</textarea>';
                                     break;
                             }
 
                             if ($option['description']) {
-                                echo '<p class="description">' . $option['description'] . '</p>';
+                                echo '<p class="description">' . wp_kses($option['description'], self::getAllowedTags()) . '</p>';
                             }
 
                             if ($option['description_callback']) {
@@ -327,7 +327,7 @@ class Settings
                         $_id_key,
                         $_id_key
                     );
-                    register_setting($menu_slug, self::prefix($key2));
+                    register_setting($menu_slug, esc_attr(self::prefix($key2)));
                 }
             }
         }
@@ -338,15 +338,19 @@ class Settings
         // get active tab, or first tab
         $active_tab = $this->getActiveTab();
 ?>
-        <div class="<?php echo $this->outputPageWrapClass(); ?> <?php echo $active_tab; ?>" id="<?php echo $menu_slug; ?>">
-            <h1><?php echo $title; ?></h1>
+        <div class="<?php echo esc_attr($this->outputPageWrapClass() . $active_tab); ?>" id="<?php echo esc_attr($menu_slug); ?>">
+            <h1><?php echo esc_html($title); ?></h1>
             <h2 class="nav-tab-wrapper">
-                <?php foreach ($sections as $key => $section) : ?>
-                    <a href="?page=<?php echo $menu_slug; ?>&tab=<?php echo $key; ?>" class="nav-tab <?php echo $active_tab == $key ? 'nav-tab-active' : ''; ?>"><?php echo $section['title']; ?></a>
+                <?php foreach ($sections as $key => $section) :
+                    $url = '?page=' . esc_attr($menu_slug) . '&tab=' . esc_attr($key);
+                    $nav_tab = $active_tab == $key ? 'nav-tab-active' : '';
+                ?>
+                    <a href="<?php echo esc_url($url); ?>" class="nav-tab <?php echo esc_attr($nav_tab); ?>"><?php echo esc_html($section['title']); ?></a>
                 <?php endforeach; ?>
             </h2>
             <form method="post" action="options.php">
                 <?php
+
                 settings_fields($menu_slug);
                 do_settings_sections($menu_slug . '-' . $active_tab);
                 // display none other settings
@@ -360,10 +364,10 @@ class Settings
                             case 'callback':
                             case 'codemirror':
                             case 'textarea':
-                                echo '<textarea name="' . self::prefix($key) . '" class="hidden">' . get_option(self::prefix($key), $option['default']) . '</textarea>';
+                                echo '<textarea name="' . esc_attr(self::prefix($key)) . '" class="hidden">' . wp_kses(get_option(self::prefix($key), $option['default']), self::getAllowedTags()) . '</textarea>';
                                 break;
                             default:
-                                echo '<input type="hidden" name="' . self::prefix($key) . '" value="' . get_option(self::prefix($key), $option['default']) . '">';
+                                echo '<input type="hidden" name="' . esc_attr(self::prefix($key)) . '" value="' . wp_kses(get_option(self::prefix($key), $option['default']), self::getAllowedTags()) . '">';
                                 break;
                         }
                     }

@@ -53,19 +53,19 @@ class Define
             $header_x_ollama = wp_remote_retrieve_header($response, 'x-ollama-proxy');
 
             if (is_wp_error($response)) {
-                echo '<p class="description"><span class="material-symbols-outlined">edit</span><span>' . __('Please enter a valid URL.', 'alpaca-bot') . '</span></p>';
+                echo '<p class="description"><span class="material-symbols-outlined">edit</span><span>' . esc_html_e('Please enter a valid URL.', 'alpaca-bot') . '</span></p>';
             } elseif (preg_match('/^"?(Ollama is running)"?$/', $body)) {
                 if ($header_x_ollama) {
-                    echo '<p class="description"><span class="material-symbols-outlined label-success">verified</span><span>' . __('Alpaca Bot Proxy connection established.', 'alpaca-bot') . '</span></p>';
+                    echo '<p class="description"><span class="material-symbols-outlined label-success">verified</span><span>' . esc_html_e('Alpaca Bot Proxy connection established.', 'alpaca-bot') . '</span></p>';
                 } else {
-                    echo '<p class="description"><span class="material-symbols-outlined label-success">check_circle</span><span>' . __('Verified connection.', 'alpaca-bot') . '</span></p>';
+                    echo '<p class="description"><span class="material-symbols-outlined label-success">check_circle</span><span>' . esc_html_e('Verified connection.', 'alpaca-bot') . '</span></p>';
                 }
             } else {
-                echo '<p class="description"><span class="material-symbols-outlined label-error">error</span><span>' . __('Invalid response.', 'alpaca-bot') . '</span></p>';
+                echo '<p class="description"><span class="material-symbols-outlined label-error">error</span><span>' . esc_html_e('Invalid response.', 'alpaca-bot') . '</span></p>';
             }
         } elseif (empty($api_url)) {
-            $patreon = '<a href="' . Define::support()['patreon']['url'] . '">' . Define::support()['patreon']['title'] . '</a>';
-            echo '<p class="description"><span>No server? We got you covered! ' . $patreon . ' and share our community hosted instances.<span></p>';
+            $patreon = '<a href="' . esc_url(Define::support()['patreon']['url']) . '">' . Define::support()['patreon']['title'] . '</a>';
+            echo '<p class="description"><span>No server? We got you covered! ' . wp_kses($patreon, Options::getAllowedTags()) . ' and share our community hosted instances.<span></p>';
         }
     }
 
