@@ -39,6 +39,55 @@ class Settings
         return $active_tab;
     }
 
+    public static function getAllowedTags(): array
+    {
+        return [
+            'a' => [
+                'href' => [],
+                'title' => [],
+            ],
+            'abbr' => [
+                'title' => [],
+            ],
+            'b' => [],
+            'blockquote' => [
+                'cite' => [],
+            ],
+            'br' => [],
+            'cite' => [
+                'title' => [],
+            ],
+            'code' => [
+                'class' => [],
+            ],
+            'del' => [
+                'datetime' => [],
+                'title' => [],
+            ],
+            'em' => [],
+            'i' => [],
+            'q' => [
+                'cite' => [],
+                'title' => [],
+            ],
+            's' => [],
+            'script' => [
+                'type' => [],
+            ],
+            'small' => [],
+            'span' => [
+                'class' => [],
+            ],
+            'strike' => [],
+            'strong' => [],
+            'time' => [
+                'class' => [],
+                'datetime' => [],
+            ],
+            'zero-md' => [],
+        ];
+    }
+
     public function getMenuType(): string
     {
         if (self::validateValue($this->parent_slug)) {
