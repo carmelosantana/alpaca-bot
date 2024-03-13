@@ -14,7 +14,7 @@ class Screen
     {
         // Apply to footer only on this page
         add_filter('admin_footer_text', function () {
-            echo 'Always verify important information to ensure accuracy.';
+            esc_html_e('Always verify important information to ensure accuracy.', 'alpaca-bot');
         });
 
         // Change the footer version to the plugin version
