@@ -62,8 +62,9 @@ class Render
 				'ID' => $post_id,
 			];
 		} else {
-			$post_title = $this->getSummarizedTitle($json['message']['content']);
-			$stripped_json = wp_strip_all_tags($json['message']['content']);
+			$message_content = $json['message']['content'] ?? '';
+			$post_title = $this->getSummarizedTitle($message_content);
+			$stripped_json = wp_strip_all_tags($message_content);
 
 			$post = [
 				'post_title' => $post_title,
