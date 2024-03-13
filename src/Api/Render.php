@@ -571,7 +571,7 @@ class Render
 	{
 		// check if post_content is set	and not empty
 		if (!$this->getPostInput('post_content')) {
-			$this->getAdminNotice('Post content is empty.', 'notice-error');
+			$this->outputAdminNotice('Post content is empty.', 'notice-error');
 			return;
 		}
 
@@ -586,12 +586,12 @@ class Render
 
 		// if post_id is not an integer then output error
 		if (!is_int($post_id)) {
-			$this->getAdminNotice('Error inserting post.', 'notice-error');
+			$this->outputAdminNotice('Error inserting post.', 'notice-error');
 			return;
 		}
 
 		// output success message with link to post
-		$this->getAdminNotice(ucfirst($post_type) . ' drafted. <a href="' . get_edit_post_link($post_id) . '">Edit ' . ucfirst($post_type) . '</a>');
+		$this->outputAdminNotice(ucfirst($post_type) . ' drafted. <a href="' . get_edit_post_link($post_id) . '">Edit ' . ucfirst($post_type) . '</a>');
 	}
 
 	public function getWpNonce()
