@@ -58,6 +58,7 @@ class Post
         unset($columns['title']);
         unset($columns['date']);
 
+        $columns['author'] = __('User', 'alpaca-bot');
         $columns['time'] = __('Time Ago', 'alpaca-bot');
         $columns['model'] = __('Model', 'alpaca-bot');
         $columns['total_duration'] = __('Total Duration', 'alpaca-bot');
