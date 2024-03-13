@@ -95,7 +95,7 @@ class Define
                 'description' => __('The time in seconds to wait for a response from <a href="https://github.com/ollama/ollama">Ollama</a>.', 'alpaca-bot'),
                 'section' => 'api',
                 'type' => 'number',
-                'default' => 60,
+                'placeholder' => 60,
             ],
             'default_model' => [
                 'label' => __('Default Model', 'alpaca-bot'),
