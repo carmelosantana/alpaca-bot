@@ -551,9 +551,9 @@ class Render
 			$id = !empty($id) ? ' id="' . $id . '"' : null;
 			$class = !empty($class) ? ' class="' . $class . '"' : null;
 
-			echo esc_html('<' . $tag . $id . $class . '>', Options::getAllowedTags());
+			echo wp_kses('<' . $tag . $id . $class . '>', Options::getAllowedTags());
 		} else {
-			echo esc_html('</' . $tag . '>', Options::getAllowedTags());
+			echo wp_kses('</' . $tag . '>', Options::getAllowedTags());
 		}
 	}
 
