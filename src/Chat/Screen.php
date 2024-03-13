@@ -47,7 +47,7 @@ class Screen
                         <div class="ab-chat-logs">
                             <?php if (Options::get('save_chat_history')) { ?>
                                 <p><strong>Chat History</strong></p>
-                                <select name="chat_history_id" id="chat_history_id" <?php echo esc_html($htmx->getHxMultiSwapLoadChat('wp/chat', 'change')); ?>></select>
+                                <select name="chat_history_id" id="chat_history_id" <?php echo wp_kses($htmx->getHxMultiSwapLoadChat('wp/chat', 'change'), Options::getAllowedTags()); ?>></select>
                                 <input type="hidden" hx-get="<?php echo esc_url($htmx->getRenderEndpoint('wp/history')); ?>" hx-trigger="load" hx-target="#chat_history_id">
                             <?php } ?>
                         </div>
