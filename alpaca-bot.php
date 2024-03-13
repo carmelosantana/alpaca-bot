@@ -3,11 +3,12 @@
 Plugin Name: Alpaca Bot
 Plugin URI: https://github.com/carmelosantana/alpaca-bot
 Description: A privately hosted WordPress AI chatbot.
-Version: 0.4.9
+Version: 0.4.10
 Author: Carmelo Santana
 Author URI: https://carmelosantana.com/
 License: GNU General Public License v2 or later
 License URI: http://www.gnu.org/licenses/gpl-2.0.html
+Requires at least: 6.4
 */
 
 // Defines
