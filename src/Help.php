@@ -57,7 +57,7 @@ class Help
             request_filesystem_credentials($url, '', true, false, null);
             return;
         }
-        
+
         // Load README.md
         global $wp_filesystem;
         $readme = $wp_filesystem->get_contents(AB_DIR_PATH . 'README.md');
@@ -88,7 +88,7 @@ class Help
 
             $screen->add_help_tab(array(
                 'id' => Options::appendPrefix($title),
-                'title' => __($title),
+                'title' => $title,
                 'content' => $content,
             ));
         }

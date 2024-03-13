@@ -20,11 +20,11 @@ class Post
     public function register(): void
     {
         $labels = array(
-            'name' => _x('Logs', 'Post type general name', AB_SLUG),
-            'singular_name' => _x('Log', 'Post type singular name', AB_SLUG),
-            'menu_name' => _x('Logs', 'Admin Menu text', AB_SLUG),
-            'name_admin_bar' => _x('Log', 'Add New on Toolbar', AB_SLUG),
-            'all_items' => __('Logs', AB_SLUG),
+            'name' => _x('Logs', 'Post type general name', 'alpaca-bot'),
+            'singular_name' => _x('Log', 'Post type singular name', 'alpaca-bot'),
+            'menu_name' => _x('Logs', 'Admin Menu text', 'alpaca-bot'),
+            'name_admin_bar' => _x('Log', 'Add New on Toolbar', 'alpaca-bot'),
+            'all_items' => __('Logs', 'alpaca-bot'),
         );
 
         $args = array(
@@ -53,12 +53,12 @@ class Post
         unset($columns['title']);
         unset($columns['date']);
 
-        $columns['time'] = __('Time Ago', AB_SLUG);
-        $columns['model'] = __('Model', AB_SLUG);
-        $columns['total_duration'] = __('Total Duration', AB_SLUG);
-        $columns['prompt_eval_count'] = __('Prompt Eval Count', AB_SLUG);
-        $columns['eval_count'] = __('Eval Count', AB_SLUG);
-        $columns['tokens_per_second'] = __('Tokens/s', AB_SLUG);
+        $columns['time'] = __('Time Ago', 'alpaca-bot');
+        $columns['model'] = __('Model', 'alpaca-bot');
+        $columns['total_duration'] = __('Total Duration', 'alpaca-bot');
+        $columns['prompt_eval_count'] = __('Prompt Eval Count', 'alpaca-bot');
+        $columns['eval_count'] = __('Eval Count', 'alpaca-bot');
+        $columns['tokens_per_second'] = __('Tokens/s', 'alpaca-bot');
 
         return $columns;
     }

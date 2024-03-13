@@ -22,8 +22,8 @@ if (!file_exists($composer = plugin_dir_path(__FILE__) . 'vendor/autoload.php'))
     trigger_error(
         sprintf(
             /* translators: %s: plugin name */
-            __('Error locating %s autoloader. Please run <code>composer install</code>.', AB_SLUG),
-            AB_TITLE
+            esc_html__('Error locating %s autoloader. Please run <code>composer install</code>.', 'alpaca-bot'),
+            esc_html__('Alpaca Bot', 'alpaca-bot')
         ),
         E_USER_ERROR
     );

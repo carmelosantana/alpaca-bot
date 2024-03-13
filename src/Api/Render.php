@@ -62,8 +62,9 @@ class Render
 				'ID' => $post_id,
 			];
 		} else {
-			$post_title = $this->getSummarizedTitle($json['message']['content']);
-			$stripped_json = wp_strip_all_tags($json['message']['content']);
+			$message_content = $json['message']['content'] ?? '';
+			$post_title = $this->getSummarizedTitle($message_content);
+			$stripped_json = wp_strip_all_tags($message_content);
 
 			$post = [
 				'post_title' => $post_title,
@@ -142,7 +143,7 @@ class Render
 
 	public function getAssistantAvatarImg($role)
 	{
-		return '<img src="' . $this->getAssistantAvatarUrl($role) . '" alt="gravatar">';
+		return '<img src="' . esc_url($this->getAssistantAvatarUrl($role)) . '" alt="gravatar">';
 	}
 
 	public function getAssistantAvatarUrl($role)
@@ -382,9 +383,7 @@ class Render
 			'author' => get_current_user_id(),
 			'post_type' => 'chat',
 			'numberposts' => -1,
-
 		]);
-		ray(get_current_user_id())->label('outputChatHistory');
 
 		// if posts output chat logs in foreach loop for select items, if not output empty disabled select option
 		echo '<option value="" disabled>Chat History</option>';
@@ -419,10 +418,10 @@ class Render
 
 				if ($optgroup != $last_optgroup) {
 					$last_optgroup = $optgroup;
-					echo '<optgroup label="' . $optgroup . '">';
+					echo '<optgroup label="' . esc_attr($optgroup) . '">';
 				}
 
-				echo '<option value="' . $post->ID . '">' . wp_trim_words($post->post_title, 8, '') . '</option>';
+				echo '<option value="' . esc_attr($post->ID) . '">' . esc_html(wp_trim_words($post->post_title, 8, '')) . '</option>';
 
 				if ($optgroup != $last_optgroup) {
 					echo '</optgroup>';
@@ -505,31 +504,26 @@ class Render
 		$out .= '</div>';	// .ab-chat-message-parts
 		$out .= '</div>';	// .ab-chat-message
 
-		echo $out;
+		echo wp_kses($out, Options::getAllowedTags());
 	}
 
-	public function getToolTip($message = '', $class = 'ab-tooltip-text')
-	{
-		return '<div class="' . $class . '">' . $message . '</div>';
-	}
-
-	public function getAdminNotice($message = '', $class = 'notice-success')
+	public function outputAdminNotice($message = '', $class = 'notice-success')
 	{
 		$id = 'ab-notice-' . uniqid();
 
 		$out = '<div class="notice ' . $class . ' is-dismissible" id="' . $id . '"><p>' . $message . '</p></div>';
 
-		return $out;
+		echo wp_kses($out, Options::getAllowedTags());
 	}
 
 	public function outputPostScript(string $class = '')
 	{
-		echo '<script type="text/javascript">smoothScrollTo(' . $class . ');</script>';
+		echo '<script type="text/javascript">smoothScrollTo(' . esc_js($class) . ');</script>';
 	}
 
 	public function outputScriptShowHide(string $id)
 	{
-		echo '<script type="text/javascript">showHide(' . $id . ');</script>';
+		echo '<script type="text/javascript">showHide(' . esc_js($id) . ');</script>';
 	}
 
 	public function outputHtmlTag($attributes = [])
@@ -557,39 +551,27 @@ class Render
 			$id = !empty($id) ? ' id="' . $id . '"' : null;
 			$class = !empty($class) ? ' class="' . $class . '"' : null;
 
-			echo '<' . $tag . $id . $class . '>';
+			echo esc_html('<' . $tag . $id . $class . '>', Options::getAllowedTags());
 		} else {
-			echo '</' . $tag . '>';
+			echo esc_html('</' . $tag . '>', Options::getAllowedTags());
 		}
 	}
 
 	public function outputHiddenFields(int $post_id)
 	{
-		echo '<input type="hidden" name="chat_id" id="chat_id" value="' . (string) $post_id . '">';
+		echo '<input type="hidden" name="chat_id" id="chat_id" value="' . esc_attr($post_id) . '">';
 	}
 
-	public function getHxMultiSwapLoadChat(string $endpoint, string $trigger)
+	public function getHxMultiSwapLoadChat(string $endpoint = 'htmx/chat', string $trigger = 'click')
 	{
-		return $this->getWpNonce($endpoint) . ' hx-post="' . $this->getRenderEndpoint($endpoint) . '" hx-trigger="' . $trigger . '" hx-ext="multi-swap" hx-swap="multi:#ab-response:beforeend,#chat_id:outerHTML" hx-disabled-elt="this" hx-indicator="#indicator"';
-	}
-
-
-	public function outputHxMultiSwapLoadChat(string $endpoint = 'htmx/chat', string $trigger = 'click')
-	{
-		echo $this->getHxMultiSwapLoadChat($endpoint, $trigger);
-	}
-
-	public function outputRenderEndpoint($endpoint)
-	{
-		$endpoint = $this->getRenderEndpoint($endpoint);
-		echo $endpoint;
+		return ' hx-post="' . $this->getRenderEndpoint($endpoint) . '" hx-trigger="' . $trigger . '" hx-ext="multi-swap" hx-swap="multi:#ab-response:beforeend,#chat_id:outerHTML" hx-disabled-elt="this" hx-indicator="#indicator"';
 	}
 
 	public function outputPostInsert($post_type = 'post')
 	{
 		// check if post_content is set	and not empty
 		if (!$this->getPostInput('post_content')) {
-			echo $this->getAdminNotice('Post content is empty.', 'notice-error');
+			$this->outputAdminNotice('Post content is empty.', 'notice-error');
 			return;
 		}
 
@@ -604,12 +586,12 @@ class Render
 
 		// if post_id is not an integer then output error
 		if (!is_int($post_id)) {
-			echo $this->getAdminNotice('Error inserting post.', 'notice-error');
+			$this->outputAdminNotice('Error inserting post.', 'notice-error');
 			return;
 		}
 
 		// output success message with link to post
-		echo $this->getAdminNotice(ucfirst($post_type) . ' drafted. <a href="' . get_edit_post_link($post_id) . '">Edit ' . ucfirst($post_type) . '</a>');
+		$this->outputAdminNotice(ucfirst($post_type) . ' drafted. <a href="' . get_edit_post_link($post_id) . '">Edit ' . ucfirst($post_type) . '</a>');
 	}
 
 	public function getWpNonce()
@@ -620,7 +602,7 @@ class Render
 
 	public function outputWpNonce()
 	{
-		echo $this->getWpNonce();
+		echo wp_kses($this->getWpNonce(), Options::getAllowedTags());
 	}
 
 	public function outputTags($tag = 'option')
@@ -632,35 +614,26 @@ class Render
 
 		// if no models found then output disabled option
 		if (!isset($json['models']) or empty($json['models'])) {
-			echo '<' . $tag . ' value="disabled" disabled>No models found</' . $tag . '>';
+			echo '<' . esc_html($tag) . ' value="disabled" disabled>No models found</' . esc_html($tag) . '>';
 			return;
 		}
 
 		// What are we doing?
-		echo '<' . $tag . ' value="disabled" disabled>Select a model</' . $tag . '>';
+		echo '<' . esc_html($tag) . ' value="disabled" disabled>Select a model</' . esc_html($tag) . '>';
 
 		// Loop through models and output options
 		foreach ($json['models'] as $model) {
 			if ($model['name'] == $default_model) {
-				echo '<' . $tag . ' value="' . $model['name'] . '" selected>' . $model['name'] . '</' . $tag . '>';
+				echo '<' . esc_html($tag) . ' value="' . esc_attr($model['name']) . '" selected>' . esc_html($model['name']) . '</' . esc_html($tag) . '>';
 				continue;
 			}
-			echo '<' . $tag . ' value="' . $model['name'] . '">' . $model['name'] . '</' . $tag . '>';
+			echo '<' . esc_html($tag) . ' value="' . esc_attr($model['name']) . '">' . esc_html($model['name']) . '</' . esc_html($tag) . '>';
 		}
 	}
 
 	public function getRenderEndpoint($endpoint)
 	{
 		return get_bloginfo('url') . '/wp-json/' . AB_SLUG . '/v1/' . $endpoint;
-	}
-
-	public function isRunning()
-	{
-		if ($this->ollama->isRunning()) {
-			echo '🟢 Online';
-		} else {
-			echo '🔴 Offline';
-		}
 	}
 
 	public function setPost($post)
@@ -720,10 +693,10 @@ class Render
 		if ($response) {
 			$time = time();
 			$class = 'fadeOut-' . $time;
-			echo 'Set as default <span class="' . $class . '">✔︎</span>';
+			echo 'Set as default <span class="' . esc_attr($class) . '">✔︎</span>';
 			echo '<script type="text/javascript">';
 			echo 'setTimeout(function() {';
-			echo 'document.querySelector(".' . $class . '").classList.add("fadeOut");';
+			echo 'document.querySelector(".' . esc_attr($class) . '").classList.add("fadeOut");';
 			echo '}, 2400);';
 			echo '</script>';
 		} else {

@@ -106,7 +106,7 @@ class AlpacaBot
         foreach ($notices as $notice) {
             $notice = wp_parse_args($notice, $default);
             if ($notice['condition']) {
-                echo '<div class="notice notice-error is-dismissible"><p>' . $notice['message'] . '</p></div>';
+                echo '<div class="notice notice-error is-dismissible"><p>' . wp_kses($notice['message'], Options::getAllowedTags()) . '</p></div>';
             }
         }
     }

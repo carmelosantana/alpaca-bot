@@ -45,7 +45,7 @@ class Agents
         wp_enqueue_style('prism', AB_DIR_URL . 'assets/css/prism.css', [], '1.29.0');
 
         // HTML
-        echo '<div class="wrap ' . AB_SLUG  . ' ' . Options::appendPrefix('options', '-') . '">';
+        echo '<div class="wrap ' . esc_attr(AB_SLUG  . ' ' . Options::appendPrefix('options', '-')) . '">';
         echo '<h1>Agents</h1>';
         echo '<p>Agents are shortcodes that help Alpaca Bot perform tasks.</p>';
         echo '<div class="ab-accordion">';
@@ -54,16 +54,16 @@ class Agents
 
         foreach ($agents as $slug => $agent) {
             $icon = $agent['icon'] ?? 'person_apron';
-            $icon = '<span class="material-symbols-outlined">' . $icon . '</span>';
+            $icon = '<span class="material-symbols-outlined">' . esc_html($icon) . '</span>';
 
-            echo '<button class="accordion-btn">' . $icon . ' <code>' . $slug . '</code> ' . $agent['description'] . '</button>';
+            echo '<button class="accordion-btn">' . wp_kses($icon, Options::getAllowedTags()) . ' <code>' . esc_html($slug) . '</code> ' . wp_kses($agent['description'], Options::getAllowedTags()) . '</button>';
             echo '<div class="panel">';
 
             if (isset($agent['arguments'])) {
                 echo '<h3>Arguments</h3>';
                 echo '<ul>';
                 foreach ($agent['arguments'] as $name => $arg) {
-                    echo '<li><i>' . $name . '</i> <code>' . $arg['type'] . '</code> ' . $arg['description'] . '</li>';
+                    echo '<li><i>' . esc_html($name) . '</i> <code>' . esc_html($arg['type']) . '</code> ' . wp_kses($arg['description'], Options::getAllowedTags()) . '</li>';
                 }
                 echo '</ul>';
             }
@@ -72,8 +72,8 @@ class Agents
                 echo '<h3>Examples</h3>';
 
                 foreach ($agent['examples'] as $example) {
-                    echo '<pre><code class="language-shortcode">' . $example[0] . '</code></pre>';
-                    echo '<p>' . $example[1] . '</p>';
+                    echo '<pre><code class="language-shortcode">' . esc_html($example[0]) . '</code></pre>';
+                    echo '<p>' . wp_kses($example[1], Options::getAllowedTags()) . '</p>';
                     echo '<hr>';
                 }
             }
@@ -82,7 +82,7 @@ class Agents
                 echo '<h3>References</h3>';
                 echo '<ul>';
                 foreach ($agent['references'] as $title => $url) {
-                    echo '<li><a href="' . $url . '" target="_blank">' . $title . '</a></li>';
+                    echo '<li><a href="' . esc_url($url) . '" target="_blank">' . esc_html($title) . '</a></li>';
                 }
                 echo '</ul>';
             }
