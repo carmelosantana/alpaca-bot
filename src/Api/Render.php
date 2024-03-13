@@ -383,9 +383,7 @@ class Render
 			'author' => get_current_user_id(),
 			'post_type' => 'chat',
 			'numberposts' => -1,
-
 		]);
-		ray(get_current_user_id())->label('outputChatHistory');
 
 		// if posts output chat logs in foreach loop for select items, if not output empty disabled select option
 		echo '<option value="" disabled>Chat History</option>';
