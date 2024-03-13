@@ -4,18 +4,19 @@ declare(strict_types=1);
 
 namespace CarmeloSantana\AlpacaBot\Log;
 
+use CarmeloSantana\AlpacaBot\Utils\Options;
+
 class Post
 {
     public function __construct()
     {
         add_action('init', [$this, 'register']);
-        add_action('admin_head', [$this, 'disableAddNew']);
-        add_action('admin_init', [$this, 'redirectToLogs']);
         add_action('manage_chat_log_posts_custom_column', [$this, 'customColumns'], 10, 2);
 
         add_filter('manage_chat_log_posts_columns', [$this, 'registerCustomColumns']);
         add_filter('manage_edit-chat_log_sortable_columns', [$this, 'sortableColumns']);
     }
+
     // add to alpaca-bot menu
     public function register(): void
     {
@@ -42,6 +43,10 @@ class Post
             'supports' => [
                 'author',
             ],
+            'capabilities' => [
+                'create_posts' => false,
+            ],
+            'map_meta_cap' => false,
         );
 
         register_post_type('chat_log', $args);
