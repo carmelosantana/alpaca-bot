@@ -472,13 +472,13 @@ class Render
 			case 'assistant':
 				// on click get innerhtml from response and send to wp/post/insert
 				$tools .= '<span aria-label="Save to post" class="hint--bottom hint--rounded">';
-				$tools .= '<span class="tools material-symbols-outlined rotate-push-pin" ' . $this->getWpNonce('wp/post/insert') . ' hx-post="' . $this->getRenderEndpoint('wp/post/insert') . '" hx-vars="post_content:getResponseInnerHTML(\'' . $response_id . '\')" hx-target="#' . $response_id . '" hx-swap="afterend">';
+				$tools .= '<span class="tools material-symbols-outlined rotate-push-pin" hx-post="' . $this->getRenderEndpoint('wp/post/insert') . '" hx-vars="post_content:getResponseInnerHTML(\'' . $response_id . '\')" hx-target="#' . $response_id . '" hx-swap="afterend">';
 				$tools .= 'push_pin';
 				$tools .= '</span>';
 				$tools .= '</span>';
 
 				// add page with note_add icon
-				$tools .= '<span aria-label="Save to page" class="tools hint--bottom hint--rounded material-symbols-outlined" ' . $this->getWpNonce('wp/page/insert') . ' hx-post="' . $this->getRenderEndpoint('wp/page/insert') . '" hx-vars="post_content:getResponseInnerHTML(\'' . $response_id . '\')" hx-target="#' . $response_id . '" hx-swap="afterend">';
+				$tools .= '<span aria-label="Save to page" class="tools hint--bottom hint--rounded material-symbols-outlined" hx-post="' . $this->getRenderEndpoint('wp/page/insert') . '" hx-vars="post_content:getResponseInnerHTML(\'' . $response_id . '\')" hx-target="#' . $response_id . '" hx-swap="afterend">';
 				$tools .= 'content_copy';
 				$tools .= '</span>';
 
@@ -551,9 +551,9 @@ class Render
 			$id = !empty($id) ? ' id="' . $id . '"' : null;
 			$class = !empty($class) ? ' class="' . $class . '"' : null;
 
-			echo esc_html('<' . $tag . $id . $class . '>', Options::getAllowedTags());
+			echo wp_kses('<' . $tag . $id . $class . '>', Options::getAllowedTags());
 		} else {
-			echo esc_html('</' . $tag . '>', Options::getAllowedTags());
+			echo wp_kses('</' . $tag . '>', Options::getAllowedTags());
 		}
 	}
 

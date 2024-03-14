@@ -4,18 +4,19 @@ declare(strict_types=1);
 
 namespace CarmeloSantana\AlpacaBot\Log;
 
+use CarmeloSantana\AlpacaBot\Utils\Options;
+
 class Post
 {
     public function __construct()
     {
         add_action('init', [$this, 'register']);
-        add_action('admin_head', [$this, 'disableAddNew']);
-        add_action('admin_init', [$this, 'redirectToLogs']);
         add_action('manage_chat_log_posts_custom_column', [$this, 'customColumns'], 10, 2);
 
         add_filter('manage_chat_log_posts_columns', [$this, 'registerCustomColumns']);
         add_filter('manage_edit-chat_log_sortable_columns', [$this, 'sortableColumns']);
     }
+
     // add to alpaca-bot menu
     public function register(): void
     {
@@ -42,6 +43,10 @@ class Post
             'supports' => [
                 'author',
             ],
+            'capabilities' => [
+                'create_posts' => false,
+            ],
+            'map_meta_cap' => false,
         );
 
         register_post_type('chat_log', $args);
@@ -53,6 +58,7 @@ class Post
         unset($columns['title']);
         unset($columns['date']);
 
+        $columns['author'] = __('User', 'alpaca-bot');
         $columns['time'] = __('Time Ago', 'alpaca-bot');
         $columns['model'] = __('Model', 'alpaca-bot');
         $columns['total_duration'] = __('Total Duration', 'alpaca-bot');
@@ -103,46 +109,13 @@ class Post
                 break;
         }
 
-        echo $out;
-    }
-
-    // disable add new post
-    public function disableAddNew()
-    {
-        // if screen is post_type = log, disable add new
-        $post_type = get_current_screen()->post_type ?? false;
-        if ($post_type == 'chat_log') {
-            echo '<style>
-                .page-title-action {
-                    display: none !important;
-                }
-            </style>';
-        }
-    }
-
-    // redirect away from post-new.php?post_type=log
-    public function redirectToLogs()
-    {
-        global $pagenow;
-
-        $post_type = $_GET['post_type'] ?? false;
-
-        if (is_admin() and $pagenow == 'post-new.php' and $post_type == 'chat_log') {
-            wp_redirect(admin_url('edit.php?post_type=chat_log'));
-            exit;
-        }
+        echo wp_kses($out, Options::getAllowedTags());
     }
 
     // make custom columns sortable
     public function sortableColumns($columns)
     {
-        $columns['total_duration'] = 'total_duration';
-        $columns['load_duration'] = 'load_duration';
-        $columns['prompt_eval_count'] = 'prompt_eval_count';
-        $columns['prompt_eval_duration'] = 'prompt_eval_duration';
-        $columns['eval_count'] = 'eval_count';
-        $columns['eval_duration'] = 'eval_duration';
-        $columns['tokens_per_second'] = 'tokens_per_second';
+        $columns['time'] = 'date';
 
         return $columns;
     }

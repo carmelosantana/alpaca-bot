@@ -53,15 +53,15 @@ class Define
             $header_x_ollama = wp_remote_retrieve_header($response, 'x-ollama-proxy');
 
             if (is_wp_error($response)) {
-                echo '<p class="description"><span class="material-symbols-outlined">edit</span><span>' . esc_html_e('Please enter a valid URL.', 'alpaca-bot') . '</span></p>';
+                echo '<p class="description"><span class="material-symbols-outlined">edit</span><span>' . esc_html__('Please enter a valid URL.', 'alpaca-bot') . '</span></p>';
             } elseif (preg_match('/^"?(Ollama is running)"?$/', $body)) {
                 if ($header_x_ollama) {
-                    echo '<p class="description"><span class="material-symbols-outlined label-success">verified</span><span>' . esc_html_e('Alpaca Bot Proxy connection established.', 'alpaca-bot') . '</span></p>';
+                    echo '<p class="description"><span class="material-symbols-outlined label-success">verified</span><span>' . esc_html__('Alpaca Bot Proxy connection established.', 'alpaca-bot') . '</span></p>';
                 } else {
-                    echo '<p class="description"><span class="material-symbols-outlined label-success">check_circle</span><span>' . esc_html_e('Verified connection.', 'alpaca-bot') . '</span></p>';
+                    echo '<p class="description"><span class="material-symbols-outlined label-success">check_circle</span><span>' . esc_html__('Verified connection.', 'alpaca-bot') . '</span></p>';
                 }
             } else {
-                echo '<p class="description"><span class="material-symbols-outlined label-error">error</span><span>' . esc_html_e('Invalid response.', 'alpaca-bot') . '</span></p>';
+                echo '<p class="description"><span class="material-symbols-outlined label-error">error</span><span>' . esc_html__('Invalid response.', 'alpaca-bot') . '</span></p>';
             }
         } elseif (empty($api_url)) {
             $patreon = '<a href="' . esc_url(Define::support()['patreon']['url']) . '">' . Define::support()['patreon']['title'] . '</a>';
@@ -95,7 +95,7 @@ class Define
                 'description' => __('The time in seconds to wait for a response from <a href="https://github.com/ollama/ollama">Ollama</a>.', 'alpaca-bot'),
                 'section' => 'api',
                 'type' => 'number',
-                'default' => 60,
+                'placeholder' => 60,
             ],
             'default_model' => [
                 'label' => __('Default Model', 'alpaca-bot'),

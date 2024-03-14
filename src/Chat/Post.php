@@ -24,6 +24,10 @@ class Post
             // Debug
             'public' => false,
             'show_in_menu' => false,
+            'capabilities' => [
+                'create_posts' => false,
+            ],
+            'map_meta_cap' => false,
         ]);
     }
 }

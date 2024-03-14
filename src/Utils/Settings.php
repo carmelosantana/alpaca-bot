@@ -41,6 +41,25 @@ class Settings
 
     public static function getAllowedTags(): array
     {
+        $htmx = [
+            'aria-label' => [],
+            'class' => [],
+            'id' => [],
+            'onclick' => [],
+            'hx-boost' => [],
+            'hx-disabled-elt' => [],
+            'hx-ext' => [],
+            'hx-get' => [],
+            'hx-indicator' => [],
+            'hx-headers' => [],
+            'hx-post' => [],
+            'hx-target' => [],
+            'hx-trigger' => [],
+            'hx-swap' => [],
+            'hx-vals' => [],
+            'hx-vars' => [],
+        ];
+
         return [
             'a' => [
                 'href' => [],
@@ -64,8 +83,34 @@ class Settings
                 'datetime' => [],
                 'title' => [],
             ],
+            'div' => [
+                'class' => [],
+                'id' => [],
+            ],
             'em' => [],
             'i' => [],
+            'img' => [
+                'alt' => [],
+                'class' => [],
+                'height' => [],
+                'src' => [],
+                'width' => [],
+            ],
+            'input' => [
+                'checked' => [],
+                'class' => [],
+                'disabled' => [],
+                'id' => [],
+                'name' => [],
+                'readonly' => [],
+                'type' => [],
+                'value' => [],
+            ],
+            'p' => [
+                'class' => [],
+                'id' => [],
+            ],
+            'pre' => [],
             'q' => [
                 'cite' => [],
                 'title' => [],
@@ -75,9 +120,7 @@ class Settings
                 'type' => [],
             ],
             'small' => [],
-            'span' => [
-                'class' => [],
-            ],
+            'span' => $htmx,
             'strike' => [],
             'strong' => [],
             'time' => [

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace CarmeloSantana\AlpacaBot\Api;
 
+use CarmeloSantana\AlpacaBot\Define;
 use CarmeloSantana\AlpacaBot\Api\Tools;
 use CarmeloSantana\AlpacaBot\Utils\Options;
 
@@ -90,7 +91,7 @@ class Ollama
         $hardcode = [
             'stream' => false,
             'keep_alive' => '5m',
-            'timeout' => Options::get('ollama_timeout'),
+            'timeout' => Options::getPlaceholder('ollama_timeout', Define::fields()),
         ];
         $args = wp_parse_args($hardcode, $args);
 
@@ -128,7 +129,7 @@ class Ollama
             'endpoint' => '',
             'json_decode' => true,
             'method' => 'GET',
-            'timeout' => Options::get('ollama_timeout'),
+            'timeout' => Options::getPlaceholder('ollama_timeout', Define::fields()),
         ]);
 
         $url = $this->getEndpoint($options['endpoint']);
