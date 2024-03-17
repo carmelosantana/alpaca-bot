@@ -51,7 +51,7 @@ class Render
 	public function addChatLog($body, $json, int $post_id)
 	{
 		// check if saving is enabled
-		if (!Options::get('save_chat_history')) {
+		if (!Options::get('chat_history_save')) {
 			return $post_id;
 		}
 

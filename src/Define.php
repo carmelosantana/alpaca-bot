@@ -116,7 +116,7 @@ class Define
                 'section' => 'chat',
                 'default' => true,
             ],
-            'save_chat_history' => [
+            'chat_history_save' => [
                 'label' => __('Save chat history?', 'alpaca-bot'),
                 'type' => 'radio',
                 'options' => [
