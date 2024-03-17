@@ -64,12 +64,20 @@ class Define
         }
     }
 
+    public static function fieldAvatarPreview()
+    {
+        $avatar = Options::getPlaceholder('default_avatar', self::fields());
+        if ($avatar) {
+            echo '<p><img src="' . esc_url($avatar) . '" style="width: 32px; height: 32px; border-radius: 50%;"></p>';
+        }
+    }
+
     public static function fields()
     {
         return [
             'api_url' => [
                 'label' => __('Ollama API URL', 'alpaca-bot'),
-                'description' => __('The URL of your <a href="https://github.com/ollama/ollama">Ollama</a> installation.', 'alpaca-bot'),
+                'description' => __('The URL of your <a href="https://github.com/ollama/ollama">Ollama</a> installation, without trailing slash.', 'alpaca-bot'),
                 'placeholder' => 'http://localhost:11434',
                 'section' => 'api',
                 'description_callback' => [__CLASS__, 'fieldApiUrlValidate'],
