@@ -126,7 +126,14 @@ class Define
                 'section' => 'chat',
                 'default' => true,
             ],
-            'log_chat_response' => [
+            'chat_history_limit' => [
+                'label' => __('Limit chat history', 'alpaca-bot'),
+                'description' => __('The number of chat messages to send to the model. Set to 0 to send all messages. Sending more than a few messages may result in losing context and increased token usage.', 'alpaca-bot'),
+                'section' => 'chat',
+                'type' => 'number',
+                'placeholder' => 5,
+            ],
+            'chat_response_log' => [
                 'label' => __('Log chat response?', 'alpaca-bot'),
                 'description' => __('Log additional information provided by the completion. This does not include conversation history.', 'alpaca-bot'),
                 'type' => 'radio',

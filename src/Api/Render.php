@@ -192,6 +192,11 @@ class Render
 
 				// process messages to match api request
 				if (isset($messages_raw) and is_array($messages_raw)) {
+					// limit chat history
+					if (Options::getPlaceholder('chat_history_limit') > 0) {
+						$messages_raw = array_slice($messages_raw, -Options::getPlaceholder('chat_history_limit'));
+					}
+
 					foreach ($messages_raw as $message) {
 						$messages[] = [
 							'role' => (is_int($message['message']['role']) ? 'user' : 'assistant'),
