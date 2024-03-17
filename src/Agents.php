@@ -148,7 +148,12 @@ class Agents
                 return 'Error: Tag not found.';
         }
 
-        $cache->set($response);
+        if (Options::validateValue($response)) {
+            $cache->set($response);
+            return $response;
+        } else {
+            return 'Error: No content returned.';
+        }
 
         return $response;
     }
@@ -175,13 +180,6 @@ class Agents
             }
         }
 
-        // remove atts that don't belong
-        foreach ($atts as $key => $value) {
-            if (!isset($agent['arguments'][$key])) {
-                unset($atts[$key]);
-            }
-        }
-
         // if valid callback $agent['callback']
         if (is_callable($agent['callback'])) {
             $content = call_user_func($agent['callback'], $atts, $content);
@@ -199,20 +197,8 @@ class Agents
 
         $atts = wp_parse_args($atts, $def);
 
-        $cache = new Cache($atts, $content, $tag);
-
-        $response = $cache->get();
-
-        if ($response) {
-            return $response;
-        }
-
         $ollama = new Ollama();
 
-        $response = $ollama->generate($atts);
-
-        $cache->set($response);
-
-        return $response;
+        return $ollama->apiGenerate($atts);
     }
 }
