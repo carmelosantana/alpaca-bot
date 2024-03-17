@@ -8,7 +8,7 @@ use CarmeloSantana\AlpacaBot\Api\Ollama;
 use CarmeloSantana\AlpacaBot\Utils\Options;
 
 class Define
-{    
+{
     public static function getModels()
     {
         if (Options::get('api_url')) {
@@ -164,7 +164,160 @@ class Define
                 'section' => 'privacy',
                 'default' => false,
             ],
+            'default_avatar' => [
+                'label' => __('Default Avatar', 'alpaca-bot'),
+                'description' => __('The URL of the default avatar to use for the chat.', 'alpaca-bot'),
+                'section' => 'assistant',
+                'type' => 'media',
+                'placeholder' => esc_url(AB_DIR_URL . 'assets/img/ollama-large.png'),
+                'description_callback' => [__CLASS__, 'fieldAvatarPreview'],
+            ],
+            'default_template' => [
+                'label' => __('Default Template', 'alpaca-bot'),
+                'description' => __('The <code>TEMPLATE</code> to be passed into the model. It may include (optionally) a system message, a user\'s message and the response from the model. Note: syntax may be model specific. Templates use Go <a href="https://pkg.go.dev/text/template">template syntax</a>.', 'alpaca-bot'),
+                'section' => 'assistant',
+                'type' => 'textarea',
+                'placeholder' => '"""{{ if .System }}<|im_start|>system
+{{ .System }}<|im_end|>
+{{ end }}{{ if .Prompt }}<|im_start|>user
+{{ .Prompt }}<|im_end|>
+{{ end }}<|im_start|>assistant
+"""',
+            ],
+            'default_system' => [
+                'label' => __('Default System Message', 'alpaca-bot'),
+                'description' => __('The <code>SYSTEM</code> instruction specifies the system message to be used in the template, if applicable.', 'alpaca-bot'),
+                'section' => 'assistant',
+                'type' => 'textarea',
+                'placeholder' => '"""<system message>"""',
+            ],
+            'default_mirostat' => [
+                'label' => __('Mirostat', 'alpaca-bot'),
+                'description' => __('Enable Mirostat sampling for controlling perplexity. (default: 0, 0 = disabled, 1 = Mirostat, 2 = Mirostat 2.0)', 'alpaca-bot'),
+                'section' => 'parameters',
+                'type' => 'number',
+                'placeholder' => 0,
+            ],
+            'default_mirostat_eta' => [
+                'label' => __('Mirostat Eta', 'alpaca-bot'),
+                'description' => __('Influences how quickly the algorithm responds to feedback from the generated text. A lower learning rate will result in slower adjustments, while a higher learning rate will make the algorithm more responsive. (Default: 0.1)', 'alpaca-bot'),
+                'section' => 'parameters',
+                'type' => 'number',
+                'placeholder' => 0.1,
+            ],
+            'default_mirostat_tau' => [
+                'label' => __('Mirostat Tau', 'alpaca-bot'),
+                'description' => __('Controls the balance between coherence and diversity of the output. A lower value will result in more focused and coherent text. (Default: 5.0)', 'alpaca-bot'),
+                'section' => 'parameters',
+                'type' => 'number',
+                'placeholder' => 5.0,
+            ],
+            'default_num_ctx' => [
+                'label' => __('Num Ctx', 'alpaca-bot'),
+                'description' => __('Sets the size of the context window used to generate the next token. (Default: 2048)', 'alpaca-bot'),
+                'section' => 'parameters',
+                'type' => 'number',
+                'placeholder' => 2048,
+            ],
+            'default_num_gqa' => [
+                'label' => __('Num GQA', 'alpaca-bot'),
+                'description' => __('The number of GQA groups in the transformer layer. Required for some models, for example it is 8 for llama2:70b', 'alpaca-bot'),
+                'section' => 'parameters',
+                'type' => 'number',
+                'placeholder' => 1,
+            ],
+            'default_num_gpu' => [
+                'label' => __('Num GPU', 'alpaca-bot'),
+                'description' => __('The number of layers to send to the GPU(s). On macOS it defaults to 1 to enable metal support, 0 to disable.', 'alpaca-bot'),
+                'section' => 'parameters',
+                'type' => 'number',
+                'placeholder' => 50,
+            ],
+            'default_num_thread' => [
+                'label' => __('Num Thread', 'alpaca-bot'),
+                'description' => __('Sets the number of threads to use during computation. By default, Ollama will detect this for optimal performance. It is recommended to set this value to the number of physical CPU cores your system has (as opposed to the logical number of cores).', 'alpaca-bot'),
+                'section' => 'parameters',
+                'type' => 'number',
+                'placeholder' => 8,
+            ],
+            'default_repeat_last_n' => [
+                'label' => __('Repeat Last N', 'alpaca-bot'),
+                'description' => __('Sets how far back for the model to look back to prevent repetition. (Default: 64, 0 = disabled, -1 = num_ctx)', 'alpaca-bot'),
+                'section' => 'parameters',
+                'type' => 'number',
+                'placeholder' => 64,
+            ],
+            'default_repeat_penalty' => [
+                'label' => __('Repeat Penalty', 'alpaca-bot'),
+                'description' => __('Sets how strongly to penalize repetitions. A higher value (e.g., 1.5) will penalize repetitions more strongly, while a lower value (e.g., 0.9) will be more lenient. (Default: 1.1)', 'alpaca-bot'),
+                'section' => 'parameters',
+                'type' => 'number',
+                'placeholder' => 1.1,
+            ],
+            'default_temperature' => [
+                'label' => __('Temperature', 'alpaca-bot'),
+                'description' => __('The temperature of the model. Increasing the temperature will make the model answer more creatively. (Default: 0.8)', 'alpaca-bot'),
+                'section' => 'parameters',
+                'type' => 'number',
+                'placeholder' => 0.8,
+            ],
+            'default_seed' => [
+                'label' => __('Seed', 'alpaca-bot'),
+                'description' => __('Sets the random number seed to use for generation. Setting this to a specific number will make the model generate the same text for the same prompt. (Default: 0)', 'alpaca-bot'),
+                'section' => 'parameters',
+                'type' => 'number',
+                'placeholder' => 0,
+            ],
+            'default_stop' => [
+                'label' => __('Stop', 'alpaca-bot'),
+                'description' => __('Sets the stop sequences to use. When this pattern is encountered the LLM will stop generating text and return. Multiple stop patterns may be set by specifying multiple separate stop parameters in a modelfile.', 'alpaca-bot'),
+                'section' => 'parameters',
+                'placeholder' => 'AI assistant:',
+            ],
+            'default_tfs_z' => [
+                'label' => __('TFS Z', 'alpaca-bot'),
+                'description' => __('Tail free sampling is used to reduce the impact of less probable tokens from the output. A higher value (e.g., 2.0) will reduce the impact more, while a value of 1.0 disables this setting. (default: 1)', 'alpaca-bot'),
+                'section' => 'parameters',
+                'type' => 'number',
+                'placeholder' => 1,
+            ],
+            'default_num_predict' => [
+                'label' => __('Num Predict', 'alpaca-bot'),
+                'description' => __('Maximum number of tokens to predict when generating text. (Default: 128, -1 = infinite generation, -2 = fill context)', 'alpaca-bot'),
+                'section' => 'parameters',
+                'type' => 'number',
+                'placeholder' => 128,
+            ],
+            'default_top_k' => [
+                'label' => __('Top K', 'alpaca-bot'),
+                'description' => __('Reduces the probability of generating nonsense. A higher value (e.g. 100) will give more diverse answers, while a lower value (e.g. 10) will be more conservative. (Default: 40)', 'alpaca-bot'),
+                'section' => 'parameters',
+                'type' => 'number',
+                'placeholder' => 40,
+            ],
+            'default_top_p' => [
+                'label' => __('Top P', 'alpaca-bot'),
+                'description' => __('Works together with top-k. A higher value (e.g., 0.95) will lead to more diverse text, while a lower value (e.g., 0.5) will generate more focused and conservative text. (Default: 0.9)', 'alpaca-bot'),
+                'section' => 'parameters',
+                'type' => 'number',
+                'placeholder' => 0.9,
+            ],
+
         ];
+    }
+
+    public static function getFieldsInSection(string $section)
+    {
+        $fields = self::fields();
+        $fieldsInSection = [];
+
+        foreach ($fields as $key => $field) {
+            if ($field['section'] === $section) {
+                $fieldsInSection[$key] = $field;
+            }
+        }
+
+        return $fieldsInSection;
     }
 
     public static function sections()
@@ -177,6 +330,14 @@ class Define
             'chat' => [
                 'title' => __('Chat', 'alpaca-bot'),
                 'description' => __('Customize the user experience.', 'alpaca-bot'),
+            ],
+            'assistant' => [
+                'title' => __('Assistant', 'alpaca-bot'),
+                'description' => __('Override the modelfile and create a custom assistant. Applies to Agents and Alpaca shortcodes.', 'alpaca-bot'),
+            ],
+            'parameters' => [
+                'title' => __('Parameters', 'alpaca-bot'),
+                'description' => __('Sets the <a href="https://github.com/ollama/ollama/blob/main/docs/modelfile.md#parameter">parameters</a> for how <a href="https://github.com/ollama/ollama">Ollama</a> will run the model.', 'alpaca-bot'),
             ],
             'agents' => [
                 'title' => __('Agents', 'alpaca-bot'),
