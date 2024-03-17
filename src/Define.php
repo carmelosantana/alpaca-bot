@@ -4,34 +4,29 @@ declare(strict_types=1);
 
 namespace CarmeloSantana\AlpacaBot;
 
+use CarmeloSantana\AlpacaBot\Api\Ollama;
 use CarmeloSantana\AlpacaBot\Utils\Options;
 
 class Define
-{
-    private string $support_discord = 'https://discord.gg/vWQTHphkVt';
-
-    private string $support_patreon = 'https://www.patreon.com/carmelosantana';
-
+{    
     public static function getModels()
     {
         if (Options::get('api_url')) {
             // get transient
             $models = get_transient('ollama_models');
 
-            if ($models) {
+            if ($models and is_array($models) and count($models) > 0) {
                 return $models;
             }
 
-            $url = Options::get('api_url') . '/api/tags';
-            $response = wp_remote_get($url);
-
-            $body = wp_remote_retrieve_body($response);
-            $body = json_decode($body, true);
+            // get models from ollama
+            $ollama = new Ollama();
+            $response = $ollama->apiTags();
 
             // if ['models'] exists loop and set each key value to model[name]
-            if (isset($body['models'])) {
+            if ($response) {
                 $models = [];
-                foreach ($body['models'] as $model) {
+                foreach ($response as $model) {
                     $models[$model['name']] = $model['name'];
                 }
                 set_transient('ollama_models', $models, 60 * 60 * 5);

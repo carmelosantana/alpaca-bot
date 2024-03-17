@@ -36,9 +36,9 @@ class Summarize extends Agent
             'prompt' => $prompt,
             'model' => $atts['model'] ?? Options::get('default_model'),
         ];
-        
+                
         // send prompt to Ollama
-        $content = (new Ollama)->generate($args);
+        $content = (new Ollama)->apiGenerate($args);
 
         return $content ? $content : 'Error: No content returned from Ollama.';
     }

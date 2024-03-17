@@ -5,12 +5,71 @@ declare(strict_types=1);
 namespace CarmeloSantana\AlpacaBot\Api;
 
 use CarmeloSantana\AlpacaBot\Define;
-use CarmeloSantana\AlpacaBot\Api\Tools;
 use CarmeloSantana\AlpacaBot\Utils\Options;
 
 class Ollama
 {
-    // Add to log post type. save all values as post meta
+    private $api_endpoints = [
+        'chat',
+        'embedding',
+        'generate',
+        'tags',
+    ];
+
+    private $api_url;
+
+    private $allowed_parameters = [
+        'chat' => [
+            'model',
+            'messages',
+            'format',
+            'options',
+            'template',
+            'stream',
+            'keep_alive',
+        ],
+        'embedding' => [
+            'model',
+            'prompt',
+            'options',
+            'keep_alive',
+        ],
+        'generate' => [
+            'model',
+            'prompt',
+            'images',
+            'format',
+            'options',
+            'system',
+            'template',
+            'context',
+            'stream',
+            'raw',
+            'keep_alive',
+        ],
+    ];
+
+    private $log_keys = [
+        'model',
+        'total_duration',
+        'load_duration',
+        'prompt_eval_count',
+        'prompt_eval_duration',
+        'eval_count',
+        'eval_duration',
+    ];
+
+    public function __construct()
+    {
+        $this->api_url = $this->getApiUrl();
+    }
+
+    /**
+     * Adds Ollama token usage to log, no message data is stored.
+     *
+     * @param  array $message Response data to log
+     * @return int|false The post id of the log entry or false on fail/disabled
+     */
     private function addToLog(array $message): int|false
     {
         // check if logging is enabled
@@ -28,22 +87,12 @@ class Ollama
             'post_status' => 'publish',
         ]);
 
-        $keys = [
-            'model',
-            'total_duration',
-            'load_duration',
-            'prompt_eval_count',
-            'prompt_eval_duration',
-            'eval_count',
-            'eval_duration',
-        ];
-
         // if no post id, we have an error
         if (!$post_id) {
             return false;
         }
 
-        foreach ($keys as $key) {
+        foreach ($this->log_keys as $key) {
             $value = $message[$key] ?? null;
             if (Options::validateValue($value)) {
                 if (is_numeric($value)) {
@@ -56,7 +105,210 @@ class Ollama
         return $post_id;
     }
 
-    private function getApiUrl()
+    /**
+     * Adds Content-Type and Authorization headers if username and password are set.
+     *
+     * @return array
+     */
+    private function buildHeaders(): array
+    {
+        $headers = [
+            'Content-Type' => 'application/json',
+        ];
+
+        $username = Options::get('api_username');
+        $password = Options::get('api_password');
+
+        if ($username and $password) {
+            $headers['Authorization'] = 'Basic ' . base64_encode($username . ':' . $password);
+        }
+
+        return $headers;
+    }
+
+    /**
+     * Builds the parameters for the API request.
+     * Validates and merges custom parameters with default parameters.
+     * Removes any empty parameters.
+     * Removes any parameters that are not allowed.
+     *
+     * @param  array $args Parameters to send to the API
+     * @param  string $section Use section to check for allowed parameters
+     * @return array
+     */
+    private function buildParameters(array $args, string $section = ''): array
+    {
+        // Validate all options
+        $args = array_map([Options::class, 'validateValue'], $args);
+
+        // Default API parameters
+        $parameters = [
+            'stream' => false,
+            'keep_alive' => '5m',
+            'template' => Options::get('default_template', ''),
+        ];
+
+        // if generate, we can check for system
+        if ($section === 'generate') {
+            $parameters['system'] = Options::get('default_system', '');
+        }
+
+        // merge custom parameters with default parameters
+        $args = wp_parse_args($parameters, $args);
+
+        // Check for any custom model parameters in the options panel
+        foreach (Define::getFieldsInSection('parameters') as $option => $field) {
+            // remove default_ prefix
+            $key = str_replace('default_', '', $option);
+
+            // check args first, then option
+            $value = $args[$key] ?? Options::get($option);
+
+            if ($value) {
+                $options[$key] = $value;
+            }
+        }
+
+        // Add options
+        if (!empty($options)) {
+            // remove empty options
+            $options = array_filter($options, function ($value) {
+                return $value !== '';
+            });
+
+            // convert numeric strings to numbers
+            $options = array_map(function ($value) {
+                if (is_numeric($value) and strpos($value, '.') !== false) {
+                    return (float) $value;
+                } elseif (is_numeric($value)) {
+                    return (int) $value;
+                } else {
+                    return $value;
+                }
+            }, $options);
+
+            $args['options'] = $options;
+        }
+
+        // remove empty
+        $args = array_filter($args, function ($value) {
+            return $value !== '';
+        });
+
+        // remove any args that are not allowed
+        if (isset($this->allowed_parameters[$section])) {
+            $args = array_intersect_key($args, array_flip($this->allowed_parameters[$section]));
+        }
+
+        grfti($args);
+        return $args;
+    }
+
+    /**
+     * Returns the 'response' key or error message from the Ollama API response.
+     *
+     * @param  array $response The response from the Ollama API
+     * @return string
+     */
+    private function response(array $response): string
+    {
+        return $response['response'] ?? $response['error'] ?? __('Error: No response from Ollama.', 'alpaca-bot');
+    }
+
+    /**
+     * Builds request and sends to Ollama API.
+     *
+     * @param  string $url
+     * @param  array $options
+     * @param  bool $json_decode
+     * @return array
+     */
+    private function request(string $url, array $options, bool $json_decode = true): array|false
+    {
+        $default = [
+            'headers' => $this->buildHeaders(),
+            'timeout' => Options::get('ollama_timeout', 60),
+        ];
+
+        $options = wp_parse_args($options, $default);
+
+        $response = wp_remote_request($url, $options);
+        
+        if (is_wp_error($response)) {
+            return false;
+        }
+
+        $response = wp_remote_retrieve_body($response);
+
+        if ($json_decode and $response) {
+            $response = json_decode($response, true);
+        }
+
+        return $response;
+    }
+
+    /**
+     * Runs an API request that requires a model.
+     *
+     * @param  mixed $endpoint
+     * @param  mixed $args
+     * @return void
+     */
+    private function run(string $endpoint, array $args): array|false
+    {
+        $response = [];
+
+        $args = $this->buildParameters($args, $endpoint);
+
+        $options = [
+            'body' => wp_json_encode($args),
+            'method' => 'POST',
+        ];
+
+        $url = $this->getEndpoint($endpoint);
+
+        $response = $this->request($url, $options);
+
+        $this->addToLog($response);
+
+        return $response;
+    }
+
+    public function apiChat(array $args): array|false
+    {
+        $response = $this->run('chat', $args);
+
+        return $response;
+    }
+
+    public function apiEmbedding(array $args): array|false
+    {
+        $response = $this->run('embedding', $args);
+
+        return $response['embedding'] ?? false;
+    }
+
+    public function apiGenerate(array $args): array|false
+    {
+        $response = $this->run('generate', $args);
+
+        return $this->response($response);
+    }
+
+    public function apiTags(): array|false
+    {
+        $args = [
+            'method' => 'GET',
+        ];
+
+        $url = $this->getEndpoint('tags');
+
+        $response = $this->request($url, $args);
+
+        return $response['models'] ?? false;
+    }
+
+    public function getApiUrl(): string
     {
         $url = Options::get('api_url');
 
@@ -68,118 +320,12 @@ class Ollama
         return $url;
     }
 
-    public function generate($args = [])
+    public function getEndpoint($endpoint): string|false
     {
-        $url = $this->getEndpoint('generate');
-
-        if (!$url) {
+        if (!in_array($endpoint, $this->api_endpoints)) {
             return false;
         }
 
-        // convert booleans
-        $args = array_map(function ($value) {
-            if ($value === 'true') {
-                return true;
-            } elseif ($value === 'false') {
-                return false;
-            } else {
-                return $value;
-            }
-        }, $args);
-
-        // hardcode
-        $hardcode = [
-            'stream' => false,
-            'keep_alive' => '5m',
-            'timeout' => Options::getPlaceholder('ollama_timeout', Define::fields()),
-        ];
-        $args = wp_parse_args($hardcode, $args);
-
-        // remove empty args
-        $args = array_filter($args, function ($value) {
-            return $value !== '';
-        });
-
-        $options = [
-            'headers' => [
-                'Content-Type' => 'application/json',
-            ],
-        ];
-        $options = Tools::addAuth($options);
-
-        $response = wp_remote_post($url, [
-            'body' => wp_json_encode($args),
-            $options,
-        ]);
-
-        if (is_wp_error($response)) {
-            return false;
-        }
-
-        $response = json_decode(wp_remote_retrieve_body($response), true);
-        $this->addToLog($response);
-
-        return $response['response'] ?? (isset($response['error']) ? 'Error: ' . $response['error'] : 'Error: No response from Ollama.');
-    }
-
-    public function decodeRemoteBody(array $options = [])
-    {
-        // WP extract args from $options array
-        $options = wp_parse_args($options, [
-            'endpoint' => '',
-            'json_decode' => true,
-            'method' => 'GET',
-            'timeout' => Options::getPlaceholder('ollama_timeout', Define::fields()),
-        ]);
-
-        $url = $this->getEndpoint($options['endpoint']);
-
-        // add auth to headers
-        $options = Tools::addAuth($options);
-
-        // make request
-        $response = wp_remote_request($url, $options);
-
-        // check for errors
-        if (is_wp_error($response)) {
-            return false;
-        }
-
-        $response = wp_remote_retrieve_body($response);
-
-        if ($options['json_decode']) {
-            $response = json_decode($response, true);
-            $this->addToLog($response);
-        }
-
-        return $response;
-    }
-
-    public function getEndpoint($endpoint)
-    {
-        $allowed_endpoints = [
-            '',    // default
-            'generate',
-            'chat',
-            'tags',
-        ];
-
-        if (!in_array($endpoint, $allowed_endpoints)) {
-            return false;
-        }
-
-        return $this->getApiUrl() . ($endpoint ? 'api/' . $endpoint : '');
-    }
-
-    public function isRunning()
-    {
-        $running = 'Ollama is running';
-        $response = $this->decodeRemoteBody(['json_decode' => false]);
-
-        if ($response == $running) {
-            return true;
-        }
-
-        return false;
+        return $this->api_url . ($endpoint ? 'api/' . $endpoint : '');
     }
 }

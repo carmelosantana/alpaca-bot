@@ -19,8 +19,6 @@ class Render
 {
 	private object $ollama;
 
-	private int $timeout = 60;
-
 	private string $user_settings_meta_key;
 
 	private array $post = []; // Validated POST data
@@ -216,6 +214,9 @@ class Render
 					'messages' => $messages,
 					'stream' => false,
 				];
+
+				// get assistant response
+				$json = $this->ollama->apiChat($body);
 				break;
 
 			case 'generate':
@@ -225,6 +226,9 @@ class Render
 					'prompt' => $prompt,
 					'stream' => false,
 				];
+
+				// get assistant response
+				$json = $this->ollama->apiGenerate($body);
 				break;
 		}
 
@@ -237,24 +241,7 @@ class Render
 			case 'generate':
 				$this->outputChatMessage(['message' => ['role' => get_current_user_id(), 'content' => $prompt, 'dialog_id' => $dialog_id]]);
 				break;
-
-			case 'regenerate':
-				$endpoint = 'chat';
-				break;
 		}
-
-		// Build request options
-		$options = [
-			'endpoint' => $endpoint,
-			'method' => 'POST',
-			'body' => wp_json_encode($body),
-			'headers' => [
-				'Content-Type' => 'application/json',
-			],
-		];
-
-		// get assistant response
-		$json = $this->ollama->decodeRemoteBody($options);
 
 		// add assistant response to body
 		if ($json) {
@@ -607,13 +594,13 @@ class Render
 
 	public function outputTags($tag = 'option')
 	{
-		$json = $this->ollama->decodeRemoteBody(['endpoint' => 'tags']);
+		$models = $this->ollama->apiTags();
 
 		// get user default model
 		$default_model = $this->getUserSetting('default_model', Options::get('default_model'));
 
 		// if no models found then output disabled option
-		if (!isset($json['models']) or empty($json['models'])) {
+		if (!$models or empty($models)) {
 			echo '<' . esc_html($tag) . ' value="disabled" disabled>No models found</' . esc_html($tag) . '>';
 			return;
 		}
@@ -622,7 +609,7 @@ class Render
 		echo '<' . esc_html($tag) . ' value="disabled" disabled>Select a model</' . esc_html($tag) . '>';
 
 		// Loop through models and output options
-		foreach ($json['models'] as $model) {
+		foreach ($models as $model) {
 			if ($model['name'] == $default_model) {
 				echo '<' . esc_html($tag) . ' value="' . esc_attr($model['name']) . '" selected>' . esc_html($model['name']) . '</' . esc_html($tag) . '>';
 				continue;
