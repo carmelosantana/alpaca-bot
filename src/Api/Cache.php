@@ -41,7 +41,7 @@ class Cache
         $this->cache = $atts['cache'] ?? '';
 
         // if no storage is set, and we're in_the_loop(), set storage to postmeta
-        if (empty($this->cache) and in_the_loop()) {
+        if ($this->cache == '' and in_the_loop()) {
             $this->store = 'postmeta';
 
             // if cache is set to a number above 0, change storage to transient
