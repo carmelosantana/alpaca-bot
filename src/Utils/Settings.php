@@ -34,7 +34,8 @@ class Settings
             return $default;
         }
 
-        $active_tab = isset($_GET['tab']) ? sanitize_text_field($_GET['tab']) : array_key_first($this->sections);
+        $active_tab = $_GET['tab'] ?? $_POST['tab'] ?? array_key_first($this->sections);
+        $active_tab = sanitize_key($active_tab);
 
         return $active_tab;
     }
@@ -288,6 +289,11 @@ class Settings
 
     private function registerSettings(array $options = [], array $sections = [], string $menu_slug = '')
     {
+        // Add wp.media
+        add_action('admin_enqueue_scripts', function () {
+            wp_enqueue_media();
+        });
+
         $default_option = [
             'default' => false,
             'description' => null,
@@ -297,6 +303,12 @@ class Settings
             'placeholder' => null,
             'type' => 'text',
         ];
+
+        // only register settings for the active tab
+        $active_tab = $this->getActiveTab();
+        $sections = array_filter($sections, function ($key) use ($active_tab) {
+            return $key == $active_tab;
+        }, ARRAY_FILTER_USE_KEY);
 
         foreach ($sections as $key => $section) {
             $_id_key = $menu_slug . '-' . $key;
@@ -313,7 +325,7 @@ class Settings
             foreach ($options as $key2 => $option) {
                 $option = wp_parse_args($option, $default_option);
 
-                if ($option['section'] == $key) {
+                if ($option['section'] == $active_tab) {
                     add_settings_field(
                         self::prefix($key2),
                         $option['label'],
@@ -326,6 +338,36 @@ class Settings
 
                                 case 'checkbox':
                                     echo '<input type="checkbox" name="' . esc_attr(self::prefix($key2)) . '" value="true" ' . ($value ? 'checked' : '') . '>';
+                                    break;
+
+                                case 'media':
+                                    echo '<input type="text" name="' . esc_attr(self::prefix($key2)) . '" value="' . esc_attr($value) . '" placeholder="' . esc_attr($option['placeholder']) . '" class="regular-text">';
+                                    echo '<button class="button button-secondary" id="' . esc_attr(self::prefix($key2)) . '_button">Upload</button>';
+
+                                    echo '<script>
+                                        jQuery(document).ready(function($) {
+                                            var custom_uploader;
+                                            $("#' . esc_attr(self::prefix($key2)) . '_button").click(function(e) {
+                                                e.preventDefault();
+                                                if (custom_uploader) {
+                                                    custom_uploader.open();
+                                                    return;
+                                                }
+                                                custom_uploader = wp.media.frames.file_frame = wp.media({
+                                                    title: "Choose Image",
+                                                    button: {
+                                                        text: "Choose Image"
+                                                    },
+                                                    multiple: false
+                                                });
+                                                custom_uploader.on("select", function() {
+                                                    var attachment = custom_uploader.state().get("selection").first().toJSON();
+                                                    $("input[name=' . esc_attr(self::prefix($key2)) . ']").val(attachment.url);
+                                                });
+                                                custom_uploader.open();
+                                            });
+                                        });
+                                    </script>';
                                     break;
 
                                 case 'number':
@@ -355,7 +397,7 @@ class Settings
                                     break;
 
                                 case 'textarea':
-                                    echo '<textarea name="' . esc_attr(self::prefix($key2)) . '" placeholder="' . esc_attr($option['placeholder']) . '" class="regular-text">' . esc_html($value) . '</textarea>';
+                                    echo '<textarea name="' . esc_attr(self::prefix($key2)) . '" placeholder="' . esc_attr($option['placeholder']) . '" class="large-text code" rows="10" cols"50">' . esc_html($value) . '</textarea>';
                                     break;
                             }
 
@@ -363,6 +405,7 @@ class Settings
                                 echo '<p class="description">' . wp_kses($option['description'], self::getAllowedTags()) . '</p>';
                             }
 
+                            // if $option['description_callback'] and admin screen is options panel
                             if ($option['description_callback']) {
                                 call_user_func($option['description_callback']);
                             }
@@ -393,28 +436,10 @@ class Settings
             </h2>
             <form method="post" action="options.php">
                 <?php
-
                 settings_fields($menu_slug);
                 do_settings_sections($menu_slug . '-' . $active_tab);
-                // display none other settings
-                foreach ($options as $key => $option) {
-                    $default_option = [
-                        'default' => false,
-                    ];
-                    $option = wp_parse_args($option, $default_option);
-                    if ($option['section'] != $active_tab) {
-                        switch ($option['type'] ?? null) {
-                            case 'callback':
-                            case 'codemirror':
-                            case 'textarea':
-                                echo '<textarea name="' . esc_attr(self::prefix($key)) . '" class="hidden">' . wp_kses(get_option(self::prefix($key), $option['default']), self::getAllowedTags()) . '</textarea>';
-                                break;
-                            default:
-                                echo '<input type="hidden" name="' . esc_attr(self::prefix($key)) . '" value="' . wp_kses(get_option(self::prefix($key), $option['default']), self::getAllowedTags()) . '">';
-                                break;
-                        }
-                    }
-                }
+                // output hidden field with current tab, this sitting isn't saved
+                echo '<input type="hidden" name="tab" value="' . esc_attr($active_tab) . '">';
                 submit_button();
                 ?>
             </form>

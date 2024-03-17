@@ -200,19 +200,7 @@ class Ollama
             $args = array_intersect_key($args, array_flip($this->allowed_parameters[$section]));
         }
 
-        grfti($args);
         return $args;
-    }
-
-    /**
-     * Returns the 'response' key or error message from the Ollama API response.
-     *
-     * @param  array $response The response from the Ollama API
-     * @return string
-     */
-    private function response(array $response): string
-    {
-        return $response['response'] ?? $response['error'] ?? __('Error: No response from Ollama.', 'alpaca-bot');
     }
 
     /**
@@ -233,7 +221,7 @@ class Ollama
         $options = wp_parse_args($options, $default);
 
         $response = wp_remote_request($url, $options);
-        
+
         if (is_wp_error($response)) {
             return false;
         }
@@ -245,6 +233,17 @@ class Ollama
         }
 
         return $response;
+    }
+
+    /**
+     * Returns the 'response' key or error message from the Ollama API response.
+     *
+     * @param  array $response The response from the Ollama API
+     * @return string
+     */
+    private function response(array $response): string
+    {
+        return $response['response'] ?? $response['error'] ?? __('Error: No response from Ollama.', 'alpaca-bot');
     }
 
     /**
@@ -288,7 +287,7 @@ class Ollama
         return $response['embedding'] ?? false;
     }
 
-    public function apiGenerate(array $args): array|false
+    public function apiGenerate(array $args): string
     {
         $response = $this->run('generate', $args);
 

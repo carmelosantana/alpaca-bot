@@ -40,7 +40,7 @@ class Summarize extends Agent
         // send prompt to Ollama
         $content = (new Ollama)->apiGenerate($args);
 
-        return $content ? $content : 'Error: No content returned from Ollama.';
+        return $content;
     }
 
     // list of filterable agents
