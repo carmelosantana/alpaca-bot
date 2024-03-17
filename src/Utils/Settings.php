@@ -376,6 +376,8 @@ class Settings
 
                                 case 'radio':
                                     foreach ($option['options'] as $key3 => $option2) {
+                                        // convert value true to 'true' and false to 'false'
+                                        $key3 = filter_var($key3, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
                                         echo '<label><input type="radio" name="' . esc_attr(self::prefix($key2)) . '" value="' . esc_attr($key3) . '" ' . ($value == $key3 ? 'checked' : '') . '> ' . esc_html($option2) . '</label><br>';
                                     }
                                     break;
