@@ -425,6 +425,9 @@ class Settings
     {
         // get active tab, or first tab
         $active_tab = $this->getActiveTab();
+
+        // display the settings update notice
+        settings_errors();
 ?>
         <div class="<?php echo esc_attr($this->outputPageWrapClass() . $active_tab); ?>" id="<?php echo esc_attr($menu_slug); ?>">
             <h1><?php echo esc_html($title); ?></h1>
