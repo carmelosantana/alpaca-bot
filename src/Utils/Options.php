@@ -32,12 +32,12 @@ class Options extends Settings
         return $value ? $value : Define::fields()[$key]['placeholder'] ?? $value;
     }
 
-    public static function validateValue($value)
+    public static function validateValue($value, $default = false)
     {
         if (is_string($value) and in_array(strtolower($value), ['true', 'false'])) {
             return filter_var($value, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
         } elseif (is_string($value) and empty($value)) {
-            return false;
+            return $default;
         }
 
         return $value;
