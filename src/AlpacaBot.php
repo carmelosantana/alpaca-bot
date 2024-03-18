@@ -7,7 +7,7 @@ namespace CarmeloSantana\AlpacaBot;
 use CarmeloSantana\AlpacaBot\Define;
 use CarmeloSantana\AlpacaBot\Utils\Options;
 
-const VERSION = '0.4.10';
+const VERSION = '0.4.11-alpha.3';
 
 class AlpacaBot
 {
