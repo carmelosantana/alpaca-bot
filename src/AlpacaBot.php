@@ -7,7 +7,7 @@ namespace CarmeloSantana\AlpacaBot;
 use CarmeloSantana\AlpacaBot\Define;
 use CarmeloSantana\AlpacaBot\Utils\Options;
 
-const VERSION = '0.4.10';
+const VERSION = '0.4.11-alpha.3';
 
 class AlpacaBot
 {
@@ -38,7 +38,7 @@ class AlpacaBot
         add_menu_page(
             AB_TITLE,
             AB_TITLE,
-            'edit_posts',
+            apply_filters(Options::appendPrefix('menu-capability'), 'edit_posts'),
             AB_SLUG,
             [__NAMESPACE__ . '\Chat\Screen', 'outputHTML'],
             AB_DIR_URL . 'assets/img/icon-80.png',
@@ -50,7 +50,7 @@ class AlpacaBot
             AB_SLUG,
             'Chat',
             'Chat',
-            'edit_posts',
+            apply_filters(Options::appendPrefix('menu-capability'), 'edit_posts'),
             AB_SLUG,
             [__NAMESPACE__ . '\Chat\Screen', 'outputHTML'],
             0

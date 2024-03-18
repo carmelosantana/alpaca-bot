@@ -28,6 +28,14 @@ class Post
             'all_items' => __('Logs', 'alpaca-bot'),
         );
 
+        $capabilities = [
+            'create_posts' => false
+        ];
+
+        if (!current_user_can('manage_options')) {
+            $capabilities['edit_posts'] = 'edit_chat_logs';
+        }
+
         $args = array(
             'labels' => $labels,
             'public' => false,
@@ -43,9 +51,7 @@ class Post
             'supports' => [
                 'author',
             ],
-            'capabilities' => [
-                'create_posts' => false,
-            ],
+            'capabilities' => $capabilities,
             'map_meta_cap' => false,
         );
 
