@@ -105,6 +105,40 @@ class Ollama
         return $post_id;
     }
 
+    public function apiChat(array $args): array|false
+    {
+        $response = $this->run('chat', $args);
+
+        return $response;
+    }
+
+    public function apiEmbedding(array $args): array|false
+    {
+        $response = $this->run('embedding', $args);
+
+        return $response['embedding'] ?? false;
+    }
+
+    public function apiGenerate(array $args): string
+    {
+        $response = $this->run('generate', $args);
+
+        return $this->response($response);
+    }
+
+    public function apiTags(): array|false
+    {
+        $args = [
+            'method' => 'GET',
+        ];
+
+        $url = $this->getEndpoint('tags');
+
+        $response = $this->request($url, $args);
+
+        return apply_filters(Options::appendPrefix('ollama-tags'), $response['models'] ?? false);
+    }    
+
     /**
      * Adds Content-Type and Authorization headers if username and password are set.
      *
@@ -203,6 +237,27 @@ class Ollama
         return $args;
     }
 
+    public function getApiUrl(): string
+    {
+        $url = Options::get('api_url');
+
+        // check for trailing slash, add if missing
+        if (substr($url, -1) !== '/') {
+            $url .= '/';
+        }
+
+        return $url;
+    }
+
+    public function getEndpoint($endpoint): string|false
+    {
+        if (!in_array($endpoint, $this->api_endpoints)) {
+            return false;
+        }
+
+        return $this->api_url . ($endpoint ? 'api/' . $endpoint : '');
+    }
+
     /**
      * Builds request and sends to Ollama API.
      *
@@ -271,60 +326,5 @@ class Ollama
         $this->addToLog($response);
 
         return $response;
-    }
-
-    public function apiChat(array $args): array|false
-    {
-        $response = $this->run('chat', $args);
-
-        return $response;
-    }
-
-    public function apiEmbedding(array $args): array|false
-    {
-        $response = $this->run('embedding', $args);
-
-        return $response['embedding'] ?? false;
-    }
-
-    public function apiGenerate(array $args): string
-    {
-        $response = $this->run('generate', $args);
-
-        return $this->response($response);
-    }
-
-    public function apiTags(): array|false
-    {
-        $args = [
-            'method' => 'GET',
-        ];
-
-        $url = $this->getEndpoint('tags');
-
-        $response = $this->request($url, $args);
-
-        return $response['models'] ?? false;
-    }
-
-    public function getApiUrl(): string
-    {
-        $url = Options::get('api_url');
-
-        // check for trailing slash, add if missing
-        if (substr($url, -1) !== '/') {
-            $url .= '/';
-        }
-
-        return $url;
-    }
-
-    public function getEndpoint($endpoint): string|false
-    {
-        if (!in_array($endpoint, $this->api_endpoints)) {
-            return false;
-        }
-
-        return $this->api_url . ($endpoint ? 'api/' . $endpoint : '');
     }
 }
