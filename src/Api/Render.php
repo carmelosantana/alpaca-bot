@@ -615,11 +615,15 @@ class Render
 
 		// Loop through models and output options
 		foreach ($models as $model) {
+			$size = number_format($model['size'] / 1000000000, 2) . ' GB';
+			$name = $model['name'] . ' (' . $size . ')';
+
 			if ($model['name'] == $default_model) {
-				echo '<' . esc_html($tag) . ' value="' . esc_attr($model['name']) . '" selected>' . esc_html($model['name']) . '</' . esc_html($tag) . '>';
+				echo '<' . esc_html($tag) . ' value="' . esc_attr($model['name']) . '" selected>' . esc_html($name) . '</' . esc_html($tag) . '>';
 				continue;
 			}
-			echo '<' . esc_html($tag) . ' value="' . esc_attr($model['name']) . '">' . esc_html($model['name']) . '</' . esc_html($tag) . '>';
+			
+			echo '<' . esc_html($tag) . ' value="' . esc_attr($model['name']) . '">' . esc_html($name) . '</' . esc_html($tag) . '>';
 		}
 	}
 
