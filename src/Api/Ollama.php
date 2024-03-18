@@ -154,7 +154,7 @@ class Ollama
         }
 
         // merge custom parameters with default parameters
-        $args = wp_parse_args($parameters, $args);
+        $args = wp_parse_args($args, $parameters);
 
         // Check for any custom model parameters in the options panel
         foreach (Define::getFieldsInSection('parameters') as $option => $field) {
