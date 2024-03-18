@@ -70,7 +70,7 @@ class Ollama
      * @param  array $message Response data to log
      * @return int|false The post id of the log entry or false on fail/disabled
      */
-    private function addToLog(array $message): int|false
+    public function addToLog(array $message): int|false
     {
         // check if logging is enabled
         if (!Options::get('log_chat_response')) {
