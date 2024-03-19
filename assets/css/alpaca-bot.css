@@ -76,11 +76,6 @@
         padding .5s .25s;
 }
 
-/* WordPress: Add padding to wp-footer to view above textarea */
-.toplevel_page_alpaca-bot #footer-left {
-    padding-bottom: 75px !important;
-}
-
 /* Custom admin menu icons */
 #toplevel_page_alpaca-bot .wp-menu-image img {
     width: 20px;
@@ -90,8 +85,7 @@
 
 /* Primary wrap */
 #ab-chat-container {
-    margin-bottom: 50px;
-    min-height: 50vh;
+    min-height: 61vh;
 }
 
 /* Welcome message */
@@ -124,7 +118,7 @@
 /* Toolbar (model select, chat history select) */
 .ab-toolbar {
     min-height: 40px;
-    margin: 1em 0 1em 0;
+    margin: 20px 0 30px 0;
 }
 
 .ab-toolbar select {
@@ -286,7 +280,8 @@
     color: #dc3232;
 }
 
-.alpaca-bot-options pre.console, .toplevel_page_alpaca-bot .console {
+.alpaca-bot-options pre.console,
+.toplevel_page_alpaca-bot .console {
     background-color: var(--wp-ultra-dark-gray);
     padding: 1em;
     border-radius: 5px;
@@ -302,16 +297,11 @@
     https://emma-delaney.medium.com/how-to-create-your-own-chatgpt-in-html-css-and-javascript-78e32b70b4be 
 */
 .typing-container {
-    position: fixed;
-    bottom: 0;
-    width: 100%;
+    width: calc(100% - 20px);
     display: flex;
-    padding: 10px 10px;
-    margin-left: -20px;
     justify-content: center;
-    background: var(--chat-container-bg);
-    border-top: 1px solid var(--lighter-gray);
     z-index: 10;
+    margin-top: 1em;
 }
 
 .typing-container .typing-content {
@@ -319,11 +309,6 @@
     max-width: var(--max-container-width);
     width: 100%;
     align-items: flex-end;
-    margin-left: -160px !important;
-}
-
-.folded .typing-container .typing-content {
-    margin-left: 0px !important;
 }
 
 .typing-container .typing-textarea {
@@ -381,10 +366,6 @@
 .typing-textarea span:disabled {
     color: var(--lighter-gray);
     cursor: not-allowed;
-}
-
-.typing-textarea span:hover {
-    color: var(--wp-blue);
 }
 
 #ab-hello {
@@ -467,18 +448,12 @@
     cursor: pointer;
 }
 
-/* When screen is less than 900 change width of textbox to fit */
-@media screen and (max-width: 928px) {
-    .typing-container .typing-content {
-        max-width: 600px;
-    }
-}
-
 /* Responsive Media Query */
-@media screen and (max-width: 768px) {
-    .typing-container .typing-content {
-        margin-left: 0px !important;
-        padding: 0em .6em;
+@media screen and (max-width: 781px) {
+    .typing-container {
+        position: fixed;
+        bottom: 10px;
+        width: calc(100% - 20px);
     }
 
     .ab-toolbar {
@@ -486,6 +461,7 @@
         flex-direction: column;
         justify-content: center;
         width: 100%;
+        margin-bottom: 1em;
     }
 
     .ab-toolbar div {
