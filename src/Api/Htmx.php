@@ -50,12 +50,12 @@ class Htmx extends Base
 			'/wp/chat' => [
 				'callback' => [$this, 'renderOutput'],
 				'methods' => $server::CREATABLE,
-				'permission_callback' => [$this, 'get_item_permissions_check'],
+				'permission_callback' => [$this, 'update_item_permissions_check'],
 			],
 			'/wp/history' => [
 				'callback' => [$this, 'renderOutput'],
 				'methods' => $server::READABLE,
-				'permission_callback' => [$this, 'get_item_permissions_check'],
+				'permission_callback' => [$this, 'update_item_permissions_check'],
 			],
 			'/wp/user/update' => [
 				'callback' => [$this, 'renderOutput'],
