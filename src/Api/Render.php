@@ -108,7 +108,7 @@ class Render
 	public function checkUserInputs()
 	{
 		// Model should not be set if user cannot change model
-		if (Options::get('user_can_change_model') == false) {
+		if (Options::get('user_can_change_model') === false) {
 			$this->setPostInput('model', false);
 		}
 
@@ -117,11 +117,11 @@ class Render
 			$this->outputAssistantErrorDialog('Please select a model and enter a prompt.');
 			return false;
 		} elseif (!$this->getPostInput('model')) {
-			if (Options::get('user_can_change_model') and Options::get('default_model')) {
+			if (Options::get('user_can_change_model') === false and Options::get('default_model')) {
 				// If user can change model and default model is set then set model to default model
 				$this->setPostInput('model', Options::get('default_model'));
 			} else {
-				// If user cannot change model and default model is not set then output error
+				// If user cannot change model or model isn't sent and default model is not set then output error
 				$this->outputAssistantErrorDialog('Ask your system administrator to select a default model.');
 				return false;
 			}
@@ -616,13 +616,15 @@ class Render
 		// Loop through models and output options
 		foreach ($models as $model) {
 			$size = number_format($model['size'] / 1000000000, 2) . ' GB';
+
 			$name = $model['name'] . ' (' . $size . ')';
+			$name = str_replace(':latest', '', $name);
 
 			if ($model['name'] == $default_model) {
 				echo '<' . esc_html($tag) . ' value="' . esc_attr($model['name']) . '" selected>' . esc_html($name) . '</' . esc_html($tag) . '>';
 				continue;
 			}
-			
+
 			echo '<' . esc_html($tag) . ' value="' . esc_attr($model['name']) . '">' . esc_html($name) . '</' . esc_html($tag) . '>';
 		}
 	}
