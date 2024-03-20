@@ -11,28 +11,16 @@ class Define
 {
     public static function getModels()
     {
-        if (Options::get('api_url')) {
-            // get transient
-            $models = get_transient('ollama_models');
+        // get models from Ollama
+        $ollama = new Ollama();
+        $cache = get_transient(Options::appendPrefix('ollama-models'));
 
-            if ($models and is_array($models) and count($models) > 0) {
-                return $models;
+        $models = [];
+
+        if ($cache) {
+            foreach ($cache as $model) {
+                $models[$model['name']] = $ollama->getModelNameSize($model);
             }
-
-            // get models from ollama
-            $ollama = new Ollama();
-            $response = $ollama->apiTags();
-
-            // if ['models'] exists loop and set each key value to model[name]
-            if ($response) {
-                $models = [];
-                foreach ($response as $model) {
-                    $models[$model['name']] = $model['name'];
-                }
-                set_transient('ollama_models', $models, 60 * 60 * 5);
-            }
-        } else {
-            $models = [];
         }
 
         return $models;

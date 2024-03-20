@@ -49,6 +49,8 @@ class Ollama
         ],
     ];
 
+    private $cache_timeout = 60 * 5;
+
     private $log_keys = [
         'model',
         'total_duration',
@@ -137,7 +139,7 @@ class Ollama
         $response = $this->request($url, $args);
 
         return apply_filters(Options::appendPrefix('ollama-tags'), $response['models'] ?? false);
-    }    
+    }
 
     /**
      * Adds Content-Type and Authorization headers if username and password are set.
@@ -256,6 +258,34 @@ class Ollama
         }
 
         return $this->api_url . ($endpoint ? 'api/' . $endpoint : '');
+    }
+
+    public function getModelNameSize(array $model): string
+    {
+        $size = number_format($model['size'] / 1000000000, 2) . ' GB';
+
+        $name = $model['name'] . ' (' . $size . ')';
+        $name = str_replace(':latest', '', $name);
+
+        return $name;
+    }
+
+    public function getModels(): array
+    {
+        $cache = get_transient(Options::appendPrefix('ollama-models'));
+
+        if ($cache) {
+            return apply_filters(Options::appendPrefix('ollama-tags'), $cache);
+        }
+
+        $models = $this->apiTags();
+
+        if ($models and is_array($models) and !empty($models)) {
+            set_transient(Options::appendPrefix('ollama-models'), $models, $this->cache_timeout);
+            return apply_filters(Options::appendPrefix('ollama-tags'), $models);
+        }
+
+        return [];
     }
 
     /**

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace CarmeloSantana\AlpacaBot;
 
+use CarmeloSantana\AlpacaBot\Api\Ollama;
 use CarmeloSantana\AlpacaBot\Define;
 use CarmeloSantana\AlpacaBot\Utils\Options;
 
@@ -15,6 +16,7 @@ class AlpacaBot
     {
         add_action('admin_enqueue_scripts', [$this, 'adminEnqueueScripts']);
         add_action('admin_enqueue_scripts', [$this, 'adminEnqueueStyles']);
+        add_action('admin_init', [$this, 'buildCache']);
         add_action('admin_menu', [$this, 'addAdminMenu']);
         add_action('admin_notices', [$this, 'adminNotices']);
 
@@ -108,6 +110,14 @@ class AlpacaBot
             if ($notice['condition']) {
                 echo '<div class="notice notice-error is-dismissible"><p>' . wp_kses($notice['message'], Options::getAllowedTags()) . '</p></div>';
             }
+        }
+    }
+
+    public function buildCache()
+    {
+        // Build model cache
+        if (Options::get('api_url') and $this->adminCheckScreen()) {
+            (new Ollama())->getModels();
         }
     }
 
