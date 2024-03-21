@@ -599,7 +599,7 @@ class Render
 
 	public function outputTags($tag = 'option')
 	{
-		$models = $this->ollama->apiTags();
+		$models = $this->ollama->getModels();
 
 		// get user default model
 		$default_model = $this->getUserSetting('default_model', Options::get('default_model'));
