@@ -68,7 +68,7 @@ class Render
 				'post_title' => $post_title,
 				'post_excerpt' => wp_trim_excerpt($stripped_json),
 				'post_type' => 'chat',
-				'post_slug' => $this->uuid(),
+				'post_slug' => wp_generate_uuid4(),
 				'post_status' => 'publish',
 			];
 		}
