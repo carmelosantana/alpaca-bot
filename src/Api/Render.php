@@ -161,9 +161,290 @@ class Render
 		return $url;
 	}
 
+	private function getAssistantModel(string $model = '', $wrap = 'span')
+	{
+		if (!empty($model)) {
+			return '<' . $wrap . ' class="model">' . $model . '</' . $wrap . '>';
+		}
+	}
+
+	public function getHxMultiSwapLoadChat(string $endpoint = 'htmx/chat', string $trigger = 'click')
+	{
+		return ' hx-post="' . $this->getRenderEndpoint($endpoint) . '" hx-trigger="' . $trigger . '" hx-ext="multi-swap" hx-swap="multi:#ab-response:beforeend,#chat_id:outerHTML" hx-disabled-elt="this" hx-indicator="#indicator"';
+	}
+
 	public function getPostInput(string $name, $default = false)
 	{
 		return $this->post[$name] ?? $default;
+	}
+
+	public function getRenderEndpoint($endpoint)
+	{
+		return get_bloginfo('url') . '/wp-json/' . AB_SLUG . '/v1/' . $endpoint;
+	}
+
+	private function getUserSetting(string $option, $default = null)
+	{
+		$user_id = get_current_user_id();
+		$user_settings = get_user_meta($user_id, $this->user_settings_meta_key, true);
+
+		$value = Options::validateValue($user_settings[$option] ?? '');
+
+		if ($value) {
+			return $value;
+		}
+
+		return $default;
+	}
+
+	public function getWpNonce()
+	{
+		$nonce = wp_create_nonce('wp_rest');
+		return 'hx-headers=\'{"X-WP-Nonce": "' . $nonce . '"}\'';
+	}
+
+	public function outputAdminNotice($message = '', $class = 'notice-success')
+	{
+		$id = 'ab-notice-' . uniqid();
+
+		$out = '<div class="notice ' . $class . ' is-dismissible" id="' . $id . '"><p>' . $message . '</p></div>';
+
+		echo wp_kses($out, Options::getAllowedTags());
+	}
+
+
+	public function outputAssistantError($message = '', $model = '', $role = 'System')
+	{
+		if (empty($message)) {
+			$message = 'Sorry but an error occurred during your last request.';
+		}
+
+		$this->outputChatMessage([
+			'message' => [
+				'role' => $role,
+				'content' => $message,
+			],
+			'model' => $model,
+		]);
+	}
+
+	public function outputAssistantErrorDialog($message = '', $model = '', $role = 'System')
+	{
+		// Open wrapper and dialog
+		$this->outputDialogStart();
+
+		// Output error message
+		$this->outputAssistantError($message, $model, $role);
+
+		// Close dialog and wrapper
+		$this->outputDialogEnd();
+	}
+
+	public function outputChatHistory()
+	{
+		// get posts by current user
+		$posts = get_posts([
+			'author' => get_current_user_id(),
+			'post_type' => 'chat',
+			'numberposts' => -1,
+		]);
+
+		// if posts output chat logs in foreach loop for select items, if not output empty disabled select option
+		echo '<option value="" disabled>Chat History</option>';
+		echo '<option value="0" selected>New Chat</option>';
+
+		if ($posts) {
+			$last_optgroup = '';
+			foreach ($posts as $post) {
+				$interval = date_diff(date_create($post->post_date), date_create('now'))->days;
+
+				if ($interval <= 1) {
+					$optgroup = 'Today';
+				} elseif ($interval <= 2) {
+					$optgroup = 'Yesterday';
+				} elseif ($interval <= 7) {
+					$optgroup = 'This Week';
+				} elseif ($interval <= 14) {
+					$optgroup = 'Last Week';
+				} elseif ($interval <= 30) {
+					$optgroup = 'This Month';
+				} elseif ($interval <= 60) {
+					$optgroup = 'Last Month';
+				} elseif ($interval <= 90) {
+					$optgroup = 'Last 3 Months';
+				} elseif ($interval <= 180) {
+					$optgroup = 'Last 6 Months';
+				} elseif ($interval <= 365) {
+					$optgroup = 'Last Year';
+				} else {
+					$optgroup = 'Older';
+				}
+
+				if ($optgroup != $last_optgroup) {
+					$last_optgroup = $optgroup;
+					echo '<optgroup label="' . esc_attr($optgroup) . '">';
+				}
+
+				echo '<option value="' . esc_attr($post->ID) . '">' . esc_html(wp_trim_words($post->post_title, 8, '')) . '</option>';
+
+				if ($optgroup != $last_optgroup) {
+					echo '</optgroup>';
+				}
+			}
+		}
+	}
+
+	public function outputChatLoad()
+	{
+		// Quick input validation
+		if (!$this->getPostInput('chat_history_id')) {
+			return;
+		}
+
+		// Open wrapper and dialog
+		$this->outputDialogStart();
+
+		// Sanitize inputs
+		$post_id = (int) $this->getPostInput('chat_history_id');
+
+		// Get post
+		$post = get_post($post_id);
+
+		// Check if post exists
+		if (!$post) {
+			$this->outputAssistantError('Chat log not found.');
+			return;
+		}
+
+		// Get post_meta messages
+		$messages = get_post_meta($post_id, 'messages', true);
+
+		// Check if $messages is valid array
+		if (is_array($messages)) {
+			// Loop through messages
+			foreach ($messages as $message) {
+				if (is_array($message))
+					$this->outputChatMessage($message);
+				else {
+					$this->outputAssistantError('Error loading chat log, log may be corrupted.');
+					// return;
+				}
+			}
+		} else {
+			$this->outputAssistantError('Error loading chat log, log may be corrupted.');
+			return;
+		}
+
+		// Close dialog and wrapper
+		$this->outputDialogEnd();
+
+		// We also output hidden field for replacement
+		$this->outputHiddenFields($post_id);
+	}
+
+	public function outputChatMessage(array $message)
+	{
+		$out = $tools = '';
+		// php function uuid
+		$uuid = 'a' . uniqid();
+		$response_id = 'response-' . $uuid;
+
+		// is_chat
+		if (isset($message['message'])) {
+			if (is_int($message['message']['role'])) {
+				$role = 'user';
+			} else {
+				$role = strtolower($message['message']['role']);
+			}
+			$response = $message['message']['content'];
+		} else {
+			$role = 'system';
+			$response = $message['response'];
+		}
+
+
+		// Copy
+		$tools .= '<span aria-label="Copy to clipboard" id="copy-' . $uuid . '" class="tools hint--bottom hint--rounded material-symbols-outlined" onclick="copyToClipboard(\'' . $uuid . '\')">';
+		$tools .= 'content_paste';
+		$tools .= '</span>';
+
+		switch ($role) {
+			case 'user':
+				// if ID is 0, we load the current user, otherwise we load the user by ID
+				$user = $message['message']['role'] == 0 ? get_user_by('id', $this->user_id) : get_user_by('id', $message['message']['role']);
+				$gravatar = get_avatar_url($user->user_email, ['size' => 128]);
+				$user_name = $user->user_login;
+
+				// regenerate response, send previous message again
+				$tools .= '<span aria-label="Regenerate response" class="tools hint--bottom hint--rounded material-symbols-outlined" ' . $this->getHxMultiSwapLoadChat('htmx/regenerate', 'click') . ' onclick="resubmitPrompt(\'' . $response_id . '\')">';
+				$tools .= 'autorenew';
+				$tools .= '</span>';
+				break;
+
+			case 'assistant':
+				// on click get innerhtml from response and send to wp/post/insert
+				$tools .= '<span aria-label="Save to post" class="hint--bottom hint--rounded">';
+				$tools .= '<span class="tools material-symbols-outlined rotate-push-pin" hx-post="' . $this->getRenderEndpoint('wp/post/insert') . '" hx-vars="post_content:getResponseInnerHTML(\'' . $response_id . '\')" hx-target="#' . $response_id . '" hx-swap="afterend">';
+				$tools .= 'push_pin';
+				$tools .= '</span>';
+				$tools .= '</span>';
+
+				// add page with note_add icon
+				$tools .= '<span aria-label="Save to page" class="tools hint--bottom hint--rounded material-symbols-outlined" hx-post="' . $this->getRenderEndpoint('wp/page/insert') . '" hx-vars="post_content:getResponseInnerHTML(\'' . $response_id . '\')" hx-target="#' . $response_id . '" hx-swap="afterend">';
+				$tools .= 'content_copy';
+				$tools .= '</span>';
+
+			default:
+				$gravatar = $this->getAssistantAvatarUrl($message['message']['role']);
+				$user_name = $message['message']['role'];
+				if (!empty($message['model'])) {
+					$user_name .= ' ' . $this->getAssistantModel($message['model']);
+				}
+				break;
+		}
+
+		$class = 'ab-chat-message-' . $role;
+
+		$out .= '<div class="ab-chat-message ' . $class . '" id="ab-chat-message-' . $uuid . '">';
+		$out .= '<div class="ab-chat-message-gravatar"><img src="' . $gravatar . '" alt="gravatar"></div>';
+		$out .= '<div class="ab-chat-message-parts">';
+		$out .= '<div class="ab-chat-message-username">' . $user_name . '</div>';
+		$out .= '<div class="ab-chat-message-response" id="' . $response_id . '">' . self::zeroScript($response) . '</div>';
+		$out .= '<div class="ab-chat-message-tools">';
+		$out .= $tools;
+		$out .= '</div>';	// .ab-chat-message-tools
+		$out .= '</div>';	// .ab-chat-message-parts
+		$out .= '</div>';	// .ab-chat-message
+
+		echo wp_kses($out, Options::getAllowedTags());
+	}
+
+	public function outputDialogEnd()
+	{
+		// End .ab-dialog
+		$this->outputHtmlTag(false);
+		$this->outputPostScript();
+
+		// End #ab-response
+		$this->outputHtmlTag(false);
+	}
+
+	// Add #ab-response wrapper used for innerHTML replacement and opens .ab-dialog
+	public function outputDialogStart()
+	{
+		$time = time();
+
+		$this->outputHtmlTag([
+			'id' => 'ab-response',
+		]);
+
+		// add user chat message to body
+		$this->outputHtmlTag([
+			'class' => 'ab-dialog',
+			'id' => 'ab-dialog-' . $time,
+		]);
+
+		return $time;
 	}
 
 	public function outputGenerate($endpoint = 'generate')
@@ -265,257 +546,9 @@ class Render
 		$this->outputHiddenFields($post_id);
 	}
 
-	public function outputDialogEnd()
+	public function outputHiddenFields(int $post_id)
 	{
-		// End .ab-dialog
-		$this->outputHtmlTag(false);
-		$this->outputPostScript();
-
-		// End #ab-response
-		$this->outputHtmlTag(false);
-	}
-
-	// Add #ab-response wrapper used for innerHTML replacement and opens .ab-dialog
-	public function outputDialogStart()
-	{
-		$time = time();
-
-		$this->outputHtmlTag([
-			'id' => 'ab-response',
-		]);
-
-		// add user chat message to body
-		$this->outputHtmlTag([
-			'class' => 'ab-dialog',
-			'id' => 'ab-dialog-' . $time,
-		]);
-
-		return $time;
-	}
-
-	public function outputAssistantError($message = '', $model = '', $role = 'System')
-	{
-		if (empty($message)) {
-			$message = 'Sorry but an error occurred during your last request.';
-		}
-
-		$this->outputChatMessage([
-			'message' => [
-				'role' => $role,
-				'content' => $message,
-			],
-			'model' => $model,
-		]);
-	}
-
-	public function outputAssistantErrorDialog($message = '', $model = '', $role = 'System')
-	{
-		// Open wrapper and dialog
-		$this->outputDialogStart();
-
-		// Output error message
-		$this->outputAssistantError($message, $model, $role);
-
-		// Close dialog and wrapper
-		$this->outputDialogEnd();
-	}
-
-	public function outputChatLoad()
-	{
-		// Quick input validation
-		if (!$this->getPostInput('chat_history_id')) {
-			return;
-		}
-
-		// Open wrapper and dialog
-		$this->outputDialogStart();
-
-		// Sanitize inputs
-		$post_id = (int) $this->getPostInput('chat_history_id');
-
-		// Get post
-		$post = get_post($post_id);
-
-		// Check if post exists
-		if (!$post) {
-			$this->outputAssistantError('Chat log not found.');
-			return;
-		}
-
-		// Get post_meta messages
-		$messages = get_post_meta($post_id, 'messages', true);
-
-		// Check if $messages is valid array
-		if (is_array($messages)) {
-			// Loop through messages
-			foreach ($messages as $message) {
-				if (is_array($message))
-					$this->outputChatMessage($message);
-				else {
-					$this->outputAssistantError('Error loading chat log, log may be corrupted.');
-					// return;
-				}
-			}
-		} else {
-			$this->outputAssistantError('Error loading chat log, log may be corrupted.');
-			return;
-		}
-
-		// Close dialog and wrapper
-		$this->outputDialogEnd();
-
-		// We also output hidden field for replacement
-		$this->outputHiddenFields($post_id);
-	}
-
-	public function outputChatHistory()
-	{
-		// get posts by current user
-		$posts = get_posts([
-			'author' => get_current_user_id(),
-			'post_type' => 'chat',
-			'numberposts' => -1,
-		]);
-
-		// if posts output chat logs in foreach loop for select items, if not output empty disabled select option
-		echo '<option value="" disabled>Chat History</option>';
-		echo '<option value="0" selected>New Chat</option>';
-
-		if ($posts) {
-			$last_optgroup = '';
-			foreach ($posts as $post) {
-				$interval = date_diff(date_create($post->post_date), date_create('now'))->days;
-
-				if ($interval <= 1) {
-					$optgroup = 'Today';
-				} elseif ($interval <= 2) {
-					$optgroup = 'Yesterday';
-				} elseif ($interval <= 7) {
-					$optgroup = 'This Week';
-				} elseif ($interval <= 14) {
-					$optgroup = 'Last Week';
-				} elseif ($interval <= 30) {
-					$optgroup = 'This Month';
-				} elseif ($interval <= 60) {
-					$optgroup = 'Last Month';
-				} elseif ($interval <= 90) {
-					$optgroup = 'Last 3 Months';
-				} elseif ($interval <= 180) {
-					$optgroup = 'Last 6 Months';
-				} elseif ($interval <= 365) {
-					$optgroup = 'Last Year';
-				} else {
-					$optgroup = 'Older';
-				}
-
-				if ($optgroup != $last_optgroup) {
-					$last_optgroup = $optgroup;
-					echo '<optgroup label="' . esc_attr($optgroup) . '">';
-				}
-
-				echo '<option value="' . esc_attr($post->ID) . '">' . esc_html(wp_trim_words($post->post_title, 8, '')) . '</option>';
-
-				if ($optgroup != $last_optgroup) {
-					echo '</optgroup>';
-				}
-			}
-		}
-	}
-
-	public function outputChatMessage(array $message)
-	{
-		$out = $tools = '';
-		// php function uuid
-		$uuid = 'a' . uniqid();
-		$response_id = 'response-' . $uuid;
-
-		// is_chat
-		if (isset($message['message'])) {
-			if (is_int($message['message']['role'])) {
-				$role = 'user';
-			} else {
-				$role = strtolower($message['message']['role']);
-			}
-			$response = $message['message']['content'];
-		} else {
-			$role = 'system';
-			$response = $message['response'];
-		}
-
-
-		// Copy
-		$tools .= '<span aria-label="Copy to clipboard" id="copy-' . $uuid . '" class="tools hint--bottom hint--rounded material-symbols-outlined" onclick="copyToClipboard(\'' . $uuid . '\')">';
-		$tools .= 'content_paste';
-		$tools .= '</span>';
-
-		switch ($role) {
-			case 'user':
-				// if ID is 0, we load the current user, otherwise we load the user by ID
-				$user = $message['message']['role'] == 0 ? get_user_by('id', $this->user_id) : get_user_by('id', $message['message']['role']);
-				$gravatar = get_avatar_url($user->user_email, ['size' => 128]);
-				$user_name = $user->user_login;
-
-				// regenerate response, send previous message again
-				$tools .= '<span aria-label="Regenerate response" class="tools hint--bottom hint--rounded material-symbols-outlined" ' . $this->getHxMultiSwapLoadChat('htmx/regenerate', 'click') . ' onclick="resubmitPrompt(\'' . $response_id . '\')">';
-				$tools .= 'autorenew';
-				$tools .= '</span>';
-				break;
-
-			case 'assistant':
-				// on click get innerhtml from response and send to wp/post/insert
-				$tools .= '<span aria-label="Save to post" class="hint--bottom hint--rounded">';
-				$tools .= '<span class="tools material-symbols-outlined rotate-push-pin" hx-post="' . $this->getRenderEndpoint('wp/post/insert') . '" hx-vars="post_content:getResponseInnerHTML(\'' . $response_id . '\')" hx-target="#' . $response_id . '" hx-swap="afterend">';
-				$tools .= 'push_pin';
-				$tools .= '</span>';
-				$tools .= '</span>';
-
-				// add page with note_add icon
-				$tools .= '<span aria-label="Save to page" class="tools hint--bottom hint--rounded material-symbols-outlined" hx-post="' . $this->getRenderEndpoint('wp/page/insert') . '" hx-vars="post_content:getResponseInnerHTML(\'' . $response_id . '\')" hx-target="#' . $response_id . '" hx-swap="afterend">';
-				$tools .= 'content_copy';
-				$tools .= '</span>';
-
-			default:
-				$gravatar = $this->getAssistantAvatarUrl($message['message']['role']);
-				$user_name = $message['message']['role'];
-				if (!empty($message['model'])) {
-					$user_name .= ' ' . $this->getAssistantModel($message['model']);
-				}
-				break;
-		}
-
-		$class = 'ab-chat-message-' . $role;
-
-		$out .= '<div class="ab-chat-message ' . $class . '" id="ab-chat-message-' . $uuid . '">';
-		$out .= '<div class="ab-chat-message-gravatar"><img src="' . $gravatar . '" alt="gravatar"></div>';
-		$out .= '<div class="ab-chat-message-parts">';
-		$out .= '<div class="ab-chat-message-username">' . $user_name . '</div>';
-		$out .= '<div class="ab-chat-message-response" id="' . $response_id . '">' . self::zeroScript($response) . '</div>';
-		$out .= '<div class="ab-chat-message-tools">';
-		$out .= $tools;
-		$out .= '</div>';	// .ab-chat-message-tools
-		$out .= '</div>';	// .ab-chat-message-parts
-		$out .= '</div>';	// .ab-chat-message
-
-		echo wp_kses($out, Options::getAllowedTags());
-	}
-
-	public function outputAdminNotice($message = '', $class = 'notice-success')
-	{
-		$id = 'ab-notice-' . uniqid();
-
-		$out = '<div class="notice ' . $class . ' is-dismissible" id="' . $id . '"><p>' . $message . '</p></div>';
-
-		echo wp_kses($out, Options::getAllowedTags());
-	}
-
-	public function outputPostScript(string $class = '')
-	{
-		echo '<script type="text/javascript">smoothScrollTo(' . esc_js($class) . ');</script>';
-	}
-
-	public function outputScriptShowHide(string $id)
-	{
-		echo '<script type="text/javascript">showHide(' . esc_js($id) . ');</script>';
+		echo '<input type="hidden" name="chat_id" id="chat_id" value="' . esc_attr($post_id) . '">';
 	}
 
 	public function outputHtmlTag($attributes = [])
@@ -549,14 +582,14 @@ class Render
 		}
 	}
 
-	public function outputHiddenFields(int $post_id)
+	public function outputPostScript(string $class = '')
 	{
-		echo '<input type="hidden" name="chat_id" id="chat_id" value="' . esc_attr($post_id) . '">';
+		echo '<script type="text/javascript">smoothScrollTo(' . esc_js($class) . ');</script>';
 	}
 
-	public function getHxMultiSwapLoadChat(string $endpoint = 'htmx/chat', string $trigger = 'click')
+	public function outputScriptShowHide(string $id)
 	{
-		return ' hx-post="' . $this->getRenderEndpoint($endpoint) . '" hx-trigger="' . $trigger . '" hx-ext="multi-swap" hx-swap="multi:#ab-response:beforeend,#chat_id:outerHTML" hx-disabled-elt="this" hx-indicator="#indicator"';
+		echo '<script type="text/javascript">showHide(' . esc_js($id) . ');</script>';
 	}
 
 	public function outputPostInsert($post_type = 'post')
@@ -584,12 +617,6 @@ class Render
 
 		// output success message with link to post
 		$this->outputAdminNotice(ucfirst($post_type) . ' drafted. <a href="' . get_edit_post_link($post_id) . '">Edit ' . ucfirst($post_type) . '</a>');
-	}
-
-	public function getWpNonce()
-	{
-		$nonce = wp_create_nonce('wp_rest');
-		return 'hx-headers=\'{"X-WP-Nonce": "' . $nonce . '"}\'';
 	}
 
 	public function outputWpNonce()
@@ -629,11 +656,6 @@ class Render
 		}
 	}
 
-	public function getRenderEndpoint($endpoint)
-	{
-		return get_bloginfo('url') . '/wp-json/' . AB_SLUG . '/v1/' . $endpoint;
-	}
-
 	public function setPost($post)
 	{
 		$this->post = $post;
@@ -644,7 +666,6 @@ class Render
 		$this->post[$name] = $value;
 	}
 
-	// Store user settings in alpaca_bot_user_settings serialized array in user meta
 	public function userSettingsUpdate()
 	{
 		// Check if user is logged in
@@ -702,47 +723,11 @@ class Render
 		}
 	}
 
-	private function getAssistantModel(string $model = '', $wrap = 'span')
-	{
-		if (!empty($model)) {
-			return '<' . $wrap . ' class="model">' . $model . '</' . $wrap . '>';
-		}
-	}
-
-	private function getUserSetting(string $option, $default = null)
-	{
-		$user_id = get_current_user_id();
-		$user_settings = get_user_meta($user_id, $this->user_settings_meta_key, true);
-
-		$value = Options::validateValue($user_settings[$option] ?? '');
-
-		if ($value) {
-			return $value;
-		}
-
-		return $default;
-	}
-
-	// https://www.uuidgenerator.net/dev-corner/php
-	private function uuid($data = null): string
-	{
-		// Generate 16 bytes (128 bits) of random data or use the data passed into the function.
-		$data = $data ?? random_bytes(16);
-		assert(strlen($data) == 16);
-
-		// Set version to 0100
-		$data[6] = chr(ord($data[6]) & 0x0f | 0x40);
-		// Set bits 6-7 to 10
-		$data[8] = chr(ord($data[8]) & 0x3f | 0x80);
-
-		// Output the 36 character UUID.
-		return vsprintf('%s%s-%s-%s-%s-%s%s%s', str_split(bin2hex($data), 4));
-	}
-
 	/**
 	 * Adds zero-md script for markdown rendering post response.
 	 *
 	 * @param  string $message
+	 * @param  string $position
 	 * @return string
 	 */
 	public static function zeroScript(string $message, string $position = ''): string
