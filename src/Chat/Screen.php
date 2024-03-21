@@ -12,8 +12,6 @@ class Screen
 {
     private object $htmx;
 
-    private object $screen;
-
     public function addFooterActions()
     {
         // add custom <script> to admin footer
@@ -35,22 +33,30 @@ class Screen
         }, 11);
     }
 
-    public function outputTitleHeader($page_title = AB_TITLE, string $title_action_html = '')
+    public function outputTitleHeader($page_title = AB_TITLE)
     { ?>
-        <h1 class="wp-heading-inline"><?php echo esc_html($page_title); ?></h1>
-        <?php 
-        if (!empty($title_action_html)) {
-            echo wp_kses($title_action_html, Options::getAllowedTags());
-        } else {
-            echo $this->pageActionGenerator();
-        } ?>
-        <hr class="wp-header-end">
+        <div class="header-wrap">
+            <h1 class="wp-heading-inline"><?php echo esc_html($page_title); ?></h1>
+            <div class="dropdown">
+                <a href="<?php echo esc_url(admin_url('admin.php?page=alpaca-bot')); ?>" class="page-title-action">New Chat</a>
+                <div class="dropdown-content">
+                    <a href="#">
+                        <span class="material-symbols-outlined">forum</span>
+                        <strong>Multi-turn</strong>
+                        <p>Ideal for tasks requiring back-and-forth interactions and providing a natural conversational experience.</p>
+                        <p>• Conversation context</p>
+                    </a>
+                    <a href="#">
+                        <span class="material-symbols-outlined">chat_apps_script</span>
+                        <strong>Single-turn</strong>
+                        <p>Optimal for content generation, summarization, and question-answering.</p>
+                        <p>• Customizable assistants</p>
+                    </a>
+                </div>
+            </div>
+            <hr class="wp-header-end">
+        </div>
     <?php }
-
-    public function pageActionGenerator($page = 'alpaca-bot', $text = 'New Chat')
-    {
-        return '<a href="' . esc_url(admin_url('admin.php?page=' . $page)) . '" class="page-title-action">' . esc_html($text) . '</a>';
-    }
 
     public function outputChatForm()
     {
@@ -90,7 +96,6 @@ class Screen
                 <?php if (Options::get('user_can_change_model')) { ?>
                     <p><strong>Model</strong></p>
                     <p hx-post="<?php echo esc_url($this->htmx->getRenderEndpoint('wp/user/update')); ?>" hx-vals='{"set_default_model": true}' id="set_default_model">Set as default</p>
-                    <!-- onclick setDefaultModel -->
                     <select name="model" id="model" onclick="setDefaultModel()"></select>
                     <input type="hidden" hx-get="<?php echo esc_url($this->htmx->getRenderEndpoint('htmx/tags')); ?>" hx-trigger="load" hx-target="#model">
                 <?php } else { ?>
