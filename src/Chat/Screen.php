@@ -88,6 +88,7 @@ class Screen
                     <textarea name="message" id="message" <?php if (!Options::get('spellcheck')) echo ' spellcheck="false" '; ?>placeholder="<?php echo esc_html(Options::getPlaceholder('default_message_placeholder', Define::fields())); ?>" required></textarea>
                     <input type="hidden" name="prompt" id="prompt">
                     <input type="hidden" name="chat_id" id="chat_id" value="0">
+                    <input type="hidden" name="chat_mode" id="chat_mode" value="<?php echo esc_html(self::getMode('chat')); ?>">
                     <span class="material-symbols-outlined" id="submit" <?php echo wp_kses($this->htmx->getHxMultiSwapLoadChat('htmx/chat'), []); ?>>arrow_circle_up</span>
                 </div>
             </div>
