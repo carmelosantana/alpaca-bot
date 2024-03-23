@@ -111,7 +111,7 @@ class Screen
                 <?php if (Options::get('chat_history_save')) { ?>
                     <p><strong>Chat History</strong></p>
                     <select name="chat_history_id" id="chat_history_id" <?php echo wp_kses($this->htmx->getHxMultiSwapLoadChat('wp/chat', 'change'), Options::getAllowedTags()); ?>></select>
-                    <input type="hidden" hx-get="<?php echo esc_url($this->htmx->getRenderEndpoint('wp/history')); ?>" hx-trigger="load" hx-target="#chat_history_id">
+                    <input type="hidden" hx-post="<?php echo esc_url($this->htmx->getRenderEndpoint('wp/history')); ?>" hx-trigger="load" hx-target="#chat_history_id">
                 <?php } ?>
             </div>
         </div>
