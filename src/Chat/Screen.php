@@ -148,12 +148,14 @@ class Screen
 <?php
     }
 
-    public static function render()
+    public function render()
     {
-        $screen = new self();
-        $screen->addFooterActions();
-        $screen->addFooterFilters();
+        $this->htmx = new Render(get_current_user_id());
 
-        $screen->outputChatForm();
+        $this->addFooterActions();
+        $this->addFooterFilters();
+
+        // TODO use apply filters to allow for custom chat forms
+        $this->outputChatForm();
     }
 }
