@@ -95,10 +95,6 @@ class Htmx extends Base
 
 		switch ($request_url) {
 			case self::NAMESPACE . '/htmx/chat':
-				$render->outputGenerate('chat');
-				break;
-
-			case self::NAMESPACE . '/htmx/generate':
 				$render->outputGenerate();
 				break;
 
