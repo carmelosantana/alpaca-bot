@@ -32,6 +32,19 @@ class Options extends Settings
         return $value ? $value : Define::fields()[$key]['placeholder'] ?? $value;
     }
 
+    public static function inputGet(string $key, $default = false)
+    {
+        if (!isset($_GET[$key])) {
+            return $default;
+        }
+
+        $value = sanitize_text_field($_GET[$key]);
+
+        $value = self::validateValue($value, $default);
+
+        return $value;
+    }
+
     public static function validateValue($value, $default = false)
     {
         if (is_string($value) and in_array(strtolower($value), ['true', 'false'])) {

@@ -12,8 +12,6 @@ class Screen
 {
     private object $htmx;
 
-    private object $screen;
-
     public function addFooterActions()
     {
         // add custom <script> to admin footer
@@ -35,26 +33,54 @@ class Screen
         }, 11);
     }
 
-    public function outputTitleHeader($page_title = AB_TITLE, string $title_action_html = '')
-    { ?>
-        <h1 class="wp-heading-inline"><?php echo esc_html($page_title); ?></h1>
-        <?php 
-        if (!empty($title_action_html)) {
-            echo wp_kses($title_action_html, Options::getAllowedTags());
-        } else {
-            echo $this->pageActionGenerator();
-        } ?>
-        <hr class="wp-header-end">
-    <?php }
-
-    public function pageActionGenerator($page = 'alpaca-bot', $text = 'New Chat')
+    public static function getMode(string $default = '')
     {
-        return '<a href="' . esc_url(admin_url('admin.php?page=' . $page)) . '" class="page-title-action">' . esc_html($text) . '</a>';
+        return Options::inputGet('mode', $default);
     }
 
+    public function outputTitleHeader($page_title = AB_TITLE)
+    { ?>
+        <div class="header-wrap">
+            <h1 class="wp-heading-inline"><?php echo esc_html($page_title); ?></h1>
+            <div class="ab-dropdown">
+                <a href="<?php echo esc_url(admin_url('admin.php?page=alpaca-bot' . (self::getMode() ? '&mode=' . self::getMode() : ''))); ?>" class="page-title-action">New Chat <span class="material-symbols-outlined">expand_more</span></a>
+                <div class="ab-dropdown-content">
+                    <a href="<?php echo esc_url(admin_url('admin.php?page=alpaca-bot')); ?>">
+                        <span class="material-symbols-outlined">forum</span>
+                        <strong>Multi-turn</strong>
+                        <p>Ideal for tasks requiring back-and-forth interactions and providing a natural conversational experience.</p>
+                        <p>• Conversation context</p>
+                    </a>
+                    <a href="<?php echo esc_url(admin_url('admin.php?page=alpaca-bot&mode=generate')); ?>">
+                        <span class="material-symbols-outlined">chat_apps_script</span>
+                        <strong>Single-turn</strong>
+                        <p>Optimal for content generation, summarization, and question-answering.</p>
+                        <p>• Customizable assistants</p>
+                    </a>
+                </div>
+            </div>
+            <hr class="wp-header-end">
+        </div>
+    <?php }
+
     public function outputChatForm()
-    {
-        $this->htmx = new Render(get_current_user_id()); ?>
+    { ?>
+        <form id="ab-chat-form" <?php echo esc_html($this->htmx->outputWpNonce()); ?>>
+            <div id="ab-chat-container" class="wrap nosubsub">
+                <?php $this->outputTitleHeader(); ?>
+                <div class="ab-chat">
+                    <?php $this->outputChatToolbar(); ?>
+                    <?php $this->outputChatWelcomeMessage(); ?>
+                    <?php $this->outputResponseContainer(); ?>
+                </div>
+            </div>
+            <?php $this->outputChatTextarea(); ?>
+        </form>
+    <?php
+    }
+
+    public function outputGeneratorForm()
+    { ?>
         <form id="ab-chat-form" <?php echo esc_html($this->htmx->outputWpNonce()); ?>>
             <div id="ab-chat-container" class="wrap nosubsub">
                 <?php $this->outputTitleHeader(); ?>
@@ -77,6 +103,7 @@ class Screen
                     <textarea name="message" id="message" <?php if (!Options::get('spellcheck')) echo ' spellcheck="false" '; ?>placeholder="<?php echo esc_html(Options::getPlaceholder('default_message_placeholder', Define::fields())); ?>" required></textarea>
                     <input type="hidden" name="prompt" id="prompt">
                     <input type="hidden" name="chat_id" id="chat_id" value="0">
+                    <input type="hidden" name="chat_mode" id="chat_mode" value="<?php echo esc_html(self::getMode('chat')); ?>">
                     <span class="material-symbols-outlined" id="submit" <?php echo wp_kses($this->htmx->getHxMultiSwapLoadChat('htmx/chat'), []); ?>>arrow_circle_up</span>
                 </div>
             </div>
@@ -90,7 +117,6 @@ class Screen
                 <?php if (Options::get('user_can_change_model')) { ?>
                     <p><strong>Model</strong></p>
                     <p hx-post="<?php echo esc_url($this->htmx->getRenderEndpoint('wp/user/update')); ?>" hx-vals='{"set_default_model": true}' id="set_default_model">Set as default</p>
-                    <!-- onclick setDefaultModel -->
                     <select name="model" id="model" onclick="setDefaultModel()"></select>
                     <input type="hidden" hx-get="<?php echo esc_url($this->htmx->getRenderEndpoint('htmx/tags')); ?>" hx-trigger="load" hx-target="#model">
                 <?php } else { ?>
@@ -101,7 +127,7 @@ class Screen
                 <?php if (Options::get('chat_history_save')) { ?>
                     <p><strong>Chat History</strong></p>
                     <select name="chat_history_id" id="chat_history_id" <?php echo wp_kses($this->htmx->getHxMultiSwapLoadChat('wp/chat', 'change'), Options::getAllowedTags()); ?>></select>
-                    <input type="hidden" hx-get="<?php echo esc_url($this->htmx->getRenderEndpoint('wp/history')); ?>" hx-trigger="load" hx-target="#chat_history_id">
+                    <input type="hidden" hx-post="<?php echo esc_url($this->htmx->getRenderEndpoint('wp/history')); ?>" hx-trigger="load" hx-target="#chat_history_id">
                 <?php } ?>
             </div>
         </div>
@@ -137,12 +163,14 @@ class Screen
 <?php
     }
 
-    public static function render()
+    public function render()
     {
-        $screen = new self();
-        $screen->addFooterActions();
-        $screen->addFooterFilters();
+        $this->htmx = new Render(get_current_user_id());
 
-        $screen->outputChatForm();
+        $this->addFooterActions();
+        $this->addFooterFilters();
+
+        // TODO use apply filters to allow for custom chat forms
+        $this->outputChatForm();
     }
 }

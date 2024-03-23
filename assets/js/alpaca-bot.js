@@ -138,7 +138,19 @@ function getResponseInnerHTML(id) {
     return html;
 }
 
-function resubmitPrompt(id) {
+function promptEdit(id) {
+    // get response innerHTML
+    var html = getResponseInnerHTML(id);
+
+    // set prompt value to response innerHTML
+    prompt.value = html;
+    message.value = prompt.value;
+
+    // Scroll to indicator
+    smoothScrollTo('footer');
+}
+
+function promptResubmit(id) {
     // get response innerHTML
     var html = getResponseInnerHTML(id);
 
@@ -190,6 +202,10 @@ function smoothScrollTo(selector = "dialog", behavior = 'smooth', block = 'start
             element = document.querySelector("#ab-response");
             block = 'end';
             break;
+
+        case 'footer':
+            element = document.querySelector("#wpfooter");
+            break;    
 
         case 'loading':
             element = document.querySelector("#indicator");

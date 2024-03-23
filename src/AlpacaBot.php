@@ -8,7 +8,7 @@ use CarmeloSantana\AlpacaBot\Api\Ollama;
 use CarmeloSantana\AlpacaBot\Define;
 use CarmeloSantana\AlpacaBot\Utils\Options;
 
-const VERSION = '0.4.11-alpha.3';
+const VERSION = '0.4.11';
 
 class AlpacaBot
 {
@@ -42,7 +42,7 @@ class AlpacaBot
             AB_TITLE,
             apply_filters(Options::appendPrefix('menu-capability'), 'edit_posts'),
             AB_SLUG,
-            [__NAMESPACE__ . '\Chat\Screen', 'render'],
+            [$this, 'chatScreen'],
             AB_DIR_URL . 'assets/img/icon-80.png',
             4
         );
@@ -54,9 +54,14 @@ class AlpacaBot
             'Chat',
             apply_filters(Options::appendPrefix('menu-capability'), 'edit_posts'),
             AB_SLUG,
-            [__NAMESPACE__ . '\Chat\Screen', 'render'],
+            [$this, 'chatScreen'],
             0
         );
+    }
+
+    public function chatScreen()
+    {
+        (new Chat\Screen())->render();
     }
 
     public function adminCheckScreen()

@@ -54,7 +54,7 @@ class Htmx extends Base
 			],
 			'/wp/history' => [
 				'callback' => [$this, 'renderOutput'],
-				'methods' => $server::READABLE,
+				'methods' => $server::CREATABLE,
 				'permission_callback' => [$this, 'update_item_permissions_check'],
 			],
 			'/wp/user/update' => [
@@ -95,10 +95,6 @@ class Htmx extends Base
 
 		switch ($request_url) {
 			case self::NAMESPACE . '/htmx/chat':
-				$render->outputGenerate('chat');
-				break;
-
-			case self::NAMESPACE . '/htmx/generate':
 				$render->outputGenerate();
 				break;
 
@@ -148,6 +144,7 @@ class Htmx extends Base
 		$allowed_arguments = [
 			'chat_history_id',
 			'chat_id',
+			'chat_mode',
 			'model',
 			'post_content',
 			'prompt',

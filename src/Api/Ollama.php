@@ -121,11 +121,26 @@ class Ollama
         return $response['embedding'] ?? false;
     }
 
-    public function apiGenerate(array $args): string
+    public function apiGenerate(array $args, string $output = 'string'): array|string
     {
         $response = $this->run('generate', $args);
 
-        return $this->response($response);
+        $response = $this->response($response);
+
+        switch ($output) {
+                // emulate chat array
+            case 'array':
+                return [
+                    'message' => [
+                        'content' => $response,
+                        'role' => 'assistant',
+                    ],
+                    'model' => $args['model'],
+                ];
+            case 'string':
+            default:
+                return $response;
+        }
     }
 
     public function apiTags(): array|false
@@ -179,14 +194,14 @@ class Ollama
 
         // Default API parameters
         $parameters = [
-            'stream' => false,
-            'keep_alive' => '5m',
-            'template' => Options::get('default_template', ''),
+            'stream' => apply_filters(Options::appendPrefix('ollama-stream'), false),
+            'keep_alive' => apply_filters(Options::appendPrefix('ollama-keep_alive'), '5m'),
         ];
 
         // if generate, we can check for system
         if ($section === 'generate') {
-            $parameters['system'] = Options::get('default_system', '');
+            $parameters['system'] = do_shortcode(apply_filters(Options::appendPrefix('ollama-system'), Options::get('default_system', '')));
+            $parameters['template'] = do_shortcode(apply_filters(Options::appendPrefix('ollama-template'), Options::get('default_template', '')));
         }
 
         // merge custom parameters with default parameters
@@ -315,6 +330,10 @@ class Ollama
 
         if ($json_decode and $response) {
             $response = json_decode($response, true);
+
+            if (json_last_error() !== JSON_ERROR_NONE) {
+                return false;
+            }
         }
 
         return $response;

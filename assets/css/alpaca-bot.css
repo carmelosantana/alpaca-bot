@@ -7,6 +7,7 @@
 
     /* WordPress colors */
     --wp-blue: #0073aa;
+    --wp-menu-blue: #2271b1;
     --wp-medium-blue: #00a0d2;
     --wp-ultra-dark-gray: #191e23;
     --wp-dark-gray: #23282d;
@@ -209,7 +210,7 @@
 /* .ab-chat-message-tools needs to make space for gravatar on left 38px */
 .ab-chat-message-tools {
     /* lower opacity when not hover */
-    opacity: 0.05;
+    opacity: 0.25;
     margin: 1em 1em 1em 1em;
     justify-content: space-between;
     transition: opacity 0.3s ease-in;
@@ -223,7 +224,7 @@
 
 /* transition tool span changes */
 .ab-chat-message-tools span.tools {
-    font-size: 1.2rem;
+    font-size: 1.28rem;
     color: var(--wp-dark-silver-gray);
     cursor: pointer;
     transition: color 0.3s ease-in-out;
@@ -248,9 +249,12 @@
 }
 
 .ab-chat-message-username .model {
+    color: var(--wp-silver-gray);
+    font-family: monospace;
+    font-size: .82em;
     font-weight: normal;
     text-transform: none;
-    color: #999;
+    margin-left: .33em;
 }
 
 .ab-chat-message-user .ab-chat-message-response {
@@ -297,6 +301,9 @@
     https://emma-delaney.medium.com/how-to-create-your-own-chatgpt-in-html-css-and-javascript-78e32b70b4be 
 */
 .typing-container {
+    position: -webkit-sticky;
+    position: sticky;
+    bottom: 1em;
     width: calc(100% - 20px);
     display: flex;
     justify-content: center;
@@ -446,6 +453,71 @@
     color: var(--console);
     text-shadow: 0px 0px .7em var(--console);
     cursor: pointer;
+}
+
+/* The container <div> - needed to position the dropdown content */
+.ab-dropdown {
+    position: relative;
+    display: inline-block;
+}
+
+/* Dropdown Content (Hidden by Default) */
+.ab-dropdown-content {
+    display: none;
+    position: absolute;
+    background-color: var(--chat-textarea-bg);
+    min-width: 260px;
+    box-shadow: 0px 8px 16px 0px rgba(0, 0, 0, 0.15);
+    z-index: 1;
+    border-radius: 4px;
+}
+
+/* Links inside the dropdown */
+.ab-dropdown-content a {
+    padding: 12px 16px;
+    text-decoration: none;
+    display: block;
+}
+
+.ab-dropdown-content a strong {
+    color: var(--wp-dark-gray);
+}
+
+.ab-dropdown-content a p {
+    color: var(--wp-dark-silver-gray);
+    font-size: .9em;
+    margin: .2em 0;
+}
+
+/* Change color of dropdown links on hover */
+.ab-dropdown-content a:hover {
+    color: var(--wp-dark-gray);
+    background-color: var(--chat-container-bg);
+    border-radius: 4px;
+}
+
+/* Show the dropdown menu on hover */
+.ab-dropdown:hover .ab-dropdown-content {
+    display: block;
+}
+
+/* reduce the size of google icons in span tags inside of dropdown-content  */
+.ab-dropdown-content span {
+    float: left;
+    font-size: 1.33em;
+    margin-right: .5em;
+}
+
+/* reduce p padding */
+.ab-dropdown-content p {
+    margin: .5em 0;
+}
+
+.page-title-action span {
+    font-size: 1.2em;
+    margin-left: .2em;
+    width: .9em;
+    vertical-align: middle;
 }
 
 /* Responsive Media Query */
