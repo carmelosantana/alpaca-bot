@@ -333,7 +333,11 @@ class Define
             ],
             'assistant' => [
                 'title' => __('Assistant', 'alpaca-bot'),
-                'description' => __('Override the modelfile and create a custom assistant. Applies to <a href="' . esc_url(admin_url('admin.php?page=alpaca-bot&mode=generate')) . '">Single-turn</a> Chat generations and shortcodes., ', 'alpaca-bot'),
+                'description' => sprintf(
+                    /* translators: %s: link to generate page */
+                    __('Override the modelfile and create a custom assistant. Applies to %s Chat generations and shortcodes.', 'alpaca-bot'),
+                    '<a href="' . esc_url(admin_url('admin.php?page=alpaca-bot&mode=generate')) . '">Single-turn</a>'
+                ),
             ],
             'parameters' => [
                 'title' => __('Parameters', 'alpaca-bot'),
