@@ -167,6 +167,13 @@ class Define
                 'placeholder' => esc_url(AB_DIR_URL . 'assets/img/ollama-large.png'),
                 'description_callback' => [__CLASS__, 'fieldAvatarPreview'],
             ],
+            'default_system' => [
+                'label' => __('Default System Message', 'alpaca-bot'),
+                'description' => __('The <code>SYSTEM</code> instruction specifies the system message to be used in the template, if applicable.', 'alpaca-bot'),
+                'section' => 'assistant',
+                'type' => 'textarea',
+                'placeholder' => '"""<system message>"""',
+            ],
             'default_template' => [
                 'label' => __('Default Template', 'alpaca-bot'),
                 'description' => __('The <code>TEMPLATE</code> to be passed into the model. It may include (optionally) a system message, a user\'s message and the response from the model. Note: syntax may be model specific. Templates use Go <a href="https://pkg.go.dev/text/template">template syntax</a>.', 'alpaca-bot'),
@@ -178,13 +185,6 @@ class Define
 {{ .Prompt }}<|im_end|>
 {{ end }}<|im_start|>assistant
 """',
-            ],
-            'default_system' => [
-                'label' => __('Default System Message', 'alpaca-bot'),
-                'description' => __('The <code>SYSTEM</code> instruction specifies the system message to be used in the template, if applicable.', 'alpaca-bot'),
-                'section' => 'assistant',
-                'type' => 'textarea',
-                'placeholder' => '"""<system message>"""',
             ],
             'default_mirostat' => [
                 'label' => __('Mirostat', 'alpaca-bot'),
