@@ -121,11 +121,26 @@ class Ollama
         return $response['embedding'] ?? false;
     }
 
-    public function apiGenerate(array $args): string
+    public function apiGenerate(array $args, string $output = 'string'): array|string
     {
         $response = $this->run('generate', $args);
 
-        return $this->response($response);
+        $response = $this->response($response);
+
+        switch ($output) {
+                // emulate chat array
+            case 'array':
+                return [
+                    'message' => [
+                        'content' => $response,
+                        'role' => 'assistant',
+                    ],
+                    'model' => $args['model'],
+                ];
+            case 'string':
+            default:
+                return $response;
+        }
     }
 
     public function apiTags(): array|false
