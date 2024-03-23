@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace CarmeloSantana\AlpacaBot\Api;
 
 use CarmeloSantana\AlpacaBot\Api\Ollama;
+use CarmeloSantana\AlpacaBot\Chat\Screen;
 use CarmeloSantana\AlpacaBot\Utils\Options;
 use PhpScience\TextRank\TextRankFacade;
 use PhpScience\TextRank\Tool\StopWords\English;
@@ -48,7 +49,7 @@ class Render
 		return $text_rank->summarizeTextBasic($stripped_json);
 	}
 
-	public function addChatLog($body, $json, int $post_id)
+	public function addChatLog(string $model, string $prompt, array $json, int $post_id)
 	{
 		// check if saving is enabled
 		if (!Options::get('chat_history_save')) {
@@ -75,10 +76,10 @@ class Render
 
 		// build user message matching api response
 		$user_message = [
-			'model' => $body['model'],
+			'model' => $model,
 			'message' => [
 				'role' => get_current_user_id(),
-				'content' => $body['message']['content'],
+				'content' => $prompt,
 			]
 		];
 
@@ -97,6 +98,10 @@ class Render
 		$meta[] = $json;
 
 		update_post_meta($post_id, 'messages', $meta);
+
+		if ($chat_mode = $this->getPostInput('chat_mode')) {
+			update_post_meta($post_id, 'chat_mode', $chat_mode);
+		}
 
 		if (is_wp_error($post_id)) {
 			return false;
@@ -178,9 +183,9 @@ class Render
 		return $this->post[$name] ?? $default;
 	}
 
-	public function getRenderEndpoint($endpoint)
+	public function getRenderEndpoint(string $endpoint = '', string $version = 'v1')
 	{
-		return get_bloginfo('url') . '/wp-json/' . AB_SLUG . '/v1/' . $endpoint;
+		return get_rest_url(null, AB_SLUG . '/' . $version . '/' . $endpoint);
 	}
 
 	private function getUserSetting(string $option, $default = null)
@@ -243,15 +248,52 @@ class Render
 	public function outputChatHistory()
 	{
 		// get posts by current user
-		$posts = get_posts([
+		$args = [
 			'author' => get_current_user_id(),
 			'post_type' => 'chat',
-			'numberposts' => -1,
-		]);
+			'numberposts' => 128,
+			'orderby' => 'date',
+			'order' => 'DESC',
+		];
 
-		// if posts output chat logs in foreach loop for select items, if not output empty disabled select option
-		echo '<option value="" disabled>Chat History</option>';
-		echo '<option value="0" selected>New Chat</option>';
+		// check input chat_mode
+		$mode = $this->getPostInput('chat_mode');
+		switch ($mode) {
+			case 'generate':
+				$args['meta_query'] = [
+					[
+						'key' => 'chat_mode',
+						'value' => 'generate',
+					],
+				];
+				break;
+
+			default:
+				$args['meta_query'] = [
+					[
+						'key' => 'chat_mode',
+						'value' => 'chat',
+					],
+				];
+				break;
+		}
+
+		$posts = get_posts($args);
+
+		switch ($mode) {
+			case 'generate':
+				$description = 'Select previous response';
+				$new = 'New Generation';
+				break;
+
+			default:
+				$description = 'Select previous chat';
+				$new = 'New Chat';
+				break;
+		}
+
+		echo '<option value="" disabled>' . esc_html($description) . '</option>';
+		echo '<option value="0" selected>' . esc_html($new) . '</option>';
 
 		if ($posts) {
 			$last_optgroup = '';
@@ -342,7 +384,7 @@ class Render
 		$this->outputHiddenFields($post_id);
 	}
 
-	public function outputChatMessage(array $message)
+	public function outputChatMessage(array|string $message)
 	{
 		$out = $tools = '';
 		// php function uuid
@@ -362,7 +404,6 @@ class Render
 			$response = $message['response'];
 		}
 
-
 		// Copy
 		$tools .= '<span aria-label="Copy to clipboard" id="copy-' . $uuid . '" class="tools hint--bottom hint--rounded material-symbols-outlined" onclick="copyToClipboard(\'' . $uuid . '\')">';
 		$tools .= 'content_paste';
@@ -376,12 +417,25 @@ class Render
 				$user_name = $user->user_login;
 
 				// regenerate response, send previous message again
-				$tools .= '<span aria-label="Regenerate response" class="tools hint--bottom hint--rounded material-symbols-outlined" ' . $this->getHxMultiSwapLoadChat('htmx/regenerate', 'click') . ' onclick="resubmitPrompt(\'' . $response_id . '\')">';
+				$tools .= '<span aria-label="Regenerate response" class="tools hint--bottom hint--rounded material-symbols-outlined" ' . $this->getHxMultiSwapLoadChat('htmx/regenerate', 'click') . ' onclick="promptResubmit(\'' . $response_id . '\')">';
 				$tools .= 'autorenew';
+				$tools .= '</span>';
+
+				// edit response, send to message
+				$tools .= '<span aria-label="Edit prompt" class="tools hint--bottom hint--rounded material-symbols-outlined" onclick="promptEdit(\'' . $response_id . '\')">';
+				$tools .= 'edit';
 				$tools .= '</span>';
 				break;
 
 			case 'assistant':
+				switch ($this->getPostInput('chat_mode')) {
+					case 'generate':
+						if ($default_avatar = Options::get('default_avatar')) {
+							$gravatar = apply_filters(Options::appendPrefix('default_avatar'), $default_avatar);
+						}
+						break;
+				}
+
 				// on click get innerhtml from response and send to wp/post/insert
 				$tools .= '<span aria-label="Save to post" class="hint--bottom hint--rounded">';
 				$tools .= '<span class="tools material-symbols-outlined rotate-push-pin" hx-post="' . $this->getRenderEndpoint('wp/post/insert') . '" hx-vars="post_content:getResponseInnerHTML(\'' . $response_id . '\')" hx-target="#' . $response_id . '" hx-swap="afterend">';
@@ -395,8 +449,12 @@ class Render
 				$tools .= '</span>';
 
 			default:
-				$gravatar = $this->getAssistantAvatarUrl($message['message']['role']);
-				$user_name = $message['message']['role'];
+				if (!isset($gravatar)) {
+					$gravatar = $this->getAssistantAvatarUrl($message['message']['role']);
+				}
+				if (!isset($user_name)) {
+					$user_name = $message['message']['role'];
+				}
 				if (!empty($message['model'])) {
 					$user_name .= ' ' . $this->getAssistantModel($message['model']);
 				}
@@ -447,7 +505,7 @@ class Render
 		return $time;
 	}
 
-	public function outputGenerate($endpoint = 'generate')
+	public function outputGenerate(string $endpoint = ''): void
 	{
 		// Quick input validation
 		if (!$this->checkUserInputs())
@@ -457,64 +515,66 @@ class Render
 		$model = $this->getPostInput('model');
 		$original_prompt = $this->getPostInput('prompt');
 
+		// if endpoint is empty, check chat_mode input
+		if (empty($endpoint)) {
+			$endpoint = $this->getPostInput('chat_mode', 'chat');
+		}
+
 		// Filter prompt
 		$prompt = apply_filters(Options::appendPrefix('user_prompt'), stripslashes($original_prompt));
 
-		// Choose completion type
-		switch ($endpoint) {
-			case 'chat':
-			case 'regenerate':
-				$post_id = (int) $this->getPostInput('chat_id', 0);
+		$post_id = (int) $this->getPostInput('chat_id', 0);
 
-				// if post_id > 0 then get post_content and add to messages
-				if ($post_id > 0) {
-					$messages_raw = get_post_meta($post_id, 'messages', true);
-				}
+		// if post_id > 0 then get post_content and add to messages
+		if ($post_id > 0) {
+			$messages_raw = get_post_meta($post_id, 'messages', true);
+		}
 
-				// process messages to match api request
-				if (isset($messages_raw) and is_array($messages_raw)) {
-					// limit chat history
-					if (Options::getPlaceholder('chat_history_limit') > 0) {
-						$messages_raw = array_slice($messages_raw, -Options::getPlaceholder('chat_history_limit'));
-					}
+		// process messages to match api request
+		if (isset($messages_raw) and is_array($messages_raw)) {
+			// limit chat history
+			if (Options::getPlaceholder('chat_history_limit') > 0) {
+				$messages_raw = array_slice($messages_raw, -Options::getPlaceholder('chat_history_limit'));
+			}
 
-					foreach ($messages_raw as $message) {
-						$messages[] = [
-							'role' => (is_int($message['message']['role']) ? 'user' : 'assistant'),
-							'content' => $message['message']['content'],
-						];
-					}
-				} else {
-					$messages = [];
-				}
-
-				$message = [
-					'role' => 'user',
-					'content' => $prompt,
+			foreach ($messages_raw as $message) {
+				$messages[] = [
+					'role' => (is_int($message['message']['role']) ? 'user' : 'assistant'),
+					'content' => $message['message']['content'],
 				];
+			}
+		} else {
+			$messages = [];
+		}
 
-				$messages[] = $message;
+		$message = [
+			'role' => 'user',
+			'content' => $prompt,
+		];
 
-				$body = [
-					'model' => $model,
-					'messages' => $messages,
-					'stream' => false,
-				];
+		$messages[] = $message;
 
-				// get assistant response
-				$json = $this->ollama->apiChat($body);
-				break;
-
+		// Choose completion type, checks POST chat_mode fist, then $endpoint
+		switch ($this->getPostInput('chat_mode', $endpoint)) {
 			case 'generate':
 				// Build request body
 				$body = [
 					'model' => $model,
 					'prompt' => $prompt,
-					'stream' => false,
 				];
 
 				// get assistant response
-				$json = $this->ollama->apiGenerate($body);
+				$json = $this->ollama->apiGenerate($body, 'array');
+				break;
+
+			default:
+				$body = [
+					'model' => $model,
+					'messages' => $messages,
+				];
+
+				// get assistant response
+				$json = $this->ollama->apiChat($body);
 				break;
 		}
 
@@ -537,7 +597,7 @@ class Render
 		}
 
 		// Save messages to chat log
-		$post_id = $this->addChatLog(['model' => $model, 'message' => $message], $json, $post_id);
+		$post_id = $this->addChatLog($model, $prompt, $json, $post_id);
 
 		// Close dialog and wrapper
 		$this->outputDialogEnd();
