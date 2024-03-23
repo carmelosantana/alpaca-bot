@@ -144,6 +144,7 @@ class Htmx extends Base
 		$allowed_arguments = [
 			'chat_history_id',
 			'chat_id',
+			'chat_mode',
 			'model',
 			'post_content',
 			'prompt',
