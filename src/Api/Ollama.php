@@ -330,6 +330,10 @@ class Ollama
 
         if ($json_decode and $response) {
             $response = json_decode($response, true);
+
+            if (json_last_error() !== JSON_ERROR_NONE) {
+                return false;
+            }
         }
 
         return $response;
