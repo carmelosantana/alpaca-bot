@@ -54,7 +54,7 @@ class Htmx extends Base
 			],
 			'/wp/history' => [
 				'callback' => [$this, 'renderOutput'],
-				'methods' => $server::READABLE,
+				'methods' => $server::CREATABLE,
 				'permission_callback' => [$this, 'update_item_permissions_check'],
 			],
 			'/wp/user/update' => [
