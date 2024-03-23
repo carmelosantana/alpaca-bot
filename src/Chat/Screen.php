@@ -33,20 +33,25 @@ class Screen
         }, 11);
     }
 
+    public static function getMode(string $default = '')
+    {
+        return Options::inputGet('mode', $default);
+    }
+
     public function outputTitleHeader($page_title = AB_TITLE)
     { ?>
         <div class="header-wrap">
             <h1 class="wp-heading-inline"><?php echo esc_html($page_title); ?></h1>
-            <div class="dropdown">
-                <a href="<?php echo esc_url(admin_url('admin.php?page=alpaca-bot')); ?>" class="page-title-action">New Chat</a>
-                <div class="dropdown-content">
-                    <a href="#">
+            <div class="ab-dropdown">
+                <a href="<?php echo esc_url(admin_url('admin.php?page=alpaca-bot' . (self::getMode() ? '&mode=' . self::getMode() : ''))); ?>" class="page-title-action">New Chat <span class="material-symbols-outlined">expand_more</span></a>
+                <div class="ab-dropdown-content">
+                    <a href="<?php echo esc_url(admin_url('admin.php?page=alpaca-bot')); ?>">
                         <span class="material-symbols-outlined">forum</span>
                         <strong>Multi-turn</strong>
                         <p>Ideal for tasks requiring back-and-forth interactions and providing a natural conversational experience.</p>
                         <p>• Conversation context</p>
                     </a>
-                    <a href="#">
+                    <a href="<?php echo esc_url(admin_url('admin.php?page=alpaca-bot&mode=generate')); ?>">
                         <span class="material-symbols-outlined">chat_apps_script</span>
                         <strong>Single-turn</strong>
                         <p>Optimal for content generation, summarization, and question-answering.</p>
