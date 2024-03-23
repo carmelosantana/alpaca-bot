@@ -256,7 +256,7 @@ class Ollama
 
     public function getApiUrl(): string
     {
-        $url = Options::get('api_url');
+        $url = Options::get('api_url', '');
 
         // check for trailing slash, add if missing
         if (substr($url, -1) !== '/') {
