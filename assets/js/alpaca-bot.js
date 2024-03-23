@@ -138,7 +138,19 @@ function getResponseInnerHTML(id) {
     return html;
 }
 
-function resubmitPrompt(id) {
+function promptEdit(id) {
+    // get response innerHTML
+    var html = getResponseInnerHTML(id);
+
+    // set prompt value to response innerHTML
+    prompt.value = html;
+    message.value = prompt.value;
+
+    // Scroll to indicator
+    smoothScrollTo('footer');
+}
+
+function promptResubmit(id) {
     // get response innerHTML
     var html = getResponseInnerHTML(id);
 
