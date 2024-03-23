@@ -210,7 +210,7 @@
 /* .ab-chat-message-tools needs to make space for gravatar on left 38px */
 .ab-chat-message-tools {
     /* lower opacity when not hover */
-    opacity: 0.05;
+    opacity: 0.25;
     margin: 1em 1em 1em 1em;
     justify-content: space-between;
     transition: opacity 0.3s ease-in;
@@ -224,7 +224,7 @@
 
 /* transition tool span changes */
 .ab-chat-message-tools span.tools {
-    font-size: 1.2rem;
+    font-size: 1.28rem;
     color: var(--wp-dark-silver-gray);
     cursor: pointer;
     transition: color 0.3s ease-in-out;
@@ -249,9 +249,12 @@
 }
 
 .ab-chat-message-username .model {
+    color: var(--wp-silver-gray);
+    font-family: monospace;
+    font-size: .82em;
     font-weight: normal;
     text-transform: none;
-    color: #999;
+    margin-left: .33em;
 }
 
 .ab-chat-message-user .ab-chat-message-response {
@@ -298,6 +301,9 @@
     https://emma-delaney.medium.com/how-to-create-your-own-chatgpt-in-html-css-and-javascript-78e32b70b4be 
 */
 .typing-container {
+    position: -webkit-sticky;
+    position: sticky;
+    bottom: 1em;
     width: calc(100% - 20px);
     display: flex;
     justify-content: center;
