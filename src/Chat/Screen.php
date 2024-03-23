@@ -64,8 +64,23 @@ class Screen
     <?php }
 
     public function outputChatForm()
-    {
-        $this->htmx = new Render(get_current_user_id()); ?>
+    { ?>
+        <form id="ab-chat-form" <?php echo esc_html($this->htmx->outputWpNonce()); ?>>
+            <div id="ab-chat-container" class="wrap nosubsub">
+                <?php $this->outputTitleHeader(); ?>
+                <div class="ab-chat">
+                    <?php $this->outputChatToolbar(); ?>
+                    <?php $this->outputChatWelcomeMessage(); ?>
+                    <?php $this->outputResponseContainer(); ?>
+                </div>
+            </div>
+            <?php $this->outputChatTextarea(); ?>
+        </form>
+    <?php
+    }
+
+    public function outputGeneratorForm()
+    { ?>
         <form id="ab-chat-form" <?php echo esc_html($this->htmx->outputWpNonce()); ?>>
             <div id="ab-chat-container" class="wrap nosubsub">
                 <?php $this->outputTitleHeader(); ?>
