@@ -198,6 +198,7 @@ class Define
                 'description' => __('Influences how quickly the algorithm responds to feedback from the generated text. A lower learning rate will result in slower adjustments, while a higher learning rate will make the algorithm more responsive. (Default: 0.1)', 'alpaca-bot'),
                 'section' => 'parameters',
                 'type' => 'number',
+                'step' => 0.1,
                 'placeholder' => 0.1,
             ],
             'default_mirostat_tau' => [
@@ -205,6 +206,7 @@ class Define
                 'description' => __('Controls the balance between coherence and diversity of the output. A lower value will result in more focused and coherent text. (Default: 5.0)', 'alpaca-bot'),
                 'section' => 'parameters',
                 'type' => 'number',
+                'step' => 0.1,
                 'placeholder' => 5.0,
             ],
             'default_num_ctx' => [
@@ -247,6 +249,7 @@ class Define
                 'description' => __('Sets how strongly to penalize repetitions. A higher value (e.g., 1.5) will penalize repetitions more strongly, while a lower value (e.g., 0.9) will be more lenient. (Default: 1.1)', 'alpaca-bot'),
                 'section' => 'parameters',
                 'type' => 'number',
+                'step' => 0.1,
                 'placeholder' => 1.1,
             ],
             'default_temperature' => [
@@ -254,6 +257,7 @@ class Define
                 'description' => __('The temperature of the model. Increasing the temperature will make the model answer more creatively. (Default: 0.8)', 'alpaca-bot'),
                 'section' => 'parameters',
                 'type' => 'number',
+                'step' => 0.1,
                 'placeholder' => 0.8,
             ],
             'default_seed' => [
@@ -295,6 +299,7 @@ class Define
                 'description' => __('Works together with top-k. A higher value (e.g., 0.95) will lead to more diverse text, while a lower value (e.g., 0.5) will generate more focused and conservative text. (Default: 0.9)', 'alpaca-bot'),
                 'section' => 'parameters',
                 'type' => 'number',
+                'step' => 0.1,
                 'placeholder' => 0.9,
             ],
 

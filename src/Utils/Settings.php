@@ -301,6 +301,7 @@ class Settings
             'field_callback' => null,
             'label' => '',
             'placeholder' => null,
+            'step' => 1,
             'type' => 'text',
         ];
 
@@ -371,7 +372,7 @@ class Settings
                                     break;
 
                                 case 'number':
-                                    echo '<input type="number" name="' . esc_attr(self::prefix($key2)) . '" value="' . esc_attr($value) . '" placeholder="' . esc_attr($option['placeholder']) . '" class="regular-text">';
+                                    echo '<input type="number" name="' . esc_attr(self::prefix($key2)) . '" value="' . esc_attr($value) . '" placeholder="' . esc_attr($option['placeholder']) . '" class="regular-text" step="' . esc_attr($option['step']) . '">';
                                     break;
 
                                 case 'radio':
