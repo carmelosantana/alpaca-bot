@@ -42,7 +42,7 @@ class AlpacaBot
             AB_TITLE,
             apply_filters(Options::appendPrefix('menu-capability'), 'edit_posts'),
             AB_SLUG,
-            [__NAMESPACE__ . '\Chat\Screen', 'render'],
+            [$this, 'chatScreen'],
             AB_DIR_URL . 'assets/img/icon-80.png',
             4
         );
@@ -54,9 +54,14 @@ class AlpacaBot
             'Chat',
             apply_filters(Options::appendPrefix('menu-capability'), 'edit_posts'),
             AB_SLUG,
-            [__NAMESPACE__ . '\Chat\Screen', 'render'],
+            [$this, 'chatScreen'],
             0
         );
+    }
+
+    public function chatScreen()
+    {
+        (new Chat\Screen())->render();
     }
 
     public function adminCheckScreen()
