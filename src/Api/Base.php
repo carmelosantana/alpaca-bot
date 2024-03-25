@@ -16,7 +16,7 @@ abstract class Base
 
     public const PERMISSION_READ = 'read';
 
-    public const PERMISSION_WRITE = 'edit_post';
+    public const PERMISSION_WRITE = 'edit_posts';
 
     /**
      * Check permissions for the posts.
