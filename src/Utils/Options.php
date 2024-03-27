@@ -45,6 +45,21 @@ class Options extends Settings
         return $value;
     }
 
+    public static function setDefaultOptions()
+    {
+        if (get_option(self::appendPrefix('version')) === \CarmeloSantana\AlpacaBot\VERSION) {
+            return;
+        }
+
+        foreach (Define::fields() as $key => $option) {
+            if (!get_option(self::appendPrefix($key) and self::validateValue($option['default']))) {
+                add_option(self::appendPrefix($key), $option['default'], '', ($option['autoload'] ?? 'no'));
+            }
+        }
+
+        update_option(self::appendPrefix('version'), \CarmeloSantana\AlpacaBot\VERSION);
+    }
+
     public static function validateValue($value, $default = false)
     {
         if (is_string($value) and in_array(strtolower($value), ['true', 'false'])) {
