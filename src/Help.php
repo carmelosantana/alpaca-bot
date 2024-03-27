@@ -37,6 +37,7 @@ class Help
 
         if (in_array($screen->id, $help_full)) {
             $ignore = [
+                'Screenshots',
                 'Requirements',
                 'Installation'
             ];

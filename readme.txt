@@ -4,7 +4,7 @@ Donate link: https://www.patreon.com/carmelosantana
 Tags: ai, large language model, embedding, chatbot, ollama  
 Requires at least: 6.4  
 Tested up to: 6.4  
-Stable tag: 0.4.10  
+Stable tag: 0.4.12  
 Requires PHP: 8.1  
 License: GPLv2 or later  
 License URI: https://www.gnu.org/licenses/gpl-2.0.html  
@@ -155,3 +155,12 @@ Please consider [becoming a Patreon](https://www.patreon.com/carmelosantana) tod
 3. Enter your [Ollama](https://github.com/ollama/ollama) API URL. 
     - Add your [Alpaca Bot](https://app.alpaca.bot/) Username and API Application Password if you are using our hosted service.
 4. Click `Save Changes`.
+
+== Screenshots ==  
+  
+1. Main chat interface with model list, chat history and prompt input.   
+2. Chat interface with a conversation history.   
+3. Drafting a post from generated responses.   
+4. Override system message for custom responses.   
+5. Custom assistant settings.   
+6. Shortcode examples.

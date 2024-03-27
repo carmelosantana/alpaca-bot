@@ -8,7 +8,7 @@ use CarmeloSantana\AlpacaBot\Api\Ollama;
 use CarmeloSantana\AlpacaBot\Define;
 use CarmeloSantana\AlpacaBot\Utils\Options;
 
-const VERSION = '0.4.11';
+const VERSION = '0.4.12';
 
 class AlpacaBot
 {
@@ -16,9 +16,10 @@ class AlpacaBot
     {
         add_action('admin_enqueue_scripts', [$this, 'adminEnqueueScripts']);
         add_action('admin_enqueue_scripts', [$this, 'adminEnqueueStyles']);
-        add_action('admin_init', [$this, 'buildCache']);
-        add_action('admin_menu', [$this, 'addAdminMenu']);
+        add_action('admin_init', [$this, 'adminInit']);
+        add_action('admin_menu', [$this, 'adminAddMenu']);
         add_action('admin_notices', [$this, 'adminNotices']);
+        add_action('init', [$this, 'init']);
 
         // Setup options
         $this->options();
@@ -30,12 +31,11 @@ class AlpacaBot
 
         // Load with plugin
         new Agents();
-        new Help();
         new Api\Htmx();
         new Chat\Post();
     }
 
-    public function addAdminMenu()
+    public function adminAddMenu()
     {
         add_menu_page(
             AB_TITLE,
@@ -57,11 +57,6 @@ class AlpacaBot
             [$this, 'chatScreen'],
             0
         );
-    }
-
-    public function chatScreen()
-    {
-        (new Chat\Screen())->render();
     }
 
     public function adminCheckScreen()
@@ -90,6 +85,11 @@ class AlpacaBot
         wp_enqueue_style(AB_SLUG, AB_DIR_URL . 'assets/css/alpaca-bot.css', [], VERSION);
         wp_enqueue_style('hint', AB_DIR_URL . 'assets/css/hint.min.css', [], VERSION);
         wp_enqueue_style('materialsymbolsoutlined', AB_DIR_URL . 'assets/css/Material-Symbols-Outlined.css', [], VERSION);
+    }
+
+    public function adminInit()
+    {
+        new Help();
     }
 
     public function adminNotices()
@@ -124,6 +124,20 @@ class AlpacaBot
         if (Options::get('api_url') and $this->adminCheckScreen()) {
             (new Ollama())->getModels();
         }
+    }
+
+    public function chatScreen()
+    {
+        (new Chat\Screen())->render();
+    }
+
+    public function init()
+    {
+        // Set default options
+        Options::setDefaultOptions();
+
+        // Build cache
+        $this->buildCache();
     }
 
     public function options()
