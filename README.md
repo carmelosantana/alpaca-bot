@@ -35,6 +35,10 @@ If self-hosting isn't for you, please consider [becoming a Patreon](https://www.
 
 ---
 
+- [Screenshots](#screenshots)
+  - [Chat Interface](#chat-interface)
+  - [Custom Assistants](#custom-assistants)
+  - [Dynamic Content Generation](#dynamic-content-generation)
 - [Requirements](#requirements)
 - [Installation](#installation)
 - [Setup](#setup)
@@ -63,6 +67,38 @@ If self-hosting isn't for you, please consider [becoming a Patreon](https://www.
 - [License](#license)
 
 ---
+
+## Screenshots
+
+### Chat Interface
+
+![Alpaca Bot](https://alpaca.bot/wp-content/uploads/2024/03/screenshot-1.png)
+
+> Main chat interface with model list, chat history and prompt input.
+
+![Chat interface with a conversation history](https://alpaca.bot/wp-content/uploads/2024/03/screenshot-2.png)
+
+> Chat interface with a conversation history.
+
+![Draft to post](https://alpaca.bot/wp-content/uploads/2024/03/screenshot-3.png)
+
+> Drafting a post from generated responses.
+
+### Custom Assistants
+
+![Custom assistant](https://alpaca.bot/wp-content/uploads/2024/03/screenshot-4.png)
+
+> Override `system` message for custom responses.
+
+![Assistant tab](https://alpaca.bot/wp-content/uploads/2024/03/screenshot-5.png)
+
+> Custom assistant settings.
+
+### Dynamic Content Generation
+
+![Shortcodes](https://alpaca.bot/wp-content/uploads/2024/03/screenshot-6.png)
+
+> Shortcode examples.
 
 ## Requirements
 
