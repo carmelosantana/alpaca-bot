@@ -336,6 +336,11 @@ class Ollama
             }
         }
 
+        // if string we have an error, likely a page output we don't want
+        if (is_string($response)) {
+            return false;
+        }
+
         return $response;
     }
 
