@@ -141,6 +141,7 @@ Patreon's also receive;
 - Access to our hosted [Ollama](https:/github.com/ollama/ollama) instances.
 - Priority feature requests.
 - Early access to new features and releases.
+- Video and community support.
 
 Please consider [becoming a Patreon](https://www.patreon.com/carmelosantana) today!
 
@@ -150,7 +151,7 @@ Please consider [becoming a Patreon](https://www.patreon.com/carmelosantana) tod
 
 1. Setup your [Ollama](https://github.com/ollama/ollama) instance in one of the following ways: 
     - Install [Ollama](https://github.com/ollama/ollama) on your localhost or server.
-    - **[Become a Patreon](https://www.patreon.com/carmelosantana)** and subscribe to [Alpaca Bot](https://alpaca.bot/) for premium API features and share our community hosted Ollama instances.
+    - **[Become a Patreon](https://www.patreon.com/carmelosantana)** and subscribe to [Alpaca Bot](https://alpaca.bot/) to access our hosted [Ollama](https://github.com/ollama/ollama) instances and premium support.
 2. Add your [Ollama](https://github.com/ollama/ollama) API URL to the settings page by navigating to `Alpaca Bot > Settings` in your WordPress admin dashboard.
 3. Enter your [Ollama](https://github.com/ollama/ollama) API URL. 
     - Add your [Alpaca Bot](https://app.alpaca.bot/) Username and API Application Password if you are using our hosted service.
