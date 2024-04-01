@@ -4,7 +4,7 @@ Donate link: https://www.patreon.com/carmelosantana
 Tags: ai, large language model, embedding, chatbot, ollama  
 Requires at least: 6.4  
 Tested up to: 6.4  
-Stable tag: 0.4.10  
+Stable tag: 0.4.12  
 Requires PHP: 8.1  
 License: GPLv2 or later  
 License URI: https://www.gnu.org/licenses/gpl-2.0.html  
@@ -141,6 +141,7 @@ Patreon's also receive;
 - Access to our hosted [Ollama](https:/github.com/ollama/ollama) instances.
 - Priority feature requests.
 - Early access to new features and releases.
+- Video and community support.
 
 Please consider [becoming a Patreon](https://www.patreon.com/carmelosantana) today!
 
@@ -150,8 +151,17 @@ Please consider [becoming a Patreon](https://www.patreon.com/carmelosantana) tod
 
 1. Setup your [Ollama](https://github.com/ollama/ollama) instance in one of the following ways: 
     - Install [Ollama](https://github.com/ollama/ollama) on your localhost or server.
-    - **[Become a Patreon](https://www.patreon.com/carmelosantana)** and subscribe to [Alpaca Bot](https://alpaca.bot/) for premium API features and share our community hosted Ollama instances.
+    - **[Become a Patreon](https://www.patreon.com/carmelosantana)** and subscribe to [Alpaca Bot](https://alpaca.bot/) to access our hosted [Ollama](https://github.com/ollama/ollama) instances and premium support.
 2. Add your [Ollama](https://github.com/ollama/ollama) API URL to the settings page by navigating to `Alpaca Bot > Settings` in your WordPress admin dashboard.
 3. Enter your [Ollama](https://github.com/ollama/ollama) API URL. 
     - Add your [Alpaca Bot](https://app.alpaca.bot/) Username and API Application Password if you are using our hosted service.
 4. Click `Save Changes`.
+
+== Screenshots ==  
+  
+1. Main chat interface with model list, chat history and prompt input.   
+2. Chat interface with a conversation history.   
+3. Drafting a post from generated responses.   
+4. Override system message for custom responses.   
+5. Custom assistant settings.   
+6. Shortcode examples.

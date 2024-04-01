@@ -8,7 +8,7 @@
 
   [![Discord](https://img.shields.io/discord/485971823821979648?logo=discord&label=Discord&color=72edad)](https://discord.gg/vWQTHphkVt)
   ![GitHub release (latest by date)](https://img.shields.io/github/v/release/carmelosantana/alpaca-bot?label=Latest%20Release&color=668bf2)
-  <a href="https://demo.alpaca.bot/"><img src="https://img.shields.io/badge/Live-Demo-ed72b1" alt="Alpaca Demo">
+  <a href="https://demo.alpaca.bot/"><img src="https://status.alpaca.bot/api/badge/27/uptime/24?labelPrefix=Demo+&color=ed72b1" alt="Alpaca Demo">
   </a>
 
   <a href="https://www.patreon.com/carmelosantana"><img src="https://img.shields.io/badge/Subscribe-Become%20a%20Patreon-826EB4?logo=patreon" alt="Patreon">
@@ -35,6 +35,10 @@ If self-hosting isn't for you, please consider [becoming a Patreon](https://www.
 
 ---
 
+- [Screenshots](#screenshots)
+  - [Chat Interface](#chat-interface)
+  - [Custom Assistants](#custom-assistants)
+  - [Dynamic Content Generation](#dynamic-content-generation)
 - [Requirements](#requirements)
 - [Installation](#installation)
 - [Setup](#setup)
@@ -64,6 +68,38 @@ If self-hosting isn't for you, please consider [becoming a Patreon](https://www.
 
 ---
 
+## Screenshots
+
+### Chat Interface
+
+![Alpaca Bot](https://alpaca.bot/wp-content/uploads/2024/03/screenshot-1.png)
+
+> Main chat interface with model list, chat history and prompt input.
+
+![Chat interface with a conversation history](https://alpaca.bot/wp-content/uploads/2024/03/screenshot-2.png)
+
+> Chat interface with a conversation history.
+
+![Draft to post](https://alpaca.bot/wp-content/uploads/2024/03/screenshot-3.png)
+
+> Drafting a post from generated responses.
+
+### Custom Assistants
+
+![Custom assistant](https://alpaca.bot/wp-content/uploads/2024/03/screenshot-4.png)
+
+> Override `system` message for custom responses.
+
+![Assistant tab](https://alpaca.bot/wp-content/uploads/2024/03/screenshot-5.png)
+
+> Custom assistant settings.
+
+### Dynamic Content Generation
+
+![Shortcodes](https://alpaca.bot/wp-content/uploads/2024/03/screenshot-6.png)
+
+> Shortcode examples.
+
 ## Requirements
 
 - Access to [Ollama](https://github.com/ollama/ollama) v0.1.24 or later.
@@ -81,7 +117,7 @@ If self-hosting isn't for you, please consider [becoming a Patreon](https://www.
 
 1. Setup your [Ollama](https://github.com/ollama/ollama) instance in one of the following ways:
    - Install [Ollama](https://github.com/ollama/ollama) on your localhost or server.
-   - ⭐️ **[Become a Patreon](https://www.patreon.com/carmelosantana)** and subscribe to [Alpaca Bot](https://alpaca.bot/) for premium API features and share our community hosted Ollama instances.
+   - ⭐️ **[Become a Patreon](https://www.patreon.com/carmelosantana)** and subscribe to [Alpaca Bot](https://alpaca.bot/) to access our hosted [Ollama](https://github.com/ollama/ollama) instances and premium support.
 2. Add your [Ollama](https://github.com/ollama/ollama) API URL to the settings page by navigating to `Alpaca Bot > Settings` in your WordPress admin dashboard.
 3. Enter your [Ollama](https://github.com/ollama/ollama) API URL.
    - Add your [Alpaca Bot](https://app.alpaca.bot/) Username and API Application Password if you are using our hosted service.
@@ -201,6 +237,7 @@ Patreon's also receive;
 - Access to our hosted [Ollama](https:/github.com/ollama/ollama) instances.
 - Priority feature requests.
 - Early access to new features and releases.
+- Video and community support.
 
 Please consider [becoming a Patreon](https://www.patreon.com/carmelosantana) today!
 

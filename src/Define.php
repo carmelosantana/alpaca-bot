@@ -69,17 +69,20 @@ class Define
                 'placeholder' => 'http://localhost:11434',
                 'section' => 'api',
                 'description_callback' => [__CLASS__, 'fieldApiUrlValidate'],
+                'autoload' => 'yes',
             ],
             'api_username' => [
                 'label' => __('API Username', 'alpaca-bot'),
                 'description' => __('This is optional.', 'alpaca-bot'),
                 'section' => 'api',
+                'autoload' => 'yes',
             ],
             'api_password' => [
                 'label' => __('API Application Password', 'alpaca-bot'),
                 'description' => __('This is optional.', 'alpaca-bot'),
                 'section' => 'api',
                 'type' => 'password',
+                'autoload' => 'yes',
             ],
             'ollama_timeout' => [
                 'label' => __('Timeout', 'alpaca-bot'),
@@ -87,12 +90,14 @@ class Define
                 'section' => 'api',
                 'type' => 'number',
                 'placeholder' => 60,
+                'autoload' => 'yes',
             ],
             'default_model' => [
                 'label' => __('Default Model', 'alpaca-bot'),
                 'type' => 'select',
                 'options' => self::getModels(),
                 'section' => 'chat',
+                'autoload' => 'yes',
             ],
             'user_can_change_model' => [
                 'label' => __('Can users change model?', 'alpaca-bot'),
@@ -302,7 +307,6 @@ class Define
                 'step' => 0.1,
                 'placeholder' => 0.9,
             ],
-
         ];
     }
 
