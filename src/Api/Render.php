@@ -33,12 +33,29 @@ class Render
 	public function getSummarizedTitle(string $message, $title_prefix = 'Chat Log')
 	{
 		$message = wp_strip_all_tags($message);
-		$summary = $this->getSummary($message);
+		$summary = $this->getSummaryTextRank($message);
 
 		return !empty($summary) ? array_shift($summary) : $title_prefix . ' ' . gmdate('Y-m-d H:i:s');
 	}
 
-	public function getSummary(string $message)
+	public function getSummaryOllama(string $message)
+	{
+		// Send text generation request to Ollama
+		// Prompt: Quickly summarize the text into a single short sentence.
+		// use model used for chat
+		$body = [
+			'model' => $this->getPostInput('model'),
+			'prompt' => '[INST]Summarize this text into a single short sentence.[/INST]' . $message,
+		];
+
+		// get assistant response
+		$response = $this->ollama->apiGenerate($body);
+
+		// return response
+		return $response;
+	}
+
+	public function getSummaryTextRank(string $message)
 	{
 		$text_rank = new TextRankFacade();
 		$stop_words = new English();
