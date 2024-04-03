@@ -38,22 +38,22 @@ class AlpacaBot
     public function adminAddMenu()
     {
         add_menu_page(
-            AB_TITLE,
-            AB_TITLE,
+            ALPACA_BOT_TITLE,
+            ALPACA_BOT_TITLE,
             apply_filters(Options::appendPrefix('menu-capability'), 'edit_posts'),
-            AB_SLUG,
+            ALPACA_BOT,
             [$this, 'chatScreen'],
-            AB_DIR_URL . 'assets/img/icon-80.png',
+            ALPACA_BOT_DIR_URL . 'assets/img/icon-80.png',
             4
         );
 
         // Add submenu page to replace the default menu page
         add_submenu_page(
-            AB_SLUG,
+            ALPACA_BOT,
             'Chat',
             'Chat',
             apply_filters(Options::appendPrefix('menu-capability'), 'edit_posts'),
-            AB_SLUG,
+            ALPACA_BOT,
             [$this, 'chatScreen'],
             0
         );
@@ -62,7 +62,7 @@ class AlpacaBot
     public function adminCheckScreen()
     {
         // check page for alpaca-bot
-        if (strpos($_SERVER['REQUEST_URI'], 'admin.php?page=' . AB_SLUG) === false) {
+        if (strpos($_SERVER['REQUEST_URI'], 'admin.php?page=' . ALPACA_BOT) === false) {
             return false;
         }
 
@@ -75,16 +75,16 @@ class AlpacaBot
             return;
         }
 
-        wp_enqueue_script('htmx', AB_DIR_URL . 'assets/js/htmx.min.js', [], '1.9.10', true);
-        wp_enqueue_script('htmx-multi-swap', AB_DIR_URL . 'assets/js/multi-swap.js', [], '1', true);
-        wp_enqueue_script(AB_SLUG, AB_DIR_URL . 'assets/js/alpaca-bot.js', [], VERSION, true);
+        wp_enqueue_script('htmx', ALPACA_BOT_DIR_URL . 'assets/js/htmx.min.js', [], '1.9.10', true);
+        wp_enqueue_script('htmx-multi-swap', ALPACA_BOT_DIR_URL . 'assets/js/multi-swap.js', [], '1', true);
+        wp_enqueue_script(ALPACA_BOT, ALPACA_BOT_DIR_URL . 'assets/js/alpaca-bot.js', [], VERSION, true);
     }
 
     public function adminEnqueueStyles()
     {
-        wp_enqueue_style(AB_SLUG, AB_DIR_URL . 'assets/css/alpaca-bot.css', [], VERSION);
-        wp_enqueue_style('hint', AB_DIR_URL . 'assets/css/hint.min.css', [], VERSION);
-        wp_enqueue_style('materialsymbolsoutlined', AB_DIR_URL . 'assets/css/Material-Symbols-Outlined.css', [], VERSION);
+        wp_enqueue_style(ALPACA_BOT, ALPACA_BOT_DIR_URL . 'assets/css/alpaca-bot.css', [], VERSION);
+        wp_enqueue_style('hint', ALPACA_BOT_DIR_URL . 'assets/css/hint.min.css', [], VERSION);
+        wp_enqueue_style('materialsymbolsoutlined', ALPACA_BOT_DIR_URL . 'assets/css/Material-Symbols-Outlined.css', [], VERSION);
     }
 
     public function adminInit()
@@ -153,9 +153,9 @@ class AlpacaBot
         $options->setMenuSlug(Options::appendPrefix('settings', '-'));
         $options->setMenuTitle('Settings');
         $options->setPageTitle('Settings');
-        $options->setParentSlug(AB_SLUG);
-        $options->setPrefix(AB_SLUG);
-        $options->addPageWrapClass(AB_SLUG);
+        $options->setParentSlug(ALPACA_BOT);
+        $options->setPrefix(ALPACA_BOT);
+        $options->addPageWrapClass(ALPACA_BOT);
         $options->addPageWrapClass(Options::appendPrefix('options', '-'));
 
         // Register and create options page

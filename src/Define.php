@@ -169,7 +169,7 @@ class Define
                 'description' => __('The URL of the default avatar to use for the chat.', 'alpaca-bot'),
                 'section' => 'assistant',
                 'type' => 'media',
-                'placeholder' => esc_url(AB_DIR_URL . 'assets/img/ollama-large.png'),
+                'placeholder' => esc_url(ALPACA_BOT_DIR_URL . 'assets/img/ollama-large.png'),
                 'description_callback' => [__CLASS__, 'fieldAvatarPreview'],
             ],
             'default_system' => [

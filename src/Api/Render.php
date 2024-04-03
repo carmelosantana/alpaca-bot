@@ -172,11 +172,11 @@ class Render
 		switch (strtolower($role)) {
 			case 'assistant':
 			case 'ollama':
-				$url = AB_DIR_URL . 'assets/img/ollama-large.png';
+				$url = ALPACA_BOT_DIR_URL . 'assets/img/ollama-large.png';
 				break;
 
 			default:
-				$url = AB_DIR_URL . 'assets/img/alpaca-bot-512.png';
+				$url = ALPACA_BOT_DIR_URL . 'assets/img/alpaca-bot-512.png';
 				break;
 		}
 
@@ -202,7 +202,7 @@ class Render
 
 	public function getRenderEndpoint(string $endpoint = '', string $version = 'v1')
 	{
-		return get_rest_url(null, AB_SLUG . '/' . $version . '/' . $endpoint);
+		return get_rest_url(null, ALPACA_BOT . '/' . $version . '/' . $endpoint);
 	}
 
 	private function getUserSetting(string $option, $default = null)

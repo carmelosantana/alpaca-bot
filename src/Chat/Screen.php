@@ -38,7 +38,7 @@ class Screen
         return Options::inputGet('mode', $default);
     }
 
-    public function outputTitleHeader($page_title = AB_TITLE)
+    public function outputTitleHeader($page_title = ALPACA_BOT_TITLE)
     { ?>
         <div class="header-wrap">
             <h1 class="wp-heading-inline"><?php echo esc_html($page_title); ?></h1>
@@ -147,19 +147,19 @@ class Screen
         <div id="ab-response">
             <!-- htmx response -->
         </div>
-        <img id="indicator" class="htmx-indicator" src="<?php echo esc_html(AB_DIR_URL); ?>assets/img/grid.svg">
+        <img id="indicator" class="htmx-indicator" src="<?php echo esc_html(ALPACA_BOT_DIR_URL); ?>assets/img/grid.svg">
     <?php }
 
     public function outputScriptZeroMd()
     { ?>
         <script>
             window.ZeroMdConfig = {
-                markedUrl: '<?php echo esc_url(AB_DIR_URL . 'assets/js/marked.min.js'); ?>',
-                prismUrl: '<?php echo esc_url(AB_DIR_URL . 'assets/js/prism.min.js'); ?>',
-                cssUrls: ['<?php echo esc_url(AB_DIR_URL . 'assets/css/github-markdown.css'); ?>', '<?php echo esc_url(AB_DIR_URL . 'assets/css/prism.css'); ?>'],
+                markedUrl: '<?php echo esc_url(ALPACA_BOT_DIR_URL . 'assets/js/marked.min.js'); ?>',
+                prismUrl: '<?php echo esc_url(ALPACA_BOT_DIR_URL . 'assets/js/prism.min.js'); ?>',
+                cssUrls: ['<?php echo esc_url(ALPACA_BOT_DIR_URL . 'assets/css/github-markdown.css'); ?>', '<?php echo esc_url(ALPACA_BOT_DIR_URL . 'assets/css/prism.css'); ?>'],
             }
         </script>
-        <script type="module" src="<?php echo esc_url(AB_DIR_URL . 'assets/js/zero-md.min.js'); ?>"></script>
+        <script type="module" src="<?php echo esc_url(ALPACA_BOT_DIR_URL . 'assets/js/zero-md.min.js'); ?>"></script>
 <?php
     }
 

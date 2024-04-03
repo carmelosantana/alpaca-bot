@@ -9,11 +9,11 @@ use CarmeloSantana\AlpacaBot\Utils\Settings;
 
 class Options extends Settings
 {
-    private string $prefix = AB_SLUG;
+    private string $prefix = ALPACA_BOT;
 
     public static function appendPrefix(string $key = '', string $separator = '_')
     {
-        return str_replace('-', $separator, AB_SLUG . (!empty($key) ? $separator . $key : ''));
+        return str_replace('-', $separator, ALPACA_BOT . (!empty($key) ? $separator . $key : ''));
     }
 
     public static function get(string $key, $default = false)

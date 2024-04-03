@@ -27,7 +27,7 @@ class Agents
     public function adminPageAdd()
     {
         add_submenu_page(
-            AB_SLUG,
+            ALPACA_BOT,
             'Agents',
             'Agents',
             'manage_options',
@@ -41,11 +41,11 @@ class Agents
     public function adminPageRender()
     {
         // Scripts
-        wp_enqueue_script('prism', AB_DIR_URL . 'assets/js/prism.min.js', [], '1.29.0', true);
-        wp_enqueue_style('prism', AB_DIR_URL . 'assets/css/prism.css', [], '1.29.0');
+        wp_enqueue_script('prism', ALPACA_BOT_DIR_URL . 'assets/js/prism.min.js', [], '1.29.0', true);
+        wp_enqueue_style('prism', ALPACA_BOT_DIR_URL . 'assets/css/prism.css', [], '1.29.0');
 
         // HTML
-        echo '<div class="wrap ' . esc_attr(AB_SLUG  . ' ' . Options::appendPrefix('options', '-')) . '">';
+        echo '<div class="wrap ' . esc_attr(ALPACA_BOT  . ' ' . Options::appendPrefix('options', '-')) . '">';
         echo '<h1>Agents</h1>';
         echo '<p>Agents are shortcodes that help Alpaca Bot perform tasks.</p>';
         echo '<div class="ab-accordion">';
