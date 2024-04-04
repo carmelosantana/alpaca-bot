@@ -74,17 +74,18 @@ class AlpacaBot
         if (!$this->adminCheckScreen()) {
             return;
         }
-
         wp_enqueue_script('htmx', ALPACA_BOT_DIR_URL . 'assets/js/htmx.min.js', [], '1.9.10', true);
         wp_enqueue_script('htmx-multi-swap', ALPACA_BOT_DIR_URL . 'assets/js/multi-swap.js', [], '1', true);
+        wp_enqueue_script('prism', ALPACA_BOT_DIR_URL . 'assets/js/prism.min.js', [], '1.29.0', true);
         wp_enqueue_script(ALPACA_BOT, ALPACA_BOT_DIR_URL . 'assets/js/alpaca-bot.js', [], VERSION, true);
     }
 
     public function adminEnqueueStyles()
     {
-        wp_enqueue_style(ALPACA_BOT, ALPACA_BOT_DIR_URL . 'assets/css/alpaca-bot.css', [], VERSION);
         wp_enqueue_style('hint', ALPACA_BOT_DIR_URL . 'assets/css/hint.min.css', [], VERSION);
-        wp_enqueue_style('materialsymbolsoutlined', ALPACA_BOT_DIR_URL . 'assets/css/Material-Symbols-Outlined.css', [], VERSION);
+        wp_enqueue_style('materialsymbolsoutlined', ALPACA_BOT_DIR_URL . 'assets/css/materialsymbolsoutlined.css', [], VERSION);
+        wp_enqueue_style('prism', ALPACA_BOT_DIR_URL . 'assets/css/prism-coy.min.css', [], '1.29.0');
+        wp_enqueue_style(ALPACA_BOT, ALPACA_BOT_DIR_URL . 'assets/css/alpaca-bot.css', [], VERSION);
     }
 
     public function adminInit()
