@@ -57,6 +57,17 @@ class AlpacaBot
             [$this, 'chatScreen'],
             0
         );
+
+        // add generate page
+        add_submenu_page(
+            ALPACA_BOT,
+            'Generate',
+            'Generate',
+            apply_filters(Options::appendPrefix('menu-capability'), 'edit_posts'),
+            Options::appendPrefix('generate', '-'),
+            [$this, 'chatScreen'],
+            1
+        );
     }
 
     public function adminCheckScreen()
