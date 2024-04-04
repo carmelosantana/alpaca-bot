@@ -5,8 +5,8 @@ declare(strict_types=1);
 namespace CarmeloSantana\AlpacaBot\Api;
 
 use CarmeloSantana\AlpacaBot\Api\Ollama;
-use CarmeloSantana\AlpacaBot\Chat\Screen;
 use CarmeloSantana\AlpacaBot\Utils\Options;
+use Parsedown;
 use PhpScience\TextRank\TextRankFacade;
 use PhpScience\TextRank\Tool\StopWords\English;
 
@@ -731,6 +731,19 @@ class Render
 
 			echo '<' . esc_html($tag) . ' value="' . esc_attr($model['name']) . '">' . esc_html($name) . '</' . esc_html($tag) . '>';
 		}
+	}
+
+	public function parseResponse(string $response)
+	{
+		// Use parse down to convert to HTML
+		$Parsedown = new \Parsedown();
+		// $Parsedown->setSafeMode(true);
+
+		// Parse response
+		$parsed_response = $Parsedown->text($response);
+
+		// Return parsed response
+		return $parsed_response;
 	}
 
 	public function setPost($post)
