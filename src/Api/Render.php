@@ -484,7 +484,7 @@ class Render
 		$out .= '<div class="ab-chat-message-gravatar"><img src="' . $gravatar . '" alt="gravatar"></div>';
 		$out .= '<div class="ab-chat-message-parts">';
 		$out .= '<div class="ab-chat-message-username">' . $user_name . '</div>';
-		$out .= '<div class="ab-chat-message-response" id="' . $response_id . '">' . self::zeroScript($response) . '</div>';
+		$out .= '<div class="ab-chat-message-response" id="' . $response_id . '">' . $this->parseResponse($response) . '</div>';
 		$out .= '<div class="ab-chat-message-tools">';
 		$out .= $tools;
 		$out .= '</div>';	// .ab-chat-message-tools
@@ -797,30 +797,6 @@ class Render
 			echo '</script>';
 		} else {
 			echo '<span class="fadeOut">Error updating user settings.</span>';
-		}
-	}
-
-	/**
-	 * Adds zero-md script for markdown rendering post response.
-	 *
-	 * @param  string $message
-	 * @param  string $position
-	 * @return string
-	 */
-	public static function zeroScript(string $message, string $position = ''): string
-	{
-		switch ($position) {
-			case 'open':
-				return '<zero-md><script type="text/markdown">';
-				break;
-
-			case 'close':
-				return '</script></zero-md>';
-				break;
-
-			default:
-				return '<zero-md><script type="text/markdown">' . $message . '</script></zero-md>';
-				break;
 		}
 	}
 }

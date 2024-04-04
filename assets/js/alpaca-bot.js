@@ -25,9 +25,6 @@ async function render(opts = {}) {
 
     // Insert or replace body into DOM
     const body = await this.stampBody(await pending, opts.classes)
-
-    // Finally, fire the rendered event
-    this.fire('zero-md-rendered', { stamped: { styles, body } })
 }
 
 // After submit 
@@ -93,8 +90,6 @@ function copyToClipboard(id) {
     var copyText = getResponseInnerHTML(id);
 
     // clean up the response
-    copyText = copyText.replace(/<zero-md><script type="text\/markdown">/g, '');
-    copyText = copyText.replace(/<\/script><\/zero-md>/g, '');
     copyText = copyText.trim();
 
     // copy and alert user
@@ -131,8 +126,6 @@ function getResponseInnerHTML(id) {
     var html = response.innerHTML;
 
     // clean up the response
-    html = html.replace(/<zero-md><script type="text\/markdown">/g, '');
-    html = html.replace(/<\/script><\/zero-md>/g, '');
     html = html.trim();
 
     return html;

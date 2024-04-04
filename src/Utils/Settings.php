@@ -128,7 +128,6 @@ class Settings
                 'class' => [],
                 'datetime' => [],
             ],
-            'zero-md' => [],
         ];
     }
 

@@ -14,8 +14,7 @@ class Screen
 
     public function addFooterActions()
     {
-        // add custom <script> to admin footer
-        add_action('admin_footer', [$this, 'outputScriptZeroMd']);
+        add_action('admin_enqueue_scripts', [$this, 'enqueueScripts']);
     }
 
     public function addFooterFilters()
@@ -148,20 +147,7 @@ class Screen
             <!-- htmx response -->
         </div>
         <img id="indicator" class="htmx-indicator" src="<?php echo esc_html(ALPACA_BOT_DIR_URL); ?>assets/img/grid.svg">
-    <?php }
-
-    public function outputScriptZeroMd()
-    { ?>
-        <script>
-            window.ZeroMdConfig = {
-                markedUrl: '<?php echo esc_url(ALPACA_BOT_DIR_URL . 'assets/js/marked.min.js'); ?>',
-                prismUrl: '<?php echo esc_url(ALPACA_BOT_DIR_URL . 'assets/js/prism.min.js'); ?>',
-                cssUrls: ['<?php echo esc_url(ALPACA_BOT_DIR_URL . 'assets/css/github-markdown.css'); ?>', '<?php echo esc_url(ALPACA_BOT_DIR_URL . 'assets/css/prism.css'); ?>'],
-            }
-        </script>
-        <script type="module" src="<?php echo esc_url(ALPACA_BOT_DIR_URL . 'assets/js/zero-md.min.js'); ?>"></script>
-<?php
-    }
+<?php }
 
     public function render()
     {
