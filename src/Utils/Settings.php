@@ -34,7 +34,18 @@ class Settings
             return $default;
         }
 
-        $active_tab = $_GET['tab'] ?? $_POST['tab'] ?? array_key_first($this->sections);
+        // post is needed for form submission, get is needed for tab request.
+        if (
+            isset($_POST['tab'], $_POST['tab_nonce'])
+            and wp_verify_nonce($_POST['tab_nonce'], 'tab_nonce')
+        ) {
+            $active_tab = sanitize_key($_POST['tab']);
+        } elseif (isset($_GET['tab'])) {
+            $active_tab = sanitize_key($_GET['tab']);
+        } else {
+            $active_tab = array_key_first($this->sections);
+        }
+
         $active_tab = sanitize_key($active_tab);
 
         return $active_tab;
@@ -445,6 +456,7 @@ class Settings
                 do_settings_sections($menu_slug . '-' . $active_tab);
                 // output hidden field with current tab, this sitting isn't saved
                 echo '<input type="hidden" name="tab" value="' . esc_attr($active_tab) . '">';
+                echo '<input type="hidden" name="tab_nonce" value="' . esc_attr(wp_create_nonce('tab_nonce')) . '">';
                 submit_button();
                 ?>
             </form>
