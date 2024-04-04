@@ -117,7 +117,8 @@ class Render
 		update_post_meta($post_id, 'messages', $meta);
 
 		if ($chat_mode = $this->getPostInput('chat_mode')) {
-			update_post_meta($post_id, 'chat_mode', $chat_mode);
+			$chat_mode = 'chat_mode_' . $chat_mode; // 'chat_mode_chat' or 'chat_mode_generate
+			update_post_meta($post_id, $chat_mode, true);
 		}
 
 		if (is_wp_error($post_id)) {
@@ -277,37 +278,28 @@ class Render
 		$mode = $this->getPostInput('chat_mode');
 		switch ($mode) {
 			case 'generate':
-				$args['meta_query'] = [
-					[
-						'key' => 'chat_mode',
-						'value' => 'generate',
-					],
-				];
-				break;
-
-			default:
-				$args['meta_query'] = [
-					[
-						'key' => 'chat_mode',
-						'value' => 'chat',
-					],
-				];
-				break;
-		}
-
-		$posts = get_posts($args);
-
-		switch ($mode) {
-			case 'generate':
+				$chat_mode = 'chat_mode_generate';
 				$description = 'Select previous response';
 				$new = 'New Generation';
 				break;
 
 			default:
+				$chat_mode = 'chat_mode_chat';
 				$description = 'Select previous chat';
 				$new = 'New Chat';
 				break;
 		}
+
+		// WordPress.DB.SlowDBQuery.slow_db_query_meta_query 
+		// Improving meta_query performance https://docs.wpvip.com/code-quality/querying-on-meta_value/
+		$args['meta_query'] = [
+			[
+				'key' => $chat_mode,
+				'compare' => 'EXISTS',
+			],
+		];
+
+		$posts = get_posts($args);
 
 		echo '<option value="" disabled>' . esc_html($description) . '</option>';
 		echo '<option value="0" selected>' . esc_html($new) . '</option>';
