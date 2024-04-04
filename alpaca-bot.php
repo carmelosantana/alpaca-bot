@@ -11,6 +11,8 @@ License URI: http://www.gnu.org/licenses/gpl-2.0.html
 Requires at least: 6.4
 */
 
+if (!defined('ABSPATH')) exit; // Exit if accessed directly
+
 // Defines
 define('ALPACA_BOT', 'alpaca-bot');
 define('ALPACA_BOT_TITLE', 'Alpaca Bot');
