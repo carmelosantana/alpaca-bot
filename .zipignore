@@ -2,3 +2,4 @@
 /_org/*
 *.env
 *.zipignore
+*/.*
