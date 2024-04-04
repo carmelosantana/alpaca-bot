@@ -33,7 +33,7 @@ class Agents
             'manage_options',
             Options::appendPrefix('agents', '-'),
             [$this, 'adminPageRender'],
-            1
+            2
         );
     }
 
