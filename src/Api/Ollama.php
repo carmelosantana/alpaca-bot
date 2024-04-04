@@ -75,7 +75,7 @@ class Ollama
     public function addToLog(array $message): int|false
     {
         // check if logging is enabled
-        if (!Options::get('log_chat_response')) {
+        if (!Options::get('chat_response_log')) {
             return false;
         }
 
