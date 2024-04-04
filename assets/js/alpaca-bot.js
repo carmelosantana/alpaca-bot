@@ -135,6 +135,9 @@ function promptEdit(id) {
     // get response innerHTML
     var html = getResponseInnerHTML(id);
 
+    // strip all HTML tags
+    html = html.replace(/<[^>]*>?/gm, '');
+
     // set prompt value to response innerHTML
     prompt.value = html;
     message.value = prompt.value;
