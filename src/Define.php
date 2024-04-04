@@ -66,7 +66,7 @@ class Define
             'api_url' => [
                 'label' => __('Ollama API URL', 'alpaca-bot'),
                 'description' => __('The URL of your <a href="https://github.com/ollama/ollama">Ollama</a> installation, without trailing slash.', 'alpaca-bot'),
-                'placeholder' => 'http://localhost:11434',
+                'placeholder' => 'http://host.docker.internal:11434',
                 'section' => 'api',
                 'description_callback' => [__CLASS__, 'fieldApiUrlValidate'],
                 'autoload' => 'yes',
