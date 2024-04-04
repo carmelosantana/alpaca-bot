@@ -25,7 +25,7 @@ class AlpacaBot
         $this->options();
 
         // Log
-        if (Options::get('log_chat_response')) {
+        if (Options::get('chat_response_log')) {
             new Log\Post();
         }
 
