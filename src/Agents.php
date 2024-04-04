@@ -42,7 +42,7 @@ class Agents
     {
         // Scripts
         wp_enqueue_script('prism', ALPACA_BOT_DIR_URL . 'assets/js/prism.min.js', [], '1.29.0', true);
-        wp_enqueue_style('prism', ALPACA_BOT_DIR_URL . 'assets/css/prism.css', [], '1.29.0');
+        wp_enqueue_style('prism', ALPACA_BOT_DIR_URL . 'assets/css/prism-default.css', [], '1.29.0');
 
         // HTML
         echo '<div class="wrap ' . esc_attr(ALPACA_BOT  . ' ' . Options::appendPrefix('options', '-')) . '">';
