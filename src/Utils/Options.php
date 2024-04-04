@@ -32,19 +32,6 @@ class Options extends Settings
         return $value ? $value : Define::fields()[$key]['placeholder'] ?? $value;
     }
 
-    public static function inputGet(string $key, $default = false)
-    {
-        if (!isset($_GET[$key])) {
-            return $default;
-        }
-
-        $value = sanitize_text_field($_GET[$key]);
-
-        $value = self::validateValue($value, $default);
-
-        return $value;
-    }
-
     public static function setDefaultOptions()
     {
         if (get_option(self::appendPrefix('version')) === \CarmeloSantana\AlpacaBot\VERSION) {
