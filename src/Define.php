@@ -137,16 +137,6 @@ class Define
                 'section' => 'chat',
                 'default' => true,
             ],
-            'default_system_message' => [
-                'label' => __('Default system message', 'alpaca-bot'),
-                'placeholder' => __('How can I help you today?', 'alpaca-bot'),
-                'section' => 'chat',
-            ],
-            'default_message_placeholder' => [
-                'label' => __('Default message placeholder', 'alpaca-bot'),
-                'placeholder' => __('Start chatting with Abie', 'alpaca-bot'),
-                'section' => 'chat',
-            ],
             'user_agent' => [
                 'label' => __('User Agent', 'alpaca-bot'),
                 'description' => __('Browser user agent to use when making requests.', 'alpaca-bot'),
@@ -171,7 +161,7 @@ class Define
                 'type' => 'media',
                 'placeholder' => esc_url(ALPACA_BOT_DIR_URL . 'assets/img/ollama-large.png'),
                 'description_callback' => [__CLASS__, 'fieldAvatarPreview'],
-            ],
+            ],            
             'default_system' => [
                 'label' => __('Default System Message', 'alpaca-bot'),
                 'description' => __('The <code>SYSTEM</code> instruction specifies the system message to be used in the template, if applicable.', 'alpaca-bot'),
@@ -191,6 +181,16 @@ class Define
 {{ end }}<|im_start|>assistant
 """',
             ],
+            'default_assistant_welcome_message' => [
+                'label' => __('Default Welcome Message', 'alpaca-bot'),
+                'placeholder' => __('How can I help you today?', 'alpaca-bot'),
+                'section' => 'assistant',
+            ],
+            'default_assistant_prompt_placeholder' => [
+                'label' => __('Default Prompt Placeholder', 'alpaca-bot'),
+                'placeholder' => __('Start chatting with Abie', 'alpaca-bot'),
+                'section' => 'assistant',
+            ],            
             'default_mirostat' => [
                 'label' => __('Mirostat', 'alpaca-bot'),
                 'description' => __('Enable Mirostat sampling for controlling perplexity. (default: 0, 0 = disabled, 1 = Mirostat, 2 = Mirostat 2.0)', 'alpaca-bot'),
