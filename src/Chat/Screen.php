@@ -32,9 +32,29 @@ class Screen
         }, 11);
     }
 
-    public static function getMode(string $default = '')
+    public function getAdminUrl(string $mode = '')
     {
-        return Options::inputGet('mode', $default);
+        $query = [
+            'page' => ALPACA_BOT . ($mode ? '-' . $mode : ''),
+        ];
+        return add_query_arg($query, admin_url('admin.php'));
+    }
+
+    public function getMode(string $default = '')
+    {
+        // get_current_screen()->id
+        // toplevel_page_alpaca-bot = chat
+        // alpaca-bot_page_alpaca-bot-generate = generate
+        $screen = get_current_screen();
+
+        switch ($screen->id) {
+            case 'toplevel_page_alpaca-bot':
+                return 'chat';
+            case 'alpaca-bot_page_alpaca-bot-generate':
+                return 'generate';
+            default:
+                return $default;
+        }
     }
 
     public function outputTitleHeader($page_title = ALPACA_BOT_TITLE)
@@ -42,15 +62,25 @@ class Screen
         <div class="header-wrap">
             <h1 class="wp-heading-inline"><?php echo esc_html($page_title); ?></h1>
             <div class="ab-dropdown">
-                <a href="<?php echo esc_url(admin_url('admin.php?page=alpaca-bot' . (self::getMode() ? '&mode=' . self::getMode() : ''))); ?>" class="page-title-action">New Chat <span class="material-symbols-outlined">expand_more</span></a>
+                <?php
+                switch ($this->getMode()) {
+                    case 'generate':
+                        echo '<a href="' . esc_url($this->getAdminUrl('generate')) . '" class="page-title-action">New Generation <span class="material-symbols-outlined">expand_more</span></a>';
+                        break;
+                    default:
+                        echo '<a href="' . esc_url($this->getAdminUrl()) . '" class="page-title-action">New Chat <span class="material-symbols-outlined">expand_more</span></a>';
+                        break;
+                }
+
+                ?>
                 <div class="ab-dropdown-content">
-                    <a href="<?php echo esc_url(admin_url('admin.php?page=alpaca-bot')); ?>">
+                    <a href="<?php echo esc_url($this->getAdminUrl()); ?>">
                         <span class="material-symbols-outlined">forum</span>
                         <strong>Multi-turn</strong>
                         <p>Ideal for tasks requiring back-and-forth interactions and providing a natural conversational experience.</p>
                         <p>• Conversation context</p>
                     </a>
-                    <a href="<?php echo esc_url(admin_url('admin.php?page=alpaca-bot&mode=generate')); ?>">
+                    <a href="<?php echo esc_url($this->getAdminUrl('generate')); ?>">
                         <span class="material-symbols-outlined">chat_apps_script</span>
                         <strong>Single-turn</strong>
                         <p>Optimal for content generation, summarization, and question-answering.</p>
@@ -78,31 +108,29 @@ class Screen
     <?php
     }
 
-    public function outputGeneratorForm()
-    { ?>
-        <form id="ab-chat-form" <?php echo esc_html($this->htmx->outputWpNonce()); ?>>
-            <div id="ab-chat-container" class="wrap nosubsub">
-                <?php $this->outputTitleHeader(); ?>
-                <div class="ab-chat">
-                    <?php $this->outputChatToolbar(); ?>
-                    <?php $this->outputChatWelcomeMessage(); ?>
-                    <?php $this->outputResponseContainer(); ?>
-                </div>
-            </div>
-            <?php $this->outputChatTextarea(); ?>
-        </form>
-    <?php
-    }
-
     public function outputChatTextarea()
-    { ?>
+    {
+        switch ($this->getMode()) {
+            case 'generate':
+                if ($default_placeholder = Options::get('default_assistant_prompt_placeholder')) {
+                    $placeholder = apply_filters(Options::appendPrefix('default_assistant_prompt_placeholder'), $default_placeholder);
+                }
+
+            default:
+                if (!isset($placeholder)) {
+                    $placeholder = Define::fields()['default_assistant_prompt_placeholder']['placeholder'];
+                }
+                break;
+        }
+    ?>
         <div class="typing-container">
             <div class="typing-content">
                 <div class="typing-textarea">
-                    <textarea name="message" id="message" <?php if (!Options::get('spellcheck')) echo ' spellcheck="false" '; ?>placeholder="<?php echo esc_html(Options::getPlaceholder('default_message_placeholder', Define::fields())); ?>" required></textarea>
+                    <textarea name="message" id="message" <?php if (!Options::get('spellcheck')) echo ' spellcheck="false" '; ?>placeholder="<?php echo esc_html($placeholder); ?>" required></textarea>
+                    <input type="hidden" name="chat_wpnonce" id="chat_wpnonce" value="<?php echo esc_html(wp_create_nonce('wp_rest')); ?>">
                     <input type="hidden" name="prompt" id="prompt">
                     <input type="hidden" name="chat_id" id="chat_id" value="0">
-                    <input type="hidden" name="chat_mode" id="chat_mode" value="<?php echo esc_html(self::getMode('chat')); ?>">
+                    <input type="hidden" name="chat_mode" id="chat_mode" value="<?php echo esc_html($this->getMode('chat')); ?>">
                     <span class="material-symbols-outlined" id="submit" <?php echo wp_kses($this->htmx->getHxMultiSwapLoadChat('htmx/chat'), []); ?>>arrow_circle_up</span>
                 </div>
             </div>
@@ -134,10 +162,29 @@ class Screen
     }
 
     public function outputChatWelcomeMessage()
-    { ?>
+    {
+        switch ($this->getMode()) {
+            case 'generate':
+                if ($default_avatar = Options::get('default_avatar')) {
+                    $gravatar = apply_filters(Options::appendPrefix('default_avatar'), $default_avatar);
+                }
+                if ($default_welcome = Options::get('default_assistant_welcome_message')) {
+                    $welcome = apply_filters(Options::appendPrefix('default_assistant_welcome_message'), $default_welcome);
+                }
+
+            default:
+                if (!isset($gravatar)) {
+                    $gravatar = $this->htmx->getAssistantAvatarUrl('system');
+                }
+                if (!isset($welcome)) {
+                    $welcome = Define::fields()['default_assistant_welcome_message']['placeholder'];
+                }
+                break;
+        }
+    ?>
         <div id="ab-hello">
-            <img src="<?php echo esc_url($this->htmx->getAssistantAvatarUrl('system')); ?>" alt="gravatar">
-            <p><?php echo esc_html(Options::getPlaceholder('default_system_message', Define::fields())); ?></p>
+            <img src="<?php echo esc_url($gravatar); ?>" alt="gravatar">
+            <p><?php echo esc_html($welcome); ?></p>
         </div>
     <?php }
 
