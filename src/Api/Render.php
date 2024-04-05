@@ -85,7 +85,7 @@ class Render
 			$post = [
 				'post_title' => $post_title,
 				'post_excerpt' => wp_trim_excerpt($stripped_json),
-				'post_type' => 'chat',
+				'post_type' => 'chat_history',
 				'post_slug' => wp_generate_uuid4(),
 				'post_status' => 'publish',
 			];
@@ -268,7 +268,7 @@ class Render
 		// get posts by current user
 		$args = [
 			'author' => get_current_user_id(),
-			'post_type' => 'chat',
+			'post_type' => 'chat_history',
 			'numberposts' => 128,
 			'orderby' => 'date',
 			'order' => 'DESC',
