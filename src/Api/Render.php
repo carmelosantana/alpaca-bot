@@ -490,7 +490,6 @@ class Render
 	{
 		// End .ab-dialog
 		$this->outputHtmlTag(false);
-		$this->outputPostScript();
 
 		// End #ab-response
 		$this->outputHtmlTag(false);
@@ -651,16 +650,6 @@ class Render
 		}
 	}
 
-	public function outputPostScript(string $class = '')
-	{
-		echo '<script type="text/javascript">smoothScrollTo(' . esc_js($class) . ');</script>';
-	}
-
-	public function outputScriptShowHide(string $id)
-	{
-		echo '<script type="text/javascript">showHide(' . esc_js($id) . ');</script>';
-	}
-
 	public function outputPostInsert($post_type = 'post')
 	{
 		// check if post_content is set	and not empty
@@ -792,16 +781,9 @@ class Render
 
 		// Output updated user settings
 		if ($response) {
-			$time = time();
-			$class = 'fadeOut-' . $time;
-			echo 'Set as default <span class="' . esc_attr($class) . '">✔︎</span>';
-			echo '<script type="text/javascript">';
-			echo 'setTimeout(function() {';
-			echo 'document.querySelector(".' . esc_attr($class) . '").classList.add("fadeOut");';
-			echo '}, 2400);';
-			echo '</script>';
+			echo 'Settings updated ✔︎';
 		} else {
-			echo '<span class="fadeOut">Error updating user settings.</span>';
+			echo 'Error updating user settings.';
 		}
 	}
 }
