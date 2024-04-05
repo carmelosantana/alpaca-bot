@@ -251,9 +251,12 @@ If you find this project useful or use it in a commercial environment please con
 
 ## Made Possible By
 
-- [Ollama](https://github.com/ollama/ollama) and the research behind these great open source [Large Language Models](https://ollama.ai/library) (LLMs).
-- [Emma Delaney](https://emma-delaney.medium.com/how-to-create-your-own-chatgpt-in-html-css-and-javascript-78e32b70b4be) *How to Create Your Own ChatGPT in HTML CSS and JavaScript*
-- [Hint.css](https://github.com/chinchang/hint.css) A CSS only tooltip library for your lovely websites.
+- Emma Delaney's [How to Create Your Own ChatGPT in HTML CSS and JavaScript](https://emma-delaney.medium.com/how-to-create-your-own-chatgpt-in-html-css-and-javascript-78e32b70b4be)
+- Google [Material Design Icons](https://material.io/resources/icons/?style=baseline) - Apache-2.0 license
+- [Hint.css](https://github.com/chinchang/hint.css) A CSS only tooltip library - MIT license
+- [TextRank](https://github.com/DavidBelicza/PHP-Science-TextRank) Automatic text summarization for PHP - MIT license
+- [Ollama](https://github.com/ollama/ollama) Get up and running with large language models locally - MIT license
+- [Parsedown](https://github.com/erusev/parsedown) A better Markdown parser - MIT license
 
 ## License
 

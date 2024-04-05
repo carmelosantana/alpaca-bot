@@ -27,25 +27,21 @@ class Agents
     public function adminPageAdd()
     {
         add_submenu_page(
-            AB_SLUG,
+            ALPACA_BOT,
             'Agents',
             'Agents',
             'manage_options',
             Options::appendPrefix('agents', '-'),
             [$this, 'adminPageRender'],
-            1
+            2
         );
     }
 
     // adminPageRender using accordion from pulling $this->getAgents()
     public function adminPageRender()
     {
-        // Scripts
-        wp_enqueue_script('prism', AB_DIR_URL . 'assets/js/prism.min.js', [], '1.29.0', true);
-        wp_enqueue_style('prism', AB_DIR_URL . 'assets/css/prism.css', [], '1.29.0');
-
         // HTML
-        echo '<div class="wrap ' . esc_attr(AB_SLUG  . ' ' . Options::appendPrefix('options', '-')) . '">';
+        echo '<div class="wrap ' . esc_attr(ALPACA_BOT  . ' ' . Options::appendPrefix('options', '-')) . '">';
         echo '<h1>Agents</h1>';
         echo '<p>Agents are shortcodes that help Alpaca Bot perform tasks.</p>';
         echo '<div class="ab-accordion">';
@@ -54,16 +50,19 @@ class Agents
 
         foreach ($agents as $slug => $agent) {
             $icon = $agent['icon'] ?? 'person_apron';
-            $icon = '<span class="material-symbols-outlined">' . esc_html($icon) . '</span>';
 
-            echo '<button class="accordion-btn">' . wp_kses($icon, Options::getAllowedTags()) . ' <code>' . esc_html($slug) . '</code> ' . wp_kses($agent['description'], Options::getAllowedTags()) . '</button>';
+            echo '<button class="accordion-btn">';
+            echo '<span class="material-symbols-outlined">' . esc_html($icon) . '</span>';
+            echo ' <code>' . esc_html($slug) . '</code> ';
+            echo esc_html($agent['description']);
+            echo '</button>';
             echo '<div class="panel">';
 
             if (isset($agent['arguments'])) {
                 echo '<h3>Arguments</h3>';
                 echo '<ul>';
                 foreach ($agent['arguments'] as $name => $arg) {
-                    echo '<li><i>' . esc_html($name) . '</i> <code>' . esc_html($arg['type']) . '</code> ' . wp_kses($arg['description'], Options::getAllowedTags()) . '</li>';
+                    echo '<li><i>' . esc_html($name) . '</i> <code>' . esc_html($arg['type']) . '</code> ' . wp_kses($arg['description'], Options::getAllowedTags('p')) . '</li>';
                 }
                 echo '</ul>';
             }
@@ -73,7 +72,7 @@ class Agents
 
                 foreach ($agent['examples'] as $example) {
                     echo '<pre><code class="language-shortcode">' . esc_html($example[0]) . '</code></pre>';
-                    echo '<p>' . wp_kses($example[1], Options::getAllowedTags()) . '</p>';
+                    echo '<p>' . wp_kses($example[1], Options::getAllowedTags('p')) . '</p>';
                     echo '<hr>';
                 }
             }

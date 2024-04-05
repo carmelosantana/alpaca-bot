@@ -132,7 +132,7 @@ class Htmx extends Base
 	public function validateNonce()
 	{
 		// validate nonce in header
-		if (!isset($_SERVER['HTTP_X_WP_NONCE']) or !wp_verify_nonce(sanitize_text_field($_SERVER['HTTP_X_WP_NONCE']), 'wp_rest')) {
+		if (!isset($_SERVER['HTTP_X_WP_NONCE']) or !wp_verify_nonce(sanitize_key($_SERVER['HTTP_X_WP_NONCE']), 'wp_rest')) {
 			return false;
 		}
 
@@ -151,17 +151,20 @@ class Htmx extends Base
 			'set_default_model',
 		];
 
-		$post = [];
-
 		// validate nonce in header
 		if (!$this->validateNonce()) {
 			wp_send_json_error('Invalid nonce.', 403);
 		}
 
+		$post = [];
+
 		// validate post arguments
 		foreach ($allowed_arguments as $arg) {
-			if (isset($_POST[$arg])) {
-				$post[$arg] = sanitize_text_field($_POST[$arg]);
+			if (
+				isset($_POST[$arg], $_SERVER['HTTP_X_WP_NONCE'])
+				and wp_verify_nonce(sanitize_key($_SERVER['HTTP_X_WP_NONCE']), 'wp_rest')
+			) {
+				$post[$arg] = sanitize_text_field(wp_unslash($_POST[$arg]));
 			}
 		}
 

@@ -41,7 +41,7 @@ class Post
             'public' => false,
             'publicly_queryable' => false,
             'show_ui' => true,
-            'show_in_menu' => AB_SLUG,
+            'show_in_menu' => ALPACA_BOT,
             'query_var' => true,
             'rewrite' => ['slug' => 'chat_log'],
             'capability_type' => 'post',
@@ -115,7 +115,7 @@ class Post
                 break;
         }
 
-        echo wp_kses($out, Options::getAllowedTags());
+        echo wp_kses($out, Options::getAllowedTags('p'));
     }
 
     // make custom columns sortable

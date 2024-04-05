@@ -25,10 +25,16 @@ async function render(opts = {}) {
 
     // Insert or replace body into DOM
     const body = await this.stampBody(await pending, opts.classes)
-
-    // Finally, fire the rendered event
-    this.fire('zero-md-rendered', { stamped: { styles, body } })
 }
+
+// After htmx requests are complete
+htmx.onLoad(function (content) {
+    // Prism highlight code blocks
+    Prism.highlightAll();
+
+    // Smooth scroll to message
+    smoothScrollTo('dialog');
+});
 
 // After submit 
 function afterSubmit() {
@@ -93,8 +99,6 @@ function copyToClipboard(id) {
     var copyText = getResponseInnerHTML(id);
 
     // clean up the response
-    copyText = copyText.replace(/<zero-md><script type="text\/markdown">/g, '');
-    copyText = copyText.replace(/<\/script><\/zero-md>/g, '');
     copyText = copyText.trim();
 
     // copy and alert user
@@ -131,8 +135,6 @@ function getResponseInnerHTML(id) {
     var html = response.innerHTML;
 
     // clean up the response
-    html = html.replace(/<zero-md><script type="text\/markdown">/g, '');
-    html = html.replace(/<\/script><\/zero-md>/g, '');
     html = html.trim();
 
     return html;
@@ -141,6 +143,9 @@ function getResponseInnerHTML(id) {
 function promptEdit(id) {
     // get response innerHTML
     var html = getResponseInnerHTML(id);
+
+    // strip all HTML tags
+    html = html.replace(/<[^>]*>?/gm, '');
 
     // set prompt value to response innerHTML
     prompt.value = html;
@@ -166,9 +171,17 @@ function promptResubmit(id) {
 }
 
 // only show set_default_model after #model is clicked
-function setDefaultModel() {
+function setDefaultModel(timeout = 5200) {
     var defaultModel = document.querySelector("#set_default_model");
-    defaultModel.style.visibility = 'visible';
+    defaultModel.innerHTML = 'Set as default';
+
+    // update class list to only fadeIn
+    defaultModel.classList = 'fadeIn';
+
+    // remove after timeout
+    setTimeout(function () {
+        defaultModel.classList = 'fadeOut';
+    }, timeout);
 }
 
 function showHide(id) {
@@ -205,7 +218,7 @@ function smoothScrollTo(selector = "dialog", behavior = 'smooth', block = 'start
 
         case 'footer':
             element = document.querySelector("#wpfooter");
-            break;    
+            break;
 
         case 'loading':
             element = document.querySelector("#indicator");

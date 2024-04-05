@@ -8,7 +8,7 @@ use CarmeloSantana\AlpacaBot\Api\Ollama;
 use CarmeloSantana\AlpacaBot\Define;
 use CarmeloSantana\AlpacaBot\Utils\Options;
 
-const VERSION = '0.4.12';
+const VERSION = '0.4.13';
 
 class AlpacaBot
 {
@@ -25,7 +25,7 @@ class AlpacaBot
         $this->options();
 
         // Log
-        if (Options::get('log_chat_response')) {
+        if (Options::get('chat_response_log')) {
             new Log\Post();
         }
 
@@ -38,35 +38,48 @@ class AlpacaBot
     public function adminAddMenu()
     {
         add_menu_page(
-            AB_TITLE,
-            AB_TITLE,
+            ALPACA_BOT_TITLE,
+            ALPACA_BOT_TITLE,
             apply_filters(Options::appendPrefix('menu-capability'), 'edit_posts'),
-            AB_SLUG,
+            ALPACA_BOT,
             [$this, 'chatScreen'],
-            AB_DIR_URL . 'assets/img/icon-80.png',
+            ALPACA_BOT_DIR_URL . 'assets/img/icon-80.png',
             4
         );
 
         // Add submenu page to replace the default menu page
         add_submenu_page(
-            AB_SLUG,
+            ALPACA_BOT,
             'Chat',
             'Chat',
             apply_filters(Options::appendPrefix('menu-capability'), 'edit_posts'),
-            AB_SLUG,
+            ALPACA_BOT,
             [$this, 'chatScreen'],
             0
+        );
+
+        // add generate page
+        add_submenu_page(
+            ALPACA_BOT,
+            'Generate',
+            'Generate',
+            apply_filters(Options::appendPrefix('menu-capability'), 'edit_posts'),
+            Options::appendPrefix('generate', '-'),
+            [$this, 'chatScreen'],
+            1
         );
     }
 
     public function adminCheckScreen()
     {
+        $screen = get_current_screen();
+
         // check page for alpaca-bot
-        if (strpos($_SERVER['REQUEST_URI'], 'admin.php?page=' . AB_SLUG) === false) {
-            return false;
+        if (in_array($screen->id, Define::getAdminPages())) {
+            return true;
         }
 
-        return true;
+        return false;
     }
 
     public function adminEnqueueScripts()
@@ -75,16 +88,23 @@ class AlpacaBot
             return;
         }
 
-        wp_enqueue_script('htmx', AB_DIR_URL . 'assets/js/htmx.min.js', [], '1.9.10', true);
-        wp_enqueue_script('htmx-multi-swap', AB_DIR_URL . 'assets/js/multi-swap.js', [], '1', true);
-        wp_enqueue_script(AB_SLUG, AB_DIR_URL . 'assets/js/alpaca-bot.js', [], VERSION, true);
+        wp_enqueue_script('htmx', ALPACA_BOT_DIR_URL . 'assets/js/htmx.min.js', [], '1.9.10', true);
+        wp_enqueue_script('htmx-multi-swap', ALPACA_BOT_DIR_URL . 'assets/js/multi-swap.js', [], '1', true);
+        wp_enqueue_script('prism', ALPACA_BOT_DIR_URL . 'assets/js/prism.min.js', [], '1.29.0', true);
+        wp_enqueue_script(ALPACA_BOT, ALPACA_BOT_DIR_URL . 'assets/js/alpaca-bot.js', [], VERSION, true);
     }
 
     public function adminEnqueueStyles()
     {
-        wp_enqueue_style(AB_SLUG, AB_DIR_URL . 'assets/css/alpaca-bot.css', [], VERSION);
-        wp_enqueue_style('hint', AB_DIR_URL . 'assets/css/hint.min.css', [], VERSION);
-        wp_enqueue_style('materialsymbolsoutlined', AB_DIR_URL . 'assets/css/Material-Symbols-Outlined.css', [], VERSION);
+        wp_enqueue_style(ALPACA_BOT, ALPACA_BOT_DIR_URL . 'assets/css/alpaca-bot.css', [], VERSION);
+
+        if (!$this->adminCheckScreen()) {
+            return;
+        }
+
+        wp_enqueue_style('hint', ALPACA_BOT_DIR_URL . 'assets/css/hint.min.css', [], VERSION);
+        wp_enqueue_style('materialsymbolsoutlined', ALPACA_BOT_DIR_URL . 'assets/css/materialsymbolsoutlined.css', [], VERSION);
+        wp_enqueue_style('prism', ALPACA_BOT_DIR_URL . 'assets/css/prism-default.min.css', [], '1.29.0');
     }
 
     public function adminInit()
@@ -113,7 +133,7 @@ class AlpacaBot
         foreach ($notices as $notice) {
             $notice = wp_parse_args($notice, $default);
             if ($notice['condition']) {
-                echo '<div class="notice notice-error is-dismissible"><p>' . wp_kses($notice['message'], Options::getAllowedTags()) . '</p></div>';
+                echo '<div class="notice notice-error is-dismissible"><p>' . wp_kses($notice['message'], Options::getAllowedTags('p')) . '</p></div>';
             }
         }
     }
@@ -121,7 +141,7 @@ class AlpacaBot
     public function buildCache()
     {
         // Build model cache
-        if (Options::get('api_url') and $this->adminCheckScreen()) {
+        if (Options::get('api_url')) {
             (new Ollama())->getModels();
         }
     }
@@ -153,9 +173,9 @@ class AlpacaBot
         $options->setMenuSlug(Options::appendPrefix('settings', '-'));
         $options->setMenuTitle('Settings');
         $options->setPageTitle('Settings');
-        $options->setParentSlug(AB_SLUG);
-        $options->setPrefix(AB_SLUG);
-        $options->addPageWrapClass(AB_SLUG);
+        $options->setParentSlug(ALPACA_BOT);
+        $options->setPrefix(ALPACA_BOT);
+        $options->addPageWrapClass(ALPACA_BOT);
         $options->addPageWrapClass(Options::appendPrefix('options', '-'));
 
         // Register and create options page

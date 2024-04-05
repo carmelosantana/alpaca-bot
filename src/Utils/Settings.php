@@ -34,13 +34,24 @@ class Settings
             return $default;
         }
 
-        $active_tab = $_GET['tab'] ?? $_POST['tab'] ?? array_key_first($this->sections);
+        // post is needed for form submission, get is needed for tab request.
+        if (
+            isset($_POST['tab'], $_POST['tab_nonce'])
+            and wp_verify_nonce($_POST['tab_nonce'], 'tab_nonce')
+        ) {
+            $active_tab = sanitize_key($_POST['tab']);
+        } elseif (isset($_GET['tab'])) {
+            $active_tab = sanitize_key($_GET['tab']);
+        } else {
+            $active_tab = array_key_first($this->sections);
+        }
+
         $active_tab = sanitize_key($active_tab);
 
         return $active_tab;
     }
 
-    public static function getAllowedTags(): array
+    public static function getAllowedTags(string $group = 'all'): array
     {
         $htmx = [
             'aria-label' => [],
@@ -61,7 +72,7 @@ class Settings
             'hx-vars' => [],
         ];
 
-        return [
+        $tags = [
             'a' => [
                 'href' => [],
                 'title' => [],
@@ -117,8 +128,10 @@ class Settings
                 'title' => [],
             ],
             's' => [],
-            'script' => [
-                'type' => [],
+            'select' => [
+                'class' => [],
+                'id' => [],
+                'name' => [],
             ],
             'small' => [],
             'span' => $htmx,
@@ -128,8 +141,36 @@ class Settings
                 'class' => [],
                 'datetime' => [],
             ],
-            'zero-md' => [],
         ];
+
+        // p
+        $allowed  = [
+            'p' =>  [
+                'a',
+                'code',
+                'img',
+                'pre',
+                'span',
+                'strike',
+                'strong',
+                'time',
+            ],
+        ];
+
+        // user can select tags by groups
+        switch ($group) {
+            case 'htmx':
+                return $htmx;
+                break;
+
+            case 'all':
+                return $tags;
+                break;
+
+            default:
+                return $tags[$group] ?? [];
+                break;
+        }
     }
 
     public function getMenuType(): string
@@ -318,7 +359,7 @@ class Settings
                 $_id_key,
                 $section['title'],
                 function () use ($section) {
-                    echo '<p>' . wp_kses($section['description'], self::getAllowedTags()) . '</p>';
+                    echo '<p>' . wp_kses($section['description'], self::getAllowedTags('p')) . '</p>';
                 },
                 $_id_key
             );
@@ -344,8 +385,8 @@ class Settings
                                 case 'media':
                                     echo '<input type="text" name="' . esc_attr(self::prefix($key2)) . '" value="' . esc_attr($value) . '" placeholder="' . esc_attr($option['placeholder']) . '" class="regular-text">';
                                     echo '<button class="button button-secondary" id="' . esc_attr(self::prefix($key2)) . '_button">Upload</button>';
-
-                                    echo '<script>
+                                    add_action('admin_print_footer_scripts', function () use ($key2) {
+                                        echo '<script type=\'text/javascript\'>
                                         jQuery(document).ready(function($) {
                                             var custom_uploader;
                                             $("#' . esc_attr(self::prefix($key2)) . '_button").click(function(e) {
@@ -369,6 +410,7 @@ class Settings
                                             });
                                         });
                                     </script>';
+                                    });
                                     break;
 
                                 case 'number':
@@ -405,7 +447,7 @@ class Settings
                             }
 
                             if ($option['description']) {
-                                echo '<p class="description">' . wp_kses($option['description'], self::getAllowedTags()) . '</p>';
+                                echo '<p class="description">' . wp_kses($option['description'], self::getAllowedTags('p')) . '</p>';
                             }
 
                             // if $option['description_callback'] and admin screen is options panel
@@ -446,6 +488,7 @@ class Settings
                 do_settings_sections($menu_slug . '-' . $active_tab);
                 // output hidden field with current tab, this sitting isn't saved
                 echo '<input type="hidden" name="tab" value="' . esc_attr($active_tab) . '">';
+                echo '<input type="hidden" name="tab_nonce" value="' . esc_attr(wp_create_nonce('tab_nonce')) . '">';
                 submit_button();
                 ?>
             </form>

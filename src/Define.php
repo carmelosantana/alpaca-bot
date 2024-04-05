@@ -9,6 +9,18 @@ use CarmeloSantana\AlpacaBot\Utils\Options;
 
 class Define
 {
+    public static function getAdminPages()
+    {
+        return [
+            'toplevel_page_' . ALPACA_BOT,
+            ALPACA_BOT . '_page_' . ALPACA_BOT . '-generate',
+            ALPACA_BOT . '_page_' . Options::appendPrefix('agents', '-'),
+            ALPACA_BOT . '_page_' . Options::appendPrefix('settings', '-'),
+            'edit-chat_log',
+            'edit-chat_history',
+        ];
+    }
+
     public static function getModels()
     {
         // get models from Ollama
@@ -48,7 +60,7 @@ class Define
             }
         } elseif (empty($api_url)) {
             $patreon = '<a href="' . esc_url(Define::support()['patreon']['url']) . '">' . Define::support()['patreon']['title'] . '</a>';
-            echo '<p class="description"><span>No server? We got you covered! ' . wp_kses($patreon, Options::getAllowedTags()) . ' and share our community hosted instances.<span></p>';
+            echo '<p class="description"><span>No server? We got you covered! ' . wp_kses($patreon, Options::getAllowedTags('p')) . ' and share our community hosted instances.<span></p>';
         }
     }
 
@@ -66,7 +78,7 @@ class Define
             'api_url' => [
                 'label' => __('Ollama API URL', 'alpaca-bot'),
                 'description' => __('The URL of your <a href="https://github.com/ollama/ollama">Ollama</a> installation, without trailing slash.', 'alpaca-bot'),
-                'placeholder' => 'http://localhost:11434',
+                'placeholder' => 'http://host.docker.internal:11434',
                 'section' => 'api',
                 'description_callback' => [__CLASS__, 'fieldApiUrlValidate'],
                 'autoload' => 'yes',
@@ -137,16 +149,6 @@ class Define
                 'section' => 'chat',
                 'default' => true,
             ],
-            'default_system_message' => [
-                'label' => __('Default system message', 'alpaca-bot'),
-                'placeholder' => __('How can I help you today?', 'alpaca-bot'),
-                'section' => 'chat',
-            ],
-            'default_message_placeholder' => [
-                'label' => __('Default message placeholder', 'alpaca-bot'),
-                'placeholder' => __('Start chatting with Abie', 'alpaca-bot'),
-                'section' => 'chat',
-            ],
             'user_agent' => [
                 'label' => __('User Agent', 'alpaca-bot'),
                 'description' => __('Browser user agent to use when making requests.', 'alpaca-bot'),
@@ -169,7 +171,7 @@ class Define
                 'description' => __('The URL of the default avatar to use for the chat.', 'alpaca-bot'),
                 'section' => 'assistant',
                 'type' => 'media',
-                'placeholder' => esc_url(AB_DIR_URL . 'assets/img/ollama-large.png'),
+                'placeholder' => esc_url(ALPACA_BOT_DIR_URL . 'assets/img/ollama-large.png'),
                 'description_callback' => [__CLASS__, 'fieldAvatarPreview'],
             ],
             'default_system' => [
@@ -190,6 +192,16 @@ class Define
 {{ .Prompt }}<|im_end|>
 {{ end }}<|im_start|>assistant
 """',
+            ],
+            'default_assistant_welcome_message' => [
+                'label' => __('Default Welcome Message', 'alpaca-bot'),
+                'placeholder' => __('How can I help you today?', 'alpaca-bot'),
+                'section' => 'assistant',
+            ],
+            'default_assistant_prompt_placeholder' => [
+                'label' => __('Default Prompt Placeholder', 'alpaca-bot'),
+                'placeholder' => __('Start chatting with Abie', 'alpaca-bot'),
+                'section' => 'assistant',
             ],
             'default_mirostat' => [
                 'label' => __('Mirostat', 'alpaca-bot'),

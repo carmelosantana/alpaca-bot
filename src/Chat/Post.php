@@ -13,7 +13,7 @@ class Post
 
     public function register(): void
     {
-        register_post_type('chat', [
+        register_post_type('chat_history', [
             'delete_with_user' => true,
             'supports' => [
                 'title',

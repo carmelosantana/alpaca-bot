@@ -4,7 +4,7 @@ Donate link: https://www.patreon.com/carmelosantana
 Tags: ai, large language model, embedding, chatbot, ollama  
 Requires at least: 6.4  
 Tested up to: 6.4  
-Stable tag: 0.4.12  
+Stable tag: 0.4.13  
 Requires PHP: 8.1  
 License: GPLv2 or later  
 License URI: https://www.gnu.org/licenses/gpl-2.0.html  
@@ -144,6 +144,15 @@ Patreon's also receive;
 - Video and community support.
 
 Please consider [becoming a Patreon](https://www.patreon.com/carmelosantana) today!
+
+### Made Possible By
+
+- Emma Delaney's [How to Create Your Own ChatGPT in HTML CSS and JavaScript](https://emma-delaney.medium.com/how-to-create-your-own-chatgpt-in-html-css-and-javascript-78e32b70b4be)
+- Google [Material Design Icons](https://material.io/resources/icons/?style=baseline) - Apache-2.0 license
+- [Hint.css](https://github.com/chinchang/hint.css) A CSS only tooltip library - MIT license
+- [TextRank](https://github.com/DavidBelicza/PHP-Science-TextRank) Automatic text summarization for PHP - MIT license
+- [Ollama](https://github.com/ollama/ollama) Get up and running with large language models locally - MIT license
+- [Parsedown](https://github.com/erusev/parsedown) A better Markdown parser - MIT license
 
 == Installation ==  
   

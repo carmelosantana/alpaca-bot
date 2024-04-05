@@ -58,7 +58,7 @@ class Get extends Agent
                 $content = '<div class="' . Options::appendPrefix('shortcode-processed', '-') . '" id="' . $id . '" data-url="' . $url . '" style="display: none;">' . $content . '</div>';
 
                 // Close and reopen zero so we can manipulate the incoming content
-                $content = '<button onclick="showHide(\'' . $id . '\')">Show Work</button>' . Render::zeroScript('', 'close') . $content . Render::zeroScript('', 'open');
+                $content = '<button onclick="showHide(\'' . $id . '\')">Show Work</button>' . $content;
                 break;
         }
 

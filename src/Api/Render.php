@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace CarmeloSantana\AlpacaBot\Api;
 
 use CarmeloSantana\AlpacaBot\Api\Ollama;
-use CarmeloSantana\AlpacaBot\Chat\Screen;
 use CarmeloSantana\AlpacaBot\Utils\Options;
 use PhpScience\TextRank\TextRankFacade;
 use PhpScience\TextRank\Tool\StopWords\English;
@@ -33,12 +32,29 @@ class Render
 	public function getSummarizedTitle(string $message, $title_prefix = 'Chat Log')
 	{
 		$message = wp_strip_all_tags($message);
-		$summary = $this->getSummary($message);
+		$summary = $this->getSummaryTextRank($message);
 
 		return !empty($summary) ? array_shift($summary) : $title_prefix . ' ' . gmdate('Y-m-d H:i:s');
 	}
 
-	public function getSummary(string $message)
+	public function getSummaryOllama(string $message)
+	{
+		// Send text generation request to Ollama
+		// Prompt: Quickly summarize the text into a single short sentence.
+		// use model used for chat
+		$body = [
+			'model' => $this->getPostInput('model'),
+			'prompt' => '[INST]Summarize this text into a single short sentence.[/INST]' . $message,
+		];
+
+		// get assistant response
+		$response = $this->ollama->apiGenerate($body);
+
+		// return response
+		return $response;
+	}
+
+	public function getSummaryTextRank(string $message)
 	{
 		$text_rank = new TextRankFacade();
 		$stop_words = new English();
@@ -68,7 +84,7 @@ class Render
 			$post = [
 				'post_title' => $post_title,
 				'post_excerpt' => wp_trim_excerpt($stripped_json),
-				'post_type' => 'chat',
+				'post_type' => 'chat_history',
 				'post_slug' => wp_generate_uuid4(),
 				'post_status' => 'publish',
 			];
@@ -100,7 +116,8 @@ class Render
 		update_post_meta($post_id, 'messages', $meta);
 
 		if ($chat_mode = $this->getPostInput('chat_mode')) {
-			update_post_meta($post_id, 'chat_mode', $chat_mode);
+			$chat_mode = 'chat_mode_' . $chat_mode; // 'chat_mode_chat' or 'chat_mode_generate
+			update_post_meta($post_id, $chat_mode, true);
 		}
 
 		if (is_wp_error($post_id)) {
@@ -155,27 +172,20 @@ class Render
 		switch (strtolower($role)) {
 			case 'assistant':
 			case 'ollama':
-				$url = AB_DIR_URL . 'assets/img/ollama-large.png';
+				$url = ALPACA_BOT_DIR_URL . 'assets/img/ollama-large.png';
 				break;
 
 			default:
-				$url = AB_DIR_URL . 'assets/img/alpaca-bot-512.png';
+				$url = ALPACA_BOT_DIR_URL . 'assets/img/alpaca-bot-512.png';
 				break;
 		}
 
 		return $url;
 	}
 
-	private function getAssistantModel(string $model = '', $wrap = 'span')
-	{
-		if (!empty($model)) {
-			return '<' . $wrap . ' class="model">' . $model . '</' . $wrap . '>';
-		}
-	}
-
 	public function getHxMultiSwapLoadChat(string $endpoint = 'htmx/chat', string $trigger = 'click')
 	{
-		return ' hx-post="' . $this->getRenderEndpoint($endpoint) . '" hx-trigger="' . $trigger . '" hx-ext="multi-swap" hx-swap="multi:#ab-response:beforeend,#chat_id:outerHTML" hx-disabled-elt="this" hx-indicator="#indicator"';
+		return ' hx-post="' . esc_attr($this->getRenderEndpoint($endpoint)) . '" hx-trigger="' . esc_attr($trigger) . '" hx-ext="multi-swap" hx-swap="multi:#ab-response:beforeend,#chat_id:outerHTML" hx-disabled-elt="this" hx-indicator="#indicator"';
 	}
 
 	public function getPostInput(string $name, $default = false)
@@ -185,7 +195,7 @@ class Render
 
 	public function getRenderEndpoint(string $endpoint = '', string $version = 'v1')
 	{
-		return get_rest_url(null, AB_SLUG . '/' . $version . '/' . $endpoint);
+		return get_rest_url(null, ALPACA_BOT . '/' . $version . '/' . $endpoint);
 	}
 
 	private function getUserSetting(string $option, $default = null)
@@ -202,19 +212,13 @@ class Render
 		return $default;
 	}
 
-	public function getWpNonce()
-	{
-		$nonce = wp_create_nonce('wp_rest');
-		return 'hx-headers=\'{"X-WP-Nonce": "' . $nonce . '"}\'';
-	}
-
 	public function outputAdminNotice($message = '', $class = 'notice-success')
 	{
 		$id = 'ab-notice-' . uniqid();
 
 		$out = '<div class="notice ' . $class . ' is-dismissible" id="' . $id . '"><p>' . $message . '</p></div>';
 
-		echo wp_kses($out, Options::getAllowedTags());
+		echo wp_kses($out, Options::getAllowedTags('p'));
 	}
 
 
@@ -250,7 +254,7 @@ class Render
 		// get posts by current user
 		$args = [
 			'author' => get_current_user_id(),
-			'post_type' => 'chat',
+			'post_type' => 'chat_history',
 			'numberposts' => 128,
 			'orderby' => 'date',
 			'order' => 'DESC',
@@ -260,37 +264,28 @@ class Render
 		$mode = $this->getPostInput('chat_mode');
 		switch ($mode) {
 			case 'generate':
-				$args['meta_query'] = [
-					[
-						'key' => 'chat_mode',
-						'value' => 'generate',
-					],
-				];
-				break;
-
-			default:
-				$args['meta_query'] = [
-					[
-						'key' => 'chat_mode',
-						'value' => 'chat',
-					],
-				];
-				break;
-		}
-
-		$posts = get_posts($args);
-
-		switch ($mode) {
-			case 'generate':
+				$chat_mode = 'chat_mode_generate';
 				$description = 'Select previous response';
 				$new = 'New Generation';
 				break;
 
 			default:
+				$chat_mode = 'chat_mode_chat';
 				$description = 'Select previous chat';
 				$new = 'New Chat';
 				break;
 		}
+
+		// WordPress.DB.SlowDBQuery.slow_db_query_meta_query 
+		// Improving meta_query performance https://docs.wpvip.com/code-quality/querying-on-meta_value/
+		$args['meta_query'] = [
+			[
+				'key' => $chat_mode,
+				'compare' => 'EXISTS',
+			],
+		];
+
+		$posts = get_posts($args);
 
 		echo '<option value="" disabled>' . esc_html($description) . '</option>';
 		echo '<option value="0" selected>' . esc_html($new) . '</option>';
@@ -456,7 +451,7 @@ class Render
 					$user_name = $message['message']['role'];
 				}
 				if (!empty($message['model'])) {
-					$user_name .= ' ' . $this->getAssistantModel($message['model']);
+					$user_name = '<span class="model">' . $message['model'] . '</span> ' . $user_name;
 				}
 				break;
 		}
@@ -467,7 +462,7 @@ class Render
 		$out .= '<div class="ab-chat-message-gravatar"><img src="' . $gravatar . '" alt="gravatar"></div>';
 		$out .= '<div class="ab-chat-message-parts">';
 		$out .= '<div class="ab-chat-message-username">' . $user_name . '</div>';
-		$out .= '<div class="ab-chat-message-response" id="' . $response_id . '">' . self::zeroScript($response) . '</div>';
+		$out .= '<div class="ab-chat-message-response" id="' . $response_id . '">' . $this->parseResponse($response) . '</div>';
 		$out .= '<div class="ab-chat-message-tools">';
 		$out .= $tools;
 		$out .= '</div>';	// .ab-chat-message-tools
@@ -480,11 +475,10 @@ class Render
 	public function outputDialogEnd()
 	{
 		// End .ab-dialog
-		$this->outputHtmlTag(false);
-		$this->outputPostScript();
+		echo '</div>';
 
 		// End #ab-response
-		$this->outputHtmlTag(false);
+		echo '</div>';
 	}
 
 	// Add #ab-response wrapper used for innerHTML replacement and opens .ab-dialog
@@ -492,15 +486,11 @@ class Render
 	{
 		$time = time();
 
-		$this->outputHtmlTag([
-			'id' => 'ab-response',
-		]);
+		// open wrapper
+		echo '<div id="ab-response">';
 
 		// add user chat message to body
-		$this->outputHtmlTag([
-			'class' => 'ab-dialog',
-			'id' => 'ab-dialog-' . $time,
-		]);
+		echo '<div class="ab-dialog" id="ab-dialog-' . esc_attr($time) . '">';
 
 		return $time;
 	}
@@ -611,47 +601,6 @@ class Render
 		echo '<input type="hidden" name="chat_id" id="chat_id" value="' . esc_attr($post_id) . '">';
 	}
 
-	public function outputHtmlTag($attributes = [])
-	{
-		$defaults = [
-			'element' => true,
-			'tag' => 'div',
-			'class' => null,
-			'id' => null,
-		];
-
-		if (!is_array($attributes) and !$attributes) {
-			$attributes = [
-				'element' => false,
-			];
-		}
-
-		$attributes = wp_parse_args($attributes, $defaults);
-
-		// Extract $attributes_options as variables
-		extract($attributes);
-
-		if ($element) {
-			// only output id= or class= if values are not empty
-			$id = !empty($id) ? ' id="' . $id . '"' : null;
-			$class = !empty($class) ? ' class="' . $class . '"' : null;
-
-			echo wp_kses('<' . $tag . $id . $class . '>', Options::getAllowedTags());
-		} else {
-			echo wp_kses('</' . $tag . '>', Options::getAllowedTags());
-		}
-	}
-
-	public function outputPostScript(string $class = '')
-	{
-		echo '<script type="text/javascript">smoothScrollTo(' . esc_js($class) . ');</script>';
-	}
-
-	public function outputScriptShowHide(string $id)
-	{
-		echo '<script type="text/javascript">showHide(' . esc_js($id) . ');</script>';
-	}
-
 	public function outputPostInsert($post_type = 'post')
 	{
 		// check if post_content is set	and not empty
@@ -677,11 +626,6 @@ class Render
 
 		// output success message with link to post
 		$this->outputAdminNotice(ucfirst($post_type) . ' drafted. <a href="' . get_edit_post_link($post_id) . '">Edit ' . ucfirst($post_type) . '</a>');
-	}
-
-	public function outputWpNonce()
-	{
-		echo wp_kses($this->getWpNonce(), Options::getAllowedTags());
 	}
 
 	public function outputTags($tag = 'option')
@@ -714,6 +658,18 @@ class Render
 
 			echo '<' . esc_html($tag) . ' value="' . esc_attr($model['name']) . '">' . esc_html($name) . '</' . esc_html($tag) . '>';
 		}
+	}
+
+	public function parseResponse(string $response)
+	{
+		// Use parse down to convert to HTML
+		$Parsedown = new \Parsedown();
+
+		// Parse response
+		$parsed_response = $Parsedown->text($response);
+
+		// Return parsed response
+		return $parsed_response;
 	}
 
 	public function setPost($post)
@@ -770,40 +726,9 @@ class Render
 
 		// Output updated user settings
 		if ($response) {
-			$time = time();
-			$class = 'fadeOut-' . $time;
-			echo 'Set as default <span class="' . esc_attr($class) . '">✔︎</span>';
-			echo '<script type="text/javascript">';
-			echo 'setTimeout(function() {';
-			echo 'document.querySelector(".' . esc_attr($class) . '").classList.add("fadeOut");';
-			echo '}, 2400);';
-			echo '</script>';
+			echo 'Settings updated ✔︎';
 		} else {
-			echo '<span class="fadeOut">Error updating user settings.</span>';
-		}
-	}
-
-	/**
-	 * Adds zero-md script for markdown rendering post response.
-	 *
-	 * @param  string $message
-	 * @param  string $position
-	 * @return string
-	 */
-	public static function zeroScript(string $message, string $position = ''): string
-	{
-		switch ($position) {
-			case 'open':
-				return '<zero-md><script type="text/markdown">';
-				break;
-
-			case 'close':
-				return '</script></zero-md>';
-				break;
-
-			default:
-				return '<zero-md><script type="text/markdown">' . $message . '</script></zero-md>';
-				break;
+			echo 'Error updating user settings.';
 		}
 	}
 }

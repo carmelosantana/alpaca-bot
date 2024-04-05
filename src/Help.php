@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace CarmeloSantana\AlpacaBot;
 
+use CarmeloSantana\AlpacaBot\Define;
 use CarmeloSantana\AlpacaBot\Utils\Options;
 use Parsedown;
 
@@ -12,21 +13,13 @@ class Help
     public function __construct()
     {
         add_action('admin_head', [$this, 'addHelpTabs']);
-        add_filter('plugin_action_links_' . AB_SLUG . '/' . AB_SLUG . '.php', [$this, 'addPluginActionLinks']);
+        add_filter('plugin_action_links_' . ALPACA_BOT . '/' . ALPACA_BOT . '.php', [$this, 'addPluginActionLinks']);
         add_filter('plugin_row_meta', [$this, 'addPluginRowMeta'], 10, 2);
     }
 
     public function addHelpTabs()
     {
         $screen = get_current_screen();
-
-        $help_full = [
-            'toplevel_page_' . AB_SLUG,
-            AB_SLUG . '_page_' . Options::appendPrefix('agents', '-'),
-            AB_SLUG . '_page_' . Options::appendPrefix('settings', '-'),
-            'edit-log',
-            'edit-chat',
-        ];
 
         $help_short = [
             'post',
@@ -35,7 +28,7 @@ class Help
 
         $ignore = $include = [];
 
-        if (in_array($screen->id, $help_full)) {
+        if (in_array($screen->id, Define::getAdminPages())) {
             $ignore = [
                 'Screenshots',
                 'Requirements',
@@ -51,7 +44,7 @@ class Help
         }
 
         // https://developer.wordpress.org/apis/filesystem/
-        $url = admin_url('admin.php?page=' . AB_SLUG);
+        $url = admin_url('admin.php?page=' . ALPACA_BOT);
         $creds = request_filesystem_credentials($url, '', false, false, null);
 
         if (!WP_Filesystem($creds)) {
@@ -61,7 +54,7 @@ class Help
 
         // Load README.md
         global $wp_filesystem;
-        $readme = $wp_filesystem->get_contents(AB_DIR_PATH . 'README.md');
+        $readme = $wp_filesystem->get_contents(ALPACA_BOT_DIR_PATH . 'README.md');
 
         // Parse README.md
         $parsedown = new Parsedown();
@@ -107,7 +100,7 @@ class Help
 
     public function addPluginActionLinks($links)
     {
-        $links[] = '<a href="' . admin_url('admin.php?page=' . AB_SLUG) . '">Chat</a>';
+        $links[] = '<a href="' . admin_url('admin.php?page=' . ALPACA_BOT) . '">Chat</a>';
         $links[] = '<a href="' . admin_url('admin.php?page=' . Options::appendPrefix('settings', '-')) . '">Settings</a>';
 
         return $links;
@@ -115,7 +108,7 @@ class Help
 
     public function addPluginRowMeta($links, $file)
     {
-        if ($file === AB_SLUG . '/' . AB_SLUG . '.php') {
+        if ($file === ALPACA_BOT . '/' . ALPACA_BOT . '.php') {
             $links[] = '<a href="' . Define::support()['discord']['url'] . '" target="_blank">Discord</a>';
             $links[] = '<a href="' . Define::support()['patreon']['url'] . '" target="_blank">Patreon</a>';
         }

@@ -3,7 +3,7 @@
 Plugin Name: Alpaca Bot
 Plugin URI: https://github.com/carmelosantana/alpaca-bot
 Description: A privately hosted WordPress AI chatbot.
-Version: 0.4.12
+Version: 0.4.13
 Author: Carmelo Santana
 Author URI: https://carmelosantana.com/
 License: GNU General Public License v2 or later
@@ -11,11 +11,13 @@ License URI: http://www.gnu.org/licenses/gpl-2.0.html
 Requires at least: 6.4
 */
 
+if (!defined('ABSPATH')) exit; // Exit if accessed directly
+
 // Defines
-define('AB_SLUG', 'alpaca-bot');
-define('AB_TITLE', 'Alpaca Bot');
-define('AB_DIR_URL', plugin_dir_url(__FILE__));
-define('AB_DIR_PATH', plugin_dir_path(__FILE__));
+define('ALPACA_BOT', 'alpaca-bot');
+define('ALPACA_BOT_TITLE', 'Alpaca Bot');
+define('ALPACA_BOT_DIR_URL', plugin_dir_url(__FILE__));
+define('ALPACA_BOT_DIR_PATH', plugin_dir_path(__FILE__));
 
 // Composer
 if (!file_exists($composer = plugin_dir_path(__FILE__) . 'vendor/autoload.php')) {

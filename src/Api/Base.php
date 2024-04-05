@@ -12,7 +12,7 @@ use \WP_REST_Response;
 
 abstract class Base
 {
-    public const NAMESPACE = AB_SLUG . '/v1';
+    public const NAMESPACE = ALPACA_BOT . '/v1';
 
     public const PERMISSION_READ = 'read';
 
