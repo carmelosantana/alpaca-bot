@@ -354,8 +354,8 @@ class Settings
                                 case 'media':
                                     echo '<input type="text" name="' . esc_attr(self::prefix($key2)) . '" value="' . esc_attr($value) . '" placeholder="' . esc_attr($option['placeholder']) . '" class="regular-text">';
                                     echo '<button class="button button-secondary" id="' . esc_attr(self::prefix($key2)) . '_button">Upload</button>';
-
-                                    echo '<script>
+                                    add_action('admin_print_footer_scripts', function () use ($key2) {
+                                        echo '<script type=\'text/javascript\'>
                                         jQuery(document).ready(function($) {
                                             var custom_uploader;
                                             $("#' . esc_attr(self::prefix($key2)) . '_button").click(function(e) {
@@ -379,6 +379,7 @@ class Settings
                                             });
                                         });
                                     </script>';
+                                    });
                                     break;
 
                                 case 'number':
