@@ -27,6 +27,15 @@ async function render(opts = {}) {
     const body = await this.stampBody(await pending, opts.classes)
 }
 
+// After htmx requests are complete
+htmx.onLoad(function (content) {
+    // Prism highlight code blocks
+    Prism.highlightAll();
+
+    // Smooth scroll to message
+    smoothScrollTo('dialog');
+});
+
 // After submit 
 function afterSubmit() {
     clearPrompt();
