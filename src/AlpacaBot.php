@@ -141,7 +141,7 @@ class AlpacaBot
     public function buildCache()
     {
         // Build model cache
-        if (Options::get('api_url') and $this->adminCheckScreen()) {
+        if (Options::get('api_url')) {
             (new Ollama())->getModels();
         }
     }
