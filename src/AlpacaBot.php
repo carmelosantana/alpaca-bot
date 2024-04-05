@@ -72,12 +72,14 @@ class AlpacaBot
 
     public function adminCheckScreen()
     {
+        $screen = get_current_screen();
+
         // check page for alpaca-bot
-        if (strpos($_SERVER['REQUEST_URI'], 'admin.php?page=' . ALPACA_BOT) === false) {
-            return false;
+        if (in_array($screen->id, Define::getAdminPages())) {
+            return true;
         }
 
-        return true;
+        return false;
     }
 
     public function adminEnqueueScripts()
@@ -85,6 +87,7 @@ class AlpacaBot
         if (!$this->adminCheckScreen()) {
             return;
         }
+
         wp_enqueue_script('htmx', ALPACA_BOT_DIR_URL . 'assets/js/htmx.min.js', [], '1.9.10', true);
         wp_enqueue_script('htmx-multi-swap', ALPACA_BOT_DIR_URL . 'assets/js/multi-swap.js', [], '1', true);
         wp_enqueue_script('prism', ALPACA_BOT_DIR_URL . 'assets/js/prism.min.js', [], '1.29.0', true);

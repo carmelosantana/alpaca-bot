@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace CarmeloSantana\AlpacaBot;
 
+use CarmeloSantana\AlpacaBot\Define;
 use CarmeloSantana\AlpacaBot\Utils\Options;
 use Parsedown;
 
@@ -20,14 +21,6 @@ class Help
     {
         $screen = get_current_screen();
 
-        $help_full = [
-            'toplevel_page_' . ALPACA_BOT,
-            ALPACA_BOT . '_page_' . Options::appendPrefix('agents', '-'),
-            ALPACA_BOT . '_page_' . Options::appendPrefix('settings', '-'),
-            'edit-log',
-            'edit-chat',
-        ];
-
         $help_short = [
             'post',
             'page',
@@ -35,7 +28,7 @@ class Help
 
         $ignore = $include = [];
 
-        if (in_array($screen->id, $help_full)) {
+        if (in_array($screen->id, Define::getAdminPages())) {
             $ignore = [
                 'Screenshots',
                 'Requirements',

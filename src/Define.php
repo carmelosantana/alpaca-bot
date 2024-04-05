@@ -9,6 +9,18 @@ use CarmeloSantana\AlpacaBot\Utils\Options;
 
 class Define
 {
+    public static function getAdminPages()
+    {
+        return [
+            'toplevel_page_' . ALPACA_BOT,
+            ALPACA_BOT . '_page_' . ALPACA_BOT . '-generate',
+            ALPACA_BOT . '_page_' . Options::appendPrefix('agents', '-'),
+            ALPACA_BOT . '_page_' . Options::appendPrefix('settings', '-'),
+            'edit-chat_log',
+            'edit-chat_history',
+        ];
+    }
+
     public static function getModels()
     {
         // get models from Ollama
