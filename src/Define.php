@@ -60,7 +60,7 @@ class Define
             }
         } elseif (empty($api_url)) {
             $patreon = '<a href="' . esc_url(Define::support()['patreon']['url']) . '">' . Define::support()['patreon']['title'] . '</a>';
-            echo '<p class="description"><span>No server? We got you covered! ' . wp_kses($patreon, Options::getAllowedTags()) . ' and share our community hosted instances.<span></p>';
+            echo '<p class="description"><span>No server? We got you covered! ' . wp_kses($patreon, Options::getAllowedTags('p')) . ' and share our community hosted instances.<span></p>';
         }
     }
 

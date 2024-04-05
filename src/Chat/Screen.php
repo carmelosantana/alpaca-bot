@@ -93,8 +93,10 @@ class Screen
     <?php }
 
     public function outputChatForm()
-    { ?>
-        <form id="ab-chat-form" <?php echo esc_html($this->htmx->outputWpNonce()); ?>>
+    {
+        $nonce = wp_create_nonce('wp_rest');
+    ?>
+        <form id="ab-chat-form" hx-headers='{"X-WP-Nonce": "<?php echo esc_attr($nonce); ?>"}'>
             <div id="ab-chat-container" class="wrap nosubsub">
                 <?php $this->outputTitleHeader(); ?>
                 <div class="ab-chat">
@@ -131,7 +133,7 @@ class Screen
                     <input type="hidden" name="prompt" id="prompt">
                     <input type="hidden" name="chat_id" id="chat_id" value="0">
                     <input type="hidden" name="chat_mode" id="chat_mode" value="<?php echo esc_html($this->getMode('chat')); ?>">
-                    <span class="material-symbols-outlined" id="submit" <?php echo wp_kses($this->htmx->getHxMultiSwapLoadChat('htmx/chat'), []); ?>>arrow_circle_up</span>
+                    <span class="material-symbols-outlined" id="submit" <?php echo wp_kses($this->htmx->getHxMultiSwapLoadChat('htmx/chat'), Options::getAllowedTags('htmx')); ?>>arrow_circle_up</span>
                 </div>
             </div>
         </div>
@@ -153,7 +155,7 @@ class Screen
             <div class="ab-chat-logs">
                 <?php if (Options::get('chat_history_save')) { ?>
                     <p><strong>Chat History</strong></p>
-                    <select name="chat_history_id" id="chat_history_id" <?php echo wp_kses($this->htmx->getHxMultiSwapLoadChat('wp/chat', 'change'), Options::getAllowedTags()); ?>></select>
+                    <select name="chat_history_id" id="chat_history_id" <?php echo wp_kses($this->htmx->getHxMultiSwapLoadChat('wp/chat', 'change'), Options::getAllowedTags('htmx')); ?>></select>
                     <input type="hidden" hx-post="<?php echo esc_url($this->htmx->getRenderEndpoint('wp/history')); ?>" hx-trigger="load" hx-target="#chat_history_id">
                 <?php } ?>
             </div>

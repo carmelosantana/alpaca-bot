@@ -6,7 +6,6 @@ namespace CarmeloSantana\AlpacaBot\Api;
 
 use CarmeloSantana\AlpacaBot\Api\Ollama;
 use CarmeloSantana\AlpacaBot\Utils\Options;
-use Parsedown;
 use PhpScience\TextRank\TextRankFacade;
 use PhpScience\TextRank\Tool\StopWords\English;
 
@@ -184,16 +183,9 @@ class Render
 		return $url;
 	}
 
-	private function getAssistantModel(string $model = '', $wrap = 'span')
-	{
-		if (!empty($model)) {
-			return '<' . $wrap . ' class="model">' . $model . '</' . $wrap . '>';
-		}
-	}
-
 	public function getHxMultiSwapLoadChat(string $endpoint = 'htmx/chat', string $trigger = 'click')
 	{
-		return ' hx-post="' . $this->getRenderEndpoint($endpoint) . '" hx-trigger="' . $trigger . '" hx-ext="multi-swap" hx-swap="multi:#ab-response:beforeend,#chat_id:outerHTML" hx-disabled-elt="this" hx-indicator="#indicator"';
+		return ' hx-post="' . esc_attr($this->getRenderEndpoint($endpoint)) . '" hx-trigger="' . esc_attr($trigger) . '" hx-ext="multi-swap" hx-swap="multi:#ab-response:beforeend,#chat_id:outerHTML" hx-disabled-elt="this" hx-indicator="#indicator"';
 	}
 
 	public function getPostInput(string $name, $default = false)
@@ -220,19 +212,13 @@ class Render
 		return $default;
 	}
 
-	public function getWpNonce()
-	{
-		$nonce = wp_create_nonce('wp_rest');
-		return 'hx-headers=\'{"X-WP-Nonce": "' . $nonce . '"}\'';
-	}
-
 	public function outputAdminNotice($message = '', $class = 'notice-success')
 	{
 		$id = 'ab-notice-' . uniqid();
 
 		$out = '<div class="notice ' . $class . ' is-dismissible" id="' . $id . '"><p>' . $message . '</p></div>';
 
-		echo wp_kses($out, Options::getAllowedTags());
+		echo wp_kses($out, Options::getAllowedTags('p'));
 	}
 
 
@@ -465,7 +451,7 @@ class Render
 					$user_name = $message['message']['role'];
 				}
 				if (!empty($message['model'])) {
-					$user_name .= ' ' . $this->getAssistantModel($message['model']);
+					$user_name = '<span class="model">' . $message['model'] . '</span> ' . $user_name;
 				}
 				break;
 		}
@@ -489,10 +475,10 @@ class Render
 	public function outputDialogEnd()
 	{
 		// End .ab-dialog
-		$this->outputHtmlTag(false);
+		echo '</div>';
 
 		// End #ab-response
-		$this->outputHtmlTag(false);
+		echo '</div>';
 	}
 
 	// Add #ab-response wrapper used for innerHTML replacement and opens .ab-dialog
@@ -500,15 +486,11 @@ class Render
 	{
 		$time = time();
 
-		$this->outputHtmlTag([
-			'id' => 'ab-response',
-		]);
+		// open wrapper
+		echo '<div id="ab-response">';
 
 		// add user chat message to body
-		$this->outputHtmlTag([
-			'class' => 'ab-dialog',
-			'id' => 'ab-dialog-' . $time,
-		]);
+		echo '<div class="ab-dialog" id="ab-dialog-' . esc_attr($time) . '">';
 
 		return $time;
 	}
@@ -619,37 +601,6 @@ class Render
 		echo '<input type="hidden" name="chat_id" id="chat_id" value="' . esc_attr($post_id) . '">';
 	}
 
-	public function outputHtmlTag($attributes = [])
-	{
-		$defaults = [
-			'element' => true,
-			'tag' => 'div',
-			'class' => null,
-			'id' => null,
-		];
-
-		if (!is_array($attributes) and !$attributes) {
-			$attributes = [
-				'element' => false,
-			];
-		}
-
-		$attributes = wp_parse_args($attributes, $defaults);
-
-		// Extract $attributes_options as variables
-		extract($attributes);
-
-		if ($element) {
-			// only output id= or class= if values are not empty
-			$id = !empty($id) ? ' id="' . $id . '"' : null;
-			$class = !empty($class) ? ' class="' . $class . '"' : null;
-
-			echo wp_kses('<' . $tag . $id . $class . '>', Options::getAllowedTags());
-		} else {
-			echo wp_kses('</' . $tag . '>', Options::getAllowedTags());
-		}
-	}
-
 	public function outputPostInsert($post_type = 'post')
 	{
 		// check if post_content is set	and not empty
@@ -675,11 +626,6 @@ class Render
 
 		// output success message with link to post
 		$this->outputAdminNotice(ucfirst($post_type) . ' drafted. <a href="' . get_edit_post_link($post_id) . '">Edit ' . ucfirst($post_type) . '</a>');
-	}
-
-	public function outputWpNonce()
-	{
-		echo wp_kses($this->getWpNonce(), Options::getAllowedTags());
 	}
 
 	public function outputTags($tag = 'option')

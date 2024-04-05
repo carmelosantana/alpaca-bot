@@ -115,7 +115,7 @@ class Post
                 break;
         }
 
-        echo wp_kses($out, Options::getAllowedTags());
+        echo wp_kses($out, Options::getAllowedTags('p'));
     }
 
     // make custom columns sortable

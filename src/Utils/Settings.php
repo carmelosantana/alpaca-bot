@@ -51,7 +51,7 @@ class Settings
         return $active_tab;
     }
 
-    public static function getAllowedTags(): array
+    public static function getAllowedTags(string $group = 'all'): array
     {
         $htmx = [
             'aria-label' => [],
@@ -72,7 +72,7 @@ class Settings
             'hx-vars' => [],
         ];
 
-        return [
+        $tags = [
             'a' => [
                 'href' => [],
                 'title' => [],
@@ -128,8 +128,10 @@ class Settings
                 'title' => [],
             ],
             's' => [],
-            'script' => [
-                'type' => [],
+            'select' => [
+                'class' => [],
+                'id' => [],
+                'name' => [],
             ],
             'small' => [],
             'span' => $htmx,
@@ -140,6 +142,35 @@ class Settings
                 'datetime' => [],
             ],
         ];
+
+        // p
+        $allowed  = [
+            'p' =>  [
+                'a',
+                'code',
+                'img',
+                'pre',
+                'span',
+                'strike',
+                'strong',
+                'time',
+            ],
+        ];
+
+        // user can select tags by groups
+        switch ($group) {
+            case 'htmx':
+                return $htmx;
+                break;
+
+            case 'all':
+                return $tags;
+                break;
+
+            default:
+                return $tags[$group] ?? [];
+                break;
+        }
     }
 
     public function getMenuType(): string
@@ -328,7 +359,7 @@ class Settings
                 $_id_key,
                 $section['title'],
                 function () use ($section) {
-                    echo '<p>' . wp_kses($section['description'], self::getAllowedTags()) . '</p>';
+                    echo '<p>' . wp_kses($section['description'], self::getAllowedTags('p')) . '</p>';
                 },
                 $_id_key
             );
@@ -416,7 +447,7 @@ class Settings
                             }
 
                             if ($option['description']) {
-                                echo '<p class="description">' . wp_kses($option['description'], self::getAllowedTags()) . '</p>';
+                                echo '<p class="description">' . wp_kses($option['description'], self::getAllowedTags('p')) . '</p>';
                             }
 
                             // if $option['description_callback'] and admin screen is options panel
