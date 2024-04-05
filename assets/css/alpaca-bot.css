@@ -98,7 +98,7 @@
 }
 
 /* Custom admin menu icons */
-#toplevel_page_alpaca-bot .wp-menu-image img {
+#toplevel_page_alpaca-bot .wp-menu-image>img {
     width: 20px;
     height: 20px;
     filter: invert(100%);
@@ -254,8 +254,6 @@
 
 .ab-chat-message-tools span.rotate-push-pin {
     transform: rotate(33deg);
-    /* font-size: 20px;
-    width: 20px; */
 }
 
 .ab-chat-message-username {
