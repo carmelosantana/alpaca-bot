@@ -96,10 +96,15 @@ class AlpacaBot
 
     public function adminEnqueueStyles()
     {
+        wp_enqueue_style(ALPACA_BOT, ALPACA_BOT_DIR_URL . 'assets/css/alpaca-bot.css', [], VERSION);
+
+        if (!$this->adminCheckScreen()) {
+            return;
+        }
+
         wp_enqueue_style('hint', ALPACA_BOT_DIR_URL . 'assets/css/hint.min.css', [], VERSION);
         wp_enqueue_style('materialsymbolsoutlined', ALPACA_BOT_DIR_URL . 'assets/css/materialsymbolsoutlined.css', [], VERSION);
         wp_enqueue_style('prism', ALPACA_BOT_DIR_URL . 'assets/css/prism-default.min.css', [], '1.29.0');
-        wp_enqueue_style(ALPACA_BOT, ALPACA_BOT_DIR_URL . 'assets/css/alpaca-bot.css', [], VERSION);
     }
 
     public function adminInit()
