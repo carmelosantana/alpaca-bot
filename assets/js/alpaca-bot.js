@@ -201,7 +201,7 @@ function smoothScrollTo(selector = "dialog", behavior = 'smooth', block = 'start
 
         case 'footer':
             element = document.querySelector("#wpfooter");
-            break;    
+            break;
 
         case 'loading':
             element = document.querySelector("#indicator");

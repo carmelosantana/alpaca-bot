@@ -718,7 +718,6 @@ class Render
 	{
 		// Use parse down to convert to HTML
 		$Parsedown = new \Parsedown();
-		// $Parsedown->setSafeMode(true);
 
 		// Parse response
 		$parsed_response = $Parsedown->text($response);

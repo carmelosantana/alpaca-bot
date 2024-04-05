@@ -173,7 +173,7 @@ class Define
                 'type' => 'media',
                 'placeholder' => esc_url(ALPACA_BOT_DIR_URL . 'assets/img/ollama-large.png'),
                 'description_callback' => [__CLASS__, 'fieldAvatarPreview'],
-            ],            
+            ],
             'default_system' => [
                 'label' => __('Default System Message', 'alpaca-bot'),
                 'description' => __('The <code>SYSTEM</code> instruction specifies the system message to be used in the template, if applicable.', 'alpaca-bot'),
@@ -202,7 +202,7 @@ class Define
                 'label' => __('Default Prompt Placeholder', 'alpaca-bot'),
                 'placeholder' => __('Start chatting with Abie', 'alpaca-bot'),
                 'section' => 'assistant',
-            ],            
+            ],
             'default_mirostat' => [
                 'label' => __('Mirostat', 'alpaca-bot'),
                 'description' => __('Enable Mirostat sampling for controlling perplexity. (default: 0, 0 = disabled, 1 = Mirostat, 2 = Mirostat 2.0)', 'alpaca-bot'),
