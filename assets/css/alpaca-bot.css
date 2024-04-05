@@ -136,13 +136,11 @@
     margin: 0.75em 0 0 0.5em;
     font-size: .95em;
     color: var(--wp-base-gray);
-    opacity: 0.7;
-    transition: opacity 0.3s ease-in-out;
 }
 
-.ab-toolbar p:hover {
-    opacity: 1;
-    transition: opacity 0.2s ease-in-out;
+.ab-toolbar #set_default_model:hover {
+    color: var(--wp-blue);
+    cursor: pointer;
 }
 
 .ab-toolbar .ab-tags {
@@ -209,8 +207,7 @@
 
 /* .ab-chat-message-tools needs to make space for gravatar on left 38px */
 .ab-chat-message-tools {
-    /* lower opacity when not hover */
-    opacity: 0.25;
+    color: var(--wp-light-silver-gray);
     margin: 1em 1em 1em 1em;
     justify-content: space-between;
     transition: opacity 0.3s ease-in;
@@ -219,12 +216,12 @@
 
 /* increase opacity on tools when hovering over parent message */
 .ab-chat-message:hover .ab-chat-message-tools {
-    opacity: 1;
+    color: var(--wp-dark-gray);
 }
 
 /* transition tool span changes */
 .ab-chat-message-tools span.tools {
-    font-size: 1.28rem;
+    font-size: 1.25rem;
     color: var(--wp-dark-silver-gray);
     cursor: pointer;
     transition: color 0.3s ease-in-out;
@@ -382,10 +379,6 @@
     justify-content: center;
     height: 100%;
     width: 100%;
-}
-
-#set_default_model {
-    visibility: hidden;
 }
 
 .alpaca-bot-options .accordion-btn {
