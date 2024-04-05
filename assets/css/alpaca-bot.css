@@ -26,10 +26,30 @@
 }
 
 /* Basic animation */
+.fadeIn {
+    visibility: visible;
+    opacity: 1;
+    transition: opacity 0.33s ease-in-out;
+}
+
 .fadeOut {
     visibility: hidden;
     opacity: 0;
-    transition: visibility 0s 2s, opacity 2s ease-in-out;
+    transition: visibility 0s 2.6s, opacity 2.6s ease-in-out;
+}
+
+.keyframesFadeOut {
+    animation: fadeOut 2.6s;
+}
+
+@keyframes fadeOut {
+    0% {
+        opacity: 1;
+    }
+
+    100% {
+        opacity: 0;
+    }
 }
 
 /* https://stackoverflow.com/a/17260048/1007492 */
