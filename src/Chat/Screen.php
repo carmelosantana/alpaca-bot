@@ -143,7 +143,7 @@ class Screen
             <div class="ab-tags">
                 <?php if (Options::get('user_can_change_model')) { ?>
                     <p><strong>Model</strong></p>
-                    <p hx-post="<?php echo esc_url($this->htmx->getRenderEndpoint('wp/user/update')); ?>" hx-vals='{"set_default_model": true}' id="set_default_model">Set as default</p>
+                    <p hx-post="<?php echo esc_url($this->htmx->getRenderEndpoint('wp/user/update')); ?>" hx-vals='{"set_default_model": true}' id="set_default_model"></p>
                     <select name="model" id="model" onclick="setDefaultModel()"></select>
                     <input type="hidden" hx-get="<?php echo esc_url($this->htmx->getRenderEndpoint('htmx/tags')); ?>" hx-trigger="load" hx-target="#model">
                 <?php } else { ?>

@@ -162,9 +162,17 @@ function promptResubmit(id) {
 }
 
 // only show set_default_model after #model is clicked
-function setDefaultModel() {
+function setDefaultModel(timeout = 5200) {
     var defaultModel = document.querySelector("#set_default_model");
-    defaultModel.style.visibility = 'visible';
+    defaultModel.innerHTML = 'Set as default';
+
+    // update class list to only fadeIn
+    defaultModel.classList = 'fadeIn';
+
+    // remove after timeout
+    setTimeout(function () {
+        defaultModel.classList = 'fadeOut';
+    }, timeout);
 }
 
 function showHide(id) {
