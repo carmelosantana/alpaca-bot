@@ -451,7 +451,7 @@ class Render
 					$user_name = $message['message']['role'];
 				}
 				if (!empty($message['model'])) {
-					$user_name = '<span class="model">' . $message['model'] . '</span> ' . $user_name;
+					$user_name = $user_name . ' <span class="model">' . $message['model'] . '</span>';
 				}
 				break;
 		}
