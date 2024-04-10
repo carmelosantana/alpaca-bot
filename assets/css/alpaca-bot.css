@@ -386,6 +386,7 @@
     cursor: pointer;
 }
 
+.typing-textarea button,
 .typing-textarea span {
     position: absolute;
     right: 0;
@@ -393,16 +394,20 @@
     color: var(--wp-light-silver-gray);
 }
 
+.typing-textarea textarea:valid~button,
 .typing-textarea textarea:valid~span {
     color: var(--wp-dark-silver-gray);
 }
 
 /* on hover and when disabled  */
+.typing-textarea button:hover,
 .typing-textarea span:hover {
     color: var(--wp-blue);
 }
 
-.typing-textarea span:disabled {
+/* if span has disabled="" */
+.typing-textarea button[disabled],
+.typing-textarea span[disabled] {
     color: var(--lighter-gray);
     cursor: not-allowed;
 }
