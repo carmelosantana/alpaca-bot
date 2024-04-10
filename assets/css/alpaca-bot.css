@@ -366,6 +366,15 @@
     color: var(--wp-dark-silver-gray);
 }
 
+/* clear all button styles in .typing-textarea */
+.typing-textarea button {
+    background: none;
+    border: none;
+    padding: 0;
+    margin: 0;
+}
+
+.typing-content button,
 .typing-content span {
     width: 56px;
     height: 56px;
