@@ -133,7 +133,7 @@ class Screen
                     <input type="hidden" name="prompt" id="prompt">
                     <input type="hidden" name="chat_id" id="chat_id" value="0">
                     <input type="hidden" name="chat_mode" id="chat_mode" value="<?php echo esc_html($this->getMode('chat')); ?>">
-                    <span class="material-symbols-outlined" id="submit" <?php echo wp_kses($this->htmx->getHxMultiSwapLoadChat('htmx/chat'), Options::getAllowedTags('htmx')); ?>>arrow_circle_up</span>
+                    <button type="submit" name="submit" id="submit" class="material-symbols-outlined" <?php echo wp_kses($this->htmx->getHxMultiSwapLoadChat('htmx/chat'), Options::getAllowedTags('htmx')); ?>>arrow_circle_up</button>
                 </div>
             </div>
         </div>
