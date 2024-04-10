@@ -412,7 +412,7 @@ class Render
 				$user_name = $user->user_login;
 
 				// regenerate response, send previous message again
-				$tools .= '<span aria-label="Regenerate response" class="tools hint--bottom hint--rounded material-symbols-outlined" ' . $this->getHxMultiSwapLoadChat('htmx/regenerate', 'click') . ' onclick="promptResubmit(\'' . $response_id . '\')">';
+				$tools .= '<span aria-label="Regenerate response" id="chat_regenerate" class="tools hint--bottom hint--rounded material-symbols-outlined" ' . $this->getHxMultiSwapLoadChat('htmx/regenerate', 'click') . ' onclick="promptResubmit(\'' . $response_id . '\')">';
 				$tools .= 'autorenew';
 				$tools .= '</span>';
 
