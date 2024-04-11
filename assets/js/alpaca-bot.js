@@ -27,11 +27,6 @@ async function render(opts = {}) {
     const body = await this.stampBody(await pending, opts.classes)
 }
 
-// After submit 
-function afterSubmit() {
-    clearPrompt();
-}
-
 function clearChat() {
     // Append to end of response
     var opResponse = document.querySelector("#ab-response");
@@ -67,19 +62,6 @@ function copyMessage() {
 // https://stackoverflow.com/a/3261380/1007492
 function isBlank(str) {
     return (!str || /^\s*$/.test(str));
-}
-
-function onClickChange() {
-    htmx.onLoad(function (content) {
-        // If the content is a form, clear the prompt and scroll to the bottom
-        afterSubmit();
-    });
-
-    // Clear welcome screen
-    clearHome();
-
-    // Copy message to prompt, clear message
-    copyMessage();
 }
 
 function copyToClipboard(id) {
@@ -131,6 +113,17 @@ function getResponseInnerHTML(id) {
     return html;
 }
 
+// After submit 
+function htmxOnComplete() {
+    clearPrompt();
+
+    // Prism highlight code blocks
+    Prism.highlightAll();
+
+    // Smooth scroll to message
+    smoothScrollTo('dialog');
+}
+
 function listenForEnter() {
     // If the Enter key is pressed without Shift and the window width is large "enough"
     message.addEventListener("keydown", (e) => {
@@ -153,6 +146,19 @@ function listenForEscape() {
             }
         }
     });
+}
+
+function onClickChange() {
+    htmx.onLoad(function (content) {
+        // If the content is a form, clear the prompt and scroll to the bottom
+        htmxOnComplete();
+    });
+
+    // Clear welcome screen
+    clearHome();
+
+    // Copy message to prompt, clear message
+    copyMessage();
 }
 
 function performEventListener(input, action, target, scroll_to) {
@@ -224,7 +230,7 @@ function showHide(id) {
 }
 
 // find element by class and scroll to it, parameter is the class name
-function smoothScrollTo(selector = "dialog", behavior = 'smooth', block = 'start') {
+function smoothScrollTo(selector = "footer", behavior = 'smooth', block = 'start') {
     switch (selector) {
         case "dialog":
             var opResponse = document.querySelector("#ab-response");
@@ -262,6 +268,10 @@ function smoothScrollTo(selector = "dialog", behavior = 'smooth', block = 'start
     console.log(element.id);
 }
 
+function submitForm() {
+    htmxOnLoad();
+}
+
 if (accordions) {
     var i;
 
@@ -287,15 +297,6 @@ if (message) {
 
     // On #chat_history_id select change
     performEventListener(chat_history_id, 'change', chat_history_id, 'dialog');
-
-    // After htmx requests are complete
-    htmx.onLoad(function (content) {
-        // Prism highlight code blocks
-        Prism.highlightAll();
-
-        // Smooth scroll to message
-        smoothScrollTo('dialog');
-    });
 
     // On page load focus on the textarea #prompt
     window.onload = function () {

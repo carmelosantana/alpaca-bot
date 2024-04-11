@@ -214,11 +214,9 @@ class Render
 
 	public function outputAdminNotice($message = '', $class = 'notice-success')
 	{
-		$id = 'ab-notice-' . uniqid();
+		$out = '<div class="notice ' . esc_attr($class) . ' is-dismissible" id="' . esc_attr('ab-notice-' . uniqid()) . '"><p>' . $message . '</p></div>';
 
-		$out = '<div class="notice ' . $class . ' is-dismissible" id="' . $id . '"><p>' . $message . '</p></div>';
-
-		echo wp_kses($out, Options::getAllowedTags('p'));
+		echo wp_kses($out, 'post');
 	}
 
 
