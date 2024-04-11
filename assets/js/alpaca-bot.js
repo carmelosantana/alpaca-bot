@@ -27,20 +27,6 @@ async function render(opts = {}) {
     const body = await this.stampBody(await pending, opts.classes)
 }
 
-// After htmx requests are complete
-htmx.onLoad(function (content) {
-    // Prism highlight code blocks
-    Prism.highlightAll();
-
-    // Smooth scroll to message
-    smoothScrollTo('dialog');
-});
-
-// After submit 
-function afterSubmit() {
-    clearPrompt();
-}
-
 function clearChat() {
     // Append to end of response
     var opResponse = document.querySelector("#ab-response");
@@ -76,19 +62,6 @@ function copyMessage() {
 // https://stackoverflow.com/a/3261380/1007492
 function isBlank(str) {
     return (!str || /^\s*$/.test(str));
-}
-
-function onClickChange() {
-    htmx.onLoad(function (content) {
-        // If the content is a form, clear the prompt and scroll to the bottom
-        afterSubmit();
-    });
-
-    // Clear welcome screen
-    clearHome();
-
-    // Copy message to prompt, clear message
-    copyMessage();
 }
 
 function copyToClipboard(id) {
@@ -138,6 +111,69 @@ function getResponseInnerHTML(id) {
     html = html.trim();
 
     return html;
+}
+
+// After submit 
+function htmxOnComplete() {
+    clearPrompt();
+
+    // Prism highlight code blocks
+    Prism.highlightAll();
+
+    // Smooth scroll to message
+    smoothScrollTo('dialog');
+}
+
+function listenForEnter() {
+    // If the Enter key is pressed without Shift and the window width is large "enough"
+    message.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" && !e.shiftKey && window.innerWidth > 640) {
+            e.preventDefault();
+            if (!isBlank(message.value)) {
+                submit.click();
+            }
+        }
+    });
+}
+
+function listenForEscape() {
+    document.addEventListener('keydown', function (e) {
+        if (e.key === 'Escape') {
+            // ask the user if we want to cancel the request
+            if (confirm('Are you sure you want to cancel the request?')) {
+                htmx.trigger('#submit', 'htmx:abort');
+                htmx.trigger('#chat_regenerate', 'htmx:abort');
+            }
+        }
+    });
+}
+
+function onClickChange() {
+    htmx.onLoad(function (content) {
+        // If the content is a form, clear the prompt and scroll to the bottom
+        htmxOnComplete();
+    });
+
+    // Clear welcome screen
+    clearHome();
+
+    // Copy message to prompt, clear message
+    copyMessage();
+}
+
+function performEventListener(input, action, target, scroll_to) {
+    input.addEventListener(action, function () {
+        // Do not submit if the message is empty
+        if (isBlank(target.value)) {
+            return;
+        }
+
+        // Scroll to indicator
+        smoothScrollTo(scroll_to);
+
+        // Submit form
+        onClickChange();
+    });
 }
 
 function promptEdit(id) {
@@ -194,7 +230,7 @@ function showHide(id) {
 }
 
 // find element by class and scroll to it, parameter is the class name
-function smoothScrollTo(selector = "dialog", behavior = 'smooth', block = 'start') {
+function smoothScrollTo(selector = "footer", behavior = 'smooth', block = 'start') {
     switch (selector) {
         case "dialog":
             var opResponse = document.querySelector("#ab-response");
@@ -232,6 +268,10 @@ function smoothScrollTo(selector = "dialog", behavior = 'smooth', block = 'start
     console.log(element.id);
 }
 
+function submitForm() {
+    htmxOnLoad();
+}
+
 if (accordions) {
     var i;
 
@@ -249,44 +289,14 @@ if (accordions) {
 }
 
 if (message) {
+    listenForEscape();
+    listenForEnter();
 
-    // If the Enter key is pressed without Shift and the window width is large "enough"
-    message.addEventListener("keydown", (e) => {
-        if (e.key === "Enter" && !e.shiftKey && window.innerWidth > 640) {
-            e.preventDefault();
-            if (!isBlank(message.value)) {
-                submit.click();
-            }
-        };
-    });
-
-    // On submit click
-    submit.addEventListener('click', function () {
-        // Do not submit if the message is empty
-        if (isBlank(message.value)) {
-            return;
-        }
-
-        // Scroll to indicator
-        smoothScrollTo('loading');
-
-        // Submit form
-        onClickChange();
-    });
+    // On submit click, prevent default and submit form if message is not empty
+    performEventListener(submit, 'click', message, 'loading');
 
     // On #chat_history_id select change
-    chat_history_id.addEventListener('change', function () {
-        // Do not submit if the message is empty
-        if (isBlank(chat_history_id.value)) {
-            return;
-        }
-
-        // Submit form
-        onClickChange();
-
-        // Clear chat
-        clearChat();
-    });
+    performEventListener(chat_history_id, 'change', chat_history_id, 'dialog');
 
     // On page load focus on the textarea #prompt
     window.onload = function () {

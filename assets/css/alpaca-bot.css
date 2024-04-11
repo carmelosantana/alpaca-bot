@@ -204,6 +204,16 @@
     margin: .6em 0;
 }
 
+.ab-chat-message-response,
+.ab-chat-message-response div,
+.ab-chat-message-response p {
+    line-height: 1.31rem;
+}
+
+.ab-chat-message-response p {
+    margin: .7rem 0;
+}
+
 .ab-chat-message .notice {
     margin: 1em 0;
 }
@@ -223,12 +233,14 @@
 
 .ab-chat-message-parts {
     margin-left: 38px;
+    display: flex;
+    flex-direction: column;
 }
 
 /* .ab-chat-message-tools needs to make space for gravatar on left 38px */
 .ab-chat-message-tools {
     color: var(--wp-light-silver-gray);
-    margin: 1em 1em 1em 1em;
+    margin: 1em 0;
     justify-content: space-between;
     transition: opacity 0.3s ease-in;
     transition: opacity 0.1s ease-out;
@@ -270,10 +282,6 @@
     font-weight: normal;
     text-transform: none;
     margin-left: .33em;
-}
-
-.ab-chat-message-user .ab-chat-message-response {
-    color: var(--wp-dark-silver-gray);
 }
 
 .alpaca-bot-options p.description {
@@ -358,6 +366,15 @@
     color: var(--wp-dark-silver-gray);
 }
 
+/* clear all button styles in .typing-textarea */
+.typing-textarea button {
+    background: none;
+    border: none;
+    padding: 0;
+    margin: 0;
+}
+
+.typing-content button,
 .typing-content span {
     width: 56px;
     height: 56px;
@@ -369,6 +386,7 @@
     cursor: pointer;
 }
 
+.typing-textarea button,
 .typing-textarea span {
     position: absolute;
     right: 0;
@@ -376,16 +394,20 @@
     color: var(--wp-light-silver-gray);
 }
 
+.typing-textarea textarea:valid~button,
 .typing-textarea textarea:valid~span {
     color: var(--wp-dark-silver-gray);
 }
 
 /* on hover and when disabled  */
+.typing-textarea button:hover,
 .typing-textarea span:hover {
     color: var(--wp-blue);
 }
 
-.typing-textarea span:disabled {
+/* if span has disabled="" */
+.typing-textarea button[disabled],
+.typing-textarea span[disabled] {
     color: var(--lighter-gray);
     cursor: not-allowed;
 }

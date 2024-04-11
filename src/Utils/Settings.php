@@ -51,7 +51,7 @@ class Settings
         return $active_tab;
     }
 
-    public static function getAllowedTags(string $group = 'all'): array
+    public static function getAllowedTags(string|array $group = 'all'): array
     {
         $htmx = [
             'aria-label' => [],
@@ -143,20 +143,6 @@ class Settings
             ],
         ];
 
-        // p
-        $allowed  = [
-            'p' =>  [
-                'a',
-                'code',
-                'img',
-                'pre',
-                'span',
-                'strike',
-                'strong',
-                'time',
-            ],
-        ];
-
         // user can select tags by groups
         switch ($group) {
             case 'htmx':
@@ -168,7 +154,15 @@ class Settings
                 break;
 
             default:
-                return $tags[$group] ?? [];
+                if (is_array($group)) {
+                    $allowed_tags = [];
+                    foreach ($group as $key) {
+                        $allowed_tags = array_merge($allowed_tags, $tags[$key] ?? []);
+                    }
+                    return $allowed_tags;
+                } else {
+                    return $tags[$group] ?? [];
+                }
                 break;
         }
     }

@@ -214,11 +214,9 @@ class Render
 
 	public function outputAdminNotice($message = '', $class = 'notice-success')
 	{
-		$id = 'ab-notice-' . uniqid();
+		$out = '<div class="notice ' . esc_attr($class) . ' is-dismissible" id="' . esc_attr('ab-notice-' . uniqid()) . '"><p>' . $message . '</p></div>';
 
-		$out = '<div class="notice ' . $class . ' is-dismissible" id="' . $id . '"><p>' . $message . '</p></div>';
-
-		echo wp_kses($out, Options::getAllowedTags('p'));
+		echo wp_kses($out, 'post');
 	}
 
 
@@ -412,7 +410,7 @@ class Render
 				$user_name = $user->user_login;
 
 				// regenerate response, send previous message again
-				$tools .= '<span aria-label="Regenerate response" class="tools hint--bottom hint--rounded material-symbols-outlined" ' . $this->getHxMultiSwapLoadChat('htmx/regenerate', 'click') . ' onclick="promptResubmit(\'' . $response_id . '\')">';
+				$tools .= '<span aria-label="Regenerate response" id="chat_regenerate" class="tools hint--bottom hint--rounded material-symbols-outlined" ' . $this->getHxMultiSwapLoadChat('htmx/regenerate', 'click') . ' onclick="promptResubmit(\'' . $response_id . '\')">';
 				$tools .= 'autorenew';
 				$tools .= '</span>';
 
@@ -451,7 +449,7 @@ class Render
 					$user_name = $message['message']['role'];
 				}
 				if (!empty($message['model'])) {
-					$user_name = '<span class="model">' . $message['model'] . '</span> ' . $user_name;
+					$user_name = $user_name . ' <span class="model">' . $message['model'] . '</span>';
 				}
 				break;
 		}
