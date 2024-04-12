@@ -26,7 +26,7 @@ abstract class Base
     public function get_item_permissions_check($request)
     {
         if (!current_user_can(apply_filters(Options::appendPrefix('api-permissions-get'), self::PERMISSION_READ))) {
-            return new WP_Error('rest_forbidden', esc_html__('You cannot access this resource.'), ['status' => $this->authorization_status_code()]);
+            return new WP_Error('rest_forbidden', esc_html__('You cannot access this resource.', 'alpaca-bot'), ['status' => $this->authorization_status_code()]);
         }
         return true;
     }
@@ -39,7 +39,7 @@ abstract class Base
     public function update_item_permissions_check($request)
     {
         if (!current_user_can(apply_filters(Options::appendPrefix('api-permissions-update'), self::PERMISSION_WRITE))) {
-            return new WP_Error('rest_forbidden', esc_html__('You cannot modify this resource.'), ['status' => $this->authorization_status_code()]);
+            return new WP_Error('rest_forbidden', esc_html__('You cannot modify this resource.', 'alpaca-bot'), ['status' => $this->authorization_status_code()]);
         }
         return true;
     }
