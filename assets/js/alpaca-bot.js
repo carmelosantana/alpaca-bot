@@ -161,7 +161,7 @@ function onClickChange() {
     copyMessage();
 }
 
-function performEventListener(input, action, target, scroll_to) {
+function performEventListener(input, action, target, scroll_to, callback = null) {
     input.addEventListener(action, function () {
         // Do not submit if the message is empty
         if (isBlank(target.value)) {
@@ -173,6 +173,11 @@ function performEventListener(input, action, target, scroll_to) {
 
         // Submit form
         onClickChange();
+
+        // Callback
+        if (callback) {
+            callback();
+        }
     });
 }
 
@@ -296,7 +301,7 @@ if (message) {
     performEventListener(submit, 'click', message, 'loading');
 
     // On #chat_history_id select change
-    performEventListener(chat_history_id, 'change', chat_history_id, 'dialog');
+    performEventListener(chat_history_id, 'change', chat_history_id, 'dialog', clearChat);
 
     // On page load focus on the textarea #prompt
     window.onload = function () {
