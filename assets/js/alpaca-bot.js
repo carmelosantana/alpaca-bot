@@ -277,6 +277,29 @@ function submitForm() {
     htmxOnLoad();
 }
 
+jQuery(document).ready(function ($) {
+    var custom_uploader;
+    $("#alpaca_bot_default_avatar_button").click(function (e) {
+        e.preventDefault();
+        if (custom_uploader) {
+            custom_uploader.open();
+            return;
+        }
+        custom_uploader = wp.media.frames.file_frame = wp.media({
+            title: "Choose Image",
+            button: {
+                text: "Choose Image"
+            },
+            multiple: false
+        });
+        custom_uploader.on("select", function () {
+            var attachment = custom_uploader.state().get("selection").first().toJSON();
+            $("input[name=alpaca_bot_default_avatar]").val(attachment.url);
+        });
+        custom_uploader.open();
+    });
+});
+
 if (accordions) {
     var i;
 
