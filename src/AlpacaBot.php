@@ -2,11 +2,11 @@
 
 declare(strict_types=1);
 
-namespace CarmeloSantana\AlpacaBot;
+namespace AlpacaBot;
 
-use CarmeloSantana\AlpacaBot\Api\Ollama;
-use CarmeloSantana\AlpacaBot\Define;
-use CarmeloSantana\AlpacaBot\Utils\Options;
+use AlpacaBot\Api\Ollama;
+use AlpacaBot\Define;
+use AlpacaBot\Utils\Options;
 
 const VERSION = '0.4.14';
 

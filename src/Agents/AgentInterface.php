@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace CarmeloSantana\AlpacaBot\Agents;
+namespace AlpacaBot\Agents;
 
 interface AgentInterface
 {

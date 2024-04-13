@@ -2,10 +2,10 @@
 
 declare(strict_types=1);
 
-namespace CarmeloSantana\AlpacaBot\Utils;
+namespace AlpacaBot\Utils;
 
-use CarmeloSantana\AlpacaBot\Define;
-use CarmeloSantana\AlpacaBot\Utils\Settings;
+use AlpacaBot\Define;
+use AlpacaBot\Utils\Settings;
 
 class Options extends Settings
 {
@@ -34,7 +34,7 @@ class Options extends Settings
 
     public static function setDefaultOptions()
     {
-        if (get_option(self::appendPrefix('version')) === \CarmeloSantana\AlpacaBot\VERSION) {
+        if (get_option(self::appendPrefix('version')) === \AlpacaBot\VERSION) {
             return;
         }
 
@@ -44,7 +44,7 @@ class Options extends Settings
             }
         }
 
-        update_option(self::appendPrefix('version'), \CarmeloSantana\AlpacaBot\VERSION);
+        update_option(self::appendPrefix('version'), \AlpacaBot\VERSION);
     }
 
     public static function validateValue($value, $default = false)

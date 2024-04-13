@@ -2,11 +2,11 @@
 
 declare(strict_types=1);
 
-namespace CarmeloSantana\AlpacaBot\Chat;
+namespace AlpacaBot\Chat;
 
-use CarmeloSantana\AlpacaBot\Define;
-use CarmeloSantana\AlpacaBot\Api\Render;
-use CarmeloSantana\AlpacaBot\Utils\Options;
+use AlpacaBot\Define;
+use AlpacaBot\Api\Render;
+use AlpacaBot\Utils\Options;
 
 class Screen
 {
@@ -27,7 +27,7 @@ class Screen
         // Change the footer version to the plugin version
         add_filter('update_footer', function ($footer) {
             // add url to alpaca.bot
-            $footer = '<a href="https://alpaca.bot" target="_blank">Alpaca Bot</a>'  . ' v' . \CarmeloSantana\AlpacaBot\VERSION;
+            $footer = '<a href="https://alpaca.bot" target="_blank">Alpaca Bot</a>'  . ' v' . \AlpacaBot\VERSION;
             return $footer;
         }, 11);
     }

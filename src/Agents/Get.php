@@ -2,10 +2,10 @@
 
 declare(strict_types=1);
 
-namespace CarmeloSantana\AlpacaBot\Agents;
+namespace AlpacaBot\Agents;
 
-use CarmeloSantana\AlpacaBot\Utils\Options;
-use CarmeloSantana\AlpacaBot\Api\Render;
+use AlpacaBot\Utils\Options;
+use AlpacaBot\Api\Render;
 
 class Get extends Agent
 {

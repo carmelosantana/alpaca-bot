@@ -2,11 +2,11 @@
 
 declare(strict_types=1);
 
-namespace CarmeloSantana\AlpacaBot;
+namespace AlpacaBot;
 
-use CarmeloSantana\AlpacaBot\Api\Cache;
-use CarmeloSantana\AlpacaBot\Api\Ollama;
-use CarmeloSantana\AlpacaBot\Utils\Options;
+use AlpacaBot\Api\Cache;
+use AlpacaBot\Api\Ollama;
+use AlpacaBot\Utils\Options;
 
 class Agents
 {

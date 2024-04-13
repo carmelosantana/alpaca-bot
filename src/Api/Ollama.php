@@ -2,10 +2,10 @@
 
 declare(strict_types=1);
 
-namespace CarmeloSantana\AlpacaBot\Api;
+namespace AlpacaBot\Api;
 
-use CarmeloSantana\AlpacaBot\Define;
-use CarmeloSantana\AlpacaBot\Utils\Options;
+use AlpacaBot\Define;
+use AlpacaBot\Utils\Options;
 
 class Ollama
 {

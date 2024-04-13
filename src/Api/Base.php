@@ -2,10 +2,10 @@
 
 declare(strict_types=1);
 
-namespace CarmeloSantana\AlpacaBot\Api;
+namespace AlpacaBot\Api;
 
-use CarmeloSantana\AlpacaBot\Api\Status;
-use CarmeloSantana\AlpacaBot\Utils\Options;
+use AlpacaBot\Api\Status;
+use AlpacaBot\Utils\Options;
 use \WP_Error;
 use \WP_REST_Request;
 use \WP_REST_Response;

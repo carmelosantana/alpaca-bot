@@ -2,11 +2,11 @@
 
 declare(strict_types=1);
 
-namespace CarmeloSantana\AlpacaBot\Agents;
+namespace AlpacaBot\Agents;
 
-use CarmeloSantana\AlpacaBot\Agents\Get;
-use CarmeloSantana\AlpacaBot\Api\Ollama;
-use CarmeloSantana\AlpacaBot\Utils\Options;
+use AlpacaBot\Agents\Get;
+use AlpacaBot\Api\Ollama;
+use AlpacaBot\Utils\Options;
 
 class Summarize extends Agent
 {

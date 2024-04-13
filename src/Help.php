@@ -2,10 +2,10 @@
 
 declare(strict_types=1);
 
-namespace CarmeloSantana\AlpacaBot;
+namespace AlpacaBot;
 
-use CarmeloSantana\AlpacaBot\Define;
-use CarmeloSantana\AlpacaBot\Utils\Options;
+use AlpacaBot\Define;
+use AlpacaBot\Utils\Options;
 use Parsedown;
 
 class Help
