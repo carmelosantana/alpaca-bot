@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace CarmeloSantana\AlpacaBot\Utils;
+namespace AlpacaBot\Utils;
 
 class Settings
 {
@@ -37,11 +37,11 @@ class Settings
         // post is needed for form submission, get is needed for tab request.
         if (
             isset($_POST['tab'], $_POST['tab_nonce'])
-            and wp_verify_nonce($_POST['tab_nonce'], 'tab_nonce')
+            and wp_verify_nonce(sanitize_key(wp_unslash($_POST['tab_nonce'])), 'tab_nonce')
         ) {
-            $active_tab = sanitize_key($_POST['tab']);
+            $active_tab = sanitize_key(wp_unslash($_POST['tab']));
         } elseif (isset($_GET['tab'])) {
-            $active_tab = sanitize_key($_GET['tab']);
+            $active_tab = sanitize_key(wp_unslash($_GET['tab']));
         } else {
             $active_tab = array_key_first($this->sections);
         }
@@ -379,32 +379,6 @@ class Settings
                                 case 'media':
                                     echo '<input type="text" name="' . esc_attr(self::prefix($key2)) . '" value="' . esc_attr($value) . '" placeholder="' . esc_attr($option['placeholder']) . '" class="regular-text">';
                                     echo '<button class="button button-secondary" id="' . esc_attr(self::prefix($key2)) . '_button">Upload</button>';
-                                    add_action('admin_print_footer_scripts', function () use ($key2) {
-                                        echo '<script type=\'text/javascript\'>
-                                        jQuery(document).ready(function($) {
-                                            var custom_uploader;
-                                            $("#' . esc_attr(self::prefix($key2)) . '_button").click(function(e) {
-                                                e.preventDefault();
-                                                if (custom_uploader) {
-                                                    custom_uploader.open();
-                                                    return;
-                                                }
-                                                custom_uploader = wp.media.frames.file_frame = wp.media({
-                                                    title: "Choose Image",
-                                                    button: {
-                                                        text: "Choose Image"
-                                                    },
-                                                    multiple: false
-                                                });
-                                                custom_uploader.on("select", function() {
-                                                    var attachment = custom_uploader.state().get("selection").first().toJSON();
-                                                    $("input[name=' . esc_attr(self::prefix($key2)) . ']").val(attachment.url);
-                                                });
-                                                custom_uploader.open();
-                                            });
-                                        });
-                                    </script>';
-                                    });
                                     break;
 
                                 case 'number':

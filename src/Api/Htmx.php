@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace CarmeloSantana\AlpacaBot\Api;
+namespace AlpacaBot\Api;
 
 /**
  * HTMX API
@@ -132,7 +132,7 @@ class Htmx extends Base
 	public function validateNonce()
 	{
 		// validate nonce in header
-		if (!isset($_SERVER['HTTP_X_WP_NONCE']) or !wp_verify_nonce(sanitize_key($_SERVER['HTTP_X_WP_NONCE']), 'wp_rest')) {
+		if (!isset($_SERVER['HTTP_X_WP_NONCE']) or !wp_verify_nonce(sanitize_key(wp_unslash($_SERVER['HTTP_X_WP_NONCE'])), 'wp_rest')) {
 			return false;
 		}
 
@@ -162,7 +162,7 @@ class Htmx extends Base
 		foreach ($allowed_arguments as $arg) {
 			if (
 				isset($_POST[$arg], $_SERVER['HTTP_X_WP_NONCE'])
-				and wp_verify_nonce(sanitize_key($_SERVER['HTTP_X_WP_NONCE']), 'wp_rest')
+				and wp_verify_nonce(sanitize_key(wp_unslash($_SERVER['HTTP_X_WP_NONCE'])), 'wp_rest')
 			) {
 				$post[$arg] = sanitize_text_field(wp_unslash($_POST[$arg]));
 			}

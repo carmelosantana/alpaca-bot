@@ -2,11 +2,11 @@
 
 declare(strict_types=1);
 
-namespace CarmeloSantana\AlpacaBot\Agents;
+namespace AlpacaBot\Agents;
 
-use CarmeloSantana\AlpacaBot\Agents\Get;
-use CarmeloSantana\AlpacaBot\Api\Ollama;
-use CarmeloSantana\AlpacaBot\Utils\Options;
+use AlpacaBot\Agents\Get;
+use AlpacaBot\Api\Ollama;
+use AlpacaBot\Utils\Options;
 
 class Summarize extends Agent
 {
@@ -74,11 +74,11 @@ class Summarize extends Agent
             'callback' => [$this, 'job'],
             'examples' => [
                 [
-                    '[agent name=summarize url=https://example.com length="2 paragraphs"]',
+                    '[alpacabot_agent name=summarize url=https://example.com length="2 paragraphs"]',
                     'Summarize the content of the <i>url</i> provided and pass it to the next agent or prompt.'
                 ],
                 [
-                    '[agent name=summarize url=https://example.com length="3 bullet points"]',
+                    '[alpacabot_agent name=summarize url=https://example.com length="3 bullet points"]',
                     'Call the Summarize agent outside of chat.'
                 ]
             ],

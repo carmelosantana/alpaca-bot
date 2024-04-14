@@ -2,9 +2,9 @@
 
 declare(strict_types=1);
 
-namespace CarmeloSantana\AlpacaBot\Log;
+namespace AlpacaBot\Log;
 
-use CarmeloSantana\AlpacaBot\Utils\Options;
+use AlpacaBot\Utils\Options;
 
 class Post
 {

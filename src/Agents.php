@@ -2,11 +2,11 @@
 
 declare(strict_types=1);
 
-namespace CarmeloSantana\AlpacaBot;
+namespace AlpacaBot;
 
-use CarmeloSantana\AlpacaBot\Api\Cache;
-use CarmeloSantana\AlpacaBot\Api\Ollama;
-use CarmeloSantana\AlpacaBot\Utils\Options;
+use AlpacaBot\Api\Cache;
+use AlpacaBot\Api\Ollama;
+use AlpacaBot\Utils\Options;
 
 class Agents
 {
@@ -16,8 +16,8 @@ class Agents
     {
         add_action('admin_menu', [$this, 'adminPageAdd']);
         add_filter(Options::appendPrefix('user_prompt'), [$this, 'hookUserPrompt']);
-        add_shortcode('agent', [$this, 'router']);
-        add_shortcode('alpaca', [$this, 'router']);
+        add_shortcode('alpacabot_agent', [$this, 'router']);
+        add_shortcode('alpacabot', [$this, 'router']);
 
         // Core agents
         (new Agents\Get())->init();
@@ -137,10 +137,10 @@ class Agents
         }
 
         switch ($tag) {
-            case 'agent':
+            case 'alpacabot_agent':
                 $response = $this->routerAgent($atts, $content, $tag);
                 break;
-            case 'alpaca':
+            case 'alpacabot':
                 $response = $this->routerAlpaca($atts, $content, $tag);
                 break;
             default:

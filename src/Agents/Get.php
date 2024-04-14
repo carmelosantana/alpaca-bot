@@ -2,10 +2,10 @@
 
 declare(strict_types=1);
 
-namespace CarmeloSantana\AlpacaBot\Agents;
+namespace AlpacaBot\Agents;
 
-use CarmeloSantana\AlpacaBot\Utils\Options;
-use CarmeloSantana\AlpacaBot\Api\Render;
+use AlpacaBot\Utils\Options;
+use AlpacaBot\Api\Render;
 
 class Get extends Agent
 {
@@ -81,12 +81,12 @@ class Get extends Agent
             'callback' => [$this, 'job'],
             'examples' => [
                 [
-                    '[agent name=get url=https://example.com]',
+                    '[alpacabot_agent name=get url=https://example.com]',
                     'Retrieves the <code>body</code> content and <code>metadata</code> from the <i>url</i> provided.'
                 ],
                 [
-                    '[alpaca model=llama2]
-    What do you think of this webpage? [agent name=get url=https://example.com]
+                    '[alpacabot model=llama2]
+    What do you think of this webpage? [alpacabot_agent name=get url=https://example.com]
 [/alpaca]',
                     'Retrieves the <code>body</code> content and <code>metadata</code> from the <i>url</i> provided and passes it to the <strong>llama2</strong> <i>model</i>.'
                 ],

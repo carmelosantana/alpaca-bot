@@ -4,7 +4,7 @@ Donate link: https://www.patreon.com/carmelosantana
 Tags: ai, large language model, embedding, chatbot, ollama  
 Requires at least: 6.4  
 Tested up to: 6.4  
-Stable tag: 0.4.14  
+Stable tag: 0.4.15  
 Requires PHP: 8.1  
 License: GPLv2 or later  
 License URI: https://www.gnu.org/licenses/gpl-2.0.html  
@@ -22,7 +22,7 @@ If self-hosting isn't for you, please consider [becoming a Patreon](https://www.
 ### Features
 
 - Chose to store conversation history **privately** in your `wp_` database or not at all.
-- Use `[agent]` to execute tasks on your behalf, generate dynamic content and more.
+- Use `[alpacabot_agent]` to execute tasks on your behalf, generate dynamic content and more.
 - Chat with dozens of pre-trained LLMs or [train your own](https://github.com/ollama/ollama/blob/main/docs/api.md#generate-embeddings).
 - Switch conversational model on the fly.
 - Create your own custom [system messages](https://github.com/ollama/ollama/blob/main/docs/modelfile.md#system) for highly predictable or formatted responses.
@@ -34,25 +34,25 @@ If self-hosting isn't for you, please consider [becoming a Patreon](https://www.
 You have two options to communicate with your AI models;
 
 1. Click **Alpaca Bot** found in the admin menu, below Dashboard and above Posts.
-2. **Use the shortcode** `[alpaca]` to generate a response within any post or page.
+2. **Use the shortcode** `[alpacabot]` to generate a response within any post or page.
 
 #### Agents
 
-Use the `[agent]` shortcode to execute tasks on your behalf. Agents are a powerful way to empower your AI models to perform tasks on your behalf.
+Use the `[alpacabot_agent]` shortcode to execute tasks on your behalf. Agents are a powerful way to empower your AI models to perform tasks on your behalf.
 
-For example, you can use the `[agent]` shortcode to retrieve content from a remote source. `[agent]`s can interact directly with your models and help summarize a webpage or rewrite content.
+For example, you can use the `[alpacabot_agent]` shortcode to retrieve content from a remote source. `[alpacabot_agent]`s can interact directly with your models and help summarize a webpage or rewrite content.
 
 ##### Example
 
 Basic webpage summarization:
 
 ```html
-[agent name=summarize model=tinyllama url=https://example.com/]
+[alpacabot_agent name=summarize model=tinyllama url=https://example.com/]
 ```
 
 ### Shortcodes
 
-#### `[alpaca]` - Chat with Alpaca Bot
+#### `[alpacabot]` - Chat with Alpaca Bot
 
 *Chat with Alpaca Bot from any post or page.*
 
@@ -61,7 +61,7 @@ Basic webpage summarization:
 - `model` - The model to use for the text generation. *(optional)*
 - `system` - Specifies the [system message](https://github.com/ollama/ollama/blob/main/docs/modelfile.md#system) that will be set in the template. *(optional)*
 
-#### `[agent]` - Execute tasks on your behalf
+#### `[alpacabot_agent]` - Execute tasks on your behalf
 
 *Execute tasks via Agents.*
 
@@ -71,7 +71,7 @@ The following are core attributes that are supported by all agents.
 
 - `name` - The agent to execute.
 
-Agent's communicating with [Ollama](https:/github.com/ollama/ollama) support `[alpaca]` attributes.
+Agent's communicating with [Ollama](https:/github.com/ollama/ollama) support `[alpacabot]` attributes.
 
 #### Caching
 

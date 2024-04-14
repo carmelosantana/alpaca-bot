@@ -2,9 +2,9 @@
 
 declare(strict_types=1);
 
-namespace CarmeloSantana\AlpacaBot\Api;
+namespace AlpacaBot\Api;
 
-use CarmeloSantana\AlpacaBot\Utils\Options;
+use AlpacaBot\Utils\Options;
 
 class Cache
 {

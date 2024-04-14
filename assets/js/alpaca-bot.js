@@ -161,7 +161,7 @@ function onClickChange() {
     copyMessage();
 }
 
-function performEventListener(input, action, target, scroll_to) {
+function performEventListener(input, action, target, scroll_to, callback = null) {
     input.addEventListener(action, function () {
         // Do not submit if the message is empty
         if (isBlank(target.value)) {
@@ -173,6 +173,11 @@ function performEventListener(input, action, target, scroll_to) {
 
         // Submit form
         onClickChange();
+
+        // Callback
+        if (callback) {
+            callback();
+        }
     });
 }
 
@@ -272,6 +277,29 @@ function submitForm() {
     htmxOnLoad();
 }
 
+jQuery(document).ready(function ($) {
+    var custom_uploader;
+    $("#alpaca_bot_default_avatar_button").click(function (e) {
+        e.preventDefault();
+        if (custom_uploader) {
+            custom_uploader.open();
+            return;
+        }
+        custom_uploader = wp.media.frames.file_frame = wp.media({
+            title: "Choose Image",
+            button: {
+                text: "Choose Image"
+            },
+            multiple: false
+        });
+        custom_uploader.on("select", function () {
+            var attachment = custom_uploader.state().get("selection").first().toJSON();
+            $("input[name=alpaca_bot_default_avatar]").val(attachment.url);
+        });
+        custom_uploader.open();
+    });
+});
+
 if (accordions) {
     var i;
 
@@ -296,7 +324,7 @@ if (message) {
     performEventListener(submit, 'click', message, 'loading');
 
     // On #chat_history_id select change
-    performEventListener(chat_history_id, 'change', chat_history_id, 'dialog');
+    performEventListener(chat_history_id, 'change', chat_history_id, 'dialog', clearChat);
 
     // On page load focus on the textarea #prompt
     window.onload = function () {

@@ -2,9 +2,9 @@
 
 declare(strict_types=1);
 
-namespace CarmeloSantana\AlpacaBot\Agents;
+namespace AlpacaBot\Agents;
 
-use CarmeloSantana\AlpacaBot\Utils\Options;
+use AlpacaBot\Utils\Options;
 
 abstract class Agent implements AgentInterface
 {
