@@ -316,13 +316,16 @@ class Render
 				}
 
 				if ($optgroup != $last_optgroup) {
+					if ($last_optgroup != '') {
+						echo '</optgroup>';
+					}
 					$last_optgroup = $optgroup;
 					echo '<optgroup label="' . esc_attr($optgroup) . '">';
 				}
 
 				echo '<option value="' . esc_attr($post->ID) . '">' . esc_html(wp_trim_words($post->post_title, 8, '')) . '</option>';
 
-				if ($optgroup != $last_optgroup) {
+				if ($post === end($posts)) {
 					echo '</optgroup>';
 				}
 			}
