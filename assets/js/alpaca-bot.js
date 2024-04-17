@@ -1,4 +1,5 @@
 const accordions = document.getElementsByClassName("accordion-btn");
+const alpaca_bot_settings = document.querySelector("#alpaca-bot-settings");
 const chat_history_id = document.querySelector("#chat_history_id");
 const message = document.querySelector("#message");
 const models = document.querySelector("#model");
@@ -14,17 +15,17 @@ htmx.config.ignoreTitle = true;
 // Render markdown to HTML per request
 async function render(opts = {}) {
     // Ensure everything is initialized
-    await this.waitForReady()
+    await this.waitForReady();
 
     // Start generating markdown HTML string in parallel
-    const pending = this.buildMd(opts)
+    const pending = this.buildMd(opts);
 
     // Insert or replace styles into DOM
-    const styles = await this.stampStyles(this.buildStyles())
-    await this.tick()
+    const styles = await this.stampStyles(this.buildStyles());
+    await this.tick();
 
     // Insert or replace body into DOM
-    const body = await this.stampBody(await pending, opts.classes)
+    const body = await this.stampBody(await pending, opts.classes);
 }
 
 function clearChat() {
@@ -35,14 +36,14 @@ function clearChat() {
 
 function clearHome() {
     // if ab-response is not empty, hide welcome message
-    if (response.innerHTML != '') {
-        welcome.style.display = 'none';
+    if (response.innerHTML != "") {
+        welcome.style.display = "none";
     }
 }
 
 // When submit XHR is complete focus on the textarea #prompt and clear the value
 function clearPrompt() {
-    prompt.value = '';
+    prompt.value = "";
 }
 
 // Copy message to prompt
@@ -51,22 +52,22 @@ function copyMessage() {
     prompt.value = message.value;
 
     // Clear message
-    message.value = '';
+    message.value = "";
 
     // Say hello to Abie
-    message.placeholder = 'Message Abie...';
+    message.placeholder = "Message Abie...";
     message.focus();
 }
 
 // Check if the message is empty
 // https://stackoverflow.com/a/3261380/1007492
 function isBlank(str) {
-    return (!str || /^\s*$/.test(str));
+    return !str || /^\s*$/.test(str);
 }
 
 function copyToClipboard(id) {
     // build vars for response and button using id
-    var btn = document.getElementById('copy-' + id);
+    var btn = document.getElementById("copy-" + id);
 
     // copy response to clipboard
     var copyText = getResponseInnerHTML(id);
@@ -77,17 +78,17 @@ function copyToClipboard(id) {
     // copy and alert user
     navigator.clipboard.writeText(copyText).then(() => {
         // change button text
-        btn.innerHTML = 'inventory';
+        btn.innerHTML = "inventory";
 
         // After sleep of 5 seconds, change button text back to copy
         setTimeout(function () {
-            btn.innerHTML = 'content_paste';
+            btn.innerHTML = "content_paste";
         }, 2600);
     });
 }
 
-// JS to append fadeout CSS class to the element after timeout 
-function fadeOut(id, timeout = 2600, class_name = 'fadeOut') {
+// JS to append fadeout CSS class to the element after timeout
+function fadeOut(id, timeout = 2600, class_name = "fadeOut") {
     var element = document.getElementById(id);
 
     // After timeout, add the class to the element
@@ -98,8 +99,8 @@ function fadeOut(id, timeout = 2600, class_name = 'fadeOut') {
 
 function getResponseInnerHTML(id) {
     // if id doesn't start with response-, add response-
-    if (!id.startsWith('response-')) {
-        id = 'response-' + id;
+    if (!id.startsWith("response-")) {
+        id = "response-" + id;
     }
 
     var response = document.getElementById(id);
@@ -113,7 +114,7 @@ function getResponseInnerHTML(id) {
     return html;
 }
 
-// After submit 
+// After submit
 function htmxOnComplete() {
     clearPrompt();
 
@@ -121,7 +122,7 @@ function htmxOnComplete() {
     Prism.highlightAll();
 
     // Smooth scroll to message
-    smoothScrollTo('dialog');
+    smoothScrollTo("dialog");
 }
 
 function listenForEnter() {
@@ -137,14 +138,41 @@ function listenForEnter() {
 }
 
 function listenForEscape() {
-    document.addEventListener('keydown', function (e) {
-        if (e.key === 'Escape') {
+    document.addEventListener("keydown", function (e) {
+        if (e.key === "Escape") {
             // ask the user if we want to cancel the request
-            if (confirm('Are you sure you want to cancel the request?')) {
-                htmx.trigger('#submit', 'htmx:abort');
-                htmx.trigger('#chat_regenerate', 'htmx:abort');
+            if (confirm("Are you sure you want to cancel the request?")) {
+                htmx.trigger("#submit", "htmx:abort");
+                htmx.trigger("#chat_regenerate", "htmx:abort");
             }
         }
+    });
+} 
+
+function mediaUploader(button, field, get = url) {
+    var custom_uploader;
+    jQuery(button).click(function (e) {
+        e.preventDefault();
+        if (custom_uploader) {
+            custom_uploader.open();
+            return;
+        }
+        custom_uploader = wp.media.frames.file_frame = wp.media({
+            title: "Choose Image",
+            button: {
+                text: "Choose Image",
+            },
+            multiple: false,
+        });
+        custom_uploader.on("select", function () {
+            var attachment = custom_uploader
+                .state()
+                .get("selection")
+                .first()
+                .toJSON();
+            jQuery(field).val(attachment[get]);
+        });
+        custom_uploader.open();
     });
 }
 
@@ -161,7 +189,13 @@ function onClickChange() {
     copyMessage();
 }
 
-function performEventListener(input, action, target, scroll_to, callback = null) {
+function performEventListener(
+    input,
+    action,
+    target,
+    scroll_to,
+    callback = null
+) {
     input.addEventListener(action, function () {
         // Do not submit if the message is empty
         if (isBlank(target.value)) {
@@ -186,14 +220,14 @@ function promptEdit(id) {
     var html = getResponseInnerHTML(id);
 
     // strip all HTML tags
-    html = html.replace(/<[^>]*>?/gm, '');
+    html = html.replace(/<[^>]*>?/gm, "");
 
     // set prompt value to response innerHTML
     prompt.value = html;
     message.value = prompt.value;
 
     // Scroll to indicator
-    smoothScrollTo('footer');
+    smoothScrollTo("footer");
 }
 
 function promptResubmit(id) {
@@ -205,7 +239,7 @@ function promptResubmit(id) {
     message.value = prompt.value;
 
     // Scroll to indicator
-    smoothScrollTo('loading');
+    smoothScrollTo("loading");
 
     // Submit form
     onClickChange();
@@ -214,14 +248,14 @@ function promptResubmit(id) {
 // only show set_default_model after #model is clicked
 function setDefaultModel(timeout = 5200) {
     var defaultModel = document.querySelector("#set_default_model");
-    defaultModel.innerHTML = 'Set as default';
+    defaultModel.innerHTML = "Set as default";
 
     // update class list to only fadeIn
-    defaultModel.classList = 'fadeIn';
+    defaultModel.classList = "fadeIn";
 
     // remove after timeout
     setTimeout(function () {
-        defaultModel.classList = 'fadeOut';
+        defaultModel.classList = "fadeOut";
     }, timeout);
 }
 
@@ -235,11 +269,15 @@ function showHide(id) {
 }
 
 // find element by class and scroll to it, parameter is the class name
-function smoothScrollTo(selector = "footer", behavior = 'smooth', block = 'start') {
+function smoothScrollTo(
+    selector = "footer",
+    behavior = "smooth",
+    block = "start"
+) {
     switch (selector) {
         case "dialog":
             var opResponse = document.querySelector("#ab-response");
-            var opDialogs = opResponse.querySelectorAll('.ab-dialog');
+            var opDialogs = opResponse.querySelectorAll(".ab-dialog");
             var lastOpDialog = opDialogs[opDialogs.length - 1];
             var element = lastOpDialog ? lastOpDialog.id : null;
 
@@ -252,16 +290,16 @@ function smoothScrollTo(selector = "footer", behavior = 'smooth', block = 'start
             element.scrollIntoView({ behavior: behavior, block: block });
             break;
 
-        case 'bottom':
+        case "bottom":
             element = document.querySelector("#ab-response");
-            block = 'end';
+            block = "end";
             break;
 
-        case 'footer':
+        case "footer":
             element = document.querySelector("#wpfooter");
             break;
 
-        case 'loading':
+        case "loading":
             element = document.querySelector("#indicator");
             break;
 
@@ -277,57 +315,54 @@ function submitForm() {
     htmxOnLoad();
 }
 
-jQuery(document).ready(function ($) {
-    var custom_uploader;
-    $("#alpaca_bot_default_avatar_button").click(function (e) {
-        e.preventDefault();
-        if (custom_uploader) {
-            custom_uploader.open();
-            return;
-        }
-        custom_uploader = wp.media.frames.file_frame = wp.media({
-            title: "Choose Image",
-            button: {
-                text: "Choose Image"
-            },
-            multiple: false
-        });
-        custom_uploader.on("select", function () {
-            var attachment = custom_uploader.state().get("selection").first().toJSON();
-            $("input[name=alpaca_bot_default_avatar]").val(attachment.url);
-        });
-        custom_uploader.open();
-    });
-});
-
 if (accordions) {
     var i;
 
     for (i = 0; i < accordions.length; i++) {
-        accordions[i].addEventListener('click', function () {
-            this.classList.toggle('active');
+        accordions[i].addEventListener("click", function () {
+            this.classList.toggle("active");
             var panel = this.nextElementSibling;
             if (panel.style.maxHeight) {
                 panel.style.maxHeight = null;
             } else {
-                panel.style.maxHeight = panel.scrollHeight + 'px';
+                panel.style.maxHeight = panel.scrollHeight + "px";
             }
         });
     }
+}
+
+if (alpaca_bot_settings) {
+    mediaUploader(
+        "#alpaca_bot_default_avatar_button",
+        "#alpaca_bot_default_avatar"
+    );
 }
 
 if (message) {
     listenForEscape();
     listenForEnter();
 
+    // add media uploader
+    mediaUploader("#file", "#images", "id");
+
     // On submit click, prevent default and submit form if message is not empty
-    performEventListener(submit, 'click', message, 'loading');
+    performEventListener(submit, "click", message, "loading");
 
     // On #chat_history_id select change
-    performEventListener(chat_history_id, 'change', chat_history_id, 'dialog', clearChat);
+    performEventListener(
+        chat_history_id,
+        "change",
+        chat_history_id,
+        "dialog",
+        clearChat
+    );
+
+    document.getElementById("upload").addEventListener("click", function () {
+        document.getElementById("file").click();
+    });
 
     // On page load focus on the textarea #prompt
     window.onload = function () {
         message.focus();
-    }
+    };
 }
