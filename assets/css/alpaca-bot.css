@@ -218,6 +218,13 @@
     margin: 1em 0;
 }
 
+.ab-chat-message-response img {
+    display: block;
+    margin: 0 auto;
+    border-radius: 4px;
+    width: 200px;
+}
+
 /* gravatar column should stretch to the bottom, forcing all elements to line up against */
 .ab-chat-message-gravatar {
     float: left;
