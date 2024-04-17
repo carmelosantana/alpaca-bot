@@ -32,7 +32,16 @@ class Render
 	public function getSummarizedTitle(string $message, $title_prefix = 'Chat Log')
 	{
 		$message = wp_strip_all_tags($message);
-		$summary = $this->getSummaryTextRank($message);
+
+		switch (Options::get('title_generation_method')) {
+			case 'ollama':
+				$summary = $this->getSummaryOllama($message);
+				break;
+
+			default:
+				$summary = $this->getSummaryTextRank($message);
+				break;
+		}
 
 		return !empty($summary) ? array_shift($summary) : $title_prefix . ' ' . gmdate('Y-m-d H:i:s');
 	}

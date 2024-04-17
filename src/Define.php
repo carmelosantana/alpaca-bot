@@ -121,16 +121,6 @@ class Define
                 'section' => 'chat',
                 'default' => true,
             ],
-            'chat_history_save' => [
-                'label' => __('Save chat history?', 'alpaca-bot'),
-                'type' => 'radio',
-                'options' => [
-                    'true' => __('Yes', 'alpaca-bot'),
-                    'false' => __('No', 'alpaca-bot'),
-                ],
-                'section' => 'chat',
-                'default' => true,
-            ],
             'chat_history_limit' => [
                 'label' => __('Limit chat history', 'alpaca-bot'),
                 'description' => __('The number of chat messages to send to the model. Set to 0 to send all messages. Sending more than a few messages may result in losing context and increased token usage.', 'alpaca-bot'),
@@ -149,11 +139,32 @@ class Define
                 'section' => 'chat',
                 'default' => true,
             ],
+            'title_generation_method' => [
+                'label' => __('Title Generation', 'alpaca-bot'),
+                'description' => __('Use TextRank (resource-efficient) or Ollama (consumes tokens) for title generation.', 'alpaca-bot'),
+                'type' => 'radio',
+                'options' => [
+                    'textrank' => __('TextRank', 'alpaca-bot'),
+                    'ollama' => __('Ollama', 'alpaca-bot'),
+                ],
+                'section' => 'chat',
+                'default' => 'textrank',
+            ],
             'user_agent' => [
                 'label' => __('User Agent', 'alpaca-bot'),
                 'description' => __('Browser user agent to use when making requests.', 'alpaca-bot'),
                 'section' => 'agents',
                 'placeholder' => 'WordPress/' . get_bloginfo('version') . '; ' . get_bloginfo('url'),
+            ],
+            'chat_history_save' => [
+                'label' => __('Save chat history?', 'alpaca-bot'),
+                'type' => 'radio',
+                'options' => [
+                    'true' => __('Yes', 'alpaca-bot'),
+                    'false' => __('No', 'alpaca-bot'),
+                ],
+                'section' => 'privacy',
+                'default' => true,
             ],
             'spellcheck' => [
                 'label' => __('Spellcheck', 'alpaca-bot'),
