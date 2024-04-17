@@ -145,6 +145,7 @@ class Htmx extends Base
 			'chat_history_id',
 			'chat_id',
 			'chat_mode',
+			'images',
 			'model',
 			'post_content',
 			'prompt',

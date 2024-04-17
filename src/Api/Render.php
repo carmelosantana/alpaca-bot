@@ -525,53 +525,98 @@ class Render
 
 		$post_id = (int) $this->getPostInput('chat_id', 0);
 
-		// if post_id > 0 then get post_content and add to messages
-		if ($post_id > 0) {
-			$messages_raw = get_post_meta($post_id, 'messages', true);
-		}
-
-		// process messages to match api request
-		if (isset($messages_raw) and is_array($messages_raw)) {
-			// limit chat history
-			if (Options::getPlaceholder('chat_history_limit') > 0) {
-				$messages_raw = array_slice($messages_raw, -Options::getPlaceholder('chat_history_limit'));
-			}
-
-			foreach ($messages_raw as $message) {
-				$messages[] = [
-					'role' => (is_int($message['message']['role']) ? 'user' : 'assistant'),
-					'content' => $message['message']['content'],
-				];
-			}
-		} else {
-			$messages = [];
-		}
-
-		$message = [
-			'role' => 'user',
-			'content' => $prompt,
+		// Build request body
+		$body = [
+			'model' => $model,
 		];
 
-		$messages[] = $message;
+		// check if images were uploaded
+		if ($this->getPostInput('images')) {
+			// add image to $message
+			$image_ids = $this->getPostInput('images');
+
+			// foreach image, get local file path and base64 encode, trim extra ,
+			$image_ids = explode(',', $image_ids);
+
+			// remove empty values
+			$image_ids = array_filter($image_ids);
+
+			$images = [];
+
+			foreach ($image_ids as $image) {
+				// get thumbnail img for prompt
+				$img_src = wp_get_attachment_image_url($image, 'medium');
+
+				// build thumbnail
+				$thumbnail = '<img src="' . esc_url($img_src) . '" alt="image" class="chat-image">';
+
+				// add thumbnail to prompt
+				$prompt .= $thumbnail;
+
+				// get local file path of image with post id with wp
+				$image = get_attached_file($image);
+
+				// base64 encode image 
+				$image = base64_encode(file_get_contents($image));
+
+				// add to array
+				$images[] = $image;
+			}
+		}
 
 		// Choose completion type, checks POST chat_mode fist, then $endpoint
 		switch ($this->getPostInput('chat_mode', $endpoint)) {
 			case 'generate':
 				// Build request body
-				$body = [
-					'model' => $model,
-					'prompt' => $prompt,
-				];
+				$body['prompt'] = $prompt;
+
+				// add image to body
+				if (isset($images)) {
+					$body['images'] = $images;
+				}
 
 				// get assistant response
 				$json = $this->ollama->apiGenerate($body, 'array');
 				break;
 
 			default:
-				$body = [
-					'model' => $model,
-					'messages' => $messages,
+				// if post_id > 0 then get post_content and add to messages
+				if ($post_id > 0) {
+					$messages_raw = get_post_meta($post_id, 'messages', true);
+				}
+
+				// process messages to match api request
+				if (isset($messages_raw) and is_array($messages_raw)) {
+					// limit chat history
+					if (Options::getPlaceholder('chat_history_limit') > 0) {
+						$messages_raw = array_slice($messages_raw, -Options::getPlaceholder('chat_history_limit'));
+					}
+
+					foreach ($messages_raw as $message) {
+						$messages[] = [
+							'role' => (is_int($message['message']['role']) ? 'user' : 'assistant'),
+							'content' => $message['message']['content'],
+						];
+					}
+				} else {
+					$messages = [];
+				}
+
+				// build message for chat
+				$message = [
+					'role' => 'user',
+					'content' => $prompt,
 				];
+
+				// add images
+				if (isset($images)) {
+					$message['images'] = $images;
+				}
+
+				// add message to messages
+				$messages[] = $message;
+
+				$body['messages'] = $messages;
 
 				// get assistant response
 				$json = $this->ollama->apiChat($body);
@@ -597,7 +642,7 @@ class Render
 		}
 
 		// Save messages to chat log
-		$post_id = $this->addChatLog($model, $prompt, $json, $post_id);
+		$post_id = $this->addChatLog($model, $prompt, $json, $post_id, $image);
 
 		// Close dialog and wrapper
 		$this->outputDialogEnd();

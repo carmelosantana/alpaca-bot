@@ -14,7 +14,7 @@ class Screen
 
     public function addFooterActions()
     {
-        add_action('admin_enqueue_scripts', [$this, 'enqueueScripts']);
+        add_thickbox();
     }
 
     public function addFooterFilters()
@@ -133,6 +133,10 @@ class Screen
                     <input type="hidden" name="prompt" id="prompt">
                     <input type="hidden" name="chat_id" id="chat_id" value="0">
                     <input type="hidden" name="chat_mode" id="chat_mode" value="<?php echo esc_html($this->getMode('chat')); ?>">
+                    <input type="hidden" name="images" id="images">
+                    <input type="file" id="file" name="file" accept="image/*" style="display: none;">
+                    <button type="button" id="upload" class="material-symbols-outlined">image</button>
+                    <!-- Submit button -->
                     <button type="submit" name="submit" id="submit" class="material-symbols-outlined" <?php echo wp_kses($this->htmx->getHxMultiSwapLoadChat('htmx/chat'), Options::getAllowedTags('htmx')); ?>>arrow_circle_up</button>
                 </div>
             </div>

@@ -218,6 +218,13 @@
     margin: 1em 0;
 }
 
+.ab-chat-message-response img {
+    display: block;
+    margin: 0 auto;
+    border-radius: 4px;
+    width: 200px;
+}
+
 /* gravatar column should stretch to the bottom, forcing all elements to line up against */
 .ab-chat-message-gravatar {
     float: left;
@@ -349,10 +356,10 @@
 
 .typing-textarea textarea {
     resize: none;
-    height: 55px;
+    height: 42px;
     width: 100%;
     border: none;
-    padding: 5px 45px 5px 10px;
+    padding: 10px 35px 5px 40px;
     color: var(--wp-base-gray);
     font-size: 1rem;
     border-radius: 4px;
@@ -360,6 +367,7 @@
     overflow-y: auto;
     background: var(--chat-textarea-bg);
     outline: 1px solid var(--lighter-gray);
+    line-height: 1.3rem;
 }
 
 .typing-textarea textarea::placeholder {
@@ -376,10 +384,10 @@
 
 .typing-content button,
 .typing-content span {
-    width: 56px;
-    height: 56px;
+    width: 43px;
+    height: 43px;
     display: flex;
-    font-size: 1.56rem;
+    font-size: 1.4rem;
     align-items: center;
     justify-content: center;
     color: var(--wp-silver-gray);
@@ -389,9 +397,17 @@
 .typing-textarea button,
 .typing-textarea span {
     position: absolute;
-    right: 0;
-    bottom: 0;
+    bottom: 0px;
     color: var(--wp-light-silver-gray);
+}
+
+.typing-textarea button#submit {
+    right: 0;
+
+}
+
+.typing-textarea button#upload {
+    left: 0;
 }
 
 .typing-textarea textarea:valid~button,
@@ -585,13 +601,11 @@
     .ab-chat-message-username {
         font-size: 1.15em;
         line-height: 1.4em;
-        min-height: 40px;
     }
 
     .ab-chat-message-username,
     .ab-chat-message-username .model {
-        display: block;
-        margin-bottom: .8em;
+        margin-bottom: 0;
     }
 
     .ab-chat-message-parts,
@@ -602,7 +616,7 @@
     .ab-chat-message-response {
         font-size: 1.25em;
         line-height: 1.4em;
-        margin-top: .8em;
+        margin-top: 0;
     }
 }
 
