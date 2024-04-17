@@ -14,7 +14,7 @@ class Screen
 
     public function addFooterActions()
     {
-        add_action('admin_enqueue_scripts', [$this, 'enqueueScripts']);
+        add_thickbox();
     }
 
     public function addFooterFilters()
