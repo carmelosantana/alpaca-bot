@@ -1,11 +1,14 @@
 const accordions = document.getElementsByClassName("accordion-btn");
 const alpaca_bot_settings = document.querySelector("#alpaca-bot-settings");
 const chat_history_id = document.querySelector("#chat_history_id");
+const images = document.querySelector("#images");
 const message = document.querySelector("#message");
 const models = document.querySelector("#model");
 const prompt = document.querySelector("#prompt");
 const response = document.querySelector("#ab-response");
 const submit = document.querySelector("#submit");
+const upload = document.querySelector("#upload");
+const upload_remove = document.querySelector("#upload_remove");
 const welcome = document.querySelector("#ab-hello");
 
 // HTMx
@@ -44,6 +47,10 @@ function clearHome() {
 // When submit XHR is complete focus on the textarea #prompt and clear the value
 function clearPrompt() {
     prompt.value = "";
+    images.value = "";
+
+    // update buttons
+    updateBtnState();    
 }
 
 // Copy message to prompt
@@ -131,7 +138,7 @@ function listenForEnter() {
         if (e.key === "Enter" && !e.shiftKey && window.innerWidth > 640) {
             e.preventDefault();
             if (!isBlank(message.value)) {
-                submit.click();
+                submitClick();
             }
         }
     });
@@ -147,9 +154,9 @@ function listenForEscape() {
             }
         }
     });
-} 
+}
 
-function mediaUploader(button, field, get = url) {
+function mediaUploader(button, field, get = url, callback = null) {
     var custom_uploader;
     jQuery(button).click(function (e) {
         e.preventDefault();
@@ -171,6 +178,10 @@ function mediaUploader(button, field, get = url) {
                 .first()
                 .toJSON();
             jQuery(field).val(attachment[get]);
+
+            if (callback) {
+                callback();
+            }
         });
         custom_uploader.open();
     });
@@ -311,8 +322,25 @@ function smoothScrollTo(
     console.log(element.id);
 }
 
-function submitForm() {
-    htmxOnLoad();
+function submitClick() {
+    updateBtnState();
+    submit.click();
+}
+
+function updateBtnState() {
+    if (images.value != "") {
+        upload.innerHTML = "hide_image";
+        // hide upload button
+        upload.style.display = "none";
+        // show remove button
+        upload_remove.style.display = "block";
+    } else {
+        upload.innerHTML = "image";
+        // show upload button
+        upload.style.display = "block";
+        // hide remove button
+        upload_remove.style.display = "none";
+    }
 }
 
 if (accordions) {
@@ -343,10 +371,16 @@ if (message) {
     listenForEnter();
 
     // add media uploader
-    mediaUploader("#file", "#images", "id");
+    mediaUploader("#upload", "#images", "id", updateBtnState);
+
+    // remove media on upload_remove click without performEventListener
+    upload_remove.addEventListener("click", function () {
+        images.value = "";
+        updateBtnState();
+    });
 
     // On submit click, prevent default and submit form if message is not empty
-    performEventListener(submit, "click", message, "loading");
+    performEventListener(submit, "click", message, "loading", updateBtnState);
 
     // On #chat_history_id select change
     performEventListener(
@@ -356,10 +390,6 @@ if (message) {
         "dialog",
         clearChat
     );
-
-    document.getElementById("upload").addEventListener("click", function () {
-        document.getElementById("file").click();
-    });
 
     // On page load focus on the textarea #prompt
     window.onload = function () {
