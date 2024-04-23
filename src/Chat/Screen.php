@@ -134,9 +134,8 @@ class Screen
                     <input type="hidden" name="chat_id" id="chat_id" value="0">
                     <input type="hidden" name="chat_mode" id="chat_mode" value="<?php echo esc_html($this->getMode('chat')); ?>">
                     <input type="hidden" name="images" id="images">
-                    <input type="file" id="file" name="file" accept="image/*" style="display: none;">
-                    <button type="button" id="upload" class="material-symbols-outlined">image</button>
-                    <!-- Submit button -->
+                    <button type="button" id="upload" class="hint--top hint--rounded material-symbols-outlined" aria-label="<?php esc_html_e('Select an image', 'alpaca-bot'); ?>">image</button>
+                    <button type="button" id="upload_remove" class="hint--top hint--rounded material-symbols-outlined" aria-label="<?php esc_html_e('Remove image', 'alpaca-bot'); ?>">hide_image</button>
                     <button type="submit" name="submit" id="submit" class="material-symbols-outlined" <?php echo wp_kses($this->htmx->getHxMultiSwapLoadChat('htmx/chat'), Options::getAllowedTags('htmx')); ?>>arrow_circle_up</button>
                 </div>
             </div>

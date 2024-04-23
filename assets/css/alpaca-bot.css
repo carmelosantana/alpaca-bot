@@ -410,7 +410,11 @@
     left: 0;
 }
 
-.typing-textarea textarea:valid~button,
+.typing-textarea button#upload_remove {
+    display: none;
+}
+
+.typing-textarea textarea:valid~button#submit,
 .typing-textarea textarea:valid~span {
     color: var(--wp-dark-silver-gray);
 }
@@ -567,6 +571,11 @@
     margin-left: .2em;
     width: .9em;
     vertical-align: middle;
+}
+
+/* reduce text size for hint.css tooltop */
+[class*=hint--]:after {
+    font-size: .8rem !important;
 }
 
 /* Responsive Media Query */
