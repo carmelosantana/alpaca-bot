@@ -377,7 +377,7 @@ class Settings
                                     break;
 
                                 case 'media':
-                                    echo '<input type="text" name="' . esc_attr(self::prefix($key2)) . '" value="' . esc_attr($value) . '" placeholder="' . esc_attr($option['placeholder']) . '" class="regular-text">';
+                                    echo '<input type="text" id="' . esc_attr(self::prefix($key2)) . '" name="' . esc_attr(self::prefix($key2)) . '" value="' . esc_attr($value) . '" placeholder="' . esc_attr($option['placeholder']) . '" class="regular-text">';
                                     echo '<button class="button button-secondary" id="' . esc_attr(self::prefix($key2)) . '_button">Upload</button>';
                                     break;
 

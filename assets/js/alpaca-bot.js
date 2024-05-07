@@ -50,7 +50,7 @@ function clearPrompt() {
     images.value = "";
 
     // update buttons
-    updateBtnState();    
+    updateBtnState();
 }
 
 // Copy message to prompt
@@ -156,7 +156,7 @@ function listenForEscape() {
     });
 }
 
-function mediaUploader(button, field, get = url, callback = null) {
+function mediaUploader(button, field, get, callback = null) {
     var custom_uploader;
     jQuery(button).click(function (e) {
         e.preventDefault();
@@ -177,7 +177,9 @@ function mediaUploader(button, field, get = url, callback = null) {
                 .get("selection")
                 .first()
                 .toJSON();
-            jQuery(field).val(attachment[get]);
+
+            var url = attachment[get] ? attachment[get] : attachment.url;
+            jQuery(field).val(url);
 
             if (callback) {
                 callback();
