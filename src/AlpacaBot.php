@@ -19,6 +19,7 @@ class AlpacaBot
         add_action('admin_init', [$this, 'adminInit']);
         add_action('admin_menu', [$this, 'adminAddMenu']);
         add_action('admin_notices', [$this, 'adminNotices']);
+        add_action('update_option_' . Options::appendPrefix('api_url'), [$this, 'clearCache']);
         add_action('init', [$this, 'init']);
 
         // Setup options
@@ -149,6 +150,11 @@ class AlpacaBot
     public function chatScreen()
     {
         (new Chat\Screen())->render();
+    }
+
+    public function clearCache()
+    {
+        delete_transient(Options::appendPrefix('ollama-models'));
     }
 
     public function init()
