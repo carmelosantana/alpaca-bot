@@ -313,6 +313,10 @@ class Ollama
      */
     private function request(string $url, array $options, bool $json_decode = true): array|false
     {
+        if ((defined('OLLAMA_OFFLINE') and OLLAMA_OFFLINE) or !Options::get('api_url')) {
+            return false;
+        }
+
         $default = [
             'headers' => $this->buildHeaders(),
             'timeout' => Options::get('ollama_timeout', 60),
@@ -323,6 +327,20 @@ class Ollama
         $response = wp_remote_request($url, $options);
 
         if (is_wp_error($response)) {
+            return false;
+        }
+
+        if ($response['response']['code'] === 401 and is_admin() and !defined('OLLAMA_OFFLINE')) {
+            add_action(
+                'admin_notices',
+                function () {
+                    echo '<div class="notice notice-error is-dismissible"><p>Ollama API Authentication Error</p></div>';
+                },
+                10
+            );
+
+            define('OLLAMA_OFFLINE', true);
+
             return false;
         }
 
