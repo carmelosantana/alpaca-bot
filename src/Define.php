@@ -11,7 +11,7 @@ class Define
 {
     public static function getAdminPages()
     {
-        return [
+        $pages = [
             'toplevel_page_' . ALPACA_BOT,
             ALPACA_BOT . '_page_' . ALPACA_BOT . '-generate',
             ALPACA_BOT . '_page_' . Options::appendPrefix('agents', '-'),
@@ -19,12 +19,17 @@ class Define
             'edit-chat_log',
             'edit-chat_history',
         ];
+
+        // apply filters
+        return apply_filters(Options::appendPrefix('admin_pages'), $pages);
     }
 
     public static function getModels()
     {
-        // get models from Ollama
+        // new instance for getModelNameSize()
         $ollama = new Ollama();
+        
+        // get models from cache
         $cache = get_transient(Options::appendPrefix('ollama-models'));
 
         $models = [];
@@ -327,7 +332,7 @@ class Define
                 'description' => __('Works together with top-k. A higher value (e.g., 0.95) will lead to more diverse text, while a lower value (e.g., 0.5) will generate more focused and conservative text. (Default: 0.9)', 'alpaca-bot'),
                 'section' => 'parameters',
                 'type' => 'number',
-                'step' => 0.1,
+                'step' => 0.01,
                 'placeholder' => 0.9,
             ],
         ];

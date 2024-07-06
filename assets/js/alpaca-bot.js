@@ -129,7 +129,7 @@ function htmxOnComplete() {
     Prism.highlightAll();
 
     // Smooth scroll to message
-    smoothScrollTo("dialog");
+    smoothScrollTo("loading");
 }
 
 function listenForEnter() {
@@ -219,7 +219,7 @@ function performEventListener(
         smoothScrollTo(scroll_to);
 
         // Submit form
-        onClickChange();
+        onClickChange(scroll_to);
 
         // Callback
         if (callback) {
@@ -382,7 +382,13 @@ if (message) {
     });
 
     // On submit click, prevent default and submit form if message is not empty
-    performEventListener(submit, "click", message, "loading", updateBtnState);
+    performEventListener(
+        submit,
+        "click",
+        message,
+        "loading",
+        updateBtnState
+    );
 
     // On #chat_history_id select change
     performEventListener(

@@ -8,7 +8,7 @@ use AlpacaBot\Api\Ollama;
 use AlpacaBot\Define;
 use AlpacaBot\Utils\Options;
 
-const VERSION = '0.4.16';
+const VERSION = '0.4.17';
 
 class AlpacaBot
 {

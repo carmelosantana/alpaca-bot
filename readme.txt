@@ -3,8 +3,8 @@ Contributors: carmelosantana
 Donate link: https://www.patreon.com/carmelosantana  
 Tags: ai, large language model, embedding, chatbot, ollama  
 Requires at least: 6.4  
-Tested up to: 6.4  
-Stable tag: 0.4.16  
+Tested up to: 6.5.5  
+Stable tag: 0.4.17  
 Requires PHP: 8.1  
 License: GPLv2 or later  
 License URI: https://www.gnu.org/licenses/gpl-2.0.html  
@@ -16,8 +16,6 @@ A privately hosted WordPress AI chatbot. Chat with your own hosted LLMs and auto
 Easily draft a post or page from any conversation. Dynamically create new content on the fly or with remote resources collected via `agents`. **Alpaca Bot** offers a familiar chat interface on both desktop and mobile. You can expect a seamless chat experience on any device!
 
 An [Ollama](https://github.com/ollama/ollama) instance is required. [Ollama](https://github.com/ollama/ollama) makes it incredibly easy to self-host large language models locally or in the cloud.
-
-If self-hosting isn't for you, please consider [becoming a Patreon](https://www.patreon.com/carmelosantana) for access to our [hosted](https://status.alpaca.bot/) [Ollama](https://github.com/ollama/ollama) instances and premium [Discord](https://discord.gg/vWQTHphkVt) support.
 
 ### Features
 
@@ -46,9 +44,7 @@ For example, you can use the `[alpacabot_agent]` shortcode to retrieve content f
 
 Basic webpage summarization:
 
-```html
-[alpacabot_agent name=summarize model=tinyllama url=https://example.com/]
-```
+`[alpacabot_agent name=summarize model=tinyllama url=https://example.com/]`
 
 ### Shortcodes
 
@@ -158,13 +154,12 @@ Please consider [becoming a Patreon](https://www.patreon.com/carmelosantana) tod
   
 ### Setup
 
-1. Setup your [Ollama](https://github.com/ollama/ollama) instance in one of the following ways: 
-    - Install [Ollama](https://github.com/ollama/ollama) on your localhost or server.
-    - **[Become a Patreon](https://www.patreon.com/carmelosantana)** and subscribe to [Alpaca Bot](https://alpaca.bot/) to access our hosted [Ollama](https://github.com/ollama/ollama) instances and premium support.
+1. Install [Ollama](https://github.com/ollama/ollama) on your localhost or server.
 2. Add your [Ollama](https://github.com/ollama/ollama) API URL to the settings page by navigating to `Alpaca Bot > Settings` in your WordPress admin dashboard.
-3. Enter your [Ollama](https://github.com/ollama/ollama) API URL. 
-    - Add your [Alpaca Bot](https://app.alpaca.bot/) Username and API Application Password if you are using our hosted service.
+3. Enter your [Ollama](https://github.com/ollama/ollama) API URL.
 4. Click `Save Changes`.
+
+**[Become a Patreon](https://www.patreon.com/carmelosantana)** and support [Alpaca Bot](https://alpaca.bot/) development. ⭐️
 
 == Screenshots ==  
   
