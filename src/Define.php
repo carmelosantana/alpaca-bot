@@ -327,7 +327,7 @@ class Define
                 'description' => __('Works together with top-k. A higher value (e.g., 0.95) will lead to more diverse text, while a lower value (e.g., 0.5) will generate more focused and conservative text. (Default: 0.9)', 'alpaca-bot'),
                 'section' => 'parameters',
                 'type' => 'number',
-                'step' => 0.1,
+                'step' => 0.01,
                 'placeholder' => 0.9,
             ],
         ];
