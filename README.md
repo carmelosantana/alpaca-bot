@@ -23,8 +23,6 @@ Easily draft a post or page from any conversation. Dynamically create new conten
 
 An [Ollama](https://github.com/ollama/ollama) instance is required. [Ollama](https://github.com/ollama/ollama) makes it incredibly easy to self-host large language models locally or in the cloud.
 
-If self-hosting isn't for you, please consider [becoming a Patreon](https://www.patreon.com/carmelosantana) for access to our [hosted](https://status.alpaca.bot/) [Ollama](https://github.com/ollama/ollama) instances and premium [Discord](https://discord.gg/vWQTHphkVt) support.
-
 ### Features
 
 - Chose to store conversation history **privately** in your `wp_` database or not at all.
@@ -115,13 +113,12 @@ If self-hosting isn't for you, please consider [becoming a Patreon](https://www.
 
 ## Setup
 
-1. Setup your [Ollama](https://github.com/ollama/ollama) instance in one of the following ways:
-   - Install [Ollama](https://github.com/ollama/ollama) on your localhost or server.
-   - ⭐️ **[Become a Patreon](https://www.patreon.com/carme$$losantana)** and subscribe to [Alpaca Bot](https://alpaca.bot/) to access our hosted [Ollama](https://github.com/ollama/ollama) instances and premium support.
+1. Install [Ollama](https://github.com/ollama/ollama) on your localhost or server.
 2. Add your [Ollama](https://github.com/ollama/ollama) API URL to the settings page by navigating to `Alpaca Bot > Settings` in your WordPress admin dashboard.
 3. Enter your [Ollama](https://github.com/ollama/ollama) API URL.
-   - Add your [Alpaca Bot](https://app.alpaca.bot/) Username and API Application Password if you are using our hosted service.
 4. Click `Save Changes`.
+
+⭐️ **[Become a Patreon](https://www.patreon.com/carme$$losantana)** and support [Alpaca Bot](https://alpaca.bot/) development. ⭐️
 
 ## Usage
 
