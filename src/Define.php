@@ -11,7 +11,7 @@ class Define
 {
     public static function getAdminPages()
     {
-        return [
+        $pages = [
             'toplevel_page_' . ALPACA_BOT,
             ALPACA_BOT . '_page_' . ALPACA_BOT . '-generate',
             ALPACA_BOT . '_page_' . Options::appendPrefix('agents', '-'),
@@ -19,12 +19,17 @@ class Define
             'edit-chat_log',
             'edit-chat_history',
         ];
+
+        // apply filters
+        return apply_filters(Options::appendPrefix('admin_pages'), $pages);
     }
 
     public static function getModels()
     {
-        // get models from Ollama
+        // new instance for getModelNameSize()
         $ollama = new Ollama();
+        
+        // get models from cache
         $cache = get_transient(Options::appendPrefix('ollama-models'));
 
         $models = [];
