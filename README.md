@@ -45,9 +45,9 @@ An [Ollama](https://github.com/ollama/ollama) instance is required. [Ollama](htt
   - [Agents](#agents)
     - [Example](#example)
 - [Shortcodes](#shortcodes)
-  - [`[alpacabot]` - Chat with Alpaca Bot](#alpaca---chat-with-alpaca-bot)
+  - [`[alpacabot]` - Chat with Alpaca Bot](#alpacabot---chat-with-alpaca-bot)
     - [Attributes](#attributes)
-  - [`[alpacabot_agent]` - Execute tasks on your behalf](#agent---execute-tasks-on-your-behalf)
+  - [`[alpacabot_agent]` - Execute tasks on your behalf](#alpacabot_agent---execute-tasks-on-your-behalf)
     - [Attributes](#attributes-1)
   - [Caching](#caching)
     - [Transient](#transient)
@@ -139,9 +139,7 @@ For example, you can use the `[alpacabot_agent]` shortcode to retrieve content f
 
 Basic webpage summarization:
 
-```html
-[alpacabot_agent name=summarize model=tinyllama url=https://example.com/]
-```
+`[alpacabot_agent name=summarize model=tinyllama url=https://example.com/]`
 
 ## Shortcodes
 
