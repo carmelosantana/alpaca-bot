@@ -642,7 +642,7 @@ class Render
 		}
 
 		// Save messages to chat log
-		$post_id = $this->addChatLog($model, $prompt, $json, $post_id, $image);
+		$post_id = $this->addChatLog($model, $prompt, $json, $post_id);
 
 		// Close dialog and wrapper
 		$this->outputDialogEnd();

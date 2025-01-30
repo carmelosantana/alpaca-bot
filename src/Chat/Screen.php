@@ -26,8 +26,7 @@ class Screen
 
         // Change the footer version to the plugin version
         add_filter('update_footer', function ($footer) {
-            // add url to alpaca.bot
-            $footer = '<a href="https://alpaca.bot" target="_blank">Alpaca Bot</a>'  . ' v' . \AlpacaBot\VERSION;
+            $footer = '<a href="https://carmelosantana.org/alpacabot" target="_blank">Alpaca Bot</a>'  . ' v' . \AlpacaBot\VERSION;
             return $footer;
         }, 11);
     }

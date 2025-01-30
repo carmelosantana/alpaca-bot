@@ -4,11 +4,11 @@
   
 ### A privately hosted WordPress AI Chatbot
   
-  <img src="https://alpaca.bot/wp-content/uploads/2024/02/alpaca-bot-icon-1006.png" alt="Alpaca Bot" width="256px">
+  <img src="https://carmelosantana.org/alpacabot/wp-content/uploads/2024/02/alpaca-bot-icon-1006.png" alt="Alpaca Bot" width="256px">
 
   [![Discord](https://img.shields.io/discord/485971823821979648?logo=discord&label=Discord&color=72edad)](https://discord.gg/vWQTHphkVt)
   ![GitHub release (latest by date)](https://img.shields.io/github/v/release/carmelosantana/alpaca-bot?label=Latest%20Release&color=668bf2)
-  <a href="https://demo.alpaca.bot/"><img src="https://status.alpaca.bot/api/badge/27/uptime/24?labelPrefix=Demo+&color=ed72b1" alt="Alpaca Demo">
+  <a href="https://demo.carmelosantana.org/alpacabot/"><img src="https://status.carmelosantana.org/alpacabot/api/badge/27/uptime/24?labelPrefix=Demo+&color=ed72b1" alt="Alpaca Demo">
   </a>
 
   <a href="https://www.patreon.com/carmelosantana"><img src="https://img.shields.io/badge/Subscribe-Become%20a%20Patreon-826EB4?logo=patreon" alt="Patreon">
@@ -70,31 +70,31 @@ An [Ollama](https://github.com/ollama/ollama) instance is required. [Ollama](htt
 
 ### Chat Interface
 
-![Alpaca Bot](https://alpaca.bot/wp-content/uploads/2024/03/screenshot-1.png)
+![Alpaca Bot](https://carmelosantana.org/alpacabot/wp-content/uploads/2024/03/screenshot-1.png)
 
 > Main chat interface with model list, chat history and prompt input.
 
-![Chat interface with a conversation history](https://alpaca.bot/wp-content/uploads/2024/03/screenshot-2.png)
+![Chat interface with a conversation history](https://carmelosantana.org/alpacabot/wp-content/uploads/2024/03/screenshot-2.png)
 
 > Chat interface with a conversation history.
 
-![Draft to post](https://alpaca.bot/wp-content/uploads/2024/03/screenshot-3.png)
+![Draft to post](https://carmelosantana.org/alpacabot/wp-content/uploads/2024/03/screenshot-3.png)
 
 > Drafting a post from generated responses.
 
 ### Custom Assistants
 
-![Custom assistant](https://alpaca.bot/wp-content/uploads/2024/03/screenshot-4.png)
+![Custom assistant](https://carmelosantana.org/alpacabot/wp-content/uploads/2024/03/screenshot-4.png)
 
 > Override `system` message for custom responses.
 
-![Assistant tab](https://alpaca.bot/wp-content/uploads/2024/03/screenshot-5.png)
+![Assistant tab](https://carmelosantana.org/alpacabot/wp-content/uploads/2024/03/screenshot-5.png)
 
 > Custom assistant settings.
 
 ### Dynamic Content Generation
 
-![Shortcodes](https://alpaca.bot/wp-content/uploads/2024/03/screenshot-6.png)
+![Shortcodes](https://carmelosantana.org/alpacabot/wp-content/uploads/2024/03/screenshot-6.png)
 
 > Shortcode examples.
 
@@ -118,7 +118,7 @@ An [Ollama](https://github.com/ollama/ollama) instance is required. [Ollama](htt
 3. Enter your [Ollama](https://github.com/ollama/ollama) API URL.
 4. Click `Save Changes`.
 
-⭐️ **[Become a Patreon](https://www.patreon.com/carme$$losantana)** and support [Alpaca Bot](https://alpaca.bot/) development. ⭐️
+⭐️ **[Become a Patreon](https://www.patreon.com/carme$$losantana)** and support [Alpaca Bot](https://carmelosantana.org/alpacabot/) development. ⭐️
 
 ## Usage
 

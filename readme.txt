@@ -159,7 +159,7 @@ Please consider [becoming a Patreon](https://www.patreon.com/carmelosantana) tod
 3. Enter your [Ollama](https://github.com/ollama/ollama) API URL.
 4. Click `Save Changes`.
 
-**[Become a Patreon](https://www.patreon.com/carmelosantana)** and support [Alpaca Bot](https://alpaca.bot/) development. ⭐️
+**[Become a Patreon](https://www.patreon.com/carmelosantana)** and support [Alpaca Bot](https://carmelosantana.org/alpacabot/) development. ⭐️
 
 == Screenshots ==  
   
