@@ -8,9 +8,6 @@
 
   [![Discord](https://img.shields.io/discord/485971823821979648?logo=discord&label=Discord&color=72edad)](https://discord.gg/vWQTHphkVt)
   ![GitHub release (latest by date)](https://img.shields.io/github/v/release/carmelosantana/alpaca-bot?label=Latest%20Release&color=668bf2)
-  <a href="https://demo.carmelosantana.org/alpacabot/"><img src="https://status.carmelosantana.org/alpacabot/api/badge/27/uptime/24?labelPrefix=Demo+&color=ed72b1" alt="Alpaca Demo">
-  </a>
-
   <a href="https://www.patreon.com/carmelosantana"><img src="https://img.shields.io/badge/Subscribe-Become%20a%20Patreon-826EB4?logo=patreon" alt="Patreon">
   </a>
 
