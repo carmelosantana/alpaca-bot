@@ -5,15 +5,23 @@ declare(strict_types=1);
 namespace AlpacaBot\Settings;
 
 /**
- * One-time move from the scattered 0.4 `alpaca_bot_*` options into the single settings option.
+ * One-time move from 0.4: the scattered `alpaca_bot_*` options into the single settings option,
+ * and the `chat_history` rows into the shape ConversationStore expects.
  *
- * Legacy options are left in place (P3 removes them); the FLAG option records that the move ran.
+ * Each step has its own flag. The options move is one request and flags itself at once; the
+ * conversation pass handles BATCH rows per admin request and flags itself when a batch comes
+ * back short, so a large history is spread over several requests instead of timing out one
+ * and restarting from the top. Legacy options are left in place (P3 removes them).
  */
 final class Migrate04
 {
     public const FLAG = 'alpaca_bot_migrated_04';
+    public const FLAG_CONVERSATIONS = 'alpaca_bot_migrated_04_conversations';
 
     private const LEGACY_PREFIX = 'alpaca_bot_';
+
+    /** Rows per admin request: one wp_update_post() and its hook chain each. */
+    private const BATCH = 100;
 
     /**
      * Legacy option (without prefix) => new dotted key.
@@ -51,13 +59,36 @@ final class Migrate04
 
     public function __construct(private Store $store) {}
 
+    /** True while either step still has work: run() does what is pending and no more. */
+    public function needed(): bool
+    {
+        return $this->optionsPending() || $this->conversationsPending();
+    }
+
+    /**
+     * Runs whichever steps are still pending; the conversation step does one batch.
+     *
+     * @return array<string, mixed> the settings after the run
+     */
+    public function run(): array
+    {
+        if ($this->optionsPending()) {
+            $this->migrateOptions();
+            update_option(self::FLAG, '1', false);
+        }
+        if ($this->conversationsPending()) {
+            $this->migrateConversations();
+        }
+        return $this->store->all();
+    }
+
     /**
      * True when 0.4 options exist and the move has not run yet.
      *
      * On a site that never had 0.4 the flag is written here, so the detection
      * (three non-autoloaded option reads) happens once instead of on every admin request.
      */
-    public function needed(): bool
+    private function optionsPending(): bool
     {
         if (get_option(self::FLAG, false) !== false) {
             return false;
@@ -70,8 +101,16 @@ final class Migrate04
         return $legacy;
     }
 
-    /** @return array<string, mixed> the migrated settings */
-    public function run(): array
+    /**
+     * Keyed on its own flag, not on the legacy options: a 0.4 site running Ollama on its
+     * defaults never had to save the settings tab, yet it has conversations.
+     */
+    private function conversationsPending(): bool
+    {
+        return get_option(self::FLAG_CONVERSATIONS, false) === false;
+    }
+
+    private function migrateOptions(): void
     {
         $next = $this->store->all();
         $fields = Schema::fields();
@@ -94,30 +133,43 @@ final class Migrate04
             $next[$key] = $value;
         }
         $this->store->replace($next);
-        $this->migrateConversations();
-        update_option(self::FLAG, '1', false);
-        return $this->store->all();
     }
 
     /**
-     * 0.4 stored conversations as `publish` posts and left post_author to wp_insert_post()'s
-     * default — the current user, so 0 for a request that had none. ConversationStore::load()
-     * checks the owner strictly and listFor() reads only `private` rows, so every legacy row
-     * becomes private, and one with no owner takes it from the first message: 0.4 wrote the
-     * user's id as that message's role.
+     * One batch of 0.4 conversation rows.
+     *
+     * 0.4 stored every conversation as a `publish` post and left post_author to
+     * wp_insert_post()'s default — the current user, so 0 for a request that had none.
+     * ConversationStore checks the owner strictly, so every legacy row becomes private, and one
+     * with no owner takes it from the first message: 0.4 wrote the user's id as that message's
+     * role. A row that already has an owner keeps it.
+     *
+     * Only `publish` rows are queried, so a row this batch flips leaves the next batch's result
+     * set: the rows are their own cursor, and the pass is complete when a batch comes back short.
      */
     private function migrateConversations(): void
     {
-        $ids = get_posts(['post_type' => 'chat_history', 'post_status' => 'any', 'numberposts' => -1, 'fields' => 'ids']);
-        foreach ($ids as $pid) {
-            $pid = (int) $pid;
-            $legacy = get_post_meta($pid, 'messages', true);
-            $role = is_array($legacy) ? ($legacy[0]['message']['role'] ?? null) : null;
+        $posts = get_posts([
+            'post_type' => 'chat_history',
+            'post_status' => 'publish',
+            'numberposts' => self::BATCH,
+            'orderby' => 'ID',
+            'order' => 'ASC',
+        ]);
+        foreach ($posts as $post) {
+            $pid = (int) $post->ID;
             $update = ['ID' => $pid, 'post_status' => 'private'];
-            if (is_int($role) && $role > 0) {
-                $update['post_author'] = $role;
+            if ((int) $post->post_author < 1) {
+                $legacy = get_post_meta($pid, 'messages', true);
+                $role = is_array($legacy) ? ($legacy[0]['message']['role'] ?? null) : null;
+                if (is_int($role) && $role > 0) {
+                    $update['post_author'] = $role;
+                }
             }
             wp_update_post($update);
+        }
+        if (count($posts) < self::BATCH) {
+            update_option(self::FLAG_CONVERSATIONS, '1', false);
         }
     }
 }

@@ -52,6 +52,7 @@ it('registers the settings store, provider factory, model catalog and conversati
     Functions\when('get_option')->alias(fn(string $k, mixed $d = false) => $legacy[$k] ?? ($k === Plugin::OPTION ? [] : $d));
     Functions\expect('update_option')->once()->with(Plugin::OPTION, Mockery::type('array'))->andReturn(true);
     Functions\expect('update_option')->once()->with(Migrate04::FLAG, '1', false)->andReturn(true);
+    Functions\expect('update_option')->once()->with(Migrate04::FLAG_CONVERSATIONS, '1', false)->andReturn(true);
     Functions\when('get_posts')->justReturn([]);
     $onAdminInit();
     expect($plugin->get(Store::class)->get('provider.base_url'))->toBe('http://localhost:11434/v1');

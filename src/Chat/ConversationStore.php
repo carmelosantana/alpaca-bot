@@ -10,8 +10,8 @@ use AlpacaBot\Settings\Store;
  * Persists conversations as `chat_history` posts — the same post type 0.4 used, so an
  * upgrade keeps every user's history.
  *
- * Ownership is the security boundary: load() and delete() answer only for the post's author,
- * and a row with no author recorded belongs to nobody.
+ * Ownership is the security boundary: load(), save() and delete() answer only for the post's
+ * author, and a row with no author recorded belongs to nobody.
  */
 final class ConversationStore
 {
@@ -42,16 +42,14 @@ final class ConversationStore
     }
 
     /**
-     * A new conversation for the user — persisted at once unless `privacy.save_history` is off
-     * (or the insert fails), in which case it stays in memory with id 0.
+     * A new conversation for the user — persisted at once unless `privacy.save_history` is off,
+     * the insert fails, or there is no user to own it (a front-end request with nobody logged
+     * in), in which case it stays in memory with id 0 and save() never writes it.
      */
     public function create(int $userId, string $title = ''): Conversation
     {
-        if ($userId < 1) {
-            throw new \InvalidArgumentException('A conversation needs an owner; got user id ' . $userId . '.');
-        }
         $c = new Conversation(0, $userId, $title, [], 'chat', (int) current_time('timestamp', true));
-        if (!$this->store->get('privacy.save_history')) {
+        if ($userId < 1 || !$this->store->get('privacy.save_history')) {
             return $c;
         }
         $id = wp_insert_post([
@@ -90,10 +88,13 @@ final class ConversationStore
      * `privacy.save_history` is off. A conversation that already has a post keeps being
      * updated even if saving has since been switched off, so the stored transcript never
      * silently diverges from what the user sees.
+     *
+     * Also a no-op when the post is not a conversation owned by the conversation's user:
+     * Conversation is plain data anyone can construct, so its id is not trusted on its own.
      */
     public function save(Conversation $c): void
     {
-        if ($c->id === 0) {
+        if ($c->id === 0 || $this->owned($c->id, $c->userId) === null) {
             return;
         }
         update_post_meta($c->id, self::META_MESSAGES, array_map(static fn(Message $m): array => $m->toArray(), $c->messages));
@@ -119,6 +120,10 @@ final class ConversationStore
      * Both guards matter: WP_Query ignores `author => 0` (the list would span every user) and
      * turns a zero `numberposts` into the blog's posts_per_page default.
      *
+     * `publish` is listed alongside `private` because that is how 0.4 stored every row, and
+     * Migrate04 flips them in batches (and a 0.4 site that never saved its settings still has
+     * them). The author clause scopes the list either way; a row is never exposed by status.
+     *
      * @return array<int, array{id: int, title: string, created: int}>
      */
     public function listFor(int $userId, int $limit): array
@@ -132,7 +137,7 @@ final class ConversationStore
             'numberposts' => $limit,
             'orderby' => 'date',
             'order' => 'DESC',
-            'post_status' => 'private',
+            'post_status' => ['private', 'publish'],
         ]);
         return array_map(static fn(object $p): array => [
             'id' => (int) $p->ID,
@@ -174,7 +179,8 @@ final class ConversationStore
      *
      * A legacy value that is not an array is left where it is (there is nothing to convert, and
      * deleting it would destroy whatever it was); entries that are not arrays are skipped, as
-     * 0.4's own reader did.
+     * 0.4's own reader did. A legacy key still sitting beside a converted transcript is dropped:
+     * the first read primed the post's meta cache, so the presence check costs no query.
      *
      * @return list<array<string, mixed>>
      */
@@ -182,6 +188,9 @@ final class ConversationStore
     {
         $raw = get_post_meta($id, self::META_MESSAGES, true);
         if (is_array($raw)) {
+            if (metadata_exists('post', $id, self::META_LEGACY)) {
+                delete_post_meta($id, self::META_LEGACY);
+            }
             return array_values(array_filter($raw, 'is_array'));
         }
         $legacy = get_post_meta($id, self::META_LEGACY, true);

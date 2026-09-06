@@ -7,6 +7,24 @@ use AlpacaBot\Settings\Schema;
 use AlpacaBot\Settings\Store;
 use Brain\Monkey\Functions;
 
+/** A tiny options table: get_option()/update_option() read and write $stored, so flags persist across calls. */
+function migrate04Options(array &$stored): void
+{
+    Functions\when('get_option')->alias(function (string $k, mixed $d = false) use (&$stored): mixed {
+        return $stored[$k] ?? ($k === 'alpaca_bot_settings' ? [] : $d);
+    });
+    Functions\when('update_option')->alias(function (string $k, mixed $v) use (&$stored): bool {
+        $stored[$k] = $v;
+        return true;
+    });
+}
+
+/** A legacy chat_history row as get_posts() hands it back. */
+function legacyRow(int $id, string $author = '0'): object
+{
+    return (object) ['ID' => $id, 'post_author' => $author, 'post_type' => 'chat_history', 'post_status' => 'publish'];
+}
+
 it('maps 0.4 options into the new schema and appends /v1 to the base url', function (): void {
     $legacy = [
         'alpaca_bot_api_url' => 'http://host.docker.internal:11434',
@@ -50,18 +68,26 @@ it('maps 0.4 options into the new schema and appends /v1 to the base url', funct
         ->and($written)->toBe($out);
 });
 
-it('is not needed when the flag is set, and writes nothing', function (): void {
-    Functions\when('get_option')->alias(fn(string $k, mixed $d = false) => $k === Migrate04::FLAG ? '1' : $d);
+it('is not needed when both flags are set, and writes nothing', function (): void {
+    Functions\when('get_option')->alias(fn(string $k, mixed $d = false) => in_array($k, [Migrate04::FLAG, Migrate04::FLAG_CONVERSATIONS], true) ? '1' : $d);
     Functions\expect('update_option')->never();
+    Functions\expect('get_posts')->never();
     expect((new Migrate04(new Store()))->needed())->toBeFalse();
 });
 
-// Without this a 1.0-only site would re-run the three detection get_option()
-// calls (all non-autoloaded, so uncached misses) on every admin request forever.
-it('is not needed on a fresh install, and sets the flag so detection runs only once', function (): void {
-    Functions\when('get_option')->alias(fn(string $k, mixed $d = false) => $k === 'alpaca_bot_settings' ? [] : $d);
-    Functions\expect('update_option')->once()->with(Migrate04::FLAG, '1', false)->andReturn(true);
-    expect((new Migrate04(new Store()))->needed())->toBeFalse();
+// Without the flags a 1.0-only site would re-run the detection get_option() calls (all
+// non-autoloaded, so uncached misses) and the conversation query on every admin request forever.
+it('on a fresh install moves no options, runs one empty conversation batch, and flags both so detection runs only once', function (): void {
+    $stored = [];
+    migrate04Options($stored);
+    Functions\expect('get_posts')->once()->andReturn([]);
+    Functions\expect('wp_update_post')->never();
+    $m = new Migrate04(new Store());
+    expect($m->needed())->toBeTrue()
+        ->and($stored)->toBe([Migrate04::FLAG => '1']);
+    $m->run();
+    expect($stored)->toBe([Migrate04::FLAG => '1', Migrate04::FLAG_CONVERSATIONS => '1'])
+        ->and($m->needed())->toBeFalse();
 });
 
 // 0.4 saved every field of a settings tab on submit, so blank inputs were stored
@@ -158,19 +184,53 @@ it('only maps onto keys that exist in the schema', function (): void {
 
 // 0.4 stored conversations as `publish` posts and left post_author to wp_insert_post()'s default
 // (the current user, so 0 for a request without one). ConversationStore::load() checks the owner
-// strictly and lists only `private` rows, so every legacy row is flipped to private and an
-// unowned one takes its owner from the first message: 0.4 wrote the user's id as that role.
-it('makes legacy chat_history rows private and recovers the owner from the first message role', function (): void {
-    Functions\when('get_option')->alias(fn(string $k, mixed $d = false) => $k === 'alpaca_bot_api_url' ? 'http://localhost:11434' : ($k === 'alpaca_bot_settings' ? [] : $d));
-    Functions\when('update_option')->justReturn(true);
-    Functions\expect('get_posts')->once()->withArgs(fn(array $q): bool => $q['post_type'] === 'chat_history' && $q['post_status'] === 'any' && $q['numberposts'] === -1 && $q['fields'] === 'ids')->andReturn([10, 11, 12]);
-    Functions\when('get_post_meta')->alias(fn(int $id, string $k) => match ($id) {
-        10 => [['model' => 'm', 'message' => ['role' => 7, 'content' => 'q']], ['model' => 'm', 'message' => ['role' => 'assistant', 'content' => 'a']]],
-        11 => [['model' => 'm', 'message' => ['role' => 0, 'content' => 'q']]],
-        default => '',
-    });
+// strictly, so every legacy row is flipped to private and an unowned one takes its owner from the
+// first message: 0.4 wrote the user's id as that role. A row that has an owner keeps it.
+it('makes legacy chat_history rows private and recovers a missing owner from the first message role', function (): void {
+    $stored = ['alpaca_bot_api_url' => 'http://localhost:11434'];
+    migrate04Options($stored);
+    Functions\expect('get_posts')->once()->withArgs(fn(array $q): bool => $q['post_type'] === 'chat_history' && $q['post_status'] === 'publish' && $q['numberposts'] === 100 && $q['orderby'] === 'ID' && $q['order'] === 'ASC' && !isset($q['fields']))
+        ->andReturn([legacyRow(10), legacyRow(11), legacyRow(12), legacyRow(13, '3')]);
+    // Only an unowned row has its transcript read.
+    Functions\expect('get_post_meta')->once()->with(10, 'messages', true)->andReturn([['model' => 'm', 'message' => ['role' => 7, 'content' => 'q']], ['model' => 'm', 'message' => ['role' => 'assistant', 'content' => 'a']]]);
+    Functions\expect('get_post_meta')->once()->with(11, 'messages', true)->andReturn([['model' => 'm', 'message' => ['role' => 0, 'content' => 'q']]]);
+    Functions\expect('get_post_meta')->once()->with(12, 'messages', true)->andReturn('');
+    Functions\expect('get_post_meta')->never()->with(13, 'messages', true);
     Functions\expect('wp_update_post')->once()->with(['ID' => 10, 'post_status' => 'private', 'post_author' => 7])->andReturn(10);
     Functions\expect('wp_update_post')->once()->with(['ID' => 11, 'post_status' => 'private'])->andReturn(11);
     Functions\expect('wp_update_post')->once()->with(['ID' => 12, 'post_status' => 'private'])->andReturn(12);
+    Functions\expect('wp_update_post')->once()->with(['ID' => 13, 'post_status' => 'private'])->andReturn(13);
     (new Migrate04(new Store()))->run();
+    expect($stored[Migrate04::FLAG])->toBe('1')->and($stored[Migrate04::FLAG_CONVERSATIONS])->toBe('1');
+});
+
+// The pass is bounded per request and resumable: a full batch leaves the conversation flag unset,
+// the rows it flipped to private drop out of the next query, and the options move (already
+// flagged) is not repeated, so settings the admin has changed since are not overwritten.
+it('migrates conversations in bounded batches across requests without re-running the options move', function (): void {
+    $stored = ['alpaca_bot_api_url' => 'http://localhost:11434', 'alpaca_bot_default_model' => 'llama3.2'];
+    migrate04Options($stored);
+    Functions\when('get_post_meta')->justReturn('');
+    Functions\expect('get_posts')->twice()->withArgs(fn(array $q): bool => $q['post_status'] === 'publish' && $q['numberposts'] === 100)
+        ->andReturn(array_map(fn(int $id): object => legacyRow($id, '3'), range(1, 100)), [legacyRow(101, '3'), legacyRow(102, '3')]);
+    Functions\expect('wp_update_post')->times(102)->withArgs(fn(array $p): bool => $p['post_status'] === 'private')->andReturn(1);
+
+    // Request 1: options moved and flagged at once; a full batch, so the conversation pass is still pending.
+    $m = new Migrate04(new Store());
+    expect($m->needed())->toBeTrue();
+    $m->run();
+    expect($stored[Migrate04::FLAG])->toBe('1')
+        ->and($stored)->not->toHaveKey(Migrate04::FLAG_CONVERSATIONS)
+        ->and($stored['alpaca_bot_settings']['models.default'])->toBe('llama3.2');
+
+    // The admin changes a setting in between.
+    $stored['alpaca_bot_settings']['models.default'] = 'mistral';
+
+    // Request 2: a short batch completes the pass; the settings are left alone.
+    $m = new Migrate04(new Store());
+    expect($m->needed())->toBeTrue();
+    $m->run();
+    expect($stored[Migrate04::FLAG_CONVERSATIONS])->toBe('1')
+        ->and($stored['alpaca_bot_settings']['models.default'])->toBe('mistral')
+        ->and((new Migrate04(new Store()))->needed())->toBeFalse();
 });
