@@ -1,0 +1,156 @@
+<?php
+
+declare(strict_types=1);
+
+namespace AlpacaBot\Tests\Integration;
+
+use AlpacaBot\Chat\UsageMeter;
+use AlpacaBot\Plugin;
+use AlpacaBot\Rest\SettingsController;
+use AlpacaBot\Settings\Schema;
+
+/**
+ * The /settings, /settings/schema, /usage and /models routes over real core: real permission
+ * callbacks, the real `alpaca_bot_settings` option, real chat_log rows, core's own schema
+ * validation of the query switches. Only the model provider is faked (TestCase::fakeProvider()).
+ *
+ * @group rest
+ */
+final class SettingsRoutesTest extends TestCase
+{
+    public function test_settings_need_manage_options(): void
+    {
+        $this->assertSame(401, $this->rest('GET', '/settings')->get_status());
+        $editor = self::factory()->user->create(['role' => 'editor']);
+        wp_set_current_user($editor);
+        foreach ([['GET', '/settings'], ['PUT', '/settings'], ['GET', '/settings/schema']] as [$method, $path]) {
+            $res = $this->rest($method, $path, ['models.temperature' => 1.5]);
+            $this->assertSame(403, $res->get_status(), "$method $path");
+            $this->assertSame('rest_forbidden', $res->get_data()['code']);
+        }
+        $this->assertSame(Schema::defaults()['models.temperature'], get_option('alpaca_bot_settings')['models.temperature']);
+
+        $this->asAdmin();
+        $this->assertSame(200, $this->rest('GET', '/settings')->get_status());
+        $res = $this->rest('PUT', '/settings', ['models.temperature' => 1.5]);
+        $this->assertSame(200, $res->get_status(), print_r($res->get_data(), true));
+        $this->assertSame(1.5, $res->get_data()['models.temperature']);
+        $this->assertSame(1.5, get_option('alpaca_bot_settings')['models.temperature']);
+        // A PUT is partial: everything else is the default it was, and the reply is the whole array.
+        $this->assertSame(Schema::defaults()['models.num_ctx'], $res->get_data()['models.num_ctx']);
+        $this->assertSame(array_keys(Schema::fields()), array_keys($res->get_data()));
+        $this->assertSame(array_keys(Schema::fields()), array_keys(get_option('alpaca_bot_settings')));
+    }
+
+    public function test_settings_accept_a_json_body_and_apply_the_schema(): void
+    {
+        $this->asAdmin();
+        $request = new \WP_REST_Request('PUT', '/alpaca-bot/v1/settings');
+        $request->set_header('Content-Type', 'application/json');
+        $request->set_body((string) wp_json_encode(['models.temperature' => 9, 'chat.spellcheck' => false, 'bogus' => 1, 'models.overrides' => ['a' => ['temperature' => 0.1, 'nope' => 1]]]));
+        $res = rest_get_server()->dispatch($request);
+        $this->assertSame(200, $res->get_status(), print_r($res->get_data(), true));
+        $stored = get_option('alpaca_bot_settings');
+        // Out of range is clamped by Schema::sanitize(), not refused.
+        $this->assertSame(2.0, $stored['models.temperature']);
+        $this->assertFalse($stored['chat.spellcheck']);
+        $this->assertArrayNotHasKey('bogus', $stored);
+        $this->assertSame(['a' => ['temperature' => 0.1]], $stored['models.overrides']);
+
+        // A later PUT of the map replaces it; a model left out is gone, not kept.
+        $this->rest('PUT', '/settings', ['models.overrides' => ['b' => ['num_ctx' => 1024]]]);
+        $this->assertSame(['b' => ['num_ctx' => 1024]], get_option('alpaca_bot_settings')['models.overrides']);
+
+        // Nothing recognised (here: what a form or query string makes of dotted keys) is a 400.
+        $res = $this->rest('PUT', '/settings', ['models_temperature' => 1]);
+        $this->assertSame(400, $res->get_status());
+        $this->assertSame('alpaca_bot_bad_request', $res->get_data()['code']);
+        $this->assertSame(2.0, get_option('alpaca_bot_settings')['models.temperature']);
+    }
+
+    public function test_the_api_key_is_masked_on_read_kept_on_a_masked_write_and_cleared_by_an_empty_one(): void
+    {
+        $this->asAdmin();
+        $res = $this->rest('PUT', '/settings', ['provider.api_key' => 'sk-live-1234']);
+        $this->assertSame(SettingsController::MASK, $res->get_data()['provider.api_key']);
+        $this->assertSame('sk-live-1234', get_option('alpaca_bot_settings')['provider.api_key']);
+        $this->assertSame(SettingsController::MASK, $this->rest('GET', '/settings')->get_data()['provider.api_key']);
+        $this->assertStringNotContainsString('sk-live', (string) wp_json_encode($this->rest('GET', '/settings')->get_data()));
+
+        $revealed = $this->rest('GET', '/settings', ['reveal' => '1']);
+        $this->assertSame('sk-live-1234', $revealed->get_data()['provider.api_key']);
+        $this->assertSame('no-store', $revealed->get_headers()['Cache-Control']);
+
+        $this->rest('PUT', '/settings', ['provider.api_key' => SettingsController::MASK, 'models.num_ctx' => 2048]);
+        $this->assertSame('sk-live-1234', get_option('alpaca_bot_settings')['provider.api_key']);
+        $this->assertSame(2048, get_option('alpaca_bot_settings')['models.num_ctx']);
+
+        $res = $this->rest('PUT', '/settings', ['provider.api_key' => '']);
+        $this->assertSame('', $res->get_data()['provider.api_key']);
+        $this->assertSame('', get_option('alpaca_bot_settings')['provider.api_key']);
+        $this->assertSame('', $this->rest('GET', '/settings')->get_data()['provider.api_key']);
+    }
+
+    public function test_the_schema_route_is_the_field_list_without_the_callables(): void
+    {
+        $this->asAdmin();
+        $res = $this->rest('GET', '/settings/schema');
+        $this->assertSame(200, $res->get_status());
+        $data = $res->get_data();
+        $this->assertSame(Schema::sections(), $data['sections']);
+        $this->assertSame(SettingsController::MASK, $data['mask']);
+        $this->assertSame(array_keys(Schema::fields()), array_keys($data['fields']));
+        $this->assertTrue($data['fields']['provider.api_key']['secret']);
+        foreach ($data['fields'] as $key => $field) {
+            $this->assertArrayNotHasKey('sanitize', $field, $key);
+        }
+        // What core would send: encodable, and no trace of the sanitize callables' names in it.
+        $json = wp_json_encode($data);
+        $this->assertIsString($json);
+        $this->assertStringNotContainsString('sanitize', $json);
+    }
+
+    public function test_usage_route_reports_the_month(): void
+    {
+        $user = $this->asAdmin();
+        $data = $this->rest('GET', '/usage')->get_data();
+        $this->assertSame(['tokens' => 0, 'requests' => 0, 'month' => gmdate('Y-m'), 'caps' => ['user' => 0, 'site' => 0]], $data);
+
+        $meter = Plugin::instance()->get(UsageMeter::class);
+        $this->assertGreaterThan(0, $meter->record($user, 'm', 10, 20, 100));
+        $other = self::factory()->user->create(['role' => 'editor']);
+        $this->assertGreaterThan(0, $meter->record($other, 'm', 1, 2, 100));
+        $this->rest('PUT', '/settings', ['governance.user_monthly_tokens' => 5000]);
+
+        $mine = $this->rest('GET', '/usage', ['user' => 'me'])->get_data();
+        $this->assertSame(['tokens' => 30, 'requests' => 1, 'month' => gmdate('Y-m'), 'caps' => ['user' => 5000, 'site' => 0]], $mine);
+        $all = $this->rest('GET', '/usage', ['user' => 'all'])->get_data();
+        $this->assertSame(['tokens' => 33, 'requests' => 2, 'month' => gmdate('Y-m'), 'caps' => ['user' => 5000, 'site' => 0]], $all);
+
+        // Anything but me|all is core's schema refusal.
+        $refused = $this->rest('GET', '/usage', ['user' => '7']);
+        $this->assertSame(400, $refused->get_status());
+        $this->assertSame('rest_invalid_param', $refused->get_data()['code']);
+
+        wp_set_current_user($other);
+        $this->assertSame(3, $this->rest('GET', '/usage')->get_data()['tokens']);
+        $forbidden = $this->rest('GET', '/usage', ['user' => 'all']);
+        $this->assertSame(403, $forbidden->get_status());
+        $this->assertSame('rest_forbidden', $forbidden->get_data()['code']);
+    }
+
+    public function test_models_route_lists_the_catalog_with_the_default_in_a_header(): void
+    {
+        $this->assertSame(401, $this->rest('GET', '/models')->get_status());
+        $this->fakeProvider();
+        wp_set_current_user(self::factory()->user->create(['role' => 'editor']));
+        // refresh=1 first: the catalog memoises what it discovered for the process, and an earlier
+        // test may have had it discover something else.
+        $res = $this->rest('GET', '/models', ['refresh' => '1']);
+        $this->assertSame(200, $res->get_status(), print_r($res->get_data(), true));
+        $this->assertSame([['id' => 'fake-model', 'label' => 'fake-model', 'tools' => true, 'vision' => false, 'thinking' => false]], $res->get_data());
+        $this->assertSame('fake-model', $res->get_headers()['X-Alpaca-Bot-Default-Model']);
+        $this->assertSame($res->get_data(), $this->rest('GET', '/models')->get_data());
+        $this->assertSame(400, $this->rest('GET', '/models', ['refresh' => 'maybe'])->get_status());
+    }
+}

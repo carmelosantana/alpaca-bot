@@ -99,6 +99,9 @@ final class Plugin
             new Rest\ChatController($this->get(Chat\Pipeline::class)),
             new Rest\StreamController($this->get(Chat\Pipeline::class)),
             new Rest\ConversationsController($this->get(Chat\ConversationStore::class), $this->get(Store::class)),
+            new Rest\ModelsController($this->get(Provider\ModelCatalog::class), $this->get(Store::class)),
+            new Rest\SettingsController($this->get(Store::class)),
+            new Rest\UsageController($this->get(Chat\UsageMeter::class), $this->get(Store::class)),
         ]);
         return array_values(array_filter(
             is_array($controllers) ? $controllers : [],

@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace AlpacaBot\Tests\Integration;
 
+use AlpacaBot\Plugin;
+use AlpacaBot\Settings\Store;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Config\ModelDefinition;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Contract\ProviderInterface;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Enum\ProviderFinishReason;
@@ -23,6 +25,12 @@ use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Provider\Usage;
  * before and after each test makes the next rest_get_server() rebuild the server and re-fire
  * rest_api_init with the current test's filters in place, so route-time filters work in any test,
  * in any order.
+ *
+ * Every test also starts from default settings. The plugin's Store is memoised on the Plugin
+ * singleton for the whole process, so a setting one test wrote (through PUT /settings, say)
+ * would still be in the memo for the next test after core rolled the option row back; writing
+ * the defaults through the Store on set_up refreshes the memo and the row together, inside the
+ * transaction, so both read as defaults and neither outlives the test.
  */
 abstract class TestCase extends \WP_UnitTestCase
 {
@@ -30,11 +38,13 @@ abstract class TestCase extends \WP_UnitTestCase
     {
         parent::set_up();
         $GLOBALS['wp_rest_server'] = null;
+        Plugin::instance()->get(Store::class)->replace([]);
     }
 
     public function tear_down(): void
     {
         $GLOBALS['wp_rest_server'] = null;
+        Plugin::instance()->get(Store::class)->replace([]);
         parent::tear_down();
     }
 
