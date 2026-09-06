@@ -4,10 +4,16 @@ declare(strict_types=1);
 
 namespace AlpacaBot\Tests\Integration;
 
+use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Config\ModelDefinition;
+use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Contract\ProviderInterface;
+use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Enum\ProviderFinishReason;
+use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Provider\Response;
+use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Provider\Usage;
+
 /**
  * Base for the integration suite: real WordPress (wp-phpunit) with the plugin loaded, every test
- * inside a transaction core rolls back. The two helpers are the whole REST test vocabulary:
- * become an administrator, dispatch a request at the plugin's namespace.
+ * inside a transaction core rolls back. The three helpers are the whole REST test vocabulary:
+ * become an administrator, fake the model provider, dispatch a request at the plugin's namespace.
  *
  * Every test gets its own REST server. WP_UnitTestCase never resets $GLOBALS['wp_rest_server']
  * (only core's WP_Test_REST_Controller_Testcase does), so rest_get_server() would build the server
@@ -30,6 +36,63 @@ abstract class TestCase extends \WP_UnitTestCase
     {
         $GLOBALS['wp_rest_server'] = null;
         parent::tear_down();
+    }
+
+    /**
+     * Swaps the configured provider for one that answers "fake reply" (or throws) and lists a
+     * single model, `fake-model`. The site's own `models.default` is left alone: ModelCatalog
+     * falls back to the first listed model when the configured one is not in the catalog, and
+     * the plugin's Store and catalog are memoised on the Plugin singleton across tests, so a
+     * setting written here would outlive this test while an option write would not be seen.
+     *
+     * Applied at request time (Factory::make() runs inside the route), not on rest_api_init, so
+     * it may be added after the server has been built.
+     */
+    protected function fakeProvider(?\Throwable $failure = null): void
+    {
+        add_filter('alpaca_bot/provider', static fn(): ProviderInterface => new class ($failure) implements ProviderInterface {
+            public function __construct(private ?\Throwable $failure) {}
+
+            public function chat(array $messages, array $tools = [], array $options = []): Response
+            {
+                return new Response('fake reply', ProviderFinishReason::Stop, usage: new Usage(3, 2, 5));
+            }
+
+            public function stream(array $messages, array $tools = [], array $options = []): iterable
+            {
+                yield new Response('fake ', ProviderFinishReason::Stop);
+                if ($this->failure !== null) {
+                    throw $this->failure;
+                }
+                yield new Response('reply', ProviderFinishReason::Stop);
+                yield new Response('', ProviderFinishReason::Stop, usage: new Usage(3, 2, 5));
+            }
+
+            public function structured(array $messages, string $schema, array $options = []): mixed
+            {
+                return [];
+            }
+
+            public function models(): array
+            {
+                return [new ModelDefinition('fake-model', 'Fake model', 'fake')];
+            }
+
+            public function isAvailable(): bool
+            {
+                return true;
+            }
+
+            public function getModel(): string
+            {
+                return 'fake-model';
+            }
+
+            public function withModel(string $model): static
+            {
+                return $this;
+            }
+        });
     }
 
     protected function asAdmin(): int

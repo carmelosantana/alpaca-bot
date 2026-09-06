@@ -6,6 +6,7 @@ namespace AlpacaBot\Rest;
 
 use AlpacaBot\Chat\CapExceeded;
 use AlpacaBot\Chat\Pipeline;
+use AlpacaBot\Chat\Result;
 use AlpacaBot\Context\Context;
 
 /**
@@ -81,12 +82,23 @@ final class ChatController extends Controller
         } catch (\Throwable $e) {
             return Errors::provider($e);
         }
-        return new \WP_REST_Response([
+        return new \WP_REST_Response(self::body($result), 200);
+    }
+
+    /**
+     * The body of a finished turn: the 200 here, and the `done` frame's data on the stream
+     * route, which is the same turn told a different way and must read the same.
+     *
+     * @return array{conversation_id: int, message: array<string, mixed>, receipt: array<string, int|string>, contexts: list<array<string, mixed>>}
+     */
+    public static function body(Result $result): array
+    {
+        return [
             'conversation_id' => $result->conversation->id,
             'message' => $result->reply->toArray(),
             'receipt' => $result->receipt,
             'contexts' => array_map(static fn(Context $c): array => $c->toArray(), $result->contexts),
-        ], 200);
+        ];
     }
 
     /**

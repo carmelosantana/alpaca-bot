@@ -97,6 +97,7 @@ final class Plugin
     {
         $controllers = apply_filters('alpaca_bot/rest/controllers', [
             new Rest\ChatController($this->get(Chat\Pipeline::class)),
+            new Rest\StreamController($this->get(Chat\Pipeline::class)),
             new Rest\ConversationsController($this->get(Chat\ConversationStore::class), $this->get(Store::class)),
         ]);
         return array_values(array_filter(

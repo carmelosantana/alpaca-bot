@@ -16,6 +16,7 @@ use AlpacaBot\Rest\Controller;
 use AlpacaBot\Settings\Store;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Contract\ProviderInterface;
 use Brain\Monkey;
+use Brain\Monkey\Actions;
 use Brain\Monkey\Filters;
 use Brain\Monkey\Functions;
 
@@ -27,6 +28,9 @@ uses()->beforeEach(function (): void {
     // the value as is (adding http:// when there is no scheme); tests that care about
     // rejection alias esc_url_raw themselves.
     Functions\stubEscapeFunctions();
+    // Rest\Sse frames are wp_json_encode()d, which is json_encode() plus a non-UTF-8 fallback
+    // no test needs; the plain function stands in.
+    Functions\when('wp_json_encode')->alias('json_encode');
     // Plugin is a process-wide singleton and Pest runs the suite in one process:
     // reset it so every test's boot() starts from a cold state.
     $instance = new ReflectionProperty(Plugin::class, 'instance');
@@ -258,6 +262,44 @@ function pipelineWith(mixed $provider, array $settings = [], array $contexts = [
         new Collector([collectorSource('test', $contexts)]),
     );
     return $h;
+}
+
+/**
+ * StreamControllerTest: makes `$hook` behave as core's do_action() does for the duration of a
+ * test. Brain Monkey records what add_action() registers and what do_action() fires but never
+ * runs the one for the other, so code under test that listens to a pipeline action (the stream
+ * route's `start` frame rides on `alpaca_bot/chat/started`) would never hear it. Wiring the two
+ * expectations together here calls every listener added so far with do_action()'s arguments,
+ * in the order they were added; priorities are ignored, which no caller relies on.
+ */
+function actionRuns(string $hook): void
+{
+    $listeners = [];
+    Actions\expectAdded($hook)->zeroOrMoreTimes()->whenHappen(static function (callable $callback) use (&$listeners): void {
+        $listeners[] = $callback;
+    });
+    Actions\expectDone($hook)->zeroOrMoreTimes()->whenHappen(static function (mixed ...$args) use (&$listeners): void {
+        foreach ($listeners as $listener) {
+            $listener(...$args);
+        }
+    });
+}
+
+/**
+ * StreamControllerTest: a stream ticket as ChatController::ticket() stores it, for user 3 and
+ * the harness's conversation 42, with `$changes` merged over it.
+ *
+ * @param array<string, mixed> $changes
+ * @return array<string, mixed>
+ */
+function streamTicket(array $changes = []): array
+{
+    return array_replace_recursive([
+        'user_id' => 3,
+        'conversation_id' => 42,
+        'message' => 'hi',
+        'options' => ['conversation_id' => 42, 'model' => '', 'images' => [], 'context' => []],
+    ], $changes);
 }
 
 /** PipelineTest: a provider mock whose one stream() call yields the given chunks and captures its arguments into `$call`. */

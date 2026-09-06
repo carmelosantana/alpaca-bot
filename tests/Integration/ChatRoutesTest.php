@@ -4,78 +4,15 @@ declare(strict_types=1);
 
 namespace AlpacaBot\Tests\Integration;
 
-use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Config\ModelDefinition;
-use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Contract\ProviderInterface;
-use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Enum\ProviderFinishReason;
-use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Provider\Response;
-use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Provider\Usage;
-
 /**
  * POST /chat and the /conversations routes over real core: real permission callbacks, real
  * chat_history posts, the real rate-limit transient. Only the model provider is faked, through
- * `alpaca_bot/provider`, the seam Factory documents.
+ * `alpaca_bot/provider`, the seam Factory documents (TestCase::fakeProvider()).
  *
  * @group rest
  */
 final class ChatRoutesTest extends TestCase
 {
-    /**
-     * Swaps the configured provider for one that answers "fake reply" (or throws) and lists a
-     * single model, `fake-model`. The site's own `models.default` is left alone: ModelCatalog
-     * falls back to the first listed model when the configured one is not in the catalog, and
-     * the plugin's Store and catalog are memoised on the Plugin singleton across tests, so a
-     * setting written here would outlive this test while an option write would not be seen.
-     *
-     * Applied at request time (Factory::make() runs inside the route), not on rest_api_init, so
-     * it may be added after the server has been built.
-     */
-    private function fakeProvider(?\Throwable $failure = null): void
-    {
-        add_filter('alpaca_bot/provider', static fn(): ProviderInterface => new class ($failure) implements ProviderInterface {
-            public function __construct(private ?\Throwable $failure) {}
-
-            public function chat(array $messages, array $tools = [], array $options = []): Response
-            {
-                return new Response('fake reply', ProviderFinishReason::Stop, usage: new Usage(3, 2, 5));
-            }
-
-            public function stream(array $messages, array $tools = [], array $options = []): iterable
-            {
-                yield new Response('fake ', ProviderFinishReason::Stop);
-                if ($this->failure !== null) {
-                    throw $this->failure;
-                }
-                yield new Response('reply', ProviderFinishReason::Stop);
-                yield new Response('', ProviderFinishReason::Stop, usage: new Usage(3, 2, 5));
-            }
-
-            public function structured(array $messages, string $schema, array $options = []): mixed
-            {
-                return [];
-            }
-
-            public function models(): array
-            {
-                return [new ModelDefinition('fake-model', 'Fake model', 'fake')];
-            }
-
-            public function isAvailable(): bool
-            {
-                return true;
-            }
-
-            public function getModel(): string
-            {
-                return 'fake-model';
-            }
-
-            public function withModel(string $model): static
-            {
-                return $this;
-            }
-        });
-    }
-
     public function test_chat_requires_login(): void
     {
         $res = $this->rest('POST', '/chat', ['message' => 'hi']);

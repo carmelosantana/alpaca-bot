@@ -6,6 +6,7 @@ use AlpacaBot\Plugin;
 use AlpacaBot\Rest\ChatController;
 use AlpacaBot\Rest\Controller;
 use AlpacaBot\Rest\ConversationsController;
+use AlpacaBot\Rest\StreamController;
 use Brain\Monkey\Actions;
 use Brain\Monkey\Filters;
 use Brain\Monkey\Functions;
@@ -126,12 +127,13 @@ it('Plugin registers every controller the alpaca_bot/rest/controllers filter han
     Plugin::boot()->register();
     expect($onRestInit)->toBeInstanceOf(Closure::class);
 
-    // The plugin's own controllers (chat, conversations) are what the filter is handed; what it
-    // returns is what registers, so a third party can append to the list or replace it outright.
-    // Anything that is not a Controller is dropped rather than fatal on register().
-    Filters\expectApplied('alpaca_bot/rest/controllers')->once()->with(Mockery::on(static fn(array $own): bool => count($own) === 2
+    // The plugin's own controllers (chat, stream, conversations) are what the filter is handed;
+    // what it returns is what registers, so a third party can append to the list or replace it
+    // outright. Anything that is not a Controller is dropped rather than fatal on register().
+    Filters\expectApplied('alpaca_bot/rest/controllers')->once()->with(Mockery::on(static fn(array $own): bool => count($own) === 3
         && $own[0] instanceof ChatController
-        && $own[1] instanceof ConversationsController))->andReturn([$this->ping, 'not-a-controller', $this->limited]);
+        && $own[1] instanceof StreamController
+        && $own[2] instanceof ConversationsController))->andReturn([$this->ping, 'not-a-controller', $this->limited]);
     Functions\expect('register_rest_route')->once()->with('alpaca-bot/v1', '/ping', Mockery::type('array'));
     Functions\expect('register_rest_route')->once()->with('alpaca-bot/v1', '/limited', Mockery::type('array'));
     $onRestInit();
