@@ -147,16 +147,18 @@ it('fires the hooks in the pinned order with the pinned arguments', function ():
     $h = pipelineWith($provider, ['chat.system_prompt' => 'Base']);
     $order = [];
     $conversation = null;
-    Filters\expectApplied('alpaca_bot/system_prompt')->once()->andReturnUsing(function (string $system, Conversation $c, string $model) use (&$order, &$conversation): string {
-        $order[] = 'system_prompt';
-        $conversation = $c;
-        expect($system)->toBe('Base')->and($model)->toBe('llama3.2')->and($c->messages)->toBe([]);
-        return $system . ' (filtered)';
-    });
     Filters\expectApplied('alpaca_bot/message/before_send')->once()->andReturnUsing(function (string $text, Conversation $c, array $options) use (&$order, &$conversation): string {
         $order[] = 'before_send';
-        expect($text)->toBe('Hi')->and($c)->toBe($conversation)->and($options)->toBe(['context' => ['k' => 'v']]);
+        $conversation = $c;
+        expect($text)->toBe('Hi')->and($options)->toBe(['context' => ['k' => 'v']])->and($c->messages)->toBe([]);
         return 'Hi (rewritten)';
+    });
+    // The user turn is already on the conversation, so a filter can tailor the prompt to it.
+    Filters\expectApplied('alpaca_bot/system_prompt')->once()->andReturnUsing(function (string $system, Conversation $c, string $model) use (&$order, &$conversation): string {
+        $order[] = 'system_prompt';
+        expect($system)->toBe('Base')->and($model)->toBe('llama3.2')->and($c)->toBe($conversation)
+            ->and($c->messages)->toHaveCount(1)->and($c->messages[0]->content)->toBe('Hi (rewritten)');
+        return $system . ' (filtered)';
     });
     Actions\expectDone('alpaca_bot/chat/started')->once()->whenHappen(function (Conversation $c, string $model) use (&$order, &$conversation): void {
         $order[] = 'started';
@@ -179,7 +181,7 @@ it('fires the hooks in the pinned order with the pinned arguments', function ():
     }
     $result = $gen->getReturn();
 
-    expect($order)->toBe(['system_prompt', 'before_send', 'started', 'delta:a', 'delta:b', 'after_receive', 'completed'])
+    expect($order)->toBe(['before_send', 'system_prompt', 'started', 'delta:a', 'delta:b', 'after_receive', 'completed'])
         ->and($result->conversation->messages[0]->content)->toBe('Hi (rewritten)')
         ->and($result->reply->content)->toBe('ab (edited)')
         ->and($result->conversation->messages[1])->toBe($result->reply);
@@ -229,6 +231,47 @@ it('fires chat/failed with the original exception, then wraps it as a provider e
         ->and($failed[1]->id)->toBe(42)
         ->and($failed[1]->messages)->toHaveCount(1)
         ->and(array_map(static fn(array $w): string => $w[0], $h->writes))->toBe(['wp_insert_post']); // the empty conversation post only
+});
+
+it('persists the partial reply, records a receipt, and fires chat/failed when the consumer abandons the stream', function (): void {
+    $provider = pipelineProvider([
+        new Response('par', ProviderFinishReason::Stop),
+        new Response('tial', ProviderFinishReason::Stop),
+        new Response('', ProviderFinishReason::Stop, usage: new Usage(5, 2, 7)),
+    ]);
+    $h = pipelineWith($provider);
+    $failed = [];
+    Actions\expectDone('alpaca_bot/chat/failed')->once()->whenHappen(function (\Throwable $e, Conversation $c) use (&$failed): void {
+        $failed = [$e, $c];
+    });
+    $receipt = null;
+    Actions\expectDone('alpaca_bot/usage/recorded')->once()->whenHappen(function (array $r) use (&$receipt): void {
+        $receipt = $r;
+    });
+    Filters\expectApplied('alpaca_bot/message/after_receive')->never();
+    Actions\expectDone('alpaca_bot/chat/completed')->never();
+
+    $gen = $h->pipeline->send(3, 'Hi');
+    $first = $gen->current();
+    expect($first->text)->toBe('par')->and($h->writes)->toHaveCount(1); // the conversation post only, so far
+    unset($gen); // the consumer walks away: PHP runs the generator's finally on destruction
+
+    expect($failed[0])->toBeInstanceOf(\RuntimeException::class)
+        ->and($failed[0]->getMessage())->toContain('abandoned')
+        ->and($failed[1]->id)->toBe(42)
+        ->and($failed[1]->messages)->toHaveCount(2)
+        ->and($failed[1]->messages[1]->role)->toBe('assistant')
+        ->and($failed[1]->messages[1]->content)->toBe('par')
+        ->and($failed[1]->messages[1]->meta)->toBe(['partial' => true])
+        // Usage never arrived: the receipt is honest about it, and the clock is the consumer's.
+        ->and($receipt['total_tokens'])->toBe(0)
+        ->and($receipt['duration_ms'])->toBeGreaterThanOrEqual(0)
+        ->and($receipt['conversation_id'])->toBe(42)
+        ->and($receipt['log_id'])->toBe(9)
+        ->and(array_map(static fn(array $w): string => $w[0], $h->writes))->toBe(['wp_insert_post', 'update_post_meta', 'wp_update_post', 'wp_insert_post']);
+    expect($h->writes[1][2][1]['content'])->toBe('par')
+        ->and($h->writes[1][2][1]['meta'])->toBe(['partial' => true])
+        ->and($h->writes[3][2]['meta_input']['total_tokens'])->toBe(0);
 });
 
 it('wraps a factory failure the same way, before anything is streamed', function (): void {
@@ -293,6 +336,17 @@ it('sends the requested model when users may change it, and the default when the
     $h = pipelineWith(pipelineProvider([new Response('ok', ProviderFinishReason::Stop)]), ['chat.user_can_change_model' => false], [], ['llama3.2', 'qwen3:8b']);
     $r = $h->pipeline->complete(3, 'Hi', ['model' => 'qwen3:8b']);
     expect($h->model)->toBe('llama3.2')->and($r->reply->model)->toBe('llama3.2');
+});
+
+it('refuses a requested model the catalog does not list rather than substituting the default', function (): void {
+    // The catalog is the allow-list (alpaca_bot/models, no embedding models); naming a model
+    // directly must not walk past it, and quietly answering with another model would be worse.
+    $h = pipelineWith(null, [], [], ['llama3.2']);
+    Actions\expectDone('alpaca_bot/chat/started')->never();
+    Actions\expectDone('alpaca_bot/chat/failed')->never();
+    expect(fn() => $h->pipeline->complete(3, 'Hi', ['model' => 'nomic-embed-text']))
+        ->toThrow(\InvalidArgumentException::class, 'nomic-embed-text')
+        ->and($h->writes)->toBe([]); // the model is settled before a conversation post is made
 });
 
 it('falls back to the first catalogued model when models.default is unset', function (): void {
@@ -370,6 +424,54 @@ it('sends images as image_url parts and keeps them on the stored user turn', fun
         ])
         ->and($r->conversation->messages[0]->images)->toBe(['data:image/png;base64,AAAA'])
         ->and($h->writes[1][2][0]['images'])->toBe(['data:image/png;base64,AAAA']);
+});
+
+it('sends an images-only turn without an empty text part', function (): void {
+    $provider = pipelineProvider([new Response('A cat', ProviderFinishReason::Stop)], $call);
+    $h = pipelineWith($provider);
+    $r = $h->pipeline->complete(3, '  ', ['images' => ['data:image/png;base64,AAAA']]);
+    expect($call['messages'][0]->content())->toBe([
+        ['type' => 'image_url', 'image_url' => ['url' => 'data:image/png;base64,AAAA']],
+    ])->and($r->conversation->messages[0]->content)->toBe('');
+});
+
+it('refuses an image that is not a data URL before checking caps or touching storage', function (): void {
+    // A URL would be fetched by the model host (SSRF from the provider) and rendered later by
+    // a history screen; the pipeline accepts inline data only, so every consumer is covered.
+    $h = pipelineWith(null, ['governance.user_monthly_tokens' => 10]);
+    $h->transients['alpaca_bot_usage_3_2024-08'] = ['tokens' => 12, 'requests' => 1];
+    Filters\expectApplied('alpaca_bot/cap/allowed')->never();
+    Actions\expectDone('alpaca_bot/chat/started')->never();
+    expect(fn() => $h->pipeline->complete(3, 'What is this?', ['images' => ['data:image/png;base64,AAAA', 'http://169.254.169.254/latest/meta-data']]))
+        ->toThrow(\InvalidArgumentException::class)
+        ->and($h->writes)->toBe([]);
+});
+
+it('refuses the turn when before_send blanks the message', function (): void {
+    $h = pipelineWith(null);
+    Filters\expectApplied('alpaca_bot/message/before_send')->once()->andReturn('   ');
+    Filters\expectApplied('alpaca_bot/system_prompt')->never();
+    Actions\expectDone('alpaca_bot/chat/started')->never();
+    expect(fn() => $h->pipeline->complete(3, 'Hi'))->toThrow(\InvalidArgumentException::class);
+});
+
+it('buildMessages() fires system_prompt once and returns exactly what send() gives the provider', function (): void {
+    $settings = ['chat.system_prompt' => 'Base'];
+    $contexts = [new Context('c', 'Editing: Hello', 'Body')];
+    $h = pipelineWith(pipelineProvider([new Response('ok', ProviderFinishReason::Stop)], $call), $settings, $contexts);
+    Filters\expectApplied('alpaca_bot/system_prompt')->twice()->andReturnUsing(static fn(string $s): string => $s . ' (filtered)');
+    $r = $h->pipeline->complete(3, 'Hi', ['system' => 'Override']);
+    $sent = array_map(static fn(object $m): array => [$m::class, $m->content()], $call['messages']);
+
+    // The same transcript (the user turn only, as it stood when send() built its messages).
+    $c = new Conversation(42, 3, 'T', [$r->conversation->messages[0]]);
+    $built = array_map(static fn(object $m): array => [$m::class, $m->content()], $h->pipeline->buildMessages($c, 'llama3.2', $contexts, 'Override'));
+
+    expect($built)->toBe($sent)
+        ->and($sent)->toBe([
+            [SystemMessage::class, "Override (filtered)\n\nContext:\n## Editing: Hello\nBody"],
+            [UserMessage::class, 'Hi'],
+        ]);
 });
 
 it('rejects an empty message before checking caps or touching storage', function (): void {

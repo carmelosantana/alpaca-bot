@@ -12,6 +12,11 @@ namespace AlpacaBot\Chat;
 final class Result
 {
     /**
+     * `duration_ms` is the pipeline's wall clock from the first provider call to the end of the
+     * stream, as the consuming process saw it. For a streaming consumer that includes the time
+     * spent between deltas (client backpressure, an SSE flush), so it bounds the provider's own
+     * time from above; it is not a measurement of the model.
+     *
      * @param array{user_id: int, model: string, prompt_tokens: int, completion_tokens: int, total_tokens: int, duration_ms: int, conversation_id: int, log_id: int, created: int} $receipt
      * @param \AlpacaBot\Context\Context[] $contexts
      */
