@@ -137,9 +137,10 @@ function currentScreenPost(int $id, string $title, string $content, string $type
  *
  * @param array<string, mixed> $settings seeded into the shared Store
  * @param \AlpacaBot\Context\Context[] $contexts what the one registered source returns
- * @param list<string> $catalog model ids the cached catalog lists
+ * @param list<string>|null $catalog model ids the cached catalog lists; null leaves the catalog transient expired,
+ *   so the catalog is discovered from `$provider` (its models() is called) and the provider filter fires twice
  */
-function pipelineWith(mixed $provider, array $settings = [], array $contexts = [], array $catalog = ['llama3.2']): object
+function pipelineWith(mixed $provider, array $settings = [], array $contexts = [], ?array $catalog = ['llama3.2']): object
 {
     $h = new class {
         public Pipeline $pipeline;
@@ -151,7 +152,9 @@ function pipelineWith(mixed $provider, array $settings = [], array $contexts = [
         public array $transients = [];
     };
     $h->post = conversationChatPost();
-    $h->transients[ModelCatalog::TRANSIENT] = array_map(static fn(string $id): array => ['id' => $id, 'label' => $id], $catalog);
+    if ($catalog !== null) {
+        $h->transients[ModelCatalog::TRANSIENT] = array_map(static fn(string $id): array => ['id' => $id, 'label' => $id], $catalog);
+    }
     Functions\when('current_time')->justReturn(1_725_000_000);
     Functions\when('wp_generate_uuid4')->justReturn('uuid');
     Functions\when('sanitize_text_field')->returnArg();
@@ -175,7 +178,7 @@ function pipelineWith(mixed $provider, array $settings = [], array $contexts = [
     if ($provider === null) {
         Filters\expectApplied('alpaca_bot/provider')->never();
     } else {
-        Filters\expectApplied('alpaca_bot/provider')->once()->andReturnUsing(static function (object $built, string $model) use ($h, $provider): mixed {
+        Filters\expectApplied('alpaca_bot/provider')->times($catalog === null ? 2 : 1)->andReturnUsing(static function (object $built, string $model) use ($h, $provider): mixed {
             $h->model = $model;
             return $provider;
         });

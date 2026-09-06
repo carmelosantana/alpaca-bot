@@ -7,6 +7,7 @@ namespace AlpacaBot\Chat;
 use AlpacaBot\Context\Collector;
 use AlpacaBot\Context\Context;
 use AlpacaBot\Provider\Factory;
+use AlpacaBot\Provider\Model;
 use AlpacaBot\Provider\ModelCatalog;
 use AlpacaBot\Settings\Store;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Contract\MessageInterface;
@@ -82,7 +83,9 @@ final class Pipeline
      * Options: `conversation_id` continues a conversation the user owns (an id that is missing
      * or not theirs is refused, not silently replaced by a new one); `model` is honoured only
      * while `chat.user_can_change_model` is on, else the default applies, and a model the
-     * catalog does not list is refused rather than swapped for the default; `images` are data
+     * catalog lists other models but not this one is refused rather than swapped for the
+     * default (an empty catalog, which is also what an unreachable provider reads as, refuses
+     * nothing: the provider call then fails loudly instead); `images` are data
      * URLs attached to the user turn and are sent verbatim: anything that is not a data URL is
      * refused, since a fetchable URL would be retrieved by the model host and rendered later by
      * a history screen, and the pipeline never reads the filesystem on a caller's behalf;
@@ -94,7 +97,7 @@ final class Pipeline
      *
      * @param array{conversation_id?: int, model?: string, images?: string[], context?: array<string, mixed>, system?: string} $options
      * @return \Generator<int, Delta, mixed, Result>
-     * @throws \InvalidArgumentException for an empty message (also one `before_send` blanked), an image that is not a data URL, a requested model the catalog does not list, or a conversation the user does not own
+     * @throws \InvalidArgumentException for an empty message (also one `before_send` blanked), an image that is not a data URL, a requested model a non-empty catalog does not list, or a conversation the user does not own
      * @throws CapExceeded before any provider call
      * @throws \RuntimeException when no model can be resolved, or wrapping a provider failure as 'Provider error: ...'
      */
@@ -290,15 +293,23 @@ final class Pipeline
      * embedding models are already out); else the catalog's default, which is never '' as long
      * as the provider lists anything.
      *
+     * The allow-list only applies when there is one. ModelCatalog reads a provider it cannot
+     * reach as an empty, uncached list, indistinguishable from a provider that lists nothing,
+     * so an empty catalog cannot refuse anything: the requested model goes through and the
+     * provider call fails loudly (`Provider error: ...`, `chat/failed`), the same way the
+     * default-model path fails in the same outage. Refusing here would report an outage as a
+     * client error naming their model. A non-empty catalog without the id is the real refusal.
+     *
      * @param array<string, mixed> $options
-     * @throws \InvalidArgumentException when the requested model is not in the catalog
+     * @throws \InvalidArgumentException when the catalog lists models and the requested one is not among them
      * @throws \RuntimeException when no model is configured and the provider lists none
      */
     private function model(array $options): string
     {
         $requested = trim((string) ($options['model'] ?? ''));
         if ($requested !== '' && (bool) $this->store->get('chat.user_can_change_model')) {
-            if ($this->catalog->find($requested) === null) {
+            $listed = array_map(static fn(Model $m): string => $m->id, $this->catalog->all());
+            if ($listed !== [] && !in_array($requested, $listed, true)) {
                 /* translators: %s: model id */
                 throw new \InvalidArgumentException(sprintf(__('Model "%s" is not available.', 'alpaca-bot'), $requested));
             }

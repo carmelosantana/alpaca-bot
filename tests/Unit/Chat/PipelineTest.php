@@ -349,6 +349,29 @@ it('refuses a requested model the catalog does not list rather than substituting
         ->and($h->writes)->toBe([]); // the model is settled before a conversation post is made
 });
 
+it('lets a requested model through when the catalog is unreachable, so the outage surfaces as a provider error', function (): void {
+    // The catalog cannot tell "not listed" from "could not be listed": ModelCatalog swallows a
+    // downed provider and returns an empty, uncached list. Refusing the model then would report
+    // an outage as a client error naming their model, with no chat/failed. An empty catalog is
+    // not an allow-list of nothing: the turn goes to the provider, which fails loudly, exactly
+    // as the default-model path does in the same outage.
+    $down = new \RuntimeException('connection refused');
+    $provider = pipelineProvider([$down]);
+    $provider->shouldReceive('models')->once()->andThrow($down);
+    $h = pipelineWith($provider, [], [], null);
+    $failed = null;
+    Actions\expectDone('alpaca_bot/chat/started')->once();
+    Actions\expectDone('alpaca_bot/chat/failed')->once()->whenHappen(function (\Throwable $e, Conversation $c) use (&$failed): void {
+        $failed = $e;
+    });
+    Actions\expectDone('alpaca_bot/chat/completed')->never();
+
+    expect(fn() => $h->pipeline->complete(3, 'Hi', ['model' => 'llama3.2']))
+        ->toThrow(\RuntimeException::class, 'Provider error: connection refused')
+        ->and($failed)->toBe($down)
+        ->and($h->model)->toBe('llama3.2');
+});
+
 it('falls back to the first catalogued model when models.default is unset', function (): void {
     $h = pipelineWith(pipelineProvider([new Response('ok', ProviderFinishReason::Stop)]), ['models.default' => ''], [], ['gemma3:4b']);
     $h->pipeline->complete(3, 'Hi');
