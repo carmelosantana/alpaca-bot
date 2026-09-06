@@ -46,6 +46,9 @@ final class Plugin
         $factory = new Provider\Factory($store);
         $this->set(Provider\Factory::class, $factory);
         $this->set(Provider\ModelCatalog::class, new Provider\ModelCatalog($factory));
+        $conversations = new Chat\ConversationStore($store);
+        $this->set(Chat\ConversationStore::class, $conversations);
+        add_action('init', [$conversations, 'registerPostType']);
         add_action('admin_init', function () use ($store): void {
             $migration = new Migrate04($store);
             if ($migration->needed()) {

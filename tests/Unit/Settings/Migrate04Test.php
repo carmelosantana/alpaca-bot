@@ -29,6 +29,7 @@ it('maps 0.4 options into the new schema and appends /v1 to the base url', funct
     Functions\when('get_option')->alias(fn(string $k, mixed $d = false) => $legacy[$k] ?? ($k === 'alpaca_bot_settings' ? [] : $d));
     $written = null;
     Functions\when('update_option')->alias(function (string $k, mixed $v) use (&$written): bool { if ($k === 'alpaca_bot_settings') { $written = $v; } return true; });
+    Functions\when('get_posts')->justReturn([]);
     $m = new Migrate04(new Store());
     expect($m->needed())->toBeTrue();
     $out = $m->run();
@@ -82,6 +83,7 @@ it('treats blank 0.4 values as unset, except booleans which are false, and sets 
     Functions\when('get_option')->alias(fn(string $k, mixed $d = false) => $legacy[$k] ?? ($k === 'alpaca_bot_settings' ? [] : $d));
     $writes = [];
     Functions\when('update_option')->alias(function (string $k, mixed $v) use (&$writes): bool { $writes[$k] = $v; return true; });
+    Functions\when('get_posts')->justReturn([]);
     $out = (new Migrate04(new Store()))->run();
     $defaults = Schema::defaults();
     expect($out['provider.base_url'])->toBe('http://localhost:11434/v1')
@@ -111,6 +113,7 @@ it("treats a stored '0' as unset like 0.4 did, instead of clamping it to the fie
     ];
     Functions\when('get_option')->alias(fn(string $k, mixed $d = false) => $legacy[$k] ?? ($k === 'alpaca_bot_settings' ? [] : $d));
     Functions\when('update_option')->justReturn(true);
+    Functions\when('get_posts')->justReturn([]);
     $out = (new Migrate04(new Store()))->run();
     $defaults = Schema::defaults();
     expect($out['provider.timeout'])->toBe($defaults['provider.timeout'])
@@ -135,6 +138,7 @@ it('is idempotent: a second run over the migrated option changes nothing', funct
         }
         return true;
     });
+    Functions\when('get_posts')->justReturn([]);
     $first = (new Migrate04(new Store()))->run();
     $second = (new Migrate04(new Store()))->run();
     expect($first['provider.base_url'])->toBe('http://localhost:11434/v1')
@@ -150,4 +154,23 @@ it('only maps onto keys that exist in the schema', function (): void {
         expect(Schema::fields())->toHaveKey($target, message: "{$legacy} => {$target}");
     }
     expect($map)->not->toHaveKey('api_password');
+});
+
+// 0.4 stored conversations as `publish` posts and left post_author to wp_insert_post()'s default
+// (the current user, so 0 for a request without one). ConversationStore::load() checks the owner
+// strictly and lists only `private` rows, so every legacy row is flipped to private and an
+// unowned one takes its owner from the first message: 0.4 wrote the user's id as that role.
+it('makes legacy chat_history rows private and recovers the owner from the first message role', function (): void {
+    Functions\when('get_option')->alias(fn(string $k, mixed $d = false) => $k === 'alpaca_bot_api_url' ? 'http://localhost:11434' : ($k === 'alpaca_bot_settings' ? [] : $d));
+    Functions\when('update_option')->justReturn(true);
+    Functions\expect('get_posts')->once()->withArgs(fn(array $q): bool => $q['post_type'] === 'chat_history' && $q['post_status'] === 'any' && $q['numberposts'] === -1 && $q['fields'] === 'ids')->andReturn([10, 11, 12]);
+    Functions\when('get_post_meta')->alias(fn(int $id, string $k) => match ($id) {
+        10 => [['model' => 'm', 'message' => ['role' => 7, 'content' => 'q']], ['model' => 'm', 'message' => ['role' => 'assistant', 'content' => 'a']]],
+        11 => [['model' => 'm', 'message' => ['role' => 0, 'content' => 'q']]],
+        default => '',
+    });
+    Functions\expect('wp_update_post')->once()->with(['ID' => 10, 'post_status' => 'private', 'post_author' => 7])->andReturn(10);
+    Functions\expect('wp_update_post')->once()->with(['ID' => 11, 'post_status' => 'private'])->andReturn(11);
+    Functions\expect('wp_update_post')->once()->with(['ID' => 12, 'post_status' => 'private'])->andReturn(12);
+    (new Migrate04(new Store()))->run();
 });

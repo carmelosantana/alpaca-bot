@@ -94,7 +94,30 @@ final class Migrate04
             $next[$key] = $value;
         }
         $this->store->replace($next);
+        $this->migrateConversations();
         update_option(self::FLAG, '1', false);
         return $this->store->all();
+    }
+
+    /**
+     * 0.4 stored conversations as `publish` posts and left post_author to wp_insert_post()'s
+     * default — the current user, so 0 for a request that had none. ConversationStore::load()
+     * checks the owner strictly and listFor() reads only `private` rows, so every legacy row
+     * becomes private, and one with no owner takes it from the first message: 0.4 wrote the
+     * user's id as that message's role.
+     */
+    private function migrateConversations(): void
+    {
+        $ids = get_posts(['post_type' => 'chat_history', 'post_status' => 'any', 'numberposts' => -1, 'fields' => 'ids']);
+        foreach ($ids as $pid) {
+            $pid = (int) $pid;
+            $legacy = get_post_meta($pid, 'messages', true);
+            $role = is_array($legacy) ? ($legacy[0]['message']['role'] ?? null) : null;
+            $update = ['ID' => $pid, 'post_status' => 'private'];
+            if (is_int($role) && $role > 0) {
+                $update['post_author'] = $role;
+            }
+            wp_update_post($update);
+        }
     }
 }
