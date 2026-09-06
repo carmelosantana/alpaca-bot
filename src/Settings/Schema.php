@@ -33,8 +33,8 @@ final class Schema
             'provider' => ['label' => __('Provider', 'alpaca-bot'), 'description' => __('Where models run. Ollama by default; WordPress AI providers when WordPress 7.0+ has them registered.', 'alpaca-bot')],
             'models' => ['label' => __('Models', 'alpaca-bot'), 'description' => __('Default model and generation options, with per-model overrides.', 'alpaca-bot')],
             'chat' => ['label' => __('Chat', 'alpaca-bot'), 'description' => __('What users see and can change in the chat screen.', 'alpaca-bot')],
-            'privacy' => ['label' => __('Privacy', 'alpaca-bot'), 'description' => __('What is stored in your database.', 'alpaca-bot')],
-            'governance' => ['label' => __('Limits', 'alpaca-bot'), 'description' => __('Server-enforced monthly token caps. 0 means unlimited.', 'alpaca-bot')],
+            'privacy' => ['label' => __('Privacy', 'alpaca-bot'), 'description' => __('What is stored in your database. Message content lives only in saved conversations; a usage receipt never contains it.', 'alpaca-bot')],
+            'governance' => ['label' => __('Limits', 'alpaca-bot'), 'description' => __('Server-enforced monthly token caps, counted from the usage receipts. 0 means unlimited. Completion tokens include the reasoning a thinking model produces before its answer (it comes back as reply.meta.reasoning), so a thinking model spends a cap faster than its visible reply suggests: a short answer can cost several hundred reasoning tokens first.', 'alpaca-bot')],
             'toolkits' => ['label' => __('Tools', 'alpaca-bot'), 'description' => __('Settings for built-in tools.', 'alpaca-bot')],
         ];
     }
@@ -46,8 +46,8 @@ final class Schema
             'provider.kind' => ['type' => 'select', 'default' => 'ollama', 'section' => 'provider', 'label' => __('Provider', 'alpaca-bot'), 'options' => ['ollama' => 'Ollama', 'wp-ai' => __('WordPress AI provider', 'alpaca-bot')]],
             'provider.base_url' => ['type' => 'string', 'default' => 'http://localhost:11434/v1', 'section' => 'provider', 'label' => __('Base URL', 'alpaca-bot'), 'description' => __('OpenAI-compatible endpoint. For Ollama this ends in /v1.', 'alpaca-bot'), 'sanitize' => [self::class, 'sanitizeUrl']],
             'provider.api_key' => ['type' => 'string', 'default' => '', 'section' => 'provider', 'label' => __('API key', 'alpaca-bot'), 'description' => __('Optional. Sent as a Bearer token.', 'alpaca-bot')],
-            'provider.timeout' => ['type' => 'integer', 'default' => 60, 'section' => 'provider', 'label' => __('Timeout (seconds)', 'alpaca-bot'), 'min' => 5, 'max' => 600],
-            'models.default' => ['type' => 'string', 'default' => '', 'section' => 'models', 'label' => __('Default model', 'alpaca-bot')],
+            'provider.timeout' => ['type' => 'integer', 'default' => 60, 'section' => 'provider', 'label' => __('Timeout (seconds)', 'alpaca-bot'), 'description' => __('How long one request may wait for the provider before it fails. The first request after a restart loads the model from cold, and a large model can take longer than the 60 seconds default to load; raise this if that first request times out and the next one works. Leave it low otherwise, so a provider that has stopped answering fails quickly instead of holding every chat open.', 'alpaca-bot'), 'min' => 5, 'max' => 600],
+            'models.default' => ['type' => 'string', 'default' => '', 'section' => 'models', 'label' => __('Default model', 'alpaca-bot'), 'description' => __('Used when a request names no model. A thinking model (qwen3, deepseek-r1, gpt-oss) reasons before it answers; the reasoning is returned as reply.meta.reasoning and its tokens count as completion tokens under the monthly caps.', 'alpaca-bot')],
             'models.temperature' => ['type' => 'number', 'default' => 0.7, 'section' => 'models', 'label' => __('Temperature', 'alpaca-bot'), 'min' => 0, 'max' => 2],
             'models.num_ctx' => ['type' => 'integer', 'default' => 8192, 'section' => 'models', 'label' => __('Context window (tokens)', 'alpaca-bot'), 'min' => 512, 'max' => 1048576],
             'models.keep_alive' => ['type' => 'string', 'default' => '5m', 'section' => 'models', 'label' => __('Keep alive', 'alpaca-bot'), 'description' => __('How long Ollama keeps the model loaded, e.g. 5m, 1h, -1.', 'alpaca-bot')],
@@ -61,7 +61,8 @@ final class Schema
             'chat.spellcheck' => ['type' => 'boolean', 'default' => true, 'section' => 'chat', 'label' => __('Spellcheck the input', 'alpaca-bot')],
             'chat.assistant_avatar' => ['type' => 'string', 'default' => '', 'section' => 'chat', 'label' => __('Assistant avatar URL', 'alpaca-bot'), 'sanitize' => [self::class, 'sanitizeUrl']],
             'privacy.save_history' => ['type' => 'boolean', 'default' => true, 'section' => 'privacy', 'label' => __('Save conversations', 'alpaca-bot')],
-            'privacy.usage_log' => ['type' => 'boolean', 'default' => true, 'section' => 'privacy', 'label' => __('Record the model and conversation on usage receipts', 'alpaca-bot'), 'description' => __('Token counts, duration and the requesting user are always kept for the monthly caps. Off leaves the model name and the conversation link out of each receipt.', 'alpaca-bot')],
+            'privacy.usage_log' => ['type' => 'boolean', 'default' => true, 'section' => 'privacy', 'label' => __('Record the model and conversation on usage receipts', 'alpaca-bot'), 'description' => __('A usage receipt is always written for every reply, on or off, so the monthly caps keep working: it always holds the token counts, the duration and the user who asked, and never the messages themselves. On, the receipt also records the model name and a link to the conversation. Off, it holds those numbers only.', 'alpaca-bot')],
+            'privacy.usage_retention_days' => ['type' => 'integer', 'default' => 90, 'section' => 'privacy', 'label' => __('Keep usage receipts for (days)', 'alpaca-bot'), 'description' => __('A daily cleanup deletes receipts older than this. 0 keeps them forever. Conversations are never touched. A receipt is counted toward the caps until its month ends, so keep this at 31 or more while a cap is set.', 'alpaca-bot'), 'min' => 0, 'max' => 3650],
             'governance.site_monthly_tokens' => ['type' => 'integer', 'default' => 0, 'section' => 'governance', 'label' => __('Site-wide monthly token cap', 'alpaca-bot'), 'min' => 0, 'max' => PHP_INT_MAX],
             'governance.user_monthly_tokens' => ['type' => 'integer', 'default' => 0, 'section' => 'governance', 'label' => __('Per-user monthly token cap', 'alpaca-bot'), 'min' => 0, 'max' => PHP_INT_MAX],
             'toolkits.user_agent' => ['type' => 'string', 'default' => 'AlpacaBot/1.0 (+https://github.com/carmelosantana/alpaca-bot)', 'section' => 'toolkits', 'label' => __('User agent for fetch tools', 'alpaca-bot')],
@@ -186,6 +187,11 @@ final class Schema
                 }
                 /** @var float|int|string $v */
                 $v = self::coerce($opts[$k], $fields[$field]);
+                // A blank cell in the settings table is "no override", not an empty value that
+                // would shadow the global keep_alive or system prompt with nothing.
+                if ($v === '') {
+                    continue;
+                }
                 $clean[$k] = $v;
             }
             if ($clean !== []) {

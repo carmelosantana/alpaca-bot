@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 
+use AlpacaBot\Admin\Menu;
+use AlpacaBot\Admin\SettingsPage;
 use AlpacaBot\Chat\CapPolicy;
 use AlpacaBot\Chat\ConversationStore;
 use AlpacaBot\Chat\Pipeline;
@@ -52,9 +54,30 @@ it('registers the settings store, provider factory, model catalog, conversation 
             return $cb instanceof Closure;
         }
     ), 20);
-    Actions\expectAdded('admin_init')->never();
+    // The daily usage cleanup is (re)scheduled on init, where an already-installed site reaches
+    // it without a reactivation, and its hook is wired here so cron has a listener.
+    Actions\expectAdded('init')->once()->with(Mockery::on(
+        static fn (mixed $cb): bool => is_array($cb)
+            && ($cb[0] ?? null) instanceof UsageMeter
+            && ($cb[1] ?? null) === 'scheduleCleanup'
+    ));
+    // A closure: cleanup() returns the deleted count for callers that want it, and an action
+    // callback must return nothing.
+    Actions\expectAdded(UsageMeter::CLEANUP_HOOK)->once()->with(Mockery::type(Closure::class));
+    // The only admin_init listener is the Settings API registration; the migration is not there.
+    Actions\expectAdded('admin_init')->once()->with(Mockery::on(
+        static fn (mixed $cb): bool => is_array($cb)
+            && ($cb[0] ?? null) instanceof SettingsPage
+            && ($cb[1] ?? null) === 'register'
+    ));
+    Actions\expectAdded('admin_menu')->once()->with(Mockery::on(
+        static fn (mixed $cb): bool => is_array($cb)
+            && ($cb[0] ?? null) instanceof Menu
+            && ($cb[1] ?? null) === 'register'
+    ));
     $plugin = Plugin::boot();
     $plugin->register();
+    expect($plugin->get(SettingsPage::class))->toBeInstanceOf(SettingsPage::class);
     expect($plugin->get(Store::class))->toBeInstanceOf(Store::class)
         ->and($plugin->get(Factory::class))->toBeInstanceOf(Factory::class)
         ->and($plugin->get(ModelCatalog::class))->toBeInstanceOf(ModelCatalog::class)
@@ -101,8 +124,8 @@ it('registers the wp alpaca-bot command when WP-CLI is the running process, and 
         $migration = $cb instanceof Closure ? $cb : $migration;
         return $cb instanceof Closure;
     }), 20);
-    Actions\expectAdded('init')->twice()->with(Mockery::type('array'));
-    Actions\expectAdded('admin_init')->never();
+    Actions\expectAdded('init')->times(3)->with(Mockery::type('array'));
+    Actions\expectAdded('admin_init')->once()->with(Mockery::type('array'));
     $plugin = Plugin::boot();
     $plugin->register();
     expect(\WP_CLI::$commands)->toHaveCount(1)
@@ -117,4 +140,9 @@ it('registers the wp alpaca-bot command when WP-CLI is the running process, and 
     $migration();
     expect($plugin->get(Store::class)->get('provider.base_url'))->toBe('http://ollama.internal:11434/v1')
         ->and($plugin->get(Store::class)->get('models.default'))->toBe('qwen3:8b');
+});
+
+it('deactivate() clears the daily usage cleanup so a deactivated plugin leaves no cron event behind', function (): void {
+    Functions\expect('wp_clear_scheduled_hook')->once()->with(UsageMeter::CLEANUP_HOOK)->andReturn(1);
+    Plugin::deactivate();
 });

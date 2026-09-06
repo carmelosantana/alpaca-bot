@@ -251,3 +251,54 @@ it('registers a private, non-searchable chat_log type with no UI that dies with 
     });
     (new UsageMeter(new Store()))->registerPostType();
 });
+
+// ---------------------------------------------------------------- retention
+
+// The daily cleanup exists so a site that keeps the usage log on is not keeping a per-user
+// trail of every request forever. It deletes chat_log rows only: a conversation is never its
+// business, and the guard is on what get_posts() hands back, not only on what it was asked for.
+it('schedules the daily cleanup once and clears it on request', function (): void {
+    Functions\expect('wp_next_scheduled')->once()->with(UsageMeter::CLEANUP_HOOK)->andReturn(false);
+    Functions\expect('wp_schedule_event')->once()->withArgs(fn(int $at, string $recurrence, string $hook): bool => $at >= 1_725_000_000 && $recurrence === 'daily' && $hook === 'alpaca_bot/usage/cleanup')->andReturn(true);
+    (new UsageMeter(new Store()))->scheduleCleanup();
+
+    Functions\expect('wp_next_scheduled')->once()->with(UsageMeter::CLEANUP_HOOK)->andReturn(1_725_086_400);
+    Functions\expect('wp_schedule_event')->never();
+    (new UsageMeter(new Store()))->scheduleCleanup();
+
+    Functions\expect('wp_clear_scheduled_hook')->once()->with(UsageMeter::CLEANUP_HOOK)->andReturn(1);
+    UsageMeter::unscheduleCleanup();
+});
+
+it('deletes nothing when retention is 0 (keep forever)', function (): void {
+    Functions\when('get_option')->justReturn(['privacy.usage_retention_days' => 0]);
+    Functions\expect('get_posts')->never();
+    Functions\expect('wp_delete_post')->never();
+    expect((new UsageMeter(new Store()))->cleanup())->toBe(0);
+});
+
+it('deletes chat_log rows older than the retention window, permanently, and never anything else', function (): void {
+    Functions\when('get_option')->justReturn(['privacy.usage_retention_days' => 90]);
+    // 90 days before 2024-08-30 06:40:00 UTC.
+    Functions\expect('get_posts')->once()->withArgs(fn(array $q): bool => $q['post_type'] === 'chat_log'
+        && $q['post_status'] === 'any'
+        && $q['date_query'] === [['before' => '2024-06-01 06:40:00', 'inclusive' => false, 'column' => 'post_date_gmt']]
+        && $q['numberposts'] === 500)->andReturn([
+            (object) ['ID' => 5, 'post_type' => 'chat_log'],
+            (object) ['ID' => 6, 'post_type' => 'chat_history'],
+            (object) ['ID' => 7, 'post_type' => 'chat_log'],
+        ]);
+    Functions\expect('wp_delete_post')->once()->with(5, true)->andReturn((object) ['ID' => 5]);
+    Functions\expect('wp_delete_post')->once()->with(7, true)->andReturn(false);
+    Functions\expect('wp_delete_post')->never()->with(6, Mockery::any());
+    expect((new UsageMeter(new Store()))->cleanup())->toBe(1);
+});
+
+it('works through a backlog in batches and stops after a bounded number of them', function (): void {
+    Functions\when('get_option')->justReturn(['privacy.usage_retention_days' => 1]);
+    $batch = array_map(static fn(int $i): object => (object) ['ID' => $i, 'post_type' => 'chat_log'], range(1, 500));
+    // Every batch comes back full: the run must still end.
+    Functions\expect('get_posts')->times(20)->andReturn($batch);
+    Functions\when('wp_delete_post')->alias(static fn(int $id): object => (object) ['ID' => $id]);
+    expect((new UsageMeter(new Store()))->cleanup())->toBe(10_000);
+});

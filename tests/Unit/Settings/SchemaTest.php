@@ -102,3 +102,34 @@ it('validates URL fields through esc_url_raw and falls back to the default when 
     expect($ok['provider.base_url'])->toBe('https://ollama.example/v1')
         ->and($ok['chat.assistant_avatar'])->toBe('https://example.com/a.png');
 });
+
+it('keeps usage receipts for 90 days by default, 0 meaning forever, and never a negative number', function (): void {
+    $f = Schema::fields()['privacy.usage_retention_days'];
+    expect($f['type'])->toBe('integer')->and($f['default'])->toBe(90)->and($f['section'])->toBe('privacy')->and($f['min'])->toBe(0);
+    expect(Schema::sanitize(['privacy.usage_retention_days' => '0'], [])['privacy.usage_retention_days'])->toBe(0)
+        ->and(Schema::sanitize(['privacy.usage_retention_days' => '-7'], [])['privacy.usage_retention_days'])->toBe(0)
+        ->and(Schema::sanitize(['privacy.usage_retention_days' => '400'], [])['privacy.usage_retention_days'])->toBe(400)
+        ->and(Schema::sanitize(['privacy.usage_retention_days' => 'x'], [])['privacy.usage_retention_days'])->toBe(90)
+        ->and(Schema::sanitize(['privacy.usage_retention_days' => '999999'], [])['privacy.usage_retention_days'])->toBe($f['max']);
+});
+
+// The copy that P1's real runs asked for. Pinned by keyword so it cannot quietly vanish.
+it('tells the admin what the timeout, the usage receipts and the caps really do', function (): void {
+    $fields = Schema::fields();
+    $sections = Schema::sections();
+    expect($fields['provider.timeout']['description'] ?? '')->toContain('cold')
+        ->and($fields['privacy.usage_log']['description'] ?? '')->toContain('always')->toContain('never')
+        ->and($fields['privacy.usage_retention_days']['description'] ?? '')->toContain('0 ')
+        ->and($sections['governance']['description'])->toContain('reasoning')
+        ->and($fields['models.default']['description'] ?? '')->toContain('reasoning');
+});
+
+// The overrides table posts every cell of every row, blank ones included: a blank is "no
+// override", never an empty string that would shadow the global keep_alive or system prompt.
+it('drops blank override cells so a row of blanks is no override at all', function (): void {
+    $out = Schema::sanitize(['models.overrides' => [
+        'a' => ['temperature' => '', 'num_ctx' => '', 'keep_alive' => '', 'system' => ''],
+        'b' => ['temperature' => '', 'num_ctx' => '', 'keep_alive' => ' 1h ', 'system' => '  '],
+    ]], []);
+    expect($out['models.overrides'])->toBe(['b' => ['keep_alive' => '1h']]);
+});

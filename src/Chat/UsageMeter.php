@@ -19,10 +19,26 @@ use AlpacaBot\Settings\Store;
  * caps. A privacy toggle that switched off a cost control would fail permissive. The row keeps
  * its author either way, because the per-user cap needs it — so "usage log off" still leaves a
  * per-user trail of token counts and timings; settings copy should say so plainly.
+ *
+ * That trail is why the rows do not live forever: `privacy.usage_retention_days` (90 by
+ * default, 0 keeps everything) bounds it, and cleanup() enforces it once a day from a cron event
+ * (CLEANUP_HOOK). The event is (re)scheduled on init rather than on activation so a site that
+ * already had the plugin when the setting arrived gets it without a reactivation; Plugin's
+ * deactivation hook clears it. Only chat_log rows are ever deleted here, never a conversation.
  */
 final class UsageMeter
 {
     public const POST_TYPE = 'chat_log';
+
+    /** The daily cron event that runs cleanup(); Plugin wires the listener and clears it on deactivation. */
+    public const CLEANUP_HOOK = 'alpaca_bot/usage/cleanup';
+
+    /**
+     * Rows deleted per query, and the most queries one run makes. A daily run that deletes ten
+     * thousand rows and stops is a run that always ends; whatever is left is tomorrow's.
+     */
+    private const CLEANUP_BATCH = 500;
+    private const CLEANUP_BATCHES = 20;
 
     /**
      * Month caches expire at the top of the hour, whether written fresh or bumped, so the rows
@@ -211,5 +227,72 @@ final class UsageMeter
     private function ttl(int $now): int
     {
         return self::TTL - $now % self::TTL;
+    }
+
+    /**
+     * Makes sure the daily cleanup event exists. Runs on init on every request: wp_next_scheduled()
+     * reads the (autoloaded) cron option, so the check costs nothing, and it is the one place that
+     * reaches an already-installed site. The first run is due a day out, not at once: a site that
+     * has just gained the setting should have a day to lower or zero it before anything is deleted.
+     */
+    public function scheduleCleanup(): void
+    {
+        if (wp_next_scheduled(self::CLEANUP_HOOK) === false) {
+            wp_schedule_event((int) current_time('timestamp', true) + 86400, 'daily', self::CLEANUP_HOOK);
+        }
+    }
+
+    /** Static so the deactivation hook needs no service to have been built first. */
+    public static function unscheduleCleanup(): void
+    {
+        wp_clear_scheduled_hook(self::CLEANUP_HOOK);
+    }
+
+    /**
+     * Deletes chat_log rows whose GMT date is older than `privacy.usage_retention_days` days, in
+     * batches; 0 deletes nothing. The month caches are left alone: a window shorter than a month
+     * makes this month's total drop by the deleted rows, and the hourly expiry re-reads the rows
+     * within the hour, which is the drift record() already tolerates.
+     *
+     * The rows come back as objects, not ids, so the type is checked on each before it is
+     * deleted: the query asks for chat_log, and this is the guard that a filter on the query, or
+     * a bug in the one above, cannot turn into a deleted conversation. Permanently (`true`): a
+     * receipt in the trash would still be a row of per-user numbers, which is what retention
+     * exists to remove.
+     *
+     * @return int rows deleted
+     */
+    public function cleanup(): int
+    {
+        $days = (int) $this->store->get('privacy.usage_retention_days');
+        if ($days <= 0) {
+            return 0;
+        }
+        $before = gmdate('Y-m-d H:i:s', (int) current_time('timestamp', true) - $days * 86400);
+        $deleted = 0;
+        for ($batch = 0; $batch < self::CLEANUP_BATCHES; $batch++) {
+            $rows = get_posts([
+                'post_type' => self::POST_TYPE,
+                'post_status' => 'any',
+                'numberposts' => self::CLEANUP_BATCH,
+                'orderby' => 'ID',
+                'order' => 'ASC',
+                'update_post_meta_cache' => false,
+                'update_post_term_cache' => false,
+                'date_query' => [['before' => $before, 'inclusive' => false, 'column' => 'post_date_gmt']],
+            ]);
+            foreach ($rows as $row) {
+                if ($row->post_type !== self::POST_TYPE) {
+                    continue;
+                }
+                if (wp_delete_post((int) $row->ID, true)) {
+                    $deleted++;
+                }
+            }
+            if (count($rows) < self::CLEANUP_BATCH) {
+                break;
+            }
+        }
+        return $deleted;
     }
 }

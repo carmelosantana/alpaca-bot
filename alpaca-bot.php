@@ -58,3 +58,4 @@ if (!is_readable($prefixed)) {
 require_once $prefixed;
 
 \AlpacaBot\Plugin::boot();
+register_deactivation_hook(__FILE__, [\AlpacaBot\Plugin::class, 'deactivate']);

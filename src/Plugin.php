@@ -52,6 +52,14 @@ final class Plugin
         $meter = new Chat\UsageMeter($store);
         $this->set(Chat\UsageMeter::class, $meter);
         add_action('init', [$meter, 'registerPostType']);
+        // The receipt retention cron: (re)scheduled on init so an already-installed site gets it
+        // without a reactivation (UsageMeter::scheduleCleanup() says why), cleared by deactivate().
+        add_action('init', [$meter, 'scheduleCleanup']);
+        // Not `static`: Brain Monkey (PHP 8.4) warns when it inspects a static closure hooked
+        // through add_action(), as the migration closure below found first.
+        add_action(Chat\UsageMeter::CLEANUP_HOOK, function () use ($meter): void {
+            $meter->cleanup();
+        });
         $caps = new Chat\CapPolicy($store, $meter);
         $this->set(Chat\CapPolicy::class, $caps);
         $collector = new Context\Collector([new Context\CurrentScreenSource()]);
@@ -73,11 +81,33 @@ final class Plugin
                 $controller->register();
             }
         });
+        // The admin screens hook admin_init and admin_menu without an is_admin() gate: neither
+        // action fires outside wp-admin, so the gate would only decide whether two small objects
+        // are built, and it would decide wrong where is_admin() is false at plugins_loaded but a
+        // test (wp-phpunit sets no screen until a test does) later fires the actions itself.
+        // options.php, which every save posts to, is wp-admin and fires admin_init as any screen.
+        $settingsPage = new Admin\SettingsPage($store, $this->get(Provider\ModelCatalog::class));
+        $this->set(Admin\SettingsPage::class, $settingsPage);
+        add_action('admin_init', [$settingsPage, 'register']);
+        $menu = new Admin\Menu($settingsPage, static function (): void {
+            echo '<div class="wrap"><h1>' . esc_html__('Alpaca Bot', 'alpaca-bot') . '</h1><p>' . esc_html__('The chat screen arrives in the next milestone.', 'alpaca-bot') . '</p></div>';
+        });
+        add_action('admin_menu', [$menu, 'register']);
         // WP-CLI is not a dependency: the command is only registered when WP-CLI is the
         // process running us, and the class itself never references WP_CLI until then.
         if (defined('WP_CLI') && constant('WP_CLI')) {
             \WP_CLI::add_command('alpaca-bot', new Cli\ChatCommand($this->get(Chat\Pipeline::class), $this->get(Provider\ModelCatalog::class), $meter, $store));
         }
+    }
+
+    /**
+     * The deactivation hook (alpaca-bot.php registers it): the one thing the plugin leaves in
+     * the database that would keep running without it is the retention cron event. Options,
+     * conversations and receipts stay; deactivation is not uninstall.
+     */
+    public static function deactivate(): void
+    {
+        Chat\UsageMeter::unscheduleCleanup();
     }
 
     /**

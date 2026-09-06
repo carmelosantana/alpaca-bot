@@ -83,6 +83,18 @@ function restController(array $routes): Controller
 }
 
 /**
+ * Admin\SettingsPageTest: a page over a pre-seeded Store and a catalog that is never asked
+ * (do_settings_sections() is stubbed there, so the overrides table never renders).
+ *
+ * @param array<string, mixed> $settings
+ */
+function settingsPage(array $settings = []): AlpacaBot\Admin\SettingsPage
+{
+    $store = new Store($settings);
+    return new AlpacaBot\Admin\SettingsPage($store, new ModelCatalog(new Factory($store)));
+}
+
+/**
  * ChatControllerTest and ConversationsControllerTest: a request with its parameters already set.
  * The stub's constructor takes route attributes as its third argument, as core's does, so
  * parameters go in through set_param(), the way core sets URL, query and body values.
