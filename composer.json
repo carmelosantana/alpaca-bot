@@ -67,6 +67,7 @@
             "@prefix"
         ],
         "test": "pest --colors=always",
+        "test:integration": "bash bin/test-integration.sh",
         "analyse": "phpstan analyse --memory-limit=1G",
         "check": [
             "@analyse",

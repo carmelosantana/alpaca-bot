@@ -7,3 +7,4 @@ vendor-prefixed/
 node_modules/
 tools/strauss/vendor/
 .phpunit.cache/
+tools/integration/vendor/
