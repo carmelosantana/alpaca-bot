@@ -10,6 +10,8 @@
 
 **Spec:** `docs/superpowers/specs/2026-09-05-alpaca-bot-release-and-quality-gates.md` and `2026-09-05-alpaca-bot-1-0-core-refactor.md` (sequencing steps 8-9). Board tasks closed here: Kanboard #2950 (plugin review automation), #2944 (security audit), #2947 (performance), #2953 (deep code review).
 
+> **Corrections from P1 execution (2026-09-05):** strauss ^0.29 and pest ^5 cannot share one lockfile (conflicting `psr/simple-cache` majors). strauss lives in `tools/strauss/composer.json`; `bin/build-vendor.sh` and every CI step below must install and run it from there (`composer --working-dir=tools/strauss install && tools/strauss/vendor/bin/strauss`), not via a root `composer prefix` script. The `composer audit` step should run for both manifests.
+
 ## Global Constraints
 
 - P1-P4 constraints hold. Branch `1.0` until the release PR merges to `main`; tags are cut from `main`.
