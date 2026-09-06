@@ -4,10 +4,10 @@ declare(strict_types=1);
 
 namespace AlpacaBot\Provider;
 
+use AlpacaBot\Settings\Schema;
 use AlpacaBot\Settings\Store;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Contract\ProviderInterface;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Provider\OllamaProvider;
-use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Provider\OpenAICompatibleProvider;
 use AlpacaBot\Vendor\Symfony\Component\HttpClient\HttpClient;
 
 /**
@@ -20,11 +20,24 @@ final class Factory
 {
     public function __construct(private Store $store) {}
 
-    /** The OpenAI-compatible endpoint: the OLLAMA_API_URL constant (with /v1 appended) wins over settings. */
+    /**
+     * The OpenAI-compatible endpoint, always ending in `/v1`.
+     *
+     * A non-empty OLLAMA_API_URL constant wins over `provider.base_url`; an empty
+     * value from either source falls back to the schema default. The providers
+     * append their own routes to the `/v1` root, so a deeper path stored by mistake
+     * (`…/v1/chat`) is cut back to its first `/v1` segment rather than getting a
+     * second `/v1` appended.
+     */
     public function baseUrl(): string
     {
-        $url = defined('OLLAMA_API_URL') ? (string) constant('OLLAMA_API_URL') : (string) $this->store->get('provider.base_url');
-        $url = rtrim($url, '/');
+        $constant = defined('OLLAMA_API_URL') ? trim((string) constant('OLLAMA_API_URL')) : '';
+        $url = $constant !== '' ? $constant : trim((string) $this->store->get('provider.base_url'));
+        if ($url === '') {
+            $url = (string) Schema::defaults()['provider.base_url'];
+        }
+        $url = (string) preg_replace('~/v1(?:/.*)?$~', '/v1', rtrim($url, '/'));
+
         return str_ends_with($url, '/v1') ? $url : $url . '/v1';
     }
 
@@ -35,18 +48,27 @@ final class Factory
     public function make(?string $model = null): ProviderInterface
     {
         $model = ($model === null || $model === '') ? (string) $this->store->get('models.default') : $model;
-        $apiKey = (string) $this->store->get('provider.api_key');
         // Symfony's `timeout` is the idle timeout between chunks, which is the one that
         // matters for a streamed reply; the library default would be 300s.
         $http = HttpClient::create(['timeout' => (int) $this->store->get('provider.timeout')]);
 
-        // OllamaProvider is final and pins its Bearer token to 'ollama-local', so a configured
-        // key needs the parent OpenAICompatibleProvider against the same /v1 endpoint.
-        // `provider.kind` = wp-ai has no adapter yet and falls through here; the filter below
-        // is the extension point for swapping in another provider.
-        $provider = $apiKey === ''
-            ? new OllamaProvider(model: $model, baseUrl: $this->baseUrl(), httpClient: $http, numCtx: (int) $this->store->get('models.num_ctx'))
-            : new OpenAICompatibleProvider(model: $model, baseUrl: $this->baseUrl(), apiKey: $apiKey, httpClient: $http);
+        // OllamaProvider pins 'ollama-local' as its Bearer token on every request, so a
+        // configured key is swapped in at the wire: the provider (and the tool-schema
+        // sanitising in its formatTools()) stays, and the key is never dropped.
+        $apiKey = (string) $this->store->get('provider.api_key');
+        if ($apiKey !== '') {
+            $http = new BearerHttpClient($http, $apiKey);
+        }
+
+        // `provider.kind`: 'ollama' is the only kind with an adapter. 'wp-ai' falls through
+        // to it until its adapter lands (P4); the filter below is the extension point for
+        // swapping in another provider.
+        $provider = new OllamaProvider(
+            model: $model,
+            baseUrl: $this->baseUrl(),
+            httpClient: $http,
+            numCtx: (int) $this->store->get('models.num_ctx'),
+        );
 
         $filtered = apply_filters('alpaca_bot/provider', $provider, $model, $this->store);
         if (!$filtered instanceof ProviderInterface) {

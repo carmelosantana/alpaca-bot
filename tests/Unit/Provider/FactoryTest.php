@@ -2,12 +2,14 @@
 
 declare(strict_types=1);
 
+use AlpacaBot\Provider\BearerHttpClient;
 use AlpacaBot\Provider\Factory;
 use AlpacaBot\Settings\Store;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Contract\ProviderInterface;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Provider\AbstractProvider;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Provider\OllamaProvider;
-use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Provider\OpenAICompatibleProvider;
+use AlpacaBot\Vendor\Symfony\Component\HttpClient\MockHttpClient;
+use AlpacaBot\Vendor\Symfony\Component\HttpClient\Response\MockResponse;
 use AlpacaBot\Vendor\Symfony\Contracts\HttpClient\HttpClientInterface;
 use Brain\Monkey\Filters;
 use Brain\Monkey\Functions;
@@ -19,16 +21,46 @@ function providerProp(object $object, string $property, ?string $class = null): 
 }
 
 /**
- * OLLAMA_API_URL is a process-wide constant and Pest runs the suite in one
- * process: the constant test is last in this file, and the settings-path
- * tests guard against a reordered run rather than asserting a stale value.
+ * OLLAMA_API_URL is a process-wide constant, so each value is probed in a fresh PHP
+ * process; the suite itself never defines it, and stays order-independent.
+ *
+ * @param string|null $constant null leaves the constant undefined
+ * @param array<string, mixed> $settings seeded into the Store
  */
-function skipIfOllamaConstantDefined(): void
+function baseUrlInFreshProcess(?string $constant, array $settings = []): string
 {
-    if (defined('OLLAMA_API_URL')) {
-        test()->markTestSkipped('OLLAMA_API_URL was defined by an earlier test; settings path not testable in this run.');
-    }
+    $script = <<<'PHP_SCRIPT'
+    <?php
+    [, $root, $defined, $constant, $settings] = $argv;
+    require $root . '/vendor/autoload.php';
+    require $root . '/vendor-prefixed/autoload.php';
+    function __(string $text, string $domain = 'default'): string { return $text; }
+    if ($defined === '1') { define('OLLAMA_API_URL', $constant); }
+    echo (new AlpacaBot\Provider\Factory(new AlpacaBot\Settings\Store(json_decode($settings, true))))->baseUrl();
+    PHP_SCRIPT;
+
+    $process = proc_open(
+        [PHP_BINARY, '--', dirname(__DIR__, 3), $constant === null ? '0' : '1', (string) $constant, json_encode($settings, JSON_THROW_ON_ERROR)],
+        [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
+        $pipes,
+    );
+    expect($process)->toBeResource();
+    fwrite($pipes[0], $script);
+    fclose($pipes[0]);
+    $stdout = (string) stream_get_contents($pipes[1]);
+    $stderr = (string) stream_get_contents($pipes[2]);
+    fclose($pipes[1]);
+    fclose($pipes[2]);
+    expect(proc_close($process))->toBe(0, "probe failed: {$stderr}{$stdout}")->and($stderr)->toBe('');
+
+    return $stdout;
 }
+
+beforeEach(function (): void {
+    // Every in-process test here exercises the settings path; a stray define() anywhere in
+    // the suite would silently retarget them, so make that a failure rather than a skip.
+    expect(defined('OLLAMA_API_URL'))->toBeFalse('OLLAMA_API_URL must never be defined in the test process; probe it with baseUrlInFreshProcess().');
+});
 
 it('builds an OllamaProvider from settings with the default model', function (): void {
     Functions\when('get_option')->justReturn(['models.default' => 'llama3.2', 'provider.base_url' => 'http://ollama:11434/v1']);
@@ -45,7 +77,6 @@ it('uses an explicit model over the settings default', function (): void {
 });
 
 it('reads provider.base_url from settings and normalises it to a /v1 endpoint', function (string $stored, string $expected): void {
-    skipIfOllamaConstantDefined();
     $factory = new Factory(new Store(['provider.base_url' => $stored]));
     $provider = $factory->make('m');
     expect($factory->baseUrl())->toBe($expected)
@@ -55,24 +86,55 @@ it('reads provider.base_url from settings and normalises it to a /v1 endpoint', 
     'trailing slash' => ['http://ollama:11434/', 'http://ollama:11434/v1'],
     'already /v1' => ['http://ollama:11434/v1', 'http://ollama:11434/v1'],
     'already /v1 with slash' => ['http://ollama:11434/v1/', 'http://ollama:11434/v1'],
+    'mounted under a prefix' => ['http://proxy/ollama/v1', 'http://proxy/ollama/v1'],
+    'deeper path stored by mistake' => ['http://ollama:11434/v1/chat', 'http://ollama:11434/v1'],
+    'v1-prefixed segment is not /v1' => ['http://ollama:11434/v1beta', 'http://ollama:11434/v1beta/v1'],
+    'empty falls back to the schema default' => ['', 'http://localhost:11434/v1'],
+    'whitespace falls back to the schema default' => ['   ', 'http://localhost:11434/v1'],
 ]);
 
 it('wires provider.timeout into the HTTP client it injects', function (): void {
     $provider = (new Factory(new Store(['provider.timeout' => 42])))->make('m');
     $client = providerProp($provider, 'httpClient', AbstractProvider::class);
     expect($client)->toBeInstanceOf(HttpClientInterface::class)
+        ->and($client)->not->toBeInstanceOf(BearerHttpClient::class)
         ->and(providerProp($client, 'defaultOptions')['timeout'])->toEqual(42);
 });
 
-it('builds an OpenAICompatibleProvider carrying the key when provider.api_key is set', function (): void {
-    skipIfOllamaConstantDefined();
+it('keeps OllamaProvider and wraps the timeout client in a Bearer decorator when provider.api_key is set', function (): void {
+    $store = new Store(['provider.api_key' => 'sk-secret', 'provider.timeout' => 42, 'provider.base_url' => 'http://ollama:11434', 'models.default' => 'llama3.2']);
+    $p = (new Factory($store))->make();
+    $client = providerProp($p, 'httpClient', AbstractProvider::class);
+    expect($p)->toBeInstanceOf(OllamaProvider::class)
+        ->and($p->getModel())->toBe('llama3.2')
+        ->and(providerProp($p, 'baseUrl', AbstractProvider::class))->toBe('http://ollama:11434/v1')
+        ->and($client)->toBeInstanceOf(BearerHttpClient::class)
+        ->and(providerProp($client, 'token'))->toBe('sk-secret')
+        ->and(providerProp(providerProp($client, 'client'), 'defaultOptions')['timeout'])->toEqual(42);
+});
+
+it('puts the configured key on the wire instead of ollama-local, on /v1 and native /api calls alike', function (): void {
     $store = new Store(['provider.api_key' => 'sk-secret', 'provider.base_url' => 'http://ollama:11434', 'models.default' => 'llama3.2']);
     $p = (new Factory($store))->make();
-    expect($p)->toBeInstanceOf(OpenAICompatibleProvider::class)
-        ->and($p)->not->toBeInstanceOf(OllamaProvider::class)
-        ->and($p->getModel())->toBe('llama3.2')
-        ->and(providerProp($p, 'apiKey', AbstractProvider::class))->toBe('sk-secret')
-        ->and(providerProp($p, 'baseUrl', AbstractProvider::class))->toBe('http://ollama:11434/v1');
+
+    // The decorator is the factory's; only the transport underneath it is swapped for a recorder.
+    $wire = [];
+    $recorder = new MockHttpClient(function (string $method, string $url, array $options) use (&$wire): MockResponse {
+        $wire[$url] = $options['normalized_headers']['authorization'] ?? null;
+        return new MockResponse(str_contains($url, '/api/tags')
+            ? '{"models":[]}'
+            : '{"choices":[{"message":{"content":"ok"},"finish_reason":"stop"}]}');
+    });
+    $decorator = providerProp($p, 'httpClient', AbstractProvider::class);
+    expect($decorator)->toBeInstanceOf(BearerHttpClient::class); // fail here, not on a real socket, if the wrap regresses
+    (new ReflectionProperty(BearerHttpClient::class, 'client'))->setValue($decorator, $recorder);
+
+    expect($p->chat([])->content)->toBe('ok')                         // /v1: AbstractProvider::headers() set 'Bearer ollama-local'
+        ->and($p->models())->toBe([])                                 // native: OllamaProvider passes no headers at all
+        ->and($wire)->toBe([
+            'http://ollama:11434/v1/chat/completions' => ['Authorization: Bearer sk-secret'],
+            'http://ollama:11434/api/tags' => ['Authorization: Bearer sk-secret'],
+        ]);
 });
 
 it('falls through to the default provider for the wp-ai kind until its adapter lands', function (): void {
@@ -92,10 +154,12 @@ it('rejects a filter that does not return a provider', function (): void {
     (new Factory(new Store([])))->make('x');
 })->throws(UnexpectedValueException::class, 'alpaca_bot/provider');
 
-it('prefers the OLLAMA_API_URL constant and appends /v1', function (): void {
-    if (!defined('OLLAMA_API_URL')) {
-        define('OLLAMA_API_URL', 'http://host.docker.internal:11434');
-    }
-    Functions\when('get_option')->justReturn([]);
-    expect((new Factory(new Store()))->baseUrl())->toBe('http://host.docker.internal:11434/v1');
-});
+it('prefers the OLLAMA_API_URL constant over settings and normalises it like a stored URL', function (?string $constant, array $settings, string $expected): void {
+    expect(baseUrlInFreshProcess($constant, $settings))->toBe($expected);
+})->with([
+    'constant wins and gets /v1' => ['http://host.docker.internal:11434', ['provider.base_url' => 'http://ollama:11434/v1'], 'http://host.docker.internal:11434/v1'],
+    'constant deeper path is cut back to /v1' => ['http://host.docker.internal:11434/v1/chat', [], 'http://host.docker.internal:11434/v1'],
+    'empty constant defers to settings' => ['', ['provider.base_url' => 'http://ollama:11434'], 'http://ollama:11434/v1'],
+    'empty constant and empty setting fall back to the schema default' => ['', ['provider.base_url' => ''], 'http://localhost:11434/v1'],
+    'undefined constant reads settings (probe sanity)' => [null, ['provider.base_url' => 'http://ollama:11434'], 'http://ollama:11434/v1'],
+]);

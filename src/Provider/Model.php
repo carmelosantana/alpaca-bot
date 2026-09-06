@@ -22,13 +22,14 @@ final class Model
     /**
      * Capability flags from the model name alone. Ollama only reports capabilities when
      * `/api/show` answers, and OpenAI-compatible `/v1/models` never does, so the name is
-     * the floor every model gets.
+     * the floor every model gets. Embedding models are not flagged here: ModelCatalog
+     * drops them from the list outright before any flag is read.
      */
     public static function fromId(string $id): self
     {
         $n = strtolower($id);
         $vision = (bool) preg_match('/llava|vision|moondream|minicpm-v|gemma3|qwen.*vl|bakllava/', $n);
-        $tools = !(bool) preg_match('/embed|llava|moondream|bakllava/', $n);
+        $tools = !(bool) preg_match('/llava|moondream|bakllava/', $n);
         $thinking = (bool) preg_match('/qwen3|deepseek-r1|gpt-oss|magistral|think/', $n);
         return new self($id, $id, $tools, $vision, $thinking);
     }

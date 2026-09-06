@@ -48,7 +48,7 @@ it('lists models from the provider, caches them, and flags capabilities by name'
         ->and($models[1]->tools)->toBeFalse();
 });
 
-it('reads the cached list on the second call instead of hitting the provider twice', function (): void {
+it('serves a second catalog from the transient the first one wrote, hitting the provider once', function (): void {
     $cached = false;
     Functions\expect('get_transient')->twice()->with(ModelCatalog::TRANSIENT)->andReturnUsing(function () use (&$cached): mixed {
         return $cached;
@@ -59,20 +59,34 @@ it('reads the cached list on the second call instead of hitting the provider twi
     });
     $provider = Mockery::mock(ProviderInterface::class);
     $provider->shouldReceive('models')->once()->andReturn([new ModelDefinition(id: 'qwen3:8b', name: 'qwen3', provider: 'ollama')]);
-    $catalog = new ModelCatalog(catalogFactory($provider));
-    $first = $catalog->all();
-    $second = $catalog->all();
+    $factory = catalogFactory($provider);
+    $first = (new ModelCatalog($factory))->all();
+    $second = (new ModelCatalog($factory))->all();
     expect($cached)->toBe([['id' => 'qwen3:8b', 'label' => 'qwen3:8b', 'tools' => true, 'vision' => false, 'thinking' => true]])
         ->and($second)->toEqual($first)
         ->and($second[0]->thinking)->toBeTrue();
 });
 
-it('refresh bypasses the cache and hits the provider again', function (): void {
+it('memoises the discovered list per request, including an empty one from a downed provider', function (): void {
+    Functions\expect('get_transient')->once()->andReturn(false);
+    Functions\expect('set_transient')->never();
+    $down = Mockery::mock(ProviderInterface::class);
+    $down->shouldReceive('models')->once()->andThrow(new RuntimeException('connection refused'));
+    $catalog = new ModelCatalog(catalogFactory($down));
+    expect($catalog->all())->toBe([])
+        ->and($catalog->find('llama3.2'))->toBeNull()
+        ->and($catalog->defaultId(new Store(['models.default' => 'configured'])))->toBe('configured')
+        ->and($catalog->all())->toBe([]);
+});
+
+it('refresh bypasses the memo and the transient and hits the provider again', function (): void {
     Functions\expect('get_transient')->never();
-    Functions\expect('set_transient')->once()->andReturn(true);
+    Functions\expect('set_transient')->twice()->andReturn(true);
     $provider = Mockery::mock(ProviderInterface::class);
-    $provider->shouldReceive('models')->once()->andReturn([new ModelDefinition(id: 'llama3.2', name: 'llama3.2', provider: 'ollama')]);
-    expect((new ModelCatalog(catalogFactory($provider)))->all(true))->toHaveCount(1);
+    $provider->shouldReceive('models')->twice()->andReturn([new ModelDefinition(id: 'llama3.2', name: 'llama3.2', provider: 'ollama')]);
+    $catalog = new ModelCatalog(catalogFactory($provider, $provider));
+    expect($catalog->all(true))->toHaveCount(1)
+        ->and($catalog->all(true))->toHaveCount(1);
 });
 
 it('uses the cached list and resolves the default id', function (): void {
@@ -80,6 +94,14 @@ it('uses the cached list and resolves the default id', function (): void {
     Functions\when('get_transient')->justReturn([['id' => 'qwen3:8b', 'label' => 'qwen3:8b', 'tools' => true, 'vision' => false, 'thinking' => true]]);
     $c = new ModelCatalog(untouchedFactory());
     expect($c->find('qwen3:8b')?->thinking)->toBeTrue()->and($c->defaultId(new Store()))->toBe('qwen3:8b')->and($c->find('nope'))->toBeNull();
+});
+
+it('drops cached entries that are not arrays or carry no id', function (): void {
+    Functions\when('get_transient')->justReturn([['id' => ''], ['label' => 'no id'], 'junk', null, ['id' => 'ok:1b']]);
+    $c = new ModelCatalog(untouchedFactory());
+    expect($c->all())->toHaveCount(1)
+        ->and($c->all()[0]->id)->toBe('ok:1b')
+        ->and($c->find(''))->toBeNull();
 });
 
 it('falls back to the first model when models.default is empty or not in the catalog', function (): void {
@@ -103,6 +125,13 @@ it('returns an empty list and caches nothing when the provider fails or has no m
         ->and((new ModelCatalog($factory))->defaultId(new Store(['models.default' => 'configured'])))->toBe('configured');
 });
 
+it('lets a broken alpaca_bot/provider filter fail loudly instead of reading as an empty catalog', function (): void {
+    Functions\when('get_transient')->justReturn(false);
+    Functions\expect('set_transient')->never();
+    Filters\expectApplied('alpaca_bot/provider')->once()->andReturn('not a provider');
+    (new ModelCatalog(new Factory(new Store([]))))->all();
+})->throws(UnexpectedValueException::class, 'alpaca_bot/provider');
+
 it('honours capability flags the provider discovered and drops embedding models', function (): void {
     Functions\when('get_transient')->justReturn(false);
     Functions\when('set_transient')->justReturn(true);
@@ -110,6 +139,7 @@ it('honours capability flags the provider discovered and drops embedding models'
     $provider->shouldReceive('models')->once()->andReturn([
         new ModelDefinition(id: 'mystery:1b', name: 'mystery', provider: 'ollama', toolCalls: true, vision: true, thinking: true),
         new ModelDefinition(id: 'nomic-embed-text:latest', name: 'nomic-embed-text', provider: 'ollama'),
+        new ModelDefinition(id: 'Mxbai-EMBED-large', name: 'mxbai', provider: 'ollama'),
     ]);
     $models = (new ModelCatalog(catalogFactory($provider)))->all();
     expect($models)->toHaveCount(1)
@@ -119,12 +149,25 @@ it('honours capability flags the provider discovered and drops embedding models'
         ->and($models[0]->thinking)->toBeTrue();
 });
 
-it('lets the alpaca_bot/models filter reshape the list and ignores non-Model entries', function (): void {
+it('caches the discovered list, not the filtered one, and ignores non-Model entries from the filter', function (): void {
     Functions\when('get_transient')->justReturn(false);
-    Functions\expect('set_transient')->once()->withArgs(fn(string $k, array $v): bool => count($v) === 1 && $v[0]['id'] === 'added:1b');
-    Filters\expectApplied('alpaca_bot/models')->once()->andReturn([new Model('added:1b', 'Added'), 'garbage']);
+    Functions\expect('set_transient')->once()->withArgs(fn(string $k, array $v): bool => count($v) === 1 && $v[0]['id'] === 'real:1b');
+    Filters\expectApplied('alpaca_bot/models')->once()
+        ->with(Mockery::on(fn(array $in): bool => count($in) === 1 && $in[0]->id === 'real:1b'))
+        ->andReturn([new Model('added:1b', 'Added'), 'garbage']);
     $provider = Mockery::mock(ProviderInterface::class);
-    $provider->shouldReceive('models')->once()->andReturn([]);
+    $provider->shouldReceive('models')->once()->andReturn([new ModelDefinition(id: 'real:1b', name: 'real', provider: 'ollama')]);
     $models = (new ModelCatalog(catalogFactory($provider)))->all();
     expect($models)->toHaveCount(1)->and($models[0]->label)->toBe('Added');
+});
+
+it('applies alpaca_bot/models on a transient hit too, so a context-dependent filter is never baked in', function (): void {
+    Functions\when('get_transient')->justReturn([['id' => 'a:1b'], ['id' => 'b:1b']]);
+    Functions\expect('set_transient')->never();
+    Filters\expectApplied('alpaca_bot/models')->twice()
+        ->with(Mockery::on(fn(array $in): bool => array_map(fn(Model $m): string => $m->id, $in) === ['a:1b', 'b:1b']))
+        ->andReturnUsing(fn(array $in): array => [$in[1]]);
+    $c = new ModelCatalog(untouchedFactory());
+    expect(array_map(fn(Model $m): string => $m->id, $c->all()))->toBe(['b:1b'])
+        ->and($c->find('a:1b'))->toBeNull();
 });
