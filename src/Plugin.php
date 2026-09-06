@@ -68,11 +68,35 @@ final class Plugin
                 $migration->run();
             }
         }, 20);
+        add_action('rest_api_init', function (): void {
+            foreach ($this->controllers() as $controller) {
+                $controller->register();
+            }
+        });
         // WP-CLI is not a dependency: the command is only registered when WP-CLI is the
         // process running us, and the class itself never references WP_CLI until then.
         if (defined('WP_CLI') && constant('WP_CLI')) {
             \WP_CLI::add_command('alpaca-bot', new Cli\ChatCommand($this->get(Chat\Pipeline::class), $this->get(Provider\ModelCatalog::class), $meter, $store));
         }
+    }
+
+    /**
+     * The REST controllers to register, through filter `alpaca_bot/rest/controllers`. The plugin's
+     * own controllers are appended to the array handed to the filter as later tasks add them; a
+     * third party appends its own Rest\Controller subclass to get the same namespace, capability
+     * filters and rate limit. Resolved on rest_api_init, not at register(), so a filter added on
+     * plugins_loaded or init is seen. Anything that is not a Controller is dropped rather than
+     * left to fatal inside register().
+     *
+     * @return list<Rest\Controller>
+     */
+    private function controllers(): array
+    {
+        $controllers = apply_filters('alpaca_bot/rest/controllers', []);
+        return array_values(array_filter(
+            is_array($controllers) ? $controllers : [],
+            static fn(mixed $controller): bool => $controller instanceof Rest\Controller,
+        ));
     }
 
     public function set(string $id, object $service): void

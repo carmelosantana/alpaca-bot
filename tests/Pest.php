@@ -46,6 +46,11 @@ if (!defined('ALPACA_BOT_FILE')) {
 }
 require_once dirname(__DIR__) . '/vendor/autoload.php';
 require_once dirname(__DIR__) . '/vendor-prefixed/autoload.php';
+// WP_Error, WP_REST_Request and WP_REST_Response are classes, which Brain Monkey cannot stub,
+// and wordpress-stubs is PHPStan-only. Load the stand-ins unless a real WordPress is present.
+if (!class_exists('WP_Error', false)) {
+    require_once __DIR__ . '/stubs/wp-rest.php';
+}
 
 // ---------------------------------------------------------------- test helpers
 // Pest loads every test file into one process, so a helper declared at the root of a test
