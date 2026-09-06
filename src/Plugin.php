@@ -49,6 +49,10 @@ final class Plugin
         $conversations = new Chat\ConversationStore($store);
         $this->set(Chat\ConversationStore::class, $conversations);
         add_action('init', [$conversations, 'registerPostType']);
+        $meter = new Chat\UsageMeter($store);
+        $this->set(Chat\UsageMeter::class, $meter);
+        add_action('init', [$meter, 'registerPostType']);
+        $this->set(Chat\CapPolicy::class, new Chat\CapPolicy($store, $meter));
         add_action('admin_init', function () use ($store): void {
             $migration = new Migrate04($store);
             if ($migration->needed()) {
