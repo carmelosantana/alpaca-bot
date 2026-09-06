@@ -12,6 +12,7 @@ use AlpacaBot\Context\ContextSourceInterface;
 use AlpacaBot\Plugin;
 use AlpacaBot\Provider\Factory;
 use AlpacaBot\Provider\ModelCatalog;
+use AlpacaBot\Rest\Controller;
 use AlpacaBot\Settings\Store;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Contract\ProviderInterface;
 use Brain\Monkey;
@@ -56,6 +57,26 @@ if (!class_exists('WP_Error', false)) {
 // Pest loads every test file into one process, so a helper declared at the root of a test
 // file is a global: a second file declaring the same name is a fatal redeclare, not a test
 // failure. Helpers live here instead, one declaration each, prefixed by the suite they serve.
+
+/**
+ * Rest\ControllerTest (and every later REST test): a Controller over exactly the given route
+ * list, so a test declares the one route it is about inline instead of a named subclass.
+ * Controller is abstract and Pest.php is one process, so a named subclass per test file would
+ * be the redeclare trap described above; an anonymous class has no name to collide on.
+ *
+ * @param list<array{path: string, methods: string, callback: callable, capability: string, args?: array<string, array<string, mixed>>, rate_limit?: bool}> $routes
+ */
+function restController(array $routes): Controller
+{
+    return new class ($routes) extends Controller {
+        public function __construct(private array $routes) {}
+
+        public function routes(): array
+        {
+            return $this->routes;
+        }
+    };
+}
 
 /** ConversationStoreTest: a chat_history post as get_post() hands it back (stdClass: WP_Post is not loaded here). */
 function conversationChatPost(int $id = 42, string $author = '3', string $type = 'chat_history', string $date = '2024-01-01 00:00:00'): object

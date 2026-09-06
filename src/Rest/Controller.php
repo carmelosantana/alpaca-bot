@@ -15,8 +15,10 @@ namespace AlpacaBot\Rest;
  * sees is get_current_user_id(), which core has already established by the time a callback runs.
  *
  * The rate limit lives in the callback wrapper, not the permission callback, so it counts only
- * requests that were allowed: a visitor or a user without the capability is refused before a
- * bucket is touched, and the bucket is always a real user's, never user 0's.
+ * requests that were allowed: a user without the capability is refused before a bucket is
+ * touched. A route a site has opened to visitors through its capability filter (`exist` holds
+ * for a logged-out request) is still limited, but per client address rather than as user 0, so
+ * one script cannot spend every visitor's allowance; RateLimit explains the keying.
  */
 abstract class Controller
 {
@@ -49,12 +51,20 @@ abstract class Controller
     /**
      * The permission callback for a route whose default capability is `$capability`. The filter
      * sees the request, so a site can tighten (or, for a route it exposes to subscribers, loosen)
-     * per request; whatever it returns is the capability checked.
+     * per request.
+     *
+     * Only a capability name is honoured. WP_User::has_cap() reads a numeric capability as a
+     * legacy user level ('1' is level_1, which every Contributor holds), so a filter that
+     * returns a bool or a number by mistake, say `fn() => current_user_can('manage_options')`,
+     * would cast to '1' and quietly open the route to Contributors. Anything that is not a
+     * non-empty, non-numeric string is treated as no opinion and the declared capability is
+     * what gets checked; a filter cannot loosen a route by accident, only by naming a capability.
      */
     public function permission(string $route, string $capability): \Closure
     {
         return static function (\WP_REST_Request $request) use ($route, $capability): bool|\WP_Error {
-            $cap = (string) apply_filters("alpaca_bot/capability/{$route}", $capability, $request);
+            $filtered = apply_filters("alpaca_bot/capability/{$route}", $capability, $request);
+            $cap = is_string($filtered) && $filtered !== '' && !is_numeric($filtered) ? $filtered : $capability;
             return current_user_can($cap) ? true : Errors::forbidden();
         };
     }

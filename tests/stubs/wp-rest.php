@@ -7,9 +7,11 @@
  * tests/Pest.php requires this file only when the real classes are absent; inside a WordPress
  * process (the integration suite) core's own classes win and this file is never loaded.
  *
- * Only the members the plugin calls are modelled, with core's signatures (wp-includes/class-wp-error.php,
- * rest-api/class-wp-rest-request.php, rest-api/class-wp-rest-response.php), so a test that
- * passes here does not depend on a method core lacks.
+ * Only the members the plugin calls are modelled, with core's signatures and semantics
+ * (wp-includes/class-wp-error.php, rest-api/class-wp-rest-request.php,
+ * rest-api/class-wp-rest-response.php), so a test that passes here does not depend on a method
+ * core lacks or a behaviour core does not have. tests/Unit/Rest/WpRestStubTest.php pins the
+ * request semantics that are easiest to get wrong.
  */
 
 declare(strict_types=1);
@@ -37,10 +39,29 @@ if (!class_exists('WP_Error', false)) {
 }
 
 if (!class_exists('WP_REST_Request', false)) {
+    /**
+     * Core's constructor takes ($method, $route, $attributes): the third argument is the route's
+     * registration options, not parameters. Parameters arrive through set_param() (what core does
+     * for URL, query and form values) or a JSON body, and get_json_params() is only the parsed
+     * body, null when there was none, as in core. A test that hands params to the constructor
+     * therefore sees them ignored here exactly as WordPress would ignore them.
+     *
+     * Where a JSON body and set_param() both carry a key, the body wins in get_param() and
+     * get_params(), core's merge order for a JSON request. Not modelled: core's per-source param
+     * types (URL/GET/POST/FILES/JSON/defaults), which only matter to code that asks for one source.
+     */
     class WP_REST_Request
     {
-        /** @param array<string, mixed> $params */
-        public function __construct(public string $method = 'GET', public string $route = '', private array $params = []) {}
+        /** @var array<string, mixed> */
+        private array $params = [];
+
+        /** @var array<string, string> */
+        private array $headers = [];
+
+        private string $body = '';
+
+        /** @param array<string, mixed> $attributes */
+        public function __construct(private string $method = '', private string $route = '', private array $attributes = []) {}
 
         public function get_method(): string
         {
@@ -52,26 +73,67 @@ if (!class_exists('WP_REST_Request', false)) {
             return $this->route;
         }
 
-        public function get_param(string $key): mixed
+        /** @return array<string, mixed> */
+        public function get_attributes(): array
         {
-            return $this->params[$key] ?? null;
+            return $this->attributes;
         }
 
-        /** @return array<string, mixed> */
-        public function get_params(): array
+        public function set_header(string $key, string $value): void
         {
-            return $this->params;
+            $this->headers[strtolower($key)] = $value;
         }
 
-        /** @return array<string, mixed> */
-        public function get_json_params(): array
+        public function get_header(string $key): ?string
         {
-            return $this->params;
+            return $this->headers[strtolower($key)] ?? null;
+        }
+
+        public function set_body(string $data): void
+        {
+            $this->body = $data;
+        }
+
+        public function get_body(): string
+        {
+            return $this->body;
         }
 
         public function set_param(string $key, mixed $value): void
         {
             $this->params[$key] = $value;
+        }
+
+        public function has_param(string $key): bool
+        {
+            return array_key_exists($key, $this->get_params());
+        }
+
+        public function get_param(string $key): mixed
+        {
+            return $this->get_params()[$key] ?? null;
+        }
+
+        /** @return array<string, mixed> */
+        public function get_params(): array
+        {
+            return array_replace($this->params, $this->get_json_params() ?? []);
+        }
+
+        /**
+         * Core parses the body only when the Content-Type says JSON (application/json or a
+         * +json type) and it decodes to an array; anything else leaves the JSON params null.
+         *
+         * @return array<string, mixed>|null
+         */
+        public function get_json_params(): ?array
+        {
+            $type = strtolower((string) $this->get_header('content-type'));
+            if ($this->body === '' || !preg_match('#^application/([^;\s]+\+)?json#', $type)) {
+                return null;
+            }
+            $decoded = json_decode($this->body, true);
+            return is_array($decoded) ? $decoded : null;
         }
     }
 }

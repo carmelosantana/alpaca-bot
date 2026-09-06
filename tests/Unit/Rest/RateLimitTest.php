@@ -49,9 +49,73 @@ it('keys the transient by bucket, user and UTC minute so a new minute starts a f
 
 it('never lets the filter disable the limiter: a non-positive limit becomes one request a minute', function (): void {
     Functions\when('current_time')->justReturn(1_725_000_015);
-    Filters\expectApplied('alpaca_bot/rate_limit')->once()->andReturn(0);
-    Functions\when('get_transient')->justReturn(1);
-    Functions\when('set_transient')->justReturn(true);
-    $hit = (new RateLimit())->hit(3);
-    expect($hit)->toMatchArray(['allowed' => false, 'remaining' => 0, 'retry_after' => 45]);
+    Filters\expectApplied('alpaca_bot/rate_limit')->twice()->andReturn(0);
+    $count = 0;
+    Functions\when('get_transient')->alias(function () use (&$count) {
+        return $count ?: false;
+    });
+    Functions\when('set_transient')->alias(function (string $k, int $v) use (&$count): bool {
+        $count = $v;
+        return true;
+    });
+    $rl = new RateLimit();
+    // The minute's first hit: with the limit clamped to one it is allowed; unclamped, 1 > 0 and
+    // every request would be refused, which is what the clamp exists to prevent.
+    expect($rl->hit(3))->toMatchArray(['allowed' => true, 'remaining' => 0, 'retry_after' => 0])
+        ->and($rl->hit(3))->toMatchArray(['allowed' => false, 'remaining' => 0, 'retry_after' => 45]);
+});
+
+it('keys an anonymous hit by the salted hash of REMOTE_ADDR, so clients have their own buckets and no raw address is stored', function (): void {
+    Functions\when('current_time')->justReturn(1_725_000_000);
+    Filters\expectApplied('alpaca_bot/rate_limit')->times(3)->with(30, 0, 'chat')->andReturn(1);
+    Functions\when('wp_hash')->alias(static fn(string $data): string => 'h' . md5($data));
+    $store = [];
+    Functions\when('get_transient')->alias(function (string $k) use (&$store): mixed {
+        return $store[$k] ?? false;
+    });
+    Functions\when('set_transient')->alias(function (string $k, int $v) use (&$store): bool {
+        $store[$k] = $v;
+        return true;
+    });
+    $saved = [$_SERVER['REMOTE_ADDR'] ?? null, $_SERVER['HTTP_X_FORWARDED_FOR'] ?? null];
+    try {
+        $rl = new RateLimit();
+        $_SERVER['REMOTE_ADDR'] = '203.0.113.5';
+        expect($rl->hit(0)['allowed'])->toBeTrue();
+        // A second client: its own bucket, so its first hit is allowed although the limit is one.
+        $_SERVER['REMOTE_ADDR'] = '198.51.100.9';
+        expect($rl->hit(0)['allowed'])->toBeTrue();
+        // The first client back, claiming through a forwarding header to be the second: the
+        // header is client-supplied and ignored, so this lands in the first bucket and is refused.
+        $_SERVER['REMOTE_ADDR'] = '203.0.113.5';
+        $_SERVER['HTTP_X_FORWARDED_FOR'] = '198.51.100.9';
+        expect($rl->hit(0)['allowed'])->toBeFalse();
+    } finally {
+        [$_SERVER['REMOTE_ADDR'], $_SERVER['HTTP_X_FORWARDED_FOR']] = $saved;
+    }
+    $keys = array_keys($store);
+    expect($keys)->toBe([
+        'alpaca_bot_rl_chat_ip_h' . md5('203.0.113.5') . '_202408300640',
+        'alpaca_bot_rl_chat_ip_h' . md5('198.51.100.9') . '_202408300640',
+    ])->and(implode(' ', $keys))->not->toContain('203.0.113')->not->toContain('_0_');
+});
+
+it('falls back to one shared anonymous bucket only when there is no valid REMOTE_ADDR at all', function (): void {
+    Functions\when('current_time')->justReturn(1_725_000_000);
+    Filters\expectApplied('alpaca_bot/rate_limit')->once()->andReturn(30);
+    Functions\expect('wp_hash')->never();
+    Functions\when('get_transient')->justReturn(false);
+    $key = null;
+    Functions\when('set_transient')->alias(function (string $k) use (&$key): bool {
+        $key = $k;
+        return true;
+    });
+    $saved = $_SERVER['REMOTE_ADDR'] ?? null;
+    try {
+        $_SERVER['REMOTE_ADDR'] = 'not-an-address';
+        (new RateLimit())->hit(0);
+    } finally {
+        $_SERVER['REMOTE_ADDR'] = $saved;
+    }
+    expect($key)->toBe('alpaca_bot_rl_chat_ip_unknown_202408300640');
 });
