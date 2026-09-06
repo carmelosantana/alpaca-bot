@@ -11,7 +11,8 @@ namespace AlpacaBot\Context;
  * userId, request) lets a plugin add or remove sources before they run, and
  * `alpaca_bot/context` (Context[], userId, request) lets it edit what was collected. Anything
  * a filter returns that is not a source or a Context is dropped rather than allowed to fatal
- * the request.
+ * the request, and a source that throws is skipped for the same reason: less context is a
+ * worse answer, no answer is a broken chat.
  */
 final class Collector
 {
@@ -35,7 +36,12 @@ final class Collector
             if (!$source instanceof ContextSourceInterface) {
                 continue;
             }
-            foreach ($source->collect($userId, $request) as $context) {
+            try {
+                $contexts = $source->collect($userId, $request);
+            } catch (\Throwable) {
+                continue;
+            }
+            foreach ($contexts as $context) {
                 $out[] = $context;
             }
         }
@@ -48,6 +54,10 @@ final class Collector
 
     /**
      * The collected contexts as one block for the system prompt, or '' when there are none.
+     *
+     * There is no ceiling on the block: each source bounds its own text (CurrentScreenSource
+     * at 4,000 characters) but nothing bounds the sum, so a filter that adds sources grows the
+     * prompt by that much. The consumer folding this into a prompt owns any global budget.
      *
      * @param Context[] $contexts
      */

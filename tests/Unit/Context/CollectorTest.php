@@ -65,6 +65,41 @@ it('drops anything a filter returns that is not a source or a context', function
     expect($out)->toHaveCount(1)->and($out[0])->toBeInstanceOf(Context::class)->and($out[0]->id)->toBe('a:1');
 });
 
+it('skips a source that throws and still collects from the others', function (): void {
+    $a = collectorSource('a', [new Context('a:1', 'A', 'alpha')]);
+    $bad = new class implements ContextSourceInterface {
+        public function id(): string
+        {
+            return 'bad';
+        }
+
+        public function collect(int $userId, array $request): array
+        {
+            throw new RuntimeException('database gone away');
+        }
+    };
+    $b = collectorSource('b', [new Context('b:1', 'B', 'beta')]);
+    $out = (new Collector([$a, $bad, $b]))->collect(1, []);
+    expect(array_map(static fn(Context $c): string => $c->id, $out))->toBe(['a:1', 'b:1']);
+});
+
+it('skips a source that raises an Error, not only an Exception', function (): void {
+    $bad = new class implements ContextSourceInterface {
+        public function id(): string
+        {
+            return 'bad';
+        }
+
+        public function collect(int $userId, array $request): array
+        {
+            return [strlen([])]; // a TypeError, on purpose
+        }
+    };
+    $b = collectorSource('b', [new Context('b:1', 'B', 'beta')]);
+    $out = (new Collector([$bad, $b]))->collect(1, []);
+    expect($out)->toHaveCount(1)->and($out[0]->id)->toBe('b:1');
+});
+
 it('add() appends a source after the constructor ones', function (): void {
     $a = collectorSource('a', [new Context('a:1', 'A', 'alpha')]);
     $b = collectorSource('b', [new Context('b:1', 'B', 'beta')]);
