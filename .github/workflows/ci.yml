@@ -1,0 +1,35 @@
+# The unit job the spec's sequencing step 1 asks for: PHPStan level 6 and Pest through the same
+# `composer check` every task ends on, plus the runtime-autoload guard. Third-party actions are
+# pinned to full commit SHAs (tags are mutable). No pull_request_target, no cache, no secrets.
+name: CI
+
+on:
+  push:
+    branches: [main, '1.0']
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: PHPStan + Pest on PHP 8.4
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+
+      - uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # 2.37.2
+        with:
+          php-version: '8.4'
+          coverage: none
+          tools: composer:v2
+
+      # post-install-cmd runs @prefix: installs strauss from its own manifest (tools/strauss,
+      # lockfile committed) and builds vendor-prefixed/, which PHPStan and Pest both need.
+      - run: composer install --no-interaction --no-progress
+
+      - run: composer check
+
+      - run: php bin/check-bootstrap.php
