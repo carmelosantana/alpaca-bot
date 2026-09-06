@@ -411,7 +411,6 @@ it('resolves the system prompt from the option, else the per-model override, els
 it('continues a conversation the user owns, replaying its history to the model', function (): void {
     $provider = pipelineProvider([new Response('Second answer', ProviderFinishReason::Stop)], $call);
     $h = pipelineWith($provider);
-    Functions\when('metadata_exists')->justReturn(false);
     Functions\when('get_post_meta')->alias(static fn(int $id, string $key): mixed => $key === 'ab_messages'
         ? [['role' => 'user', 'content' => 'First question', 'created' => 1], ['role' => 'assistant', 'content' => 'First answer', 'created' => 2]]
         : '');
@@ -438,7 +437,6 @@ it('continues a conversation the user owns, replaying its history to the model',
 it('sends only the most recent chat.context_messages turns, keeps the system prompt, and stores the whole conversation', function (): void {
     $provider = pipelineProvider([new Response('A3', ProviderFinishReason::Stop)], $call);
     $h = pipelineWith($provider, ['chat.context_messages' => 2, 'chat.system_prompt' => 'Be brief']);
-    Functions\when('metadata_exists')->justReturn(false);
     Functions\when('get_post_meta')->alias(static fn(int $id, string $key): mixed => $key === 'ab_messages'
         ? [['role' => 'user', 'content' => 'Q1'], ['role' => 'assistant', 'content' => 'A1'], ['role' => 'user', 'content' => 'Q2'], ['role' => 'assistant', 'content' => 'A2']]
         : '');
@@ -458,7 +456,6 @@ it('sends only the most recent chat.context_messages turns, keeps the system pro
 it('sends the whole transcript when chat.context_messages is 0', function (): void {
     $provider = pipelineProvider([new Response('A3', ProviderFinishReason::Stop)], $call);
     $h = pipelineWith($provider, ['chat.context_messages' => 0]);
-    Functions\when('metadata_exists')->justReturn(false);
     Functions\when('get_post_meta')->alias(static fn(int $id, string $key): mixed => $key === 'ab_messages'
         ? [['role' => 'user', 'content' => 'Q1'], ['role' => 'assistant', 'content' => 'A1'], ['role' => 'user', 'content' => 'Q2'], ['role' => 'assistant', 'content' => 'A2']]
         : '');
