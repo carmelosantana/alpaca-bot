@@ -48,7 +48,7 @@ final class Schema
             'chat.spellcheck' => ['type' => 'boolean', 'default' => true, 'section' => 'chat', 'label' => __('Spellcheck the input', 'alpaca-bot')],
             'chat.assistant_avatar' => ['type' => 'string', 'default' => '', 'section' => 'chat', 'label' => __('Assistant avatar URL', 'alpaca-bot'), 'sanitize' => [self::class, 'sanitizeUrl']],
             'privacy.save_history' => ['type' => 'boolean', 'default' => true, 'section' => 'privacy', 'label' => __('Save conversations', 'alpaca-bot')],
-            'privacy.usage_log' => ['type' => 'boolean', 'default' => true, 'section' => 'privacy', 'label' => __('Keep a usage log (tokens, model, duration)', 'alpaca-bot')],
+            'privacy.usage_log' => ['type' => 'boolean', 'default' => true, 'section' => 'privacy', 'label' => __('Record the model and conversation on usage receipts', 'alpaca-bot'), 'description' => __('Token counts, duration and the requesting user are always kept for the monthly caps. Off leaves the model name and the conversation link out of each receipt.', 'alpaca-bot')],
             'governance.site_monthly_tokens' => ['type' => 'integer', 'default' => 0, 'section' => 'governance', 'label' => __('Site-wide monthly token cap', 'alpaca-bot'), 'min' => 0, 'max' => PHP_INT_MAX],
             'governance.user_monthly_tokens' => ['type' => 'integer', 'default' => 0, 'section' => 'governance', 'label' => __('Per-user monthly token cap', 'alpaca-bot'), 'min' => 0, 'max' => PHP_INT_MAX],
             'toolkits.user_agent' => ['type' => 'string', 'default' => 'AlpacaBot/1.0 (+https://github.com/carmelosantana/alpaca-bot)', 'section' => 'toolkits', 'label' => __('User agent for fetch tools', 'alpaca-bot')],

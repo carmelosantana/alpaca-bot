@@ -5,6 +5,7 @@ declare(strict_types=1);
 use AlpacaBot\Chat\CapPolicy;
 use AlpacaBot\Chat\ConversationStore;
 use AlpacaBot\Chat\UsageMeter;
+use AlpacaBot\Context\Collector;
 use AlpacaBot\Plugin;
 use AlpacaBot\Provider\Factory;
 use AlpacaBot\Provider\ModelCatalog;
@@ -29,7 +30,7 @@ it('exposes a version and boots once', function (): void {
         ->and(Plugin::VERSION)->toMatch('/^1\.0\.0/');
 });
 
-it('registers the settings store, provider factory, model catalog, conversation store, usage meter and cap policy, hooks both post types on init, and runs the 0.4 migration once on admin_init', function (): void {
+it('registers the settings store, provider factory, model catalog, conversation store, usage meter, cap policy and context collector, hooks both post types on init, and runs the 0.4 migration once on admin_init', function (): void {
     Actions\expectAdded('init')->once()->with(Mockery::on(
         static fn (mixed $cb): bool => is_array($cb)
             && ($cb[0] ?? null) instanceof ConversationStore
@@ -54,7 +55,8 @@ it('registers the settings store, provider factory, model catalog, conversation 
         ->and($plugin->get(ModelCatalog::class))->toBeInstanceOf(ModelCatalog::class)
         ->and($plugin->get(ConversationStore::class))->toBeInstanceOf(ConversationStore::class)
         ->and($plugin->get(UsageMeter::class))->toBeInstanceOf(UsageMeter::class)
-        ->and($plugin->get(CapPolicy::class))->toBeInstanceOf(CapPolicy::class);
+        ->and($plugin->get(CapPolicy::class))->toBeInstanceOf(CapPolicy::class)
+        ->and($plugin->get(Collector::class))->toBeInstanceOf(Collector::class);
 
     // A 0.4 site: one legacy option present, no flag -> the hook migrates and flags.
     $legacy = ['alpaca_bot_api_url' => 'http://localhost:11434'];

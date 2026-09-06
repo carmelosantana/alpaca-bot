@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use AlpacaBot\Chat\CapPolicy;
 use AlpacaBot\Chat\UsageMeter;
+use AlpacaBot\Context\ContextSourceInterface;
 use AlpacaBot\Plugin;
 use AlpacaBot\Settings\Store;
 use Brain\Monkey;
@@ -89,4 +90,28 @@ function capPolicyWith(array $settings): CapPolicy
     Functions\when('get_option')->justReturn($settings);
     $store = new Store();
     return new CapPolicy($store, new UsageMeter($store));
+}
+
+/** CollectorTest: a source with a fixed id that returns the given contexts whatever the request. */
+function collectorSource(string $id, array $contexts): ContextSourceInterface
+{
+    return new class ($id, $contexts) implements ContextSourceInterface {
+        public function __construct(private string $id, private array $contexts) {}
+
+        public function id(): string
+        {
+            return $this->id;
+        }
+
+        public function collect(int $userId, array $request): array
+        {
+            return $this->contexts;
+        }
+    };
+}
+
+/** CurrentScreenSourceTest: a post as get_post() hands it back (stdClass: WP_Post is not loaded here). */
+function currentScreenPost(int $id, string $title, string $content, string $type = 'post', string $status = 'draft'): object
+{
+    return (object) ['ID' => $id, 'post_title' => $title, 'post_content' => $content, 'post_type' => $type, 'post_status' => $status];
 }

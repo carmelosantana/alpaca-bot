@@ -53,6 +53,7 @@ final class Plugin
         $this->set(Chat\UsageMeter::class, $meter);
         add_action('init', [$meter, 'registerPostType']);
         $this->set(Chat\CapPolicy::class, new Chat\CapPolicy($store, $meter));
+        $this->set(Context\Collector::class, new Context\Collector([new Context\CurrentScreenSource()]));
         add_action('admin_init', function () use ($store): void {
             $migration = new Migrate04($store);
             if ($migration->needed()) {
