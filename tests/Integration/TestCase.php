@@ -106,15 +106,15 @@ abstract class TestCase extends \WP_UnitTestCase
      * Dispatches through the server core registered the routes on, so the permission callback,
      * capability filter, schema validation and rate limit all run as they would over HTTP. Body
      * params rather than a JSON body: the routes read get_param(), which resolves either, and body
-     * params need no Content-Type to be seen. A GET's go on the query string, the only place core
-     * reads a GET's parameters from.
+     * params need no Content-Type to be seen. A GET's or HEAD's go on the query string, the only
+     * place core reads their parameters from.
      *
      * @param array<string, mixed> $body
      */
     protected function rest(string $method, string $path, array $body = []): \WP_REST_Response
     {
         $request = new \WP_REST_Request($method, '/alpaca-bot/v1' . $path);
-        if ($body !== [] && $method === 'GET') {
+        if ($body !== [] && in_array($method, ['GET', 'HEAD'], true)) {
             $request->set_query_params($body);
         } elseif ($body !== []) {
             $request->set_body_params($body);

@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use AlpacaBot\Chat\CapExceeded;
+use AlpacaBot\Chat\Conversation;
 use AlpacaBot\Rest\ChatController;
 use AlpacaBot\Rest\StreamController;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Enum\ProviderFinishReason;
@@ -12,13 +13,16 @@ use Brain\Monkey\Actions;
 use Brain\Monkey\Filters;
 use Brain\Monkey\Functions;
 
-// restRequest(), pipelineWith(), pipelineProvider(), actionRuns() and streamTicket() live in
-// tests/Pest.php.
+// restRequest(), restConvertsErrors(), pipelineWith(), pipelineProvider(), actionRuns() and
+// streamTicket() live in tests/Pest.php.
 // Pipeline is final, so stream() runs over the real one with WordPress and the provider stubbed,
-// as ChatControllerTest does. Two things are pinned: handle() redeems a ticket for its owner,
-// once, and nothing else; stream() turns what the pipeline yields, returns or throws into
-// frames, with the same error policy as the JSON route. serve() (the rest_pre_serve_request
-// side) ends every output buffer, this runner's included, so only the real check covers it.
+// as ChatControllerTest does. Three things are pinned: handle() redeems a ticket for its owner,
+// once even when the same token arrives concurrently, for GET only, and nothing else; serve()
+// takes over exactly the request handle() redeemed, whatever response core hands it, and no
+// other; stream() turns what the pipeline yields, returns or throws into frames, with the same
+// error policy as the JSON route, and stops when the client has gone. Sse::prepareOutput() ends
+// every output buffer, this runner's included, so serve() is built with it replaced; what it
+// really does to a PHP process is the wire check's (curl against the harness site).
 // The conversation post the harness serves is 42, owned by user 3; the current user is 3.
 
 beforeEach(function (): void {
@@ -76,12 +80,15 @@ it('refuses a token that is missing, unknown, another user\'s, or for another co
     expect($deleted)->toBe([]);
 });
 
-it('redeems a valid ticket once, marking the response for serve() with the ticket as its data', function (): void {
+it('redeems a valid ticket once: the deletion is the claim, and the response carries nothing of the ticket', function (): void {
     $h = pipelineWith(null);
     $h->transients[ChatController::STREAM_TRANSIENT . 'tok'] = streamTicket();
     $deleted = [];
     Functions\when('delete_transient')->alias(static function (string $key) use (&$deleted, $h): bool {
         $deleted[] = $key;
+        if (!isset($h->transients[$key])) {
+            return false;
+        }
         unset($h->transients[$key]);
         return true;
     });
@@ -89,11 +96,152 @@ it('redeems a valid ticket once, marking the response for serve() with the ticke
     $res = $controller->handle(restRequest('GET', '/alpaca-bot/v1/chat/42/stream', ['id' => '42', 'token' => 'tok']));
     expect($res)->toBeInstanceOf(WP_REST_Response::class)
         ->and($res->get_status())->toBe(200)
-        ->and($res->get_headers())->toBe([StreamController::MARKER => '1'])
-        ->and($res->get_data())->toBe(streamTicket())
+        // The ticket is held for serve(), not returned: core renders this body only if nothing
+        // streams, and a wrapped copy of it (?_envelope=1) is not where serve() looks.
+        ->and($res->get_headers())->toBe([])
+        ->and($res->get_data())->toBeNull()
         // Deleted on redemption, before anything runs: the same token is now as good as none.
         ->and($deleted)->toBe([ChatController::STREAM_TRANSIENT . 'tok'])
         ->and($controller->handle(restRequest('GET', '/alpaca-bot/v1/chat/42/stream', ['id' => '42', 'token' => 'tok'])))->toBeInstanceOf(WP_Error::class);
+});
+
+it('refuses a token another request claimed first: a delete that removed nothing is a lost race, not a redemption', function (): void {
+    // Two requests holding one token both read the ticket and both pass the ownership checks;
+    // the store then reports that this delete removed no row (the other request's did). Without
+    // this the same ticket would run one billed turn per concurrent request.
+    $h = pipelineWith(null);
+    $h->transients[ChatController::STREAM_TRANSIENT . 'tok'] = streamTicket();
+    Functions\when('delete_transient')->justReturn(false);
+    $prepared = 0;
+    $controller = new StreamController($h->pipeline, function () use (&$prepared): void {
+        $prepared++;
+    });
+    $request = restRequest('GET', '/alpaca-bot/v1/chat/42/stream', ['id' => '42', 'token' => 'tok']);
+    $res = $controller->handle($request);
+    expect($res)->toBeInstanceOf(WP_Error::class)
+        ->and($res->get_error_code())->toBe('rest_forbidden')
+        ->and($res->get_error_data())->toBe(['status' => 403]);
+    // ... and the loser is not streamed either: nothing was held for serve().
+    $server = new WP_REST_Server();
+    expect($controller->serve(false, new WP_REST_Response(), $request, $server))->toBeFalse()
+        ->and($server->sent)->toBe([])
+        ->and($prepared)->toBe(0);
+});
+
+it('refuses HEAD with 405 and Allow: GET before the ticket is read, so a probe cannot redeem it', function (): void {
+    // Core routes a HEAD to the GET handler when no HEAD handler is registered, and drops the
+    // body only after rest_pre_serve_request has run: taken here, a HEAD would run a billed turn
+    // and write a stream onto a response that must have no body.
+    $h = pipelineWith(null);
+    $reads = 0;
+    Functions\when('get_transient')->alias(static function () use (&$reads): array {
+        $reads++;
+        return streamTicket();
+    });
+    $deleted = [];
+    Functions\when('delete_transient')->alias(static function (string $key) use (&$deleted): bool {
+        $deleted[] = $key;
+        return true;
+    });
+    restConvertsErrors();
+    $controller = new StreamController($h->pipeline);
+    $request = restRequest('HEAD', '/alpaca-bot/v1/chat/42/stream', ['id' => '42', 'token' => 'tok']);
+    $res = $controller->handle($request);
+    expect($res)->toBeInstanceOf(WP_REST_Response::class)
+        ->and($res->get_status())->toBe(405)
+        ->and($res->get_headers())->toBe(['Allow' => 'GET'])
+        ->and($res->get_data()['code'])->toBe('alpaca_bot_method_not_allowed')
+        ->and($reads)->toBe(0)
+        ->and($deleted)->toBe([]);
+    $server = new WP_REST_Server();
+    expect($controller->serve(false, $res, $request, $server))->toBeFalse()
+        ->and($server->sent)->toBe([]);
+});
+
+it('serve() leaves alone a request nothing was redeemed for, one redeemed for a different request, and one already served', function (): void {
+    $h = pipelineWith(null);
+    $h->transients[ChatController::STREAM_TRANSIENT . 'tok'] = streamTicket();
+    $prepared = 0;
+    $controller = new StreamController($h->pipeline, function () use (&$prepared): void {
+        $prepared++;
+    });
+    $server = new WP_REST_Server();
+
+    // A refusal: core renders the WP_Error handle() returned as its own JSON response.
+    $refused = restRequest('GET', '/alpaca-bot/v1/chat/42/stream', ['id' => '42', 'token' => 'nope']);
+    expect($controller->handle($refused))->toBeInstanceOf(WP_Error::class)
+        ->and($controller->serve(false, new WP_REST_Response(['code' => 'rest_forbidden'], 403), $refused, $server))->toBeFalse();
+    // Another route's response (OPTIONS, or any other plugin's), on a request this controller
+    // never saw: the hook runs for every REST request and must not hijack one.
+    expect($controller->serve(false, new WP_REST_Response(['other' => 'route']), restRequest('GET', '/wp/v2/posts'), $server))->toBeFalse();
+
+    // Redeemed, but core is serving a different request object than the one handle() saw.
+    $request = restRequest('GET', '/alpaca-bot/v1/chat/42/stream', ['id' => '42', 'token' => 'tok']);
+    expect($controller->handle($request))->toBeInstanceOf(WP_REST_Response::class);
+    $twin = restRequest('GET', '/alpaca-bot/v1/chat/42/stream', ['id' => '42', 'token' => 'tok']);
+    expect($controller->serve(false, new WP_REST_Response(), $twin, $server))->toBeFalse();
+
+    // Already served by something hooked earlier: nothing is written over it.
+    expect($controller->serve(true, new WP_REST_Response(), $request, $server))->toBeTrue()
+        ->and($server->sent)->toBe([])
+        ->and($prepared)->toBe(0);
+});
+
+it('serve() takes over the redeemed request: SSE headers, then the output prepared, then the frames, and tells core it was served', function (): void {
+    $h = pipelineWith(pipelineProvider([
+        new Response('a', ProviderFinishReason::Stop),
+        new Response('b', ProviderFinishReason::Stop, usage: new Usage(5, 2, 7)),
+    ]));
+    actionRuns('alpaca_bot/chat/started');
+    $h->transients[ChatController::STREAM_TRANSIENT . 'tok'] = streamTicket();
+    $server = new WP_REST_Server();
+    $sentBeforePrepare = null;
+    $controller = new StreamController($h->pipeline, function () use (&$sentBeforePrepare, $server): void {
+        $sentBeforePrepare = $server->sent;
+    });
+    $request = restRequest('GET', '/alpaca-bot/v1/chat/42/stream', ['id' => '42', 'token' => 'tok']);
+    $response = $controller->handle($request);
+    expect($response)->toBeInstanceOf(WP_REST_Response::class);
+
+    ob_start();
+    $served = $controller->serve(false, $response, $request, $server);
+    $out = (string) ob_get_clean();
+    expect($served)->toBeTrue()
+        // The headers go out before the buffers are ended: once a frame is written they cannot.
+        ->and($sentBeforePrepare)->toBe([
+            ['Content-Type', 'text/event-stream; charset=utf-8'],
+            ['Cache-Control', 'no-cache'],
+            ['X-Accel-Buffering', 'no'],
+        ])
+        ->and($server->sent)->toBe($sentBeforePrepare)
+        ->and($out)->toStartWith("event: start\ndata: {\"conversation_id\":42,\"model\":\"llama3.2\"}\n\nevent: delta\ndata: {\"text\":\"a\",\"reasoning\":\"\"}\n\nevent: delta\ndata: {\"text\":\"b\",\"reasoning\":\"\"}\n\nevent: done\ndata: {")
+        ->and($out)->toEndWith("\n\n")
+        ->and($h->meta[42]['ab_messages'][1]['content'])->toBe('ab');
+
+    // Consumed: the same request served again streams nothing more.
+    ob_start();
+    expect($controller->serve(false, $response, $request, $server))->toBeFalse()
+        ->and(ob_get_clean())->toBe('');
+});
+
+it('serve() streams a redeemed request whose response core has re-wrapped (?_envelope=1), which keeps nothing handle() returned', function (): void {
+    // WP_REST_Server::envelope_response() hands the filter a new response: status 200, no
+    // headers, the original as `body`. What serve() streams is the ticket handle() held for
+    // this request, so the wrapping changes nothing; a marker on the response would be gone.
+    $h = pipelineWith(null, ['governance.user_monthly_tokens' => 10]);
+    $h->transients['alpaca_bot_usage_3_2024-08'] = ['tokens' => 12, 'requests' => 1];
+    $h->transients[ChatController::STREAM_TRANSIENT . 'tok'] = streamTicket();
+    $controller = new StreamController($h->pipeline, static function (): void {});
+    $request = restRequest('GET', '/alpaca-bot/v1/chat/42/stream', ['id' => '42', 'token' => 'tok']);
+    $response = $controller->handle($request);
+    $enveloped = new WP_REST_Response(['body' => $response->get_data(), 'status' => $response->get_status(), 'headers' => $response->get_headers()], 200);
+    $server = new WP_REST_Server();
+    ob_start();
+    $served = $controller->serve(false, $enveloped, $request, $server);
+    $out = (string) ob_get_clean();
+    expect($served)->toBeTrue()
+        ->and(array_column($server->sent, 0))->toBe(['Content-Type', 'Cache-Control', 'X-Accel-Buffering'])
+        ->and($out)->toStartWith("event: error\ndata: {\"code\":\"alpaca_bot_cap_exceeded\"");
 });
 
 it('writes a start frame with the real conversation id, a delta per chunk, then a done frame shaped like POST /chat\'s 200', function (): void {
@@ -126,6 +274,31 @@ it('writes a start frame with the real conversation id, a delta per chunk, then 
         ->and($done['contexts'])->toBe([])
         // The stored transcript is what was streamed.
         ->and($h->meta[42]['ab_messages'][1]['content'])->toBe('ab');
+});
+
+it('stops after the frame the client did not read: no done frame, the listener removed, the partial reply stored and chat/failed fired', function (): void {
+    // connection_aborted() only learns of a closed connection from a failed write, which is why
+    // stream() asks after each frame; here the probe answers for it. The generator is left
+    // undrained, which the pipeline treats as an abandoned turn.
+    $h = pipelineWith(pipelineProvider([
+        new Response('a', ProviderFinishReason::Stop),
+        new Response('b', ProviderFinishReason::Stop),
+    ]));
+    actionRuns('alpaca_bot/chat/started');
+    Actions\expectRemoved('alpaca_bot/chat/started')->once();
+    Actions\expectDone('alpaca_bot/chat/failed')->once()->with(Mockery::type(\RuntimeException::class), Mockery::type(Conversation::class));
+    $frames = [];
+    (new StreamController($h->pipeline))->stream(
+        streamTicket(),
+        function (string $f) use (&$frames): void {
+            $frames[] = $f;
+        },
+        static function () use (&$frames): bool {
+            return count($frames) >= 2;
+        },
+    );
+    expect(array_map(static fn(string $f): string => strtok($f, "\n"), $frames))->toBe(['event: start', 'event: delta'])
+        ->and($h->meta[42]['ab_messages'][1])->toMatchArray(['role' => 'assistant', 'content' => 'a', 'meta' => ['partial' => true]]);
 });
 
 it('writes one error frame, in the JSON route\'s error shape, when the pipeline refuses the turn', function (): void {

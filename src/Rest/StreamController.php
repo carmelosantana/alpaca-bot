@@ -22,22 +22,37 @@ use AlpacaBot\Chat\Pipeline;
  * paths. After `done` or `error` the connection closes.
  *
  * The turn does not run inside the route callback. Core renders a callback's return value as
- * JSON once the callback is over, so handle() only redeems the ticket and returns it as a
- * response marked with a header; serve(), on `rest_pre_serve_request`, sees the marker, sends
- * the SSE headers in place of core's, and streams. Splitting it this way keeps the redemption
- * (the part with an outcome core can render, a 403) inside the permission and schema flow and
- * leaves stream() pure: a ticket in, frames out through a writer, which is what the tests run.
+ * JSON once the callback is over, so handle() only redeems the ticket, keeps it here against
+ * the request it was redeemed for, and returns an empty 200; serve(), on
+ * `rest_pre_serve_request`, recognises that request, sends the SSE headers in place of core's,
+ * and streams. Splitting it this way keeps the redemption (the part with an outcome core can
+ * render, a 403) inside the permission and schema flow and leaves stream() pure: a ticket in,
+ * frames out through a writer, which is what the tests run.
  */
 final class StreamController extends Controller
 {
-    public const MARKER = 'X-Alpaca-Bot-Stream';
+    /** @var array{request: \WP_REST_Request, ticket: array<string, mixed>}|null the ticket handle() redeemed and the request it redeemed it for, until serve() streams it */
+    private ?array $redeemed = null;
 
-    public function __construct(private Pipeline $pipeline) {}
+    /** @var \Closure(): void what serve() runs between sending its headers and writing the first frame */
+    private \Closure $prepareOutput;
+
+    /**
+     * `$prepareOutput` defaults to Sse::prepareOutput(), which ends every output buffer in the
+     * process; a test runner that owns those buffers hands in something gentler.
+     *
+     * @param (callable(): void)|null $prepareOutput
+     */
+    public function __construct(private Pipeline $pipeline, ?callable $prepareOutput = null)
+    {
+        $this->prepareOutput = $prepareOutput === null ? Sse::prepareOutput(...) : $prepareOutput(...);
+    }
 
     /**
      * Not rate limited: the turn was counted on the POST that issued the ticket, and a streamed
-     * turn must not cost two hits. The ticket itself, one-time and bound to its user, is what
-     * stops this route being replayed.
+     * turn must not cost two hits. The ticket is what stops this route being replayed instead:
+     * bound to its user, and redeemable exactly once even when the same token arrives many
+     * times at once (handle() says how), so one POST, one hit, one turn.
      */
     public function routes(): array
     {
@@ -63,51 +78,79 @@ final class StreamController extends Controller
     }
 
     /**
-     * Redeems the ticket: the token must name a stored ticket, the ticket must be the current
-     * user's (the id core authenticated, never anything in the request) and for the
-     * conversation in the URL, and it is deleted before anything runs, so a token is good
-     * exactly once. Every refusal is the same 403: which of the three failed is nothing a
-     * caller needs, and saying so would let one probe tokens.
+     * Redeems the ticket. GET only: core sends a HEAD to the GET handler of a route with no
+     * HEAD handler and drops the body only after rest_pre_serve_request, so a HEAD taken here
+     * would run a billed turn for a probe; it is refused (405, Allow: GET) before the ticket is
+     * read, and survives for the GET that follows.
      *
-     * A token is alphanumeric (wp_generate_password without specials, as ChatController makes
-     * it); one with anything else in it is refused before it becomes a transient key rather
-     * than stripped, so that no other string can be made to name a ticket.
+     * The token must name a stored ticket, the ticket must be the current user's (the id core
+     * authenticated, never anything in the request) and for the conversation in the URL, and
+     * then the deletion is the claim: delete_transient() reports whether this call removed the
+     * stored ticket, and only a call it says yes to goes on. Without a persistent object cache
+     * a transient is an options row and that report is the affected-row count of
+     * `DELETE … WHERE option_name = %s`, which the unique key on option_name makes exactly one
+     * of any number of concurrent deletes; with one it is the cache's own delete, which the
+     * mainstream drop-ins (Redis DEL, Memcached delete, APCu) likewise report as false for a key
+     * already gone. So of N requests holding one token, N-1 read the ticket, pass the checks and
+     * are still refused, and the token runs one turn. Reading before deleting is what keeps a
+     * token that is not the caller's untouched: a refused request deletes nothing.
+     *
+     * Every refusal is the same 403: which check failed is nothing a caller needs, and saying
+     * so would let one probe tokens. A token is alphanumeric (wp_generate_password without
+     * specials, as ChatController makes it); one with anything else in it is refused before it
+     * becomes a transient key rather than stripped, so that no other string can be made to
+     * name a ticket.
      */
     public function handle(\WP_REST_Request $request): \WP_REST_Response|\WP_Error
     {
+        if ($request->get_method() !== 'GET') {
+            $response = rest_convert_error_to_response(Errors::methodNotAllowed());
+            $response->header('Allow', 'GET');
+            return $response;
+        }
         $token = (string) $request->get_param('token');
-        $ticket = preg_match('/^[A-Za-z0-9]+$/', $token) === 1 ? get_transient(ChatController::STREAM_TRANSIENT . $token) : false;
+        $key = ChatController::STREAM_TRANSIENT . $token;
+        $ticket = preg_match('/^[A-Za-z0-9]+$/', $token) === 1 ? get_transient($key) : false;
         if (
             !is_array($ticket)
             || (int) ($ticket['user_id'] ?? -1) !== $this->userId()
             || (int) ($ticket['conversation_id'] ?? -1) !== (int) $request->get_param('id')
+            || !delete_transient($key)
         ) {
             return Errors::forbidden(__('Invalid or expired stream token.', 'alpaca-bot'));
         }
-        delete_transient(ChatController::STREAM_TRANSIENT . $token);
-        $response = new \WP_REST_Response($ticket, 200);
-        $response->header(self::MARKER, '1');
-        return $response;
+        $this->redeemed = ['request' => $request, 'ticket' => $ticket];
+        return new \WP_REST_Response(null, 200);
     }
 
     /**
-     * `rest_pre_serve_request`: for a response handle() marked, and only then, takes over the
-     * output. Core has already sent its headers (Content-Type: application/json, the no-cache
-     * set) and the response's own, the marker included; the SSE headers replace what they
-     * share a name with and the marker is withdrawn, then the frames are written straight to
-     * the client. Returning true tells core the response has been sent.
+     * `rest_pre_serve_request`: for the request handle() redeemed a ticket for, and only that
+     * one, takes over the output. The match is on the request object itself, which core carries
+     * unchanged from dispatch to this filter, rather than on anything in the response: core
+     * builds a new response for `?_envelope=1` (and any `rest_post_dispatch` filter may), and
+     * a marker set on the one handle() returned would be gone with it while the ticket had
+     * already been spent. Every other request (a refusal, which core renders itself; OPTIONS,
+     * which never reaches the callback; another route's) is left to whatever was going to
+     * serve it.
+     *
+     * Core has already sent its headers (Content-Type: application/json, the no-cache set); the
+     * SSE headers replace what they share a name with, then the frames are written straight to
+     * the client. Returning true tells core the response has been sent. A request something
+     * hooked earlier has served (`$served`) is not written over, even though its ticket is
+     * spent: two bodies on one response help nobody.
      */
     public function serve(bool $served, \WP_HTTP_Response $result, \WP_REST_Request $request, \WP_REST_Server $server): bool
     {
-        if ($served || empty($result->get_headers()[self::MARKER])) {
+        if ($served || $this->redeemed === null || $this->redeemed['request'] !== $request) {
             return $served;
         }
-        $server->remove_header(self::MARKER);
+        $ticket = $this->redeemed['ticket'];
+        $this->redeemed = null;
         foreach (Sse::headers() as $name => $value) {
             $server->send_header($name, $value);
         }
-        Sse::prepareOutput();
-        $this->stream((array) $result->get_data(), static function (string $frame): void {
+        ($this->prepareOutput)();
+        $this->stream($ticket, static function (string $frame): void {
             echo $frame;
             flush();
         });
@@ -117,9 +160,11 @@ final class StreamController extends Controller
     /**
      * Runs the ticket's turn and hands each frame to `$write`. The `start` frame rides on
      * `alpaca_bot/chat/started`, the pipeline's own signal that the conversation exists, with a
-     * listener that lives exactly as long as this turn. A client that stops reading is noticed
-     * after the frame that failed to reach it; the generator is then left undrained, which the
-     * pipeline treats as an abandoned turn (the partial reply is stored, `chat/failed` fires).
+     * listener that lives exactly as long as this turn. `$aborted` says whether the client has
+     * gone; it defaults to PHP's connection_aborted(), which learns that only from a write that
+     * failed, so it is asked after each frame. A client that has gone is noticed after the
+     * frame that did not reach it; the generator is then left undrained, which the pipeline
+     * treats as an abandoned turn (the partial reply is stored, `chat/failed` fires).
      *
      * What the pipeline throws is mapped as ChatController maps it, through Errors, so the
      * policy is one: CapExceeded is the 402's data, an InvalidArgumentException the 400's, and
@@ -129,9 +174,11 @@ final class StreamController extends Controller
      *
      * @param array<string, mixed> $ticket as ChatController stored it: user_id, conversation_id, message, options
      * @param callable(string): void $write
+     * @param (callable(): bool)|null $aborted
      */
-    public function stream(array $ticket, callable $write): void
+    public function stream(array $ticket, callable $write, ?callable $aborted = null): void
     {
+        $aborted ??= static fn(): bool => connection_aborted() !== 0;
         // Not static: Brain Monkey names a hooked closure by binding it, which a static one refuses.
         $started = function (Conversation $conversation, string $model) use ($write): void {
             $write(Sse::frame('start', ['conversation_id' => $conversation->id, 'model' => $model]));
@@ -141,7 +188,7 @@ final class StreamController extends Controller
             $turn = $this->pipeline->send((int) ($ticket['user_id'] ?? 0), (string) ($ticket['message'] ?? ''), (array) ($ticket['options'] ?? []));
             foreach ($turn as $delta) {
                 $write(Sse::frame('delta', ['text' => $delta->text, 'reasoning' => $delta->reasoning]));
-                if (connection_aborted()) {
+                if ($aborted()) {
                     return;
                 }
             }

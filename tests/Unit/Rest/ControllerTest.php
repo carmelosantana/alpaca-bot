@@ -106,7 +106,7 @@ it('wraps a rate-limited route so an exhausted bucket answers 429 with Retry-Aft
     });
     // Core turns a WP_Error into the {code, message, data} JSON body; the wrapper goes through
     // it so the 429 can also carry the Retry-After header a WP_Error has nowhere to put.
-    Functions\when('rest_convert_error_to_response')->alias(static fn(WP_Error $e): WP_REST_Response => new WP_REST_Response(['code' => $e->get_error_code(), 'message' => $e->get_error_message(), 'data' => $e->get_error_data()], (int) $e->get_error_data()['status']));
+    restConvertsErrors();
 
     $request = new WP_REST_Request('POST', '/alpaca-bot/v1/limited');
     expect($callback($request))->toBe(['ok' => true]);

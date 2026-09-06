@@ -66,6 +66,16 @@ final class Errors
         return new \WP_Error('alpaca_bot_bad_request', $message, ['status' => 400]);
     }
 
+    /**
+     * 405 for a method a route cannot answer. Core sends a HEAD to a route's GET handler when
+     * no HEAD handler is registered, so a route whose GET has an effect (the stream route runs
+     * a turn) refuses it here; the Allow header a 405 must carry is the route's to add.
+     */
+    public static function methodNotAllowed(): \WP_Error
+    {
+        return new \WP_Error('alpaca_bot_method_not_allowed', __('This route does not answer that method.', 'alpaca-bot'), ['status' => 405]);
+    }
+
     /** `$what` is the (translated) noun, e.g. "Conversation"; used for another user's resource too, so existence is not leaked. */
     public static function notFound(string $what): \WP_Error
     {

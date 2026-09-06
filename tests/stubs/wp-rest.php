@@ -1,17 +1,20 @@
 <?php
 
 /**
- * Runtime stand-ins for the three WordPress REST classes the unit suite touches. wordpress-stubs
+ * Runtime stand-ins for the WordPress REST classes the unit suite touches. wordpress-stubs
  * is PHPStan-only (declared in bootstrapFiles, never autoloaded) and Brain Monkey stubs functions,
  * not classes, so without these `new WP_Error()` inside Rest\Errors is a fatal in the unit run.
  * tests/Pest.php requires this file only when the real classes are absent; inside a WordPress
  * process (the integration suite) core's own classes win and this file is never loaded.
  *
  * Only the members the plugin calls are modelled, with core's signatures and semantics
- * (wp-includes/class-wp-error.php, rest-api/class-wp-rest-request.php,
- * rest-api/class-wp-rest-response.php), so a test that passes here does not depend on a method
- * core lacks or a behaviour core does not have. tests/Unit/Rest/WpRestStubTest.php pins the
- * request semantics that are easiest to get wrong.
+ * (wp-includes/class-wp-error.php, class-wp-http-response.php, rest-api/class-wp-rest-request.php,
+ * rest-api/class-wp-rest-response.php, rest-api/class-wp-rest-server.php), so a test that passes
+ * here does not depend on a method core lacks or a behaviour core does not have. The one
+ * departure is WP_REST_Server::send_header(), which records instead of calling header(): under
+ * the CLI SAPI header() is a silent no-op, and what StreamController::serve() sent is the point
+ * of its tests. tests/Unit/Rest/WpRestStubTest.php pins the request semantics that are easiest
+ * to get wrong.
  */
 
 declare(strict_types=1);
@@ -138,8 +141,9 @@ if (!class_exists('WP_REST_Request', false)) {
     }
 }
 
-if (!class_exists('WP_REST_Response', false)) {
-    class WP_REST_Response
+if (!class_exists('WP_HTTP_Response', false)) {
+    /** The base core's WP_REST_Response extends; what the rest_pre_serve_request filter types its result as. */
+    class WP_HTTP_Response
     {
         /** @param array<string, string> $headers */
         public function __construct(public mixed $data = null, public int $status = 200, public array $headers = []) {}
@@ -168,6 +172,26 @@ if (!class_exists('WP_REST_Response', false)) {
         public function get_headers(): array
         {
             return $this->headers;
+        }
+    }
+}
+
+if (!class_exists('WP_REST_Response', false)) {
+    class WP_REST_Response extends WP_HTTP_Response
+    {
+    }
+}
+
+if (!class_exists('WP_REST_Server', false)) {
+    /** send_header() records [name, value] pairs in order into `$sent` rather than calling header() (see the file docblock). */
+    class WP_REST_Server
+    {
+        /** @var list<array{0: string, 1: string}> */
+        public array $sent = [];
+
+        public function send_header(string $key, string $value): void
+        {
+            $this->sent[] = [$key, $value];
         }
     }
 }

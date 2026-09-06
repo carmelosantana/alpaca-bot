@@ -98,6 +98,16 @@ function restRequest(string $method, string $route, array $params = []): WP_REST
     return $request;
 }
 
+/**
+ * ControllerTest and StreamControllerTest: rest_convert_error_to_response() as core does it, a
+ * {code, message, data} body under the error's status, for a route that answers a refusal as a
+ * WP_REST_Response because it has a header to carry (Retry-After on a 429, Allow on a 405).
+ */
+function restConvertsErrors(): void
+{
+    Functions\when('rest_convert_error_to_response')->alias(static fn(WP_Error $e): WP_REST_Response => new WP_REST_Response(['code' => $e->get_error_code(), 'message' => $e->get_error_message(), 'data' => $e->get_error_data()], (int) $e->get_error_data()['status']));
+}
+
 /** ConversationStoreTest: a chat_history post as get_post() hands it back (stdClass: WP_Post is not loaded here). */
 function conversationChatPost(int $id = 42, string $author = '3', string $type = 'chat_history', string $date = '2024-01-01 00:00:00'): object
 {

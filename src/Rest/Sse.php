@@ -26,7 +26,9 @@ final class Sse
     /**
      * Sent in place of the JSON headers core has already queued (Content-Type replaces its
      * application/json). X-Accel-Buffering is for an nginx in front of PHP, which otherwise
-     * holds the response until it ends; no-cache is for anything else in between.
+     * holds the response until it ends; no-cache is for anything else in between. No
+     * `Connection: keep-alive`: it is what HTTP/1.1 does anyway, and under HTTP/2 a
+     * connection-specific header is malformed (Apache strips it; a stricter peer may not).
      *
      * @return array<string, string>
      */
@@ -36,7 +38,6 @@ final class Sse
             'Content-Type' => 'text/event-stream; charset=utf-8',
             'Cache-Control' => 'no-cache',
             'X-Accel-Buffering' => 'no',
-            'Connection' => 'keep-alive',
         ];
     }
 
@@ -62,8 +63,12 @@ final class Sse
         @ini_set('zlib.output_compression', '0');
         @ini_set('output_buffering', '0');
         @ini_set('implicit_flush', '1');
+        // A buffer started without PHP_OUTPUT_HANDLER_REMOVABLE refuses to end and leaves the
+        // level as it was; stop there rather than spin (its contents then precede the stream).
         while (ob_get_level() > 0) {
-            ob_end_clean();
+            if (@ob_end_clean() === false) {
+                break;
+            }
         }
         ignore_user_abort(true);
         set_time_limit(0);
