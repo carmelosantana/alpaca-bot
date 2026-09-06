@@ -32,7 +32,7 @@ it('exposes a version and boots once', function (): void {
         ->and(Plugin::VERSION)->toMatch('/^1\.0\.0/');
 });
 
-it('registers the settings store, provider factory, model catalog, conversation store, usage meter, cap policy, context collector and chat pipeline, hooks both post types on init, and runs the 0.4 migration once on admin_init', function (): void {
+it('registers the settings store, provider factory, model catalog, conversation store, usage meter, cap policy, context collector and chat pipeline, hooks both post types on init, and runs the 0.4 migration on init after them, never on admin_init', function (): void {
     Actions\expectAdded('init')->once()->with(Mockery::on(
         static fn (mixed $cb): bool => is_array($cb)
             && ($cb[0] ?? null) instanceof ConversationStore
@@ -43,13 +43,16 @@ it('registers the settings store, provider factory, model catalog, conversation 
             && ($cb[0] ?? null) instanceof UsageMeter
             && ($cb[1] ?? null) === 'registerPostType'
     ));
-    $onAdminInit = null;
-    Actions\expectAdded('admin_init')->once()->with(Mockery::on(
-        static function (mixed $cb) use (&$onAdminInit): bool {
-            $onAdminInit = $cb;
+    // On init, not admin_init: WP-CLI (the whole P1 user surface) never fires admin_init, and
+    // the post types register on init at 10, so the migration's chat_history query runs after.
+    $onInit = null;
+    Actions\expectAdded('init')->once()->with(Mockery::on(
+        static function (mixed $cb) use (&$onInit): bool {
+            $onInit = $cb;
             return $cb instanceof Closure;
         }
-    ));
+    ), 20);
+    Actions\expectAdded('admin_init')->never();
     $plugin = Plugin::boot();
     $plugin->register();
     expect($plugin->get(Store::class))->toBeInstanceOf(Store::class)
@@ -68,11 +71,11 @@ it('registers the settings store, provider factory, model catalog, conversation 
     Functions\expect('update_option')->once()->with(Migrate04::FLAG, '1', false)->andReturn(true);
     Functions\expect('update_option')->once()->with(Migrate04::FLAG_CONVERSATIONS, '1', false)->andReturn(true);
     Functions\when('get_posts')->justReturn([]);
-    $onAdminInit();
+    $onInit();
     expect($plugin->get(Store::class)->get('provider.base_url'))->toBe('http://localhost:11434/v1');
 });
 
-it('registers the wp alpaca-bot command when WP-CLI is the running process', function (): void {
+it('registers the wp alpaca-bot command when WP-CLI is the running process, and the 0.4 migration reaches that process through init', function (): void {
     // WP_CLI (the constant and the class) is process-wide once defined, and Pest runs every test
     // in one process, so this test is the one place that defines it. The stand-in records what
     // add_command() was given; every later register() in the run goes through it harmlessly.
@@ -91,9 +94,27 @@ it('registers the wp alpaca-bot command when WP-CLI is the running process', fun
     if (!defined('WP_CLI')) {
         define('WP_CLI', true);
     }
+    // wp-cli loads WordPress fully and fires init, never admin_init: an upgraded 0.4 site's
+    // first `wp alpaca-bot chat` must see the admin's configured api_url, not the schema default.
+    $migration = null;
+    Actions\expectAdded('init')->once()->with(Mockery::on(static function (mixed $cb) use (&$migration): bool {
+        $migration = $cb instanceof Closure ? $cb : $migration;
+        return $cb instanceof Closure;
+    }), 20);
+    Actions\expectAdded('init')->twice()->with(Mockery::type('array'));
+    Actions\expectAdded('admin_init')->never();
     $plugin = Plugin::boot();
     $plugin->register();
     expect(\WP_CLI::$commands)->toHaveCount(1)
         ->and(\WP_CLI::$commands[0][0])->toBe('alpaca-bot')
-        ->and(\WP_CLI::$commands[0][1])->toBeInstanceOf(ChatCommand::class);
+        ->and(\WP_CLI::$commands[0][1])->toBeInstanceOf(ChatCommand::class)
+        ->and($migration)->toBeInstanceOf(Closure::class);
+
+    $legacy = ['alpaca_bot_api_url' => 'http://ollama.internal:11434', 'alpaca_bot_default_model' => 'qwen3:8b'];
+    Functions\when('get_option')->alias(fn(string $k, mixed $d = false) => $legacy[$k] ?? ($k === Plugin::OPTION ? [] : $d));
+    Functions\when('update_option')->justReturn(true);
+    Functions\when('get_posts')->justReturn([]);
+    $migration();
+    expect($plugin->get(Store::class)->get('provider.base_url'))->toBe('http://ollama.internal:11434/v1')
+        ->and($plugin->get(Store::class)->get('models.default'))->toBe('qwen3:8b');
 });

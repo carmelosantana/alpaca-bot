@@ -57,12 +57,17 @@ final class Plugin
         $collector = new Context\Collector([new Context\CurrentScreenSource()]);
         $this->set(Context\Collector::class, $collector);
         $this->set(Chat\Pipeline::class, new Chat\Pipeline($store, $factory, $this->get(Provider\ModelCatalog::class), $conversations, $meter, $caps, $collector));
-        add_action('admin_init', function () use ($store): void {
+        // On init, after the post types (priority 10), not on admin_init: WP-CLI loads WordPress
+        // and fires init but never admin_init, and in P1 the CLI is the whole user surface, so an
+        // upgraded 0.4 site's first `wp alpaca-bot chat` must already see its configured
+        // settings. Store::all() runs Schema::defaults() through __(), which is safe during init
+        // (the just-in-time textdomain loader only objects before it).
+        add_action('init', function () use ($store): void {
             $migration = new Migrate04($store);
             if ($migration->needed()) {
                 $migration->run();
             }
-        });
+        }, 20);
         // WP-CLI is not a dependency: the command is only registered when WP-CLI is the
         // process running us, and the class itself never references WP_CLI until then.
         if (defined('WP_CLI') && constant('WP_CLI')) {
