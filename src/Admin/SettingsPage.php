@@ -14,10 +14,16 @@ use AlpacaBot\Settings\Store;
  * section per Schema section, a field per Schema field, shown one section at a time as tabs
  * (`?tab=`) and posted to core's options.php.
  *
- * Core saves an option whole, so a form that shows one tab has to post every tab: the fields of
- * the tabs not shown go out as hidden inputs (Fields::hidden()), and the sanitize callback
- * receives the entire array every time. That is the fix for the old first-save bug, where saving
- * one tab reset the others to their defaults.
+ * Core saves an option whole, so a form that shows one tab posts every tab: the fields of the
+ * tabs not shown go out as hidden inputs (Fields::hidden()), and the sanitize callback receives
+ * the entire array every time. Under that, Schema::sanitize() keeps the stored value for any key
+ * a post does not name, so a save can never reset a field it did not carry (the old first-save
+ * bug, where saving one tab reset the others to their defaults). The two together cover PHP's
+ * max_input_vars, which drops the tail of a long post (an overrides table is four inputs per
+ * model) and tells no one: the carry-over is printed before the visible tab so the tail is never
+ * the key or the URL, a dropped field keeps its stored value, and the form ends with END_MARKER,
+ * whose absence from a post means it was cut and the whole save is refused with a notice rather
+ * than stored in part.
  *
  * The sanitize callback is a closure, not `[Schema::class, 'sanitize']`: core calls it with the
  * option *name* second, and Schema::sanitize() wants the stored array there so a secret posted
@@ -35,6 +41,9 @@ final class SettingsPage
     public const SLUG = 'alpaca-bot-settings';
     public const GROUP = 'alpaca_bot';
 
+    /** The last input of the form. A post of the option that arrives without it was cut short by PHP. */
+    public const END_MARKER = 'alpaca_bot_settings_end';
+
     public function __construct(private Store $store, private ModelCatalog $catalog) {}
 
     /** On admin_init: the setting, its sections (one page id per tab) and its fields. */
@@ -44,7 +53,12 @@ final class SettingsPage
             'type' => 'array',
             'sanitize_callback' => static function (mixed $input): array {
                 $stored = get_option(Plugin::OPTION, []);
-                return Schema::sanitize(is_array($input) ? $input : [], is_array($stored) ? $stored : []);
+                $stored = is_array($stored) ? $stored : [];
+                if (self::postIsTruncated()) {
+                    add_settings_error(Plugin::OPTION, 'truncated', __('Nothing was saved: the form was longer than PHP accepts in one request (max_input_vars), so its end never arrived. Raise max_input_vars in php.ini, or set per-model overrides through the REST API.', 'alpaca-bot'));
+                    $input = [];
+                }
+                return Schema::sanitize(is_array($input) ? $input : [], $stored);
             },
             'default' => Schema::defaults(),
         ]);
@@ -54,8 +68,9 @@ final class SettingsPage
             }, self::page($id));
         }
         foreach (Schema::fields() as $key => $f) {
-            // A checkbox carries its own label; a table has no single control to point a label at.
-            $args = $f['type'] === 'array' ? [] : ['label_for' => Fields::id($key)];
+            // A checkbox carries its own label (its row title is blank, and a label_for there
+            // would be an empty second label); a table has no single control to point a label at.
+            $args = in_array($f['type'], ['array', 'boolean'], true) ? [] : ['label_for' => Fields::id($key)];
             add_settings_field('alpaca_bot_' . $key, $f['type'] === 'boolean' ? '' : $f['label'], function () use ($key, $f): void {
                 echo $key === 'models.overrides' ? $this->renderOverrides() : Fields::render($key, $f, $this->store->get($key)); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- Fields escapes every attribute and text node.
             }, self::page($f['section']), 'alpaca_bot_' . $f['section'], $args);
@@ -82,14 +97,30 @@ final class SettingsPage
         }
         echo '</nav><form method="post" action="options.php">';
         settings_fields(self::GROUP);
-        do_settings_sections(self::page($active));
+        // The carry-over before the visible tab: what PHP's max_input_vars cuts is the tail, so
+        // the tail is the last rows of an overrides table, never the key or the URL. The marker
+        // is the last input of all; a post without it was cut, and the sanitize callback refuses it.
         foreach (Schema::fields() as $key => $f) {
             if ($f['section'] !== $active) {
                 echo Fields::hidden($key, $this->store->get($key)); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- escaped in Fields.
             }
         }
+        do_settings_sections(self::page($active));
+        printf('<input type="hidden" name="%s" value="1">', esc_attr(self::END_MARKER));
         submit_button();
         echo '</form></div>';
+    }
+
+    /**
+     * True for a form post of the option that lacks the END_MARKER input render() prints last:
+     * PHP dropped the tail (max_input_vars, 1000 by default, with no notice to userland) and what
+     * arrived is not the form. Any other caller of the sanitize callback (the REST route, WP-CLI,
+     * a test) posts nothing and is never refused. options.php verified the nonce before the
+     * callback ran; this reads only whether the form reached its end.
+     */
+    private static function postIsTruncated(): bool
+    {
+        return isset($_POST[Plugin::OPTION]) && !isset($_POST[self::END_MARKER]); // phpcs:ignore WordPress.Security.NonceVerification.Missing -- verified by options.php; see the docblock.
     }
 
     /** `?tab=` when it names a section, else the first one. sanitize_key() bounds what is echoed back into the tab links. */
@@ -107,12 +138,15 @@ final class SettingsPage
     }
 
     /**
-     * The overrides table. Placeholders show the global value each blank cell falls back to.
-     * A model with a stored override that the catalog no longer lists still gets a row, so the
-     * override can be seen and cleared rather than carried invisibly.
+     * The overrides table, its columns labelled as the global fields they override. Placeholders
+     * show the global value a blank cell falls back to, except the system prompt's: that global
+     * is multi-line and lives on the Chat tab, so the caption names it instead. A model with a
+     * stored override that the catalog no longer lists still gets a row, so the override can be
+     * seen and cleared rather than carried invisibly.
      */
     private function renderOverrides(): string
     {
+        $fields = Schema::fields();
         $overrides = $this->store->get('models.overrides', []);
         $overrides = is_array($overrides) ? $overrides : [];
         $ids = array_map(static fn($m): string => $m->id, $this->catalog->all());
@@ -146,7 +180,11 @@ final class SettingsPage
                 . $cell('system', 'text', 'regular-text')
                 . '</tr>';
         }
-        return '<table class="widefat striped"><thead><tr><th>' . esc_html__('Model', 'alpaca-bot') . '</th><th>' . esc_html__('Temperature', 'alpaca-bot') . '</th><th>num_ctx</th><th>keep_alive</th><th>' . esc_html__('System prompt', 'alpaca-bot') . '</th></tr></thead><tbody>' . $rows . '</tbody></table>'
-            . '<p class="description">' . esc_html__('Blank cells use the global values above. A model-level system prompt replaces the global one for that model.', 'alpaca-bot') . '</p>';
+        $head = '<th>' . esc_html__('Model', 'alpaca-bot') . '</th>';
+        foreach (['models.temperature', 'models.num_ctx', 'models.keep_alive', 'chat.system_prompt'] as $key) {
+            $head .= '<th>' . esc_html($fields[$key]['label']) . '</th>';
+        }
+        return '<table class="widefat striped"><thead><tr>' . $head . '</tr></thead><tbody>' . $rows . '</tbody></table>'
+            . '<p class="description">' . esc_html__('A blank cell uses the global value: the fields above for temperature, context window and keep alive, and the system prompt on the Chat tab. A model-level system prompt replaces the global one for that model.', 'alpaca-bot') . '</p>';
     }
 }

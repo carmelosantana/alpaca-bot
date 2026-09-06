@@ -52,8 +52,8 @@ it('maps 0.4 options into the new schema and appends /v1 to the base url', funct
         ->and($written)->toBe($out);
 });
 
-it('is not needed when both flags are set, and writes nothing', function (): void {
-    Functions\when('get_option')->alias(fn(string $k, mixed $d = false) => in_array($k, [Migrate04::FLAG, Migrate04::FLAG_CONVERSATIONS], true) ? '1' : $d);
+it('is not needed when all three flags are set, and writes nothing', function (): void {
+    Functions\when('get_option')->alias(fn(string $k, mixed $d = false) => in_array($k, [Migrate04::FLAG, Migrate04::FLAG_RETENTION, Migrate04::FLAG_CONVERSATIONS], true) ? '1' : $d);
     Functions\expect('update_option')->never();
     Functions\expect('get_posts')->never();
     expect((new Migrate04(new Store()))->needed())->toBeFalse();
@@ -61,17 +61,58 @@ it('is not needed when both flags are set, and writes nothing', function (): voi
 
 // Without the flags a 1.0-only site would re-run the detection get_option() calls (all
 // non-autoloaded, so uncached misses) and the conversation query on every admin request forever.
-it('on a fresh install moves no options, runs one empty conversation batch, and flags both so detection runs only once', function (): void {
+it('on a fresh install moves no options, runs one empty conversation batch, and flags all three steps so detection runs only once', function (): void {
     $stored = [];
     migrate04Options($stored);
-    Functions\expect('get_posts')->once()->andReturn([]);
+    // One query for receipts (none: a fresh site keeps the retention default), one conversation batch.
+    Functions\expect('get_posts')->twice()->andReturn([]);
     Functions\expect('wp_update_post')->never();
     $m = new Migrate04(new Store());
     expect($m->needed())->toBeTrue()
         ->and($stored)->toBe([Migrate04::FLAG => '1']);
     $m->run();
-    expect($stored)->toBe([Migrate04::FLAG => '1', Migrate04::FLAG_CONVERSATIONS => '1'])
+    expect($stored)->toBe([Migrate04::FLAG => '1', Migrate04::FLAG_RETENTION => '1', Migrate04::FLAG_CONVERSATIONS => '1'])
+        ->and($m->needed())->toBeFalse()
+        ->and((new Store())->get('privacy.usage_retention_days'))->toBe(90);
+});
+
+// `privacy.usage_retention_days` arrived after sites were already recording receipts. Its
+// default would have the daily cleanup delete an upgraded site's whole usage history a day
+// after the upgrade, unasked; a site with anything the field could act on gets 0 written
+// explicitly, once, so nothing goes until an admin chooses a window. Only a fresh install,
+// with neither a settings row nor a receipt, takes the 90-day default.
+it('writes retention 0 on a site whose settings row predates the field, and leaves a row that has it alone', function (): void {
+    $stored = [Migrate04::FLAG => '1', Migrate04::FLAG_CONVERSATIONS => '1', 'alpaca_bot_settings' => ['models.default' => 'qwen3-vl:2b', 'provider.base_url' => 'http://ollama:11434/v1']];
+    migrate04Options($stored);
+    Functions\expect('get_posts')->never();
+    $m = new Migrate04(new Store());
+    expect($m->needed())->toBeTrue();
+    $out = $m->run();
+    expect($out['privacy.usage_retention_days'])->toBe(0)
+        ->and($out['models.default'])->toBe('qwen3-vl:2b')
+        ->and($out['provider.base_url'])->toBe('http://ollama:11434/v1')
+        ->and($stored['alpaca_bot_settings']['privacy.usage_retention_days'])->toBe(0)
+        ->and($stored[Migrate04::FLAG_RETENTION])->toBe('1')
         ->and($m->needed())->toBeFalse();
+
+    // A row that already carries the field was saved by an admin who saw it: their number stands.
+    $stored = [Migrate04::FLAG => '1', Migrate04::FLAG_CONVERSATIONS => '1', 'alpaca_bot_settings' => ['privacy.usage_retention_days' => 45]];
+    migrate04Options($stored);
+    (new Migrate04(new Store()))->run();
+    expect($stored['alpaca_bot_settings']['privacy.usage_retention_days'])->toBe(45)
+        ->and($stored[Migrate04::FLAG_RETENTION])->toBe('1');
+});
+
+it('writes retention 0 on a 0.4 site that has receipts and no settings row yet, alongside the migrated options', function (): void {
+    $stored = ['alpaca_bot_default_model' => 'llama3.2'];
+    migrate04Options($stored);
+    Functions\when('get_posts')->alias(static fn(array $q): array => $q['post_type'] === 'chat_log' ? [17] : []);
+    Functions\expect('wp_update_post')->never();
+    $out = (new Migrate04(new Store()))->run();
+    expect($out['privacy.usage_retention_days'])->toBe(0)
+        ->and($out['models.default'])->toBe('llama3.2')
+        ->and($stored['alpaca_bot_settings']['privacy.usage_retention_days'])->toBe(0)
+        ->and($stored['alpaca_bot_settings']['models.default'])->toBe('llama3.2');
 });
 
 // 0.4 saved every field of a settings tab on submit, so blank inputs were stored

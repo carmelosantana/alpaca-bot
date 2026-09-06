@@ -7,6 +7,7 @@ namespace AlpacaBot\Tests\Integration;
 use AlpacaBot\Admin\Menu;
 use AlpacaBot\Admin\SettingsPage;
 use AlpacaBot\Plugin;
+use AlpacaBot\Provider\Model;
 use AlpacaBot\Settings\Schema;
 use AlpacaBot\Settings\Store;
 
@@ -42,6 +43,8 @@ final class SettingsPageTest extends TestCase
     public function tear_down(): void
     {
         unset($_GET['tab']);
+        $_POST = [];
+        $GLOBALS['wp_settings_errors'] = [];
         parent::tear_down();
     }
 
@@ -122,11 +125,14 @@ final class SettingsPageTest extends TestCase
             'models.default' => 'qwen3-vl:2b',
             'models.temperature' => 0.3,
             'models.overrides' => ['qwen3-vl:2b' => ['num_ctx' => 4096, 'system' => 'Be brief & kind']],
+            // Posted by a textarea as CRLF; stored as LF, and carried through a hidden input unchanged.
+            'chat.system_prompt' => "You are terse.\r\nAnswer in one line.",
             'chat.spellcheck' => false,
             'privacy.usage_retention_days' => 0,
         ]));
         $before = get_option('alpaca_bot_settings');
         $this->assertSame('sk-secret-integration', $before['provider.api_key']);
+        $this->assertSame("You are terse.\nAnswer in one line.", $before['chat.system_prompt']);
 
         $_GET['tab'] = 'chat';
         set_current_screen('alpaca-bot_page_alpaca-bot-settings');
@@ -155,6 +161,101 @@ final class SettingsPageTest extends TestCase
     }
 
     /**
+     * PHP's max_input_vars (1000 by default) drops the tail of a long POST and tells userland
+     * nothing; a Models tab with four inputs per catalog model gets there at a few hundred
+     * models. Two layers cover it, and each is proved on its own here. The page ends the form
+     * with a marker input, and the sanitize callback refuses a post of the option that arrives
+     * without it: nothing changes and the admin is told why. And under that, the schema keeps
+     * the stored value for every key a post does not name, so even a post the guard does not
+     * see (the callback reached with no $_POST at all) can never clear the key or the URL: the
+     * reviewer's case, reproduced against the old layout where the carry-over was the tail.
+     */
+    public function test_a_post_php_cut_short_is_refused_whole_and_the_schema_keeps_what_it_never_heard(): void
+    {
+        $store = Plugin::instance()->get(Store::class);
+        $store->replace(['provider.api_key' => 'sk-REVIEW-SENTINEL-9f3a', 'provider.base_url' => 'https://openrouter.ai/api/v1', 'models.default' => 'qwen3-vl:2b']);
+        $before = get_option('alpaca_bot_settings');
+
+        $_GET['tab'] = 'models';
+        set_current_screen('alpaca-bot_page_alpaca-bot-settings');
+        ob_start();
+        Plugin::instance()->get(SettingsPage::class)->render();
+        $html = (string) ob_get_clean();
+        // The carry-over precedes the visible tab, and the marker is the last input before submit.
+        $this->assertLessThan(strpos($html, 'id="ab-models-default"'), strpos($html, 'name="alpaca_bot_settings[provider.api_key]"'));
+        $this->assertLessThan(strpos($html, 'id="submit"'), strpos($html, 'name="' . SettingsPage::END_MARKER . '" value="1"'));
+        $posted = self::postedFrom($html);
+        $posted['models.default'] = 'changed-on-the-models-tab';
+
+        // Layer one, the guard: the post arrived without its marker, so it was cut, and is refused.
+        $_POST = ['alpaca_bot_settings' => $posted];
+        update_option('alpaca_bot_settings', $posted);
+        $this->assertSame($before, get_option('alpaca_bot_settings'));
+        $errors = get_settings_errors('alpaca_bot_settings');
+        $this->assertCount(1, $errors);
+        $this->assertSame('truncated', $errors[0]['code']);
+        $this->assertStringContainsString('max_input_vars', $errors[0]['message']);
+        // With the marker the same post saves.
+        $_POST[SettingsPage::END_MARKER] = '1';
+        update_option('alpaca_bot_settings', $posted);
+        $this->assertSame('changed-on-the-models-tab', get_option('alpaca_bot_settings')['models.default']);
+        $this->assertSame('sk-REVIEW-SENTINEL-9f3a', get_option('alpaca_bot_settings')['provider.api_key']);
+
+        // Layer two, the schema alone: no $_POST, the guard is inert, and the post is the old
+        // layout's truncation, the Models fields with the whole carry-over dropped.
+        $_POST = [];
+        $cut = array_filter($posted, static fn(string $key): bool => Schema::fields()[$key]['section'] === 'models', ARRAY_FILTER_USE_KEY);
+        $cut['models.default'] = 'changed-again';
+        $this->assertArrayNotHasKey('provider.api_key', $cut);
+        update_option('alpaca_bot_settings', $cut);
+        $after = get_option('alpaca_bot_settings');
+        $this->assertSame('changed-again', $after['models.default']);
+        $this->assertSame('sk-REVIEW-SENTINEL-9f3a', $after['provider.api_key']);
+        $this->assertSame('https://openrouter.ai/api/v1', $after['provider.base_url']);
+        $this->assertSame(array_keys(Schema::fields()), array_keys($after));
+    }
+
+    /**
+     * The overrides table over real core: a model id from the provider and an override value
+     * from the option, both hostile, render escaped at every attribute and text node, and the
+     * form posts the stored override back exactly as it was stored.
+     */
+    public function test_the_models_tab_escapes_model_ids_and_override_values_and_posts_them_back_intact(): void
+    {
+        $evilId = '"><script>alert(1)</script>';
+        $evilValue = '"><img src=x onerror=alert(2)>';
+        $this->fakeProvider();
+        add_filter('alpaca_bot/models', static fn(): array => [Model::fromArray(['id' => $evilId, 'label' => 'x']), Model::fromArray(['id' => 'qwen3-vl:2b', 'label' => 'qwen'])]);
+        $store = Plugin::instance()->get(Store::class);
+        $store->replace(['models.num_ctx' => 4096, 'models.overrides' => ['qwen3-vl:2b' => ['num_ctx' => 2048, 'system' => $evilValue], 'gone-model' => ['temperature' => 0.2]]]);
+
+        $_GET['tab'] = 'models';
+        set_current_screen('alpaca-bot_page_alpaca-bot-settings');
+        ob_start();
+        Plugin::instance()->get(SettingsPage::class)->render();
+        $html = (string) ob_get_clean();
+
+        $this->assertStringNotContainsString('<script', $html);
+        $this->assertStringNotContainsString('<img', $html);
+        $this->assertStringContainsString('<th scope="row">' . esc_html($evilId) . '</th>', $html);
+        $this->assertStringContainsString('name="' . esc_attr('alpaca_bot_settings[models.overrides][' . $evilId . '][temperature]') . '"', $html);
+        $this->assertStringContainsString('name="alpaca_bot_settings[models.overrides][qwen3-vl:2b][system]" value="' . esc_attr($evilValue) . '"', $html);
+        $this->assertStringContainsString('<th scope="row">gone-model</th>', $html);
+        $this->assertStringContainsString('<th>Context window (tokens)</th><th>Keep alive</th>', $html);
+        $this->assertStringContainsString('placeholder="4096"', $html);
+        // Three table rows (the settings fields above the table are <th scope="row"> too).
+        $this->assertSame(1, preg_match('#<tbody>(.*)</tbody>#s', $html, $body));
+        $this->assertSame(3, substr_count($body[1], '<tr><th scope="row">'));
+
+        $_POST = ['alpaca_bot_settings' => [], SettingsPage::END_MARKER => '1'];
+        update_option('alpaca_bot_settings', self::postedFrom($html));
+        $this->assertSame(
+            ['qwen3-vl:2b' => ['num_ctx' => 2048, 'system' => $evilValue], 'gone-model' => ['temperature' => 0.2]],
+            get_option('alpaca_bot_settings')['models.overrides'],
+        );
+    }
+
+    /**
      * The form fields as a browser would post them: visible controls and hidden carry-overs
      * alike, `alpaca_bot_settings[a.b]` and `alpaca_bot_settings[a.b][m][f]` names unpacked.
      *
@@ -168,7 +269,8 @@ final class SettingsPageTest extends TestCase
             if (!preg_match('/name="alpaca_bot_settings\[([^"]+)\]"/', $tag[2], $name)) {
                 continue;
             }
-            $path = explode('][', $name[1]);
+            // A browser decodes the name attribute as it does any other: a model id with markup in it comes back as itself.
+            $path = array_map(static fn(string $segment): string => html_entity_decode($segment, ENT_QUOTES), explode('][', $name[1]));
             if ($tag[1] === 'textarea') {
                 $value = substr($tag[3] ?? '', 0, -strlen('</textarea>'));
             } elseif ($tag[1] === 'select') {

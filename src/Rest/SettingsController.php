@@ -26,13 +26,14 @@ use AlpacaBot\Settings\Store;
  * whatever its body says.
  *
  * A PUT is partial at the top level only: each key sent replaces the stored value outright,
- * keys not sent are untouched. That includes `models.overrides`, a map of model id to its
- * options: a PUT of the map is the whole map, and a model left out is gone. Merging per model
- * would leave a client no way to remove one short of a second, different verb; a client that
- * wants to change one model reads the map, edits it and sends it back. Whatever arrives goes
- * through Schema::sanitize() on its way to the option (unknown keys dropped, ranges clamped,
- * types coerced), and the reply is the array as stored, masked, so the client sees what the
- * schema made of its input rather than what it sent.
+ * keys not sent are untouched (Schema::sanitize() keeps the stored value for a key the input
+ * leaves out, so Store::replace() is handed the body as it came). That includes
+ * `models.overrides`, a map of model id to its options: a PUT of the map is the whole map, and
+ * a model left out is gone. Merging per model would leave a client no way to remove one short
+ * of a second, different verb; a client that wants to change one model reads the map, edits it
+ * and sends it back. Whatever arrives goes through Schema::sanitize() on its way to the option
+ * (unknown keys dropped, ranges clamped, types coerced), and the reply is the array as stored,
+ * masked, so the client sees what the schema made of its input rather than what it sent.
  *
  * The keys are dotted (`models.temperature`) and read from get_params(), core's merge of every
  * source; in practice only a JSON body can carry them. PHP rewrites a dot in a top-level
@@ -75,7 +76,7 @@ final class SettingsController extends Controller
         if ($input === []) {
             return Errors::badRequest(__('No settings were sent. Send a JSON body of dotted keys, e.g. {"models.temperature": 0.7}.', 'alpaca-bot'));
         }
-        $this->store->replace(array_merge($this->store->all(), $input));
+        $this->store->replace($input);
         return new \WP_REST_Response($this->masked($this->store->all()));
     }
 

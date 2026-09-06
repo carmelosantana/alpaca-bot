@@ -256,9 +256,12 @@ final class UsageMeter
      *
      * The rows come back as objects, not ids, so the type is checked on each before it is
      * deleted: the query asks for chat_log, and this is the guard that a filter on the query, or
-     * a bug in the one above, cannot turn into a deleted conversation. Permanently (`true`): a
-     * receipt in the trash would still be a row of per-user numbers, which is what retention
-     * exists to remove.
+     * a bug in the one above, cannot turn into a deleted conversation. Permanently (`true`), and
+     * out of the trash as well (every registered status by name, where 'any' would leave the
+     * trash out): a trashed receipt is still a row of per-user numbers, which is what retention
+     * exists to remove. A row a batch could not remove, whether the guard skipped it or
+     * wp_delete_post() refused (a `delete_post` filter), is left out of the next query, so no
+     * batch asks for the same rows twice.
      *
      * @return int rows deleted
      */
@@ -270,10 +273,12 @@ final class UsageMeter
         }
         $before = gmdate('Y-m-d H:i:s', (int) current_time('timestamp', true) - $days * 86400);
         $deleted = 0;
+        $skip = [];
         for ($batch = 0; $batch < self::CLEANUP_BATCHES; $batch++) {
             $rows = get_posts([
                 'post_type' => self::POST_TYPE,
-                'post_status' => 'any',
+                'post_status' => array_keys(get_post_stati()),
+                'post__not_in' => $skip,
                 'numberposts' => self::CLEANUP_BATCH,
                 'orderby' => 'ID',
                 'order' => 'ASC',
@@ -282,12 +287,11 @@ final class UsageMeter
                 'date_query' => [['before' => $before, 'inclusive' => false, 'column' => 'post_date_gmt']],
             ]);
             foreach ($rows as $row) {
-                if ($row->post_type !== self::POST_TYPE) {
+                if ($row->post_type !== self::POST_TYPE || !wp_delete_post((int) $row->ID, true)) {
+                    $skip[] = (int) $row->ID;
                     continue;
                 }
-                if (wp_delete_post((int) $row->ID, true)) {
-                    $deleted++;
-                }
+                $deleted++;
             }
             if (count($rows) < self::CLEANUP_BATCH) {
                 break;

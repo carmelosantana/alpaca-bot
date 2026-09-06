@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace AlpacaBot\Tests\Integration;
 
 use AlpacaBot\Plugin;
+use AlpacaBot\Settings\Schema;
 use AlpacaBot\Settings\Store;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Config\ModelDefinition;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Contract\ProviderInterface;
@@ -26,8 +27,10 @@ use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Provider\Usage;
  * rest_api_init with the current test's filters in place, so route-time filters work in any test,
  * in any order.
  *
- * Every test also starts from default settings, written through the Store on set_up. That one
- * write does two things. It creates the `alpaca_bot_settings` option row: wp-phpunit never
+ * Every test also starts from default settings, written through the Store on set_up: the
+ * defaults spelled out, because Store::replace() keeps what it is not told (an empty write would
+ * carry the previous test's memo forward). That one write does two things. It creates the
+ * `alpaca_bot_settings` option row: wp-phpunit never
  * activates the plugin (bootstrap.php loads the main file instead), so without it the row does
  * not exist and get_option() is false; SettingsRoutesTest reads the row directly and is coupled
  * to this. And it refreshes the Store's memo, which lives on the Plugin singleton for the whole
@@ -46,7 +49,7 @@ abstract class TestCase extends \WP_UnitTestCase
     {
         parent::set_up();
         $GLOBALS['wp_rest_server'] = null;
-        Plugin::instance()->get(Store::class)->replace([]);
+        Plugin::instance()->get(Store::class)->replace(Schema::defaults());
     }
 
     public function tear_down(): void

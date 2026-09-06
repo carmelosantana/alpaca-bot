@@ -45,8 +45,36 @@ it('sanitizes by type, clamps ranges, and drops unknown keys', function (): void
         ->and($out['chat.history_limit'])->toBe(20);
 });
 
-it('sanitizing an empty input yields exactly the defaults', function (): void {
+it('sanitizing an empty input over an empty store yields exactly the defaults', function (): void {
     expect(Schema::sanitize([], []))->toBe(Schema::defaults());
+});
+
+// PHP's max_input_vars drops the tail of a large POST and tells userland nothing. On the Models
+// tab that tail is the hidden carry-over of every other tab, the API key and the base URL first
+// among them. A key the input does not name keeps what is stored, so a cut-short post can lose
+// at most what it did not carry, never what it never mentioned; only a store holding nothing
+// falls back to the default.
+it('keeps the stored value for a key the input leaves out, and takes the default only when nothing is stored', function (): void {
+    $current = ['provider.api_key' => 'sk-stored', 'provider.base_url' => 'https://openrouter.ai/api/v1', 'models.temperature' => 1.3, 'chat.spellcheck' => false];
+    $out = Schema::sanitize(['models.default' => 'gpt-4o'], $current);
+    expect($out['models.default'])->toBe('gpt-4o')
+        ->and($out['provider.api_key'])->toBe('sk-stored')
+        ->and($out['provider.base_url'])->toBe('https://openrouter.ai/api/v1')
+        ->and($out['models.temperature'])->toBe(1.3)
+        ->and($out['chat.spellcheck'])->toBeFalse()
+        ->and($out['chat.welcome'])->toBe('How can I help?');
+    // What is kept is still put through the schema: a stored value outside it is corrected, not carried.
+    $kept = Schema::sanitize([], ['models.num_ctx' => 5, 'provider.kind' => 'bogus', 'nope' => 'x']);
+    expect($kept['models.num_ctx'])->toBe(512)->and($kept['provider.kind'])->toBe('ollama')->and($kept)->not->toHaveKey('nope');
+});
+
+// A textarea posts CRLF and a JSON client posts LF, and a hidden carry-over of either goes
+// through the browser's own newline handling on its way back. One stored spelling, LF, makes
+// the value the same whichever path wrote it, so saving an unrelated tab cannot rewrite it.
+it('stores one line ending: CRLF and a lone CR become LF, on the prompt and on an override', function (): void {
+    $out = Schema::sanitize(['chat.system_prompt' => "one\r\ntwo\rthree\r\n", 'models.overrides' => ['m' => ['system' => "a\r\nb"]]], []);
+    expect($out['chat.system_prompt'])->toBe("one\ntwo\nthree")
+        ->and($out['models.overrides']['m']['system'])->toBe("a\nb");
 });
 
 it('names the secret fields and the mask that stands in for them', function (): void {
@@ -60,8 +88,8 @@ it('keeps a stored secret when handed the mask, clears it on an empty string, re
     expect(Schema::sanitize(['provider.api_key' => Schema::MASK], $stored)['provider.api_key'])->toBe('sk-stored')
         ->and(Schema::sanitize(['provider.api_key' => ''], $stored)['provider.api_key'])->toBe('')
         ->and(Schema::sanitize(['provider.api_key' => ' sk-new '], $stored)['provider.api_key'])->toBe('sk-new')
-        // Absent is not the mask: a full replacement that leaves the key out clears it, as for any field.
-        ->and(Schema::sanitize([], $stored)['provider.api_key'])->toBe('')
+        // Absent keeps what is stored, as for any field: only '' clears.
+        ->and(Schema::sanitize([], $stored)['provider.api_key'])->toBe('sk-stored')
         // The mask over nothing stored is nothing stored, never the literal mask.
         ->and(Schema::sanitize(['provider.api_key' => Schema::MASK], [])['provider.api_key'])->toBe('');
 });
@@ -111,6 +139,8 @@ it('keeps usage receipts for 90 days by default, 0 meaning forever, and never a 
         ->and(Schema::sanitize(['privacy.usage_retention_days' => '400'], [])['privacy.usage_retention_days'])->toBe(400)
         ->and(Schema::sanitize(['privacy.usage_retention_days' => 'x'], [])['privacy.usage_retention_days'])->toBe(90)
         ->and(Schema::sanitize(['privacy.usage_retention_days' => '999999'], [])['privacy.usage_retention_days'])->toBe($f['max']);
+    // The clamp is in the copy: a value above the ceiling is stored as the ceiling, silently otherwise.
+    expect($f['description'] ?? '')->toContain((string) $f['max']);
 });
 
 // The copy that P1's real runs asked for. Pinned by keyword so it cannot quietly vanish.
@@ -120,8 +150,9 @@ it('tells the admin what the timeout, the usage receipts and the caps really do'
     expect($fields['provider.timeout']['description'] ?? '')->toContain('cold')
         ->and($fields['privacy.usage_log']['description'] ?? '')->toContain('always')->toContain('never')
         ->and($fields['privacy.usage_retention_days']['description'] ?? '')->toContain('0 ')
-        ->and($sections['governance']['description'])->toContain('reasoning')
-        ->and($fields['models.default']['description'] ?? '')->toContain('reasoning');
+        // The reasoning's wire key is `message` (Rest\ChatController::body()), not the Result's `reply` property.
+        ->and($sections['governance']['description'])->toContain('message.meta.reasoning')->not->toContain('reply.meta')
+        ->and($fields['models.default']['description'] ?? '')->toContain('message.meta.reasoning')->not->toContain('reply.meta');
 });
 
 // The overrides table posts every cell of every row, blank ones included: a blank is "no

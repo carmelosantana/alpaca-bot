@@ -34,7 +34,7 @@ final class Schema
             'models' => ['label' => __('Models', 'alpaca-bot'), 'description' => __('Default model and generation options, with per-model overrides.', 'alpaca-bot')],
             'chat' => ['label' => __('Chat', 'alpaca-bot'), 'description' => __('What users see and can change in the chat screen.', 'alpaca-bot')],
             'privacy' => ['label' => __('Privacy', 'alpaca-bot'), 'description' => __('What is stored in your database. Message content lives only in saved conversations; a usage receipt never contains it.', 'alpaca-bot')],
-            'governance' => ['label' => __('Limits', 'alpaca-bot'), 'description' => __('Server-enforced monthly token caps, counted from the usage receipts. 0 means unlimited. Completion tokens include the reasoning a thinking model produces before its answer (it comes back as reply.meta.reasoning), so a thinking model spends a cap faster than its visible reply suggests: a short answer can cost several hundred reasoning tokens first.', 'alpaca-bot')],
+            'governance' => ['label' => __('Limits', 'alpaca-bot'), 'description' => __('Server-enforced monthly token caps, counted from the usage receipts. 0 means unlimited. Completion tokens include the reasoning a thinking model produces before its answer (it comes back as message.meta.reasoning), so a thinking model spends a cap faster than its visible reply suggests: a short answer can cost several hundred reasoning tokens first.', 'alpaca-bot')],
             'toolkits' => ['label' => __('Tools', 'alpaca-bot'), 'description' => __('Settings for built-in tools.', 'alpaca-bot')],
         ];
     }
@@ -47,7 +47,7 @@ final class Schema
             'provider.base_url' => ['type' => 'string', 'default' => 'http://localhost:11434/v1', 'section' => 'provider', 'label' => __('Base URL', 'alpaca-bot'), 'description' => __('OpenAI-compatible endpoint. For Ollama this ends in /v1.', 'alpaca-bot'), 'sanitize' => [self::class, 'sanitizeUrl']],
             'provider.api_key' => ['type' => 'string', 'default' => '', 'section' => 'provider', 'label' => __('API key', 'alpaca-bot'), 'description' => __('Optional. Sent as a Bearer token.', 'alpaca-bot')],
             'provider.timeout' => ['type' => 'integer', 'default' => 60, 'section' => 'provider', 'label' => __('Timeout (seconds)', 'alpaca-bot'), 'description' => __('How long one request may wait for the provider before it fails. The first request after a restart loads the model from cold, and a large model can take longer than the 60 seconds default to load; raise this if that first request times out and the next one works. Leave it low otherwise, so a provider that has stopped answering fails quickly instead of holding every chat open.', 'alpaca-bot'), 'min' => 5, 'max' => 600],
-            'models.default' => ['type' => 'string', 'default' => '', 'section' => 'models', 'label' => __('Default model', 'alpaca-bot'), 'description' => __('Used when a request names no model. A thinking model (qwen3, deepseek-r1, gpt-oss) reasons before it answers; the reasoning is returned as reply.meta.reasoning and its tokens count as completion tokens under the monthly caps.', 'alpaca-bot')],
+            'models.default' => ['type' => 'string', 'default' => '', 'section' => 'models', 'label' => __('Default model', 'alpaca-bot'), 'description' => __('Used when a request names no model. A thinking model (qwen3, deepseek-r1, gpt-oss) reasons before it answers; the reasoning is returned as message.meta.reasoning and its tokens count as completion tokens under the monthly caps.', 'alpaca-bot')],
             'models.temperature' => ['type' => 'number', 'default' => 0.7, 'section' => 'models', 'label' => __('Temperature', 'alpaca-bot'), 'min' => 0, 'max' => 2],
             'models.num_ctx' => ['type' => 'integer', 'default' => 8192, 'section' => 'models', 'label' => __('Context window (tokens)', 'alpaca-bot'), 'min' => 512, 'max' => 1048576],
             'models.keep_alive' => ['type' => 'string', 'default' => '5m', 'section' => 'models', 'label' => __('Keep alive', 'alpaca-bot'), 'description' => __('How long Ollama keeps the model loaded, e.g. 5m, 1h, -1.', 'alpaca-bot')],
@@ -62,7 +62,7 @@ final class Schema
             'chat.assistant_avatar' => ['type' => 'string', 'default' => '', 'section' => 'chat', 'label' => __('Assistant avatar URL', 'alpaca-bot'), 'sanitize' => [self::class, 'sanitizeUrl']],
             'privacy.save_history' => ['type' => 'boolean', 'default' => true, 'section' => 'privacy', 'label' => __('Save conversations', 'alpaca-bot')],
             'privacy.usage_log' => ['type' => 'boolean', 'default' => true, 'section' => 'privacy', 'label' => __('Record the model and conversation on usage receipts', 'alpaca-bot'), 'description' => __('A usage receipt is always written for every reply, on or off, so the monthly caps keep working: it always holds the token counts, the duration and the user who asked, and never the messages themselves. On, the receipt also records the model name and a link to the conversation. Off, it holds those numbers only.', 'alpaca-bot')],
-            'privacy.usage_retention_days' => ['type' => 'integer', 'default' => 90, 'section' => 'privacy', 'label' => __('Keep usage receipts for (days)', 'alpaca-bot'), 'description' => __('A daily cleanup deletes receipts older than this. 0 keeps them forever. Conversations are never touched. A receipt is counted toward the caps until its month ends, so keep this at 31 or more while a cap is set.', 'alpaca-bot'), 'min' => 0, 'max' => 3650],
+            'privacy.usage_retention_days' => ['type' => 'integer', 'default' => 90, 'section' => 'privacy', 'label' => __('Keep usage receipts for (days)', 'alpaca-bot'), 'description' => __('A daily cleanup deletes receipts older than this. 0 keeps them forever; 3650 (ten years) is the most, and a larger number is stored as 3650. Conversations are never touched. A receipt is counted toward the caps until its month ends, so keep this at 31 or more while a cap is set.', 'alpaca-bot'), 'min' => 0, 'max' => 3650],
             'governance.site_monthly_tokens' => ['type' => 'integer', 'default' => 0, 'section' => 'governance', 'label' => __('Site-wide monthly token cap', 'alpaca-bot'), 'min' => 0, 'max' => PHP_INT_MAX],
             'governance.user_monthly_tokens' => ['type' => 'integer', 'default' => 0, 'section' => 'governance', 'label' => __('Per-user monthly token cap', 'alpaca-bot'), 'min' => 0, 'max' => PHP_INT_MAX],
             'toolkits.user_agent' => ['type' => 'string', 'default' => 'AlpacaBot/1.0 (+https://github.com/carmelosantana/alpaca-bot)', 'section' => 'toolkits', 'label' => __('User agent for fetch tools', 'alpaca-bot')],
@@ -76,15 +76,25 @@ final class Schema
     }
 
     /**
-     * Full, validated settings array. Missing keys take their default; unknown keys are dropped.
+     * Full, validated settings array: every schema key, in schema order, nothing else. A key the
+     * input names is taken from the input; one it leaves out keeps what `$current` holds; only
+     * when `$current` has nothing for it either does the default apply. Kept or new, every value
+     * goes through its field's coercion, so a stored value outside the schema is corrected on the
+     * way back rather than carried.
      *
-     * `$current` is what the option holds now, and is where a SECRETS field keeps its value from:
-     * a secret sent as MASK, or as anything that is not a string, resolves to `$current`'s value
-     * (secret()). There is no default for it on purpose. `[]` would turn an echoed mask into a
-     * cleared key, and reading the option here would hide a database read inside a pure function;
-     * every caller knows what it is writing over (Store has its memo, a `register_setting()`
-     * sanitize callback has get_option()), so it says so. Core calls that callback with the option
-     * name as the second argument, so it must be a closure that passes the stored array, not
+     * Absent-keeps-stored is what makes a write partial at the top level (Store::replace(), the
+     * REST PUT), and it is the guarantee under the settings page: PHP's max_input_vars drops the
+     * tail of a large form post with no notice to userland, and a post can only lose what it
+     * failed to carry, never a field it did not mention. Clearing is always explicit ('' for a
+     * string, the secret included; 0 for a checkbox, which its hidden input posts).
+     *
+     * `$current` is also where a SECRETS field keeps its value from: a secret sent as MASK, or as
+     * anything that is not a string, resolves to `$current`'s value (secret()). There is no
+     * default for it on purpose. `[]` would turn an echoed mask into a cleared key, and reading
+     * the option here would hide a database read inside a pure function; every caller knows what
+     * it is writing over (Store has its memo, a `register_setting()` sanitize callback has
+     * get_option()), so it says so. Core calls that callback with the option name as the second
+     * argument, so it must be a closure that passes the stored array, not
      * `[Schema::class, 'sanitize']` itself: that fails with a TypeError rather than storing a mask.
      *
      * @param array<string, mixed> $input
@@ -95,7 +105,7 @@ final class Schema
     {
         $out = [];
         foreach (self::fields() as $key => $f) {
-            $raw = array_key_exists($key, $input) ? $input[$key] : $f['default'];
+            $raw = array_key_exists($key, $input) ? $input[$key] : ($current[$key] ?? $f['default']);
             if (in_array($key, self::SECRETS, true)) {
                 $raw = self::secret($raw, $current[$key] ?? '');
             }
@@ -138,7 +148,11 @@ final class Schema
                 return is_array($raw) ? $raw : $f['default'];
             case 'string':
             default:
-                return is_scalar($raw) ? trim((string) $raw) : $f['default'];
+                // One line ending. A textarea posts CRLF, a JSON client LF, and a hidden
+                // carry-over of either is normalised again by the browser on its way back;
+                // stored as LF, a multi-line value reads the same whichever path wrote it, and
+                // saving an unrelated tab cannot rewrite it.
+                return is_scalar($raw) ? trim(str_replace(["\r\n", "\r"], "\n", (string) $raw)) : $f['default'];
         }
     }
 

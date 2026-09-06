@@ -277,11 +277,14 @@ it('deletes nothing when retention is 0 (keep forever)', function (): void {
     expect((new UsageMeter(new Store()))->cleanup())->toBe(0);
 });
 
-it('deletes chat_log rows older than the retention window, permanently, and never anything else', function (): void {
+it('deletes chat_log rows older than the retention window, permanently, trashed ones included, and never anything else', function (): void {
     Functions\when('get_option')->justReturn(['privacy.usage_retention_days' => 90]);
+    // Every registered status by name: 'any' would leave a trashed receipt out, and in the trash forever.
+    Functions\when('get_post_stati')->justReturn(['publish' => 'publish', 'private' => 'private', 'trash' => 'trash', 'auto-draft' => 'auto-draft']);
     // 90 days before 2024-08-30 06:40:00 UTC.
     Functions\expect('get_posts')->once()->withArgs(fn(array $q): bool => $q['post_type'] === 'chat_log'
-        && $q['post_status'] === 'any'
+        && $q['post_status'] === ['publish', 'private', 'trash', 'auto-draft']
+        && $q['post__not_in'] === []
         && $q['date_query'] === [['before' => '2024-06-01 06:40:00', 'inclusive' => false, 'column' => 'post_date_gmt']]
         && $q['numberposts'] === 500)->andReturn([
             (object) ['ID' => 5, 'post_type' => 'chat_log'],
@@ -294,8 +297,22 @@ it('deletes chat_log rows older than the retention window, permanently, and neve
     expect((new UsageMeter(new Store()))->cleanup())->toBe(1);
 });
 
+// A row wp_delete_post() refuses (a `delete_post` filter, say) would come back in every batch
+// and make a full batch of refusals repeat the same query until the batch limit; a row the
+// type guard skips likewise. Both are left out of the next query, so every batch moves on.
+it('moves past rows it could not delete instead of asking for them again', function (): void {
+    Functions\when('get_option')->justReturn(['privacy.usage_retention_days' => 1]);
+    Functions\when('get_post_stati')->justReturn(['private' => 'private']);
+    $stuck = array_map(static fn(int $i): object => (object) ['ID' => $i, 'post_type' => $i === 500 ? 'chat_history' : 'chat_log'], range(1, 500));
+    Functions\expect('get_posts')->once()->withArgs(fn(array $q): bool => $q['post__not_in'] === [])->andReturn($stuck);
+    Functions\expect('get_posts')->once()->withArgs(fn(array $q): bool => $q['post__not_in'] === range(1, 500))->andReturn([]);
+    Functions\expect('wp_delete_post')->times(499)->andReturn(false);
+    expect((new UsageMeter(new Store()))->cleanup())->toBe(0);
+});
+
 it('works through a backlog in batches and stops after a bounded number of them', function (): void {
     Functions\when('get_option')->justReturn(['privacy.usage_retention_days' => 1]);
+    Functions\when('get_post_stati')->justReturn(['private' => 'private']);
     $batch = array_map(static fn(int $i): object => (object) ['ID' => $i, 'post_type' => 'chat_log'], range(1, 500));
     // Every batch comes back full: the run must still end.
     Functions\expect('get_posts')->times(20)->andReturn($batch);

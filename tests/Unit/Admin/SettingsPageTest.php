@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use AlpacaBot\Admin\SettingsPage;
 use AlpacaBot\Plugin;
+use AlpacaBot\Provider\ModelCatalog;
 use AlpacaBot\Settings\Schema;
 use Brain\Monkey\Functions;
 
@@ -24,10 +25,36 @@ it('registers the option under the alpaca_bot group with a sanitize callback tha
     // What core does on options.php: the callback, the posted array, the option name.
     $out = ($opts['sanitize_callback'])(['provider.api_key' => Schema::MASK, 'models.temperature' => '0.3'], Plugin::OPTION);
     expect($out['provider.api_key'])->toBe('sk-stored')->and($out['models.temperature'])->toBe(0.3)
-        // Only what was posted survives: the page posts every field, and a caller that does not is corrected by the schema.
-        ->and($out['models.default'])->toBe('');
+        // A field the post does not name keeps its stored value: the page posts every field, and a post that arrives short loses nothing.
+        ->and($out['models.default'])->toBe('kept');
     expect(($opts['sanitize_callback'])('', Plugin::OPTION)['models.num_ctx'])->toBe(Schema::defaults()['models.num_ctx'])
         ->and(($opts['sanitize_callback'])(['provider.api_key' => ''], Plugin::OPTION)['provider.api_key'])->toBe('');
+});
+
+// PHP's max_input_vars cuts a long form off at the tail and says nothing to userland. The page
+// ends the form with a marker input; a post that reached the sanitize callback without it was
+// cut, and is refused whole with a notice rather than saved in part. Outside a form post (REST,
+// WP-CLI, a test calling the callback) there is no marker to miss and the guard is inert.
+it('refuses a form post that PHP cut short, keeping the option as it was and telling the admin why', function (): void {
+    Functions\when('add_settings_section')->justReturn(null);
+    Functions\when('add_settings_field')->justReturn(null);
+    $opts = null;
+    Functions\expect('register_setting')->once()->withArgs(function (string $group, string $option, array $o) use (&$opts): bool {
+        $opts = $o;
+        return true;
+    });
+    Functions\when('get_option')->justReturn(['provider.api_key' => 'sk-stored', 'models.default' => 'kept', 'provider.base_url' => 'https://openrouter.ai/api/v1']);
+    Functions\expect('add_settings_error')->once()->withArgs(fn(string $setting, string $code, string $message): bool => $setting === Plugin::OPTION && $code === 'truncated' && str_contains($message, 'max_input_vars'));
+    settingsPage()->register();
+    $_POST = [Plugin::OPTION => ['models.default' => 'changed']];
+    $out = ($opts['sanitize_callback'])(['models.default' => 'changed'], Plugin::OPTION);
+    expect($out['models.default'])->toBe('kept')
+        ->and($out['provider.api_key'])->toBe('sk-stored')
+        ->and($out['provider.base_url'])->toBe('https://openrouter.ai/api/v1')
+        ->and(array_keys($out))->toBe(array_keys(Schema::fields()));
+    $_POST[SettingsPage::END_MARKER] = '1';
+    expect(($opts['sanitize_callback'])(['models.default' => 'changed'], Plugin::OPTION)['models.default'])->toBe('changed');
+    $_POST = [];
 });
 
 it('adds a section per schema section on its own page and a field per schema field on that page', function (): void {
@@ -48,8 +75,46 @@ it('adds a section per schema section on its own page and a field per schema fie
         ->and($fields['alpaca_bot_models.temperature'][0])->toBe(SettingsPage::SLUG . '-models')
         ->and($fields['alpaca_bot_models.temperature'][1])->toBe('alpaca_bot_models')
         ->and($fields['alpaca_bot_models.temperature'][2]['label_for'])->toBe('ab-models-temperature')
-        // The overrides table has no single control to label.
-        ->and($fields['alpaca_bot_models.overrides'][2])->not->toHaveKey('label_for');
+        // The overrides table has no single control to label, and a checkbox carries its own label.
+        ->and($fields['alpaca_bot_models.overrides'][2])->not->toHaveKey('label_for')
+        ->and($fields['alpaca_bot_chat.spellcheck'][2])->not->toHaveKey('label_for');
+});
+
+// The table's model ids come from the provider's JSON and its values from the option: both are
+// escaped at every attribute and text node, the columns carry the labels of the global fields
+// they override, and the caption names where each global lives.
+it('renders the overrides table with every model id and stored value escaped, labelled like the fields it overrides', function (): void {
+    Functions\when('register_setting')->justReturn(null);
+    Functions\when('add_settings_section')->justReturn(null);
+    Functions\when('esc_attr')->alias(fn($s) => htmlspecialchars((string) $s, ENT_QUOTES));
+    Functions\when('esc_html')->alias(fn($s) => htmlspecialchars((string) $s, ENT_QUOTES));
+    $evilId = '"><script>alert(1)</script>';
+    $evilValue = '"><img src=x onerror=alert(2)>';
+    Functions\when('get_transient')->alias(fn(string $key): mixed => $key === ModelCatalog::TRANSIENT ? [['id' => $evilId, 'label' => 'x'], ['id' => 'llama3.2', 'label' => 'llama3.2']] : false);
+    $render = null;
+    Functions\expect('add_settings_field')->times(count(Schema::fields()))->withArgs(function (string $id, string $title, callable $cb) use (&$render): bool {
+        if ($id === 'alpaca_bot_models.overrides') {
+            $render = $cb;
+        }
+        return true;
+    });
+    settingsPage(['models.num_ctx' => 4096, 'models.overrides' => ['llama3.2' => ['system' => $evilValue], 'gone-model' => ['num_ctx' => 2048]]])->register();
+    ob_start();
+    $render();
+    $html = (string) ob_get_clean();
+    $escapedId = htmlspecialchars($evilId, ENT_QUOTES);
+    expect($html)->not->toContain('<script')->not->toContain('<img')
+        ->toContain('<th scope="row">' . $escapedId . '</th>')
+        ->toContain('name="alpaca_bot_settings[models.overrides][' . $escapedId . '][temperature]"')
+        ->toContain('name="alpaca_bot_settings[models.overrides][llama3.2][system]" value="' . htmlspecialchars($evilValue, ENT_QUOTES) . '"')
+        // A stored override for a model the catalog no longer lists still gets a row, so it can be seen and cleared.
+        ->toContain('<th scope="row">gone-model</th>')
+        ->toContain('name="alpaca_bot_settings[models.overrides][gone-model][num_ctx]" value="2048"')
+        ->toContain('placeholder="4096"')
+        ->toContain('<th>Context window (tokens)</th><th>Keep alive</th>')
+        ->not->toContain('<th>num_ctx</th>')
+        ->toContain('Chat tab');
+    expect(substr_count($html, '<tr><th scope="row">'))->toBe(3);
 });
 
 it('renders the active tab and carries every other tab as hidden inputs with the secret masked', function (): void {
@@ -75,6 +140,13 @@ it('renders the active tab and carries every other tab as hidden inputs with the
         ->not->toContain('name="alpaca_bot_settings[chat.welcome]"')
         ->toContain('nav-tab-active">Chat<');
     expect(preg_match_all('/class="nav-tab( nav-tab-active)?"/', $html))->toBe(count(Schema::sections()));
+    // The carry-over comes before the tab's own fields, so a post PHP cuts short loses the end of
+    // the visible tab, never the key or the URL; the end marker is the last input before submit.
+    $carry = (int) strpos($html, 'name="alpaca_bot_settings[provider.api_key]"');
+    $sections = (int) strpos($html, '<!-- sections:');
+    $marker = (int) strpos($html, 'name="' . SettingsPage::END_MARKER . '" value="1"');
+    expect($carry)->toBeGreaterThan(0)->toBeLessThan($sections)
+        ->and($marker)->toBeGreaterThan($sections)->toBeLessThan((int) strpos($html, '<input type="submit">'));
 });
 
 it('falls back to the provider tab for an unknown or missing tab', function (): void {

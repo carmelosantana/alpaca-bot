@@ -4,19 +4,25 @@ declare(strict_types=1);
 
 namespace AlpacaBot\Settings;
 
+use AlpacaBot\Chat\UsageMeter;
+use AlpacaBot\Plugin;
+
 /**
- * One-time move from 0.4: the scattered `alpaca_bot_*` options into the single settings option,
- * and the `chat_history` rows into the shape ConversationStore expects.
+ * One-time moves, each under its own flag: from 0.4, the scattered `alpaca_bot_*` options into
+ * the single settings option and the `chat_history` rows into the shape ConversationStore
+ * expects; and for a setting that arrived after sites were already running 1.0, the value an
+ * upgraded site gets when it differs from a fresh install's default (migrateRetention()).
  *
- * Each step has its own flag. The options move is one request and flags itself at once; the
- * conversation pass handles BATCH rows per admin request and flags itself when a batch comes
- * back short, so a large history is spread over several requests instead of timing out one
- * and restarting from the top. Legacy options are left in place (P3 removes them).
+ * The options move and the retention step are one request each and flag themselves at once;
+ * the conversation pass handles BATCH rows per admin request and flags itself when a batch
+ * comes back short, so a large history is spread over several requests instead of timing out
+ * one and restarting from the top. Legacy options are left in place (P3 removes them).
  */
 final class Migrate04
 {
     public const FLAG = 'alpaca_bot_migrated_04';
     public const FLAG_CONVERSATIONS = 'alpaca_bot_migrated_04_conversations';
+    public const FLAG_RETENTION = 'alpaca_bot_migrated_retention';
 
     private const LEGACY_PREFIX = 'alpaca_bot_';
 
@@ -59,19 +65,25 @@ final class Migrate04
 
     public function __construct(private Store $store) {}
 
-    /** True while either step still has work: run() does what is pending and no more. */
+    /** True while any step still has work: run() does what is pending and no more. */
     public function needed(): bool
     {
-        return $this->optionsPending() || $this->conversationsPending();
+        return $this->optionsPending() || $this->retentionPending() || $this->conversationsPending();
     }
 
     /**
-     * Runs whichever steps are still pending; the conversation step does one batch.
+     * Runs whichever steps are still pending; the conversation step does one batch. Retention
+     * goes before the options move: on a 0.4 site the move creates the settings row and would
+     * fill the retention default in, and the retention step has to see that there was no row.
      *
      * @return array<string, mixed> the settings after the run
      */
     public function run(): array
     {
+        if ($this->retentionPending()) {
+            $this->migrateRetention();
+            update_option(self::FLAG_RETENTION, '1', false);
+        }
         if ($this->optionsPending()) {
             $this->migrateOptions();
             update_option(self::FLAG, '1', false);
@@ -80,6 +92,49 @@ final class Migrate04
             $this->migrateConversations();
         }
         return $this->store->all();
+    }
+
+    private function retentionPending(): bool
+    {
+        return get_option(self::FLAG_RETENTION, false) === false;
+    }
+
+    /**
+     * `privacy.usage_retention_days` arrived after sites were recording receipts, and its
+     * default (90) would have the daily cleanup delete an upgraded site's whole usage history a
+     * day after the upgrade, unasked. A site with anything the field could act on when it first
+     * appears gets 0 written explicitly, so nothing is deleted until an admin chooses a window:
+     * a settings row written before the field existed (a site upgrading within 1.0), or a
+     * receipt row and no settings row (a 0.4 site; its options are moved right after this). A
+     * row that already carries the field was saved by an admin who saw it, and stands. A fresh
+     * install has neither row and keeps the default. The receipts query runs only on a site
+     * without a settings row, once, under the flag.
+     *
+     * The option is read with an explicit default: on an admin request register_setting()'s
+     * default stands in for a missing row otherwise, and a fresh install would look like a row
+     * that has the field.
+     */
+    private function migrateRetention(): void
+    {
+        $row = get_option(Plugin::OPTION, null);
+        if (is_array($row) && $row !== []) {
+            if (!array_key_exists('privacy.usage_retention_days', $row)) {
+                $this->store->set('privacy.usage_retention_days', 0);
+            }
+            return;
+        }
+        $receipts = get_posts([
+            'post_type' => UsageMeter::POST_TYPE,
+            'post_status' => 'any',
+            'numberposts' => 1,
+            'fields' => 'ids',
+            'no_found_rows' => true,
+            'update_post_meta_cache' => false,
+            'update_post_term_cache' => false,
+        ]);
+        if ($receipts !== []) {
+            $this->store->set('privacy.usage_retention_days', 0);
+        }
     }
 
     /**
