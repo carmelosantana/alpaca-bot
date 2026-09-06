@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use AlpacaBot\Settings\Schema;
+use Brain\Monkey\Functions;
 
 it('has defaults for every field and a section for each', function (): void {
     $fields = Schema::fields();
@@ -38,4 +39,31 @@ it('sanitizes by type, clamps ranges, and drops unknown keys', function (): void
 
 it('sanitizing an empty input yields exactly the defaults', function (): void {
     expect(Schema::sanitize([]))->toBe(Schema::defaults());
+});
+
+it('clamps per-model overrides to the same bounds as the global fields', function (): void {
+    $fields = Schema::fields();
+    $out = Schema::sanitize(['models.overrides' => [
+        'hot' => ['temperature' => '99', 'num_ctx' => '999999999999'],
+        'cold' => ['temperature' => '-3', 'num_ctx' => '1', 'keep_alive' => ' 1h ', 'system' => ' be terse '],
+        'junk' => ['temperature' => 'warm', 'num_ctx' => 'lots'],
+    ]]);
+    expect($out['models.overrides']['hot'])->toBe(['temperature' => (float) $fields['models.temperature']['max'], 'num_ctx' => $fields['models.num_ctx']['max']])
+        ->and($out['models.overrides']['cold'])->toBe(['temperature' => (float) $fields['models.temperature']['min'], 'num_ctx' => $fields['models.num_ctx']['min'], 'keep_alive' => '1h', 'system' => 'be terse'])
+        ->and($out['models.overrides'])->not->toHaveKey('junk');
+});
+
+it('validates URL fields through esc_url_raw and falls back to the default when it rejects the value', function (): void {
+    // Minimal stand-in for WordPress: keep http(s), reject everything else.
+    Functions\when('esc_url_raw')->alias(fn(string $url): string => preg_match('#^https?://#i', $url) === 1 ? $url : '');
+    $out = Schema::sanitize([
+        'provider.base_url' => 'gopher://ollama:11434/v1/',
+        'chat.assistant_avatar' => 'javascript:alert(1)',
+    ]);
+    expect($out['provider.base_url'])->toBe(Schema::defaults()['provider.base_url'])
+        ->and($out['chat.assistant_avatar'])->toBe('');
+
+    $ok = Schema::sanitize(['provider.base_url' => ' https://ollama.example/v1/ ', 'chat.assistant_avatar' => 'https://example.com/a.png']);
+    expect($ok['provider.base_url'])->toBe('https://ollama.example/v1')
+        ->and($ok['chat.assistant_avatar'])->toBe('https://example.com/a.png');
 });

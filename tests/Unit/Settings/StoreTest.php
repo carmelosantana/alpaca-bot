@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use AlpacaBot\Plugin;
+use AlpacaBot\Settings\Schema;
 use AlpacaBot\Settings\Store;
 use Brain\Monkey\Functions;
 
@@ -30,11 +31,14 @@ it('modelOverrides merges per-model values over globals', function (): void {
         ->and($s->modelOverrides('other'))->toBe(['temperature' => 0.5, 'num_ctx' => 8192, 'keep_alive' => '5m']);
 });
 
-it('serves an injected cache without touching the database', function (): void {
+it('serves an injected cache merged over the defaults, without touching the database', function (): void {
     Functions\expect('get_option')->never();
     $s = new Store(['models.default' => 'seeded']);
     expect($s->get('models.default'))->toBe('seeded')
-        ->and($s->all())->toBe(['models.default' => 'seeded']);
+        ->and($s->all())->toMatchArray(['models.default' => 'seeded'])
+        ->and($s->all())->toHaveCount(count(Schema::defaults()))
+        ->and($s->get('provider.timeout'))->toBe(60)
+        ->and($s->modelOverrides('any'))->toBe(['temperature' => 0.7, 'num_ctx' => 8192, 'keep_alive' => '5m']);
 });
 
 it('replace sanitizes, persists, and refreshes the memoized cache', function (): void {

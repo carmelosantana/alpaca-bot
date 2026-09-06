@@ -20,6 +20,11 @@ it('maps 0.4 options into the new schema and appends /v1 to the base url', funct
         'alpaca_bot_user_can_change_model' => '1',
         'alpaca_bot_user_agent' => 'Custom UA',
         'alpaca_bot_default_assistant_welcome_message' => 'Hi!',
+        'alpaca_bot_default_assistant_prompt_placeholder' => 'Ask me',
+        'alpaca_bot_default_avatar' => 'https://example.com/bot.png',
+        'alpaca_bot_spellcheck' => '1',
+        // 0.4 sent this as HTTP Basic next to api_username; 1.0 sends api_key as Bearer. Never carried over.
+        'alpaca_bot_api_password' => 'app-password',
     ];
     Functions\when('get_option')->alias(fn(string $k, mixed $d = false) => $legacy[$k] ?? ($k === 'alpaca_bot_settings' ? [] : $d));
     $written = null;
@@ -37,16 +42,24 @@ it('maps 0.4 options into the new schema and appends /v1 to the base url', funct
         ->and($out['chat.history_limit'])->toBe(10)
         ->and($out['toolkits.user_agent'])->toBe('Custom UA')
         ->and($out['chat.welcome'])->toBe('Hi!')
+        ->and($out['chat.placeholder'])->toBe('Ask me')
+        ->and($out['chat.assistant_avatar'])->toBe('https://example.com/bot.png')
+        ->and($out['chat.spellcheck'])->toBeTrue()
+        ->and($out['provider.api_key'])->toBe('')
         ->and($written)->toBe($out);
 });
 
-it('is not needed when the flag is set or no legacy option exists', function (): void {
+it('is not needed when the flag is set, and writes nothing', function (): void {
     Functions\when('get_option')->alias(fn(string $k, mixed $d = false) => $k === Migrate04::FLAG ? '1' : $d);
+    Functions\expect('update_option')->never();
     expect((new Migrate04(new Store()))->needed())->toBeFalse();
 });
 
-it('is not needed on a fresh install with no 0.4 options at all', function (): void {
+// Without this a 1.0-only site would re-run the three detection get_option()
+// calls (all non-autoloaded, so uncached misses) on every admin request forever.
+it('is not needed on a fresh install, and sets the flag so detection runs only once', function (): void {
     Functions\when('get_option')->alias(fn(string $k, mixed $d = false) => $k === 'alpaca_bot_settings' ? [] : $d);
+    Functions\expect('update_option')->once()->with(Migrate04::FLAG, '1', false)->andReturn(true);
     expect((new Migrate04(new Store()))->needed())->toBeFalse();
 });
 
@@ -83,4 +96,58 @@ it('treats blank 0.4 values as unset, except booleans which are false, and sets 
         ->and($out['chat.user_can_change_model'])->toBeTrue()
         ->and($writes)->toHaveKey(Migrate04::FLAG)
         ->and($writes[Migrate04::FLAG])->toBe('1');
+});
+
+// Options::get() went through empty() and `$value ? $value : $default`, so a
+// stored '0' was just as "unset" as '' — and the 0.4 UI told admins to enter 0
+// for history_limit ("Set to 0 to send all messages").
+it("treats a stored '0' as unset like 0.4 did, instead of clamping it to the field minimum", function (): void {
+    $legacy = [
+        'alpaca_bot_api_url' => 'http://localhost:11434',
+        'alpaca_bot_ollama_timeout' => '0',
+        'alpaca_bot_default_temperature' => '0',
+        'alpaca_bot_default_num_ctx' => '0',
+        'alpaca_bot_chat_history_limit' => '0',
+    ];
+    Functions\when('get_option')->alias(fn(string $k, mixed $d = false) => $legacy[$k] ?? ($k === 'alpaca_bot_settings' ? [] : $d));
+    Functions\when('update_option')->justReturn(true);
+    $out = (new Migrate04(new Store()))->run();
+    $defaults = Schema::defaults();
+    expect($out['provider.timeout'])->toBe($defaults['provider.timeout'])
+        ->and($out['models.temperature'])->toBe($defaults['models.temperature'])
+        ->and($out['models.num_ctx'])->toBe($defaults['models.num_ctx'])
+        ->and($out['chat.history_limit'])->toBe($defaults['chat.history_limit']);
+});
+
+it('is idempotent: a second run over the migrated option changes nothing', function (): void {
+    $legacy = [
+        'alpaca_bot_api_url' => 'http://localhost:11434',
+        'alpaca_bot_default_model' => 'llama3.2',
+        'alpaca_bot_chat_history_limit' => '10',
+    ];
+    $stored = [];
+    Functions\when('get_option')->alias(function (string $k, mixed $d = false) use ($legacy, &$stored): mixed {
+        return $legacy[$k] ?? ($k === 'alpaca_bot_settings' ? $stored : $d);
+    });
+    Functions\when('update_option')->alias(function (string $k, mixed $v) use (&$stored): bool {
+        if ($k === 'alpaca_bot_settings') {
+            $stored = $v;
+        }
+        return true;
+    });
+    $first = (new Migrate04(new Store()))->run();
+    $second = (new Migrate04(new Store()))->run();
+    expect($first['provider.base_url'])->toBe('http://localhost:11434/v1')
+        ->and($second)->toBe($first);
+});
+
+// A renamed schema key would otherwise surface as an undefined-index warning
+// inside run() and silently disable the blank-value guard for that key.
+it('only maps onto keys that exist in the schema', function (): void {
+    $map = (new ReflectionClassConstant(Migrate04::class, 'MAP'))->getValue();
+    expect($map)->toBeArray()->not->toBeEmpty();
+    foreach ($map as $legacy => $target) {
+        expect(Schema::fields())->toHaveKey($target, message: "{$legacy} => {$target}");
+    }
+    expect($map)->not->toHaveKey('api_password');
 });

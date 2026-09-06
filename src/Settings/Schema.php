@@ -99,40 +99,52 @@ final class Schema
         }
     }
 
-    /** @param array<string, mixed> $f */
+    /**
+     * esc_url_raw() drops disallowed schemes (javascript:, data:, ...) so nothing
+     * unsafe reaches the chat UI (assistant_avatar) or server-side HTTP (base_url).
+     *
+     * @param array<string, mixed> $f
+     */
     public static function sanitizeUrl(mixed $raw, array $f): string
     {
-        $v = is_scalar($raw) ? rtrim(trim((string) $raw), '/') : '';
+        $v = is_scalar($raw) ? trim((string) $raw) : '';
+        $v = $v === '' ? '' : rtrim(esc_url_raw($v), '/');
         return $v === '' ? (string) $f['default'] : $v;
     }
 
     /**
      * model => {temperature?, num_ctx?, keep_alive?, system?}; anything else is dropped.
      *
-     * @param array<string, mixed> $f
+     * Each override is coerced with the schema field it overrides, so the type and
+     * min/max bounds have one source of truth: fields().
+     *
      * @return array<string, array<string, float|int|string>>
      */
-    public static function sanitizeOverrides(mixed $raw, array $f): array
+    public static function sanitizeOverrides(mixed $raw): array
     {
         if (!is_array($raw)) {
             return [];
         }
-        $allowed = ['temperature' => 'number', 'num_ctx' => 'integer', 'keep_alive' => 'string', 'system' => 'string'];
+        $fields = self::fields();
+        $allowed = ['temperature' => 'models.temperature', 'num_ctx' => 'models.num_ctx', 'keep_alive' => 'models.keep_alive', 'system' => 'chat.system_prompt'];
         $out = [];
         foreach ($raw as $model => $opts) {
             if (!is_string($model) || $model === '' || !is_array($opts)) {
                 continue;
             }
             $clean = [];
-            foreach ($allowed as $k => $type) {
+            foreach ($allowed as $k => $field) {
                 if (!array_key_exists($k, $opts) || !is_scalar($opts[$k])) {
                     continue;
                 }
-                $clean[$k] = match ($type) {
-                    'number' => max(0.0, min(2.0, (float) $opts[$k])),
-                    'integer' => max(512, (int) $opts[$k]),
-                    default => trim((string) $opts[$k]),
-                };
+                // An unparseable number is dropped rather than coerced to the schema
+                // default, which would silently shadow the admin's global value.
+                if (in_array($fields[$field]['type'], ['number', 'integer'], true) && !is_numeric($opts[$k])) {
+                    continue;
+                }
+                /** @var float|int|string $v */
+                $v = self::coerce($opts[$k], $fields[$field]);
+                $clean[$k] = $v;
             }
             if ($clean !== []) {
                 $out[$model] = $clean;

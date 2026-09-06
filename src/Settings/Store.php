@@ -14,8 +14,17 @@ use AlpacaBot\Plugin;
  */
 final class Store
 {
-    /** @param array<string, mixed>|null $cache pre-seeded settings; skips the option read entirely */
-    public function __construct(private ?array $cache = null) {}
+    /** @var array<string, mixed>|null */
+    private ?array $cache;
+
+    /**
+     * @param array<string, mixed>|null $cache pre-seeded settings (merged over the defaults,
+     *                                         like a stored option); skips the option read entirely
+     */
+    public function __construct(?array $cache = null)
+    {
+        $this->cache = $cache === null ? null : array_merge(Schema::defaults(), $cache);
+    }
 
     /** @return array<string, mixed> defaults merged with whatever is stored */
     public function all(): array

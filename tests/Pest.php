@@ -10,6 +10,10 @@ uses()->beforeEach(function (): void {
     Monkey\setUp();
     // Schema labels run through __(); pass the strings through untouched.
     Functions\stubTranslationFunctions();
+    // Schema::sanitizeUrl() runs through esc_url_raw(). Brain Monkey's stand-in keeps
+    // the value as is (adding http:// when there is no scheme); tests that care about
+    // rejection alias esc_url_raw themselves.
+    Functions\stubEscapeFunctions();
     // Plugin is a process-wide singleton and Pest runs the suite in one process:
     // reset it so every test's boot() starts from a cold state.
     $instance = new ReflectionProperty(Plugin::class, 'instance');
