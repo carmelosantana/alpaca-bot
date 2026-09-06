@@ -12,6 +12,8 @@
 
 > **Corrections from P1 execution (2026-09-05):** `OllamaProvider` is `final extends OpenAICompatibleProvider` with a hardcoded API key; `provider.api_key` is applied by a `BearerHttpClient` decorator, never by swapping providers (swapping loses `OllamaProvider::formatTools()`, which strips JSON-Schema keywords Ollama rejects, so toolkits in this plan must keep the Ollama provider). `models()` returns `ModelDefinition[]`, not strings. Multimodal input is `UserMessage::withImages(string $text, string[] $paths)`. Verify every php-agents call against `vendor-prefixed/carmelosantana/php-agents/src` before coding.
 
+> **Hook order correction (2026-09-05):** the pipeline fires `alpaca_bot/message/before_send` BEFORE `alpaca_bot/system_prompt` (so the system-prompt filter can see the user's message). Task 6's generated `docs/hooks.md` must reflect the order in `src/Chat/Pipeline.php`'s class docblock.
+
 ## Global Constraints
 
 - P1-P3 constraints hold. Branch `1.0`, `composer check`, `composer test:integration`, `pnpm check` green per task.
