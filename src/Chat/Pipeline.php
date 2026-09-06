@@ -167,8 +167,16 @@ final class Pipeline
                 $streamEnded = true;
             } catch (\Throwable $e) {
                 $streamEnded = true;
-                do_action('alpaca_bot/chat/failed', $e, $conversation);
-                throw new \RuntimeException('Provider error: ' . $e->getMessage(), 0, $e);
+                try {
+                    do_action('alpaca_bot/chat/failed', $e, $conversation);
+                } finally {
+                    // Thrown from the finally so a listener that throws cannot replace the
+                    // provider failure with its own exception: a caller maps what arrives by
+                    // class (ChatController reads an InvalidArgumentException as the user's
+                    // mistake, 400). PHP chains a pending exception behind the one thrown here,
+                    // so a listener's is kept, after $e.
+                    throw new \RuntimeException('Provider error: ' . $e->getMessage(), 0, $e);
+                }
             } finally {
                 $this->settle($streamEnded, $userId, $conversation, $model, $content, $reasoning, $prompt, $completion, $started);
             }

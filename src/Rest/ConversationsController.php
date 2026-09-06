@@ -20,15 +20,20 @@ use AlpacaBot\Settings\Store;
  */
 final class ConversationsController extends Controller
 {
-    /** The whole history when deleting it all; listFor() needs a bound, and nobody has this many. */
-    private const ALL = 10_000;
+    /**
+     * How many conversations destroyAll() lists per pass. listFor() needs a bound, and one pass
+     * of everything would be one WP_Post per row in memory at once; batches of this size are
+     * cheap and the loop runs until the list is drained, so the count answered is the whole
+     * history, however long.
+     */
+    public const BATCH = 500;
 
     public function __construct(private ConversationStore $conversations, private Store $store) {}
 
     public function routes(): array
     {
         return [
-            ['path' => '/conversations', 'methods' => 'GET', 'callback' => [$this, 'index'], 'capability' => 'edit_posts', 'args' => ['limit' => ['type' => 'integer', 'default' => 0]]],
+            ['path' => '/conversations', 'methods' => 'GET', 'callback' => [$this, 'index'], 'capability' => 'edit_posts', 'args' => ['limit' => ['type' => 'integer', 'default' => 0, 'minimum' => 0, 'maximum' => 200]]],
             ['path' => '/conversations', 'methods' => 'DELETE', 'callback' => [$this, 'destroyAll'], 'capability' => 'edit_posts'],
             ['path' => '/conversations/(?P<id>\d+)', 'methods' => 'GET', 'callback' => [$this, 'show'], 'capability' => 'edit_posts'],
             ['path' => '/conversations/(?P<id>\d+)', 'methods' => 'DELETE', 'callback' => [$this, 'destroy'], 'capability' => 'edit_posts'],
@@ -37,7 +42,9 @@ final class ConversationsController extends Controller
 
     /**
      * `limit` is the request's when it is one or more, else the site's `chat.history_limit`
-     * (what the history screen shows); either way capped at the setting's own ceiling of 200.
+     * (what the history screen shows). The schema bounds it to 0..200 (the setting's own ceiling),
+     * so core has refused anything else before this runs; the clamp here is for a caller that
+     * did not come through core's validation.
      */
     public function index(\WP_REST_Request $request): \WP_REST_Response
     {
@@ -70,13 +77,22 @@ final class ConversationsController extends Controller
             : Errors::notFound(__('Conversation', 'alpaca-bot'));
     }
 
+    /**
+     * Lists and deletes a BATCH at a time until a pass comes back short, so the answer is the
+     * whole history gone, not the first N. A full pass that deleted nothing ends the loop too:
+     * a row that will not delete would otherwise be listed again forever.
+     */
     public function destroyAll(\WP_REST_Request $request): \WP_REST_Response
     {
         $userId = $this->userId();
         $deleted = 0;
-        foreach ($this->conversations->listFor($userId, self::ALL) as $row) {
-            $deleted += $this->conversations->delete($row['id'], $userId) ? 1 : 0;
-        }
+        do {
+            $rows = $this->conversations->listFor($userId, self::BATCH);
+            $before = $deleted;
+            foreach ($rows as $row) {
+                $deleted += $this->conversations->delete($row['id'], $userId) ? 1 : 0;
+            }
+        } while (count($rows) === self::BATCH && $deleted > $before);
         return new \WP_REST_Response(['deleted' => $deleted]);
     }
 }

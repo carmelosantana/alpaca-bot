@@ -32,7 +32,10 @@ it('declares one rate-limited POST /chat route for editors', function (): void {
         ->and($routes[0]['methods'])->toBe('POST')
         ->and($routes[0]['capability'])->toBe('edit_posts')
         ->and($routes[0]['rate_limit'])->toBeTrue()
-        ->and($routes[0]['args']['message']['required'])->toBeTrue()
+        // Not required: an images-only turn has no message, and core would refuse the request
+        // before the callback ran (rest_missing_callback_param) if the schema said otherwise.
+        ->and($routes[0]['args']['message'])->toBe(['type' => 'string', 'required' => false, 'default' => ''])
+        ->and($routes[0]['args']['images'])->toBe(['type' => 'array', 'items' => ['type' => 'string'], 'default' => []])
         ->and(array_keys($routes[0]['args']))->toBe(['message', 'conversation_id', 'model', 'images', 'context', 'stream']);
 });
 
@@ -124,9 +127,9 @@ it('maps CapExceeded to 402 and rejects an empty message with 400 before the pip
         ->and($h->writes)->toBe([]);
 });
 
-it('accepts an images-only turn, as the pipeline does', function (): void {
+it('accepts an images-only turn with no message parameter at all, as the pipeline does', function (): void {
     $h = pipelineWith(pipelineProvider([new Response('a cat', ProviderFinishReason::Stop)], $call));
-    $res = (new ChatController($h->pipeline))->create(restRequest('POST', '/alpaca-bot/v1/chat', ['message' => '', 'images' => ['data:image/png;base64,AAAA']]));
+    $res = (new ChatController($h->pipeline))->create(restRequest('POST', '/alpaca-bot/v1/chat', ['images' => ['data:image/png;base64,AAAA']]));
     expect($res->get_status())->toBe(200)
         ->and($call['messages'][0]->content())->toBe([['type' => 'image_url', 'image_url' => ['url' => 'data:image/png;base64,AAAA']]]);
 });
@@ -143,10 +146,19 @@ it('maps the pipeline\'s InvalidArgumentException to 400 and a provider failure 
         ->and($bad->get_error_message())->toBe('Conversation 42 was not found.')
         ->and($bad->get_error_data())->toBe(['status' => 400]);
 
+    // The provider's words (which quote its URL) stay out of the 502 for an editor...
+    Functions\when('current_user_can')->justReturn(false);
     $h = pipelineWith(pipelineProvider([new \RuntimeException('connection refused')]));
     $down = (new ChatController($h->pipeline))->create(restRequest('POST', '/alpaca-bot/v1/chat', ['message' => 'hi']));
     expect($down)->toBeInstanceOf(WP_Error::class)
         ->and($down->get_error_code())->toBe('alpaca_bot_provider_error')
-        ->and($down->get_error_message())->toBe('Provider error: connection refused')
+        ->and($down->get_error_message())->toBe('The model provider could not complete the request.')
         ->and($down->get_error_data())->toBe(['status' => 502]);
+
+    // ... and reach an administrator as data.detail, wrapped as the pipeline wraps them.
+    Functions\when('current_user_can')->justReturn(true);
+    $h = pipelineWith(pipelineProvider([new \RuntimeException('connection refused')]));
+    $admin = (new ChatController($h->pipeline))->create(restRequest('POST', '/alpaca-bot/v1/chat', ['message' => 'hi']));
+    expect($admin->get_error_message())->toBe('The model provider could not complete the request.')
+        ->and($admin->get_error_data())->toBe(['status' => 502, 'detail' => 'Provider error: connection refused']);
 });

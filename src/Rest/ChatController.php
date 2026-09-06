@@ -11,7 +11,9 @@ use AlpacaBot\Context\Context;
 /**
  * `POST /chat`: one turn through the Pipeline as the current user.
  *
- * Body `{message, conversation_id?, model?, images?, context?, stream?}`. With `stream` off the
+ * Body `{message?, conversation_id?, model?, images?, context?, stream?}`; `message` may be left
+ * out for an images-only turn (the schema cannot say "one of the two", so the controller checks
+ * that at least one is there and answers 400 in its own words). With `stream` off the
  * turn runs here and the response is `{conversation_id, message, receipt, contexts}` (200). With
  * `stream` on nothing runs: the response is a ticket, `{conversation_id, token, stream_url}`
  * (202), and the client opens `stream_url` (Task 4's SSE route) to have the turn run there.
@@ -42,7 +44,7 @@ final class ChatController extends Controller
             'capability' => 'edit_posts',
             'rate_limit' => true,
             'args' => [
-                'message' => ['type' => 'string', 'required' => true],
+                'message' => ['type' => 'string', 'required' => false, 'default' => ''],
                 'conversation_id' => ['type' => 'integer', 'default' => 0],
                 'model' => ['type' => 'string', 'default' => ''],
                 'images' => ['type' => 'array', 'items' => ['type' => 'string'], 'default' => []],

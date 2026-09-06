@@ -252,6 +252,38 @@ it('keeps the conversation the caller passed in when the provider fails', functi
         ->and($h->writes)->toBe([]);
 });
 
+it('keeps a conversation the caller passed in even when nothing is stored on it yet', function (): void {
+    // The guard is on who named the conversation, not on what it holds: a 0.4 row whose legacy
+    // transcript is [] or a row a listener created is the caller's, and a failed turn must not
+    // take it. pipelineWith() serves no transcript for 42 under either key, so deleteIfEmpty()
+    // would find it empty; only the `$requested` check keeps it from running at all.
+    $h = pipelineWith(pipelineProvider([new \RuntimeException('connection refused')]));
+    Actions\expectDone('alpaca_bot/chat/failed')->once();
+    expect(fn() => $h->pipeline->complete(3, 'Hi again', ['conversation_id' => 42]))->toThrow(\RuntimeException::class, 'Provider error')
+        ->and($h->writes)->toBe([]);
+});
+
+it('still reports the provider failure when a chat/failed listener throws, keeping the listener\'s exception behind it', function (): void {
+    // A caller maps what the pipeline throws by class (ChatController: InvalidArgumentException
+    // is the user's mistake, 400), so a listener's exception must not replace the wrapper. It
+    // is chained after the provider's, and the empty post is still taken back.
+    $boom = new \RuntimeException('connection refused');
+    $listener = new \InvalidArgumentException('listener bug');
+    $h = pipelineWith(pipelineProvider([$boom]));
+    Actions\expectDone('alpaca_bot/chat/failed')->once()->andThrow($listener);
+    $caught = null;
+    try {
+        $h->pipeline->complete(3, 'Hi');
+    } catch (\Throwable $e) {
+        $caught = $e;
+    }
+    expect($caught)->toBeInstanceOf(\RuntimeException::class)
+        ->and($caught->getMessage())->toBe('Provider error: connection refused')
+        ->and($caught->getPrevious())->toBe($boom)
+        ->and($boom->getPrevious())->toBe($listener)
+        ->and(array_map(static fn(array $w): string => $w[0], $h->writes))->toBe(['wp_insert_post', 'wp_delete_post']);
+});
+
 it('keeps the conversation it created when a chat/failed listener has saved a turn onto it', function (): void {
     // A listener that stores the user's turn for a retry gets to keep it: the check is on what
     // is stored when the turn fails, not on who created the post.

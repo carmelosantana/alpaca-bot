@@ -27,7 +27,10 @@ it('declares the collection and item routes for editors, none rate limited', fun
         ['/conversations/(?P<id>\d+)', 'DELETE'],
     ])
         ->and(array_unique(array_column($routes, 'capability')))->toBe(['edit_posts'])
-        ->and(array_filter($routes, static fn(array $r): bool => !empty($r['rate_limit'])))->toBe([]);
+        ->and(array_filter($routes, static fn(array $r): bool => !empty($r['rate_limit'])))->toBe([])
+        // The schema says what index() accepts, so core refuses 201 (or -1) with rest_invalid_param
+        // rather than the route quietly clamping; 0 is "the site's history_limit".
+        ->and($routes[0]['args'])->toBe(['limit' => ['type' => 'integer', 'default' => 0, 'minimum' => 0, 'maximum' => 200]]);
 });
 
 it('lists the current user\'s conversations, chat.history_limit deep unless the request says otherwise, clamped to 200', function (): void {
@@ -80,15 +83,37 @@ it('deletes one conversation as the user, 404 when it is not theirs', function (
     expect($missing)->toBeInstanceOf(WP_Error::class)->and($missing->get_error_data()['status'])->toBe(404);
 });
 
-it('deletes every conversation of the user and counts what went', function (): void {
-    Functions\expect('get_posts')->once()->withArgs(static fn(array $q): bool => $q['author'] === 3 && $q['numberposts'] >= 1000)
-        ->andReturn([(object) ['ID' => 2, 'post_title' => 'B', 'post_date_gmt' => '2024-01-02 00:00:00'], (object) ['ID' => 1, 'post_title' => 'A', 'post_date_gmt' => '2024-01-01 00:00:00']]);
+it('deletes every conversation of the user, a batch at a time until the list is drained, and counts what went', function (): void {
+    // Two batches: the first full, the second short. listFor() reads back what is left after
+    // each pass (deleted rows are gone), so the stub serves the batches in turn.
+    $rows = static fn(array $ids): array => array_map(static fn(int $id): object => (object) ['ID' => $id, 'post_title' => 'T', 'post_date_gmt' => '2024-01-01 00:00:00'], $ids);
+    $batch = ConversationsController::BATCH;
+    $batches = [$rows(range($batch + 2, 3)), $rows([2, 1])];
+    $asked = [];
+    Functions\when('get_posts')->alias(static function (array $q) use (&$batches, &$asked): array {
+        $asked[] = [$q['author'], $q['numberposts']];
+        return array_shift($batches) ?? [];
+    });
     Functions\when('get_post')->alias(static fn(int $id): object => conversationChatPost($id, '3'));
     $deleted = [];
     Functions\when('wp_delete_post')->alias(static function (int $id, bool $force) use (&$deleted): object {
         $deleted[] = $id;
         return conversationChatPost($id, '3');
     });
-    expect($this->controller->destroyAll(restRequest('DELETE', '/alpaca-bot/v1/conversations'))->get_data())->toBe(['deleted' => 2])
-        ->and($deleted)->toBe([2, 1]);
+    expect($this->controller->destroyAll(restRequest('DELETE', '/alpaca-bot/v1/conversations'))->get_data())->toBe(['deleted' => $batch + 2])
+        ->and($deleted)->toBe(range($batch + 2, 1))
+        ->and($asked)->toBe([[3, $batch], [3, $batch]]);
+});
+
+it('stops deleting when a full batch removed nothing, rather than looping on rows that will not go', function (): void {
+    $batch = ConversationsController::BATCH;
+    $asked = 0;
+    Functions\when('get_posts')->alias(static function (array $q) use (&$asked, $batch): array {
+        $asked++;
+        return array_map(static fn(int $id): object => (object) ['ID' => $id, 'post_title' => 'T', 'post_date_gmt' => '2024-01-01 00:00:00'], range(1, $batch));
+    });
+    Functions\when('get_post')->alias(static fn(int $id): object => conversationChatPost($id, '3'));
+    Functions\when('wp_delete_post')->justReturn(false);
+    expect($this->controller->destroyAll(restRequest('DELETE', '/alpaca-bot/v1/conversations'))->get_data())->toBe(['deleted' => 0])
+        ->and($asked)->toBe(1);
 });

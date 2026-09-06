@@ -73,9 +73,28 @@ final class Errors
         return new \WP_Error('alpaca_bot_not_found', sprintf(__('%s not found.', 'alpaca-bot'), $what), ['status' => 404]);
     }
 
-    /** 502: the upstream model provider failed, so the client should not retry blindly and the operator should look at the provider. */
+    /**
+     * 502: the upstream model provider failed, so the client should not retry blindly and the
+     * operator should look at the provider.
+     *
+     * The message is fixed. What the provider threw quotes its endpoint (the vendored client's
+     * transport and HTTP errors both end in `for "http://host:port/v1/chat/completions"`), and
+     * anyone who may chat can make it throw by posting while the provider is down, so the raw
+     * text is not for the caller: it goes to the debug log, behind WP_DEBUG as core's own
+     * logging is, and to `data.detail` when the request is an administrator's, who is the one
+     * person it helps and may read the settings that hold the URL anyway. The code and status are
+     * the wire contract and do not change with who asked.
+     */
     public static function provider(\Throwable $e): \WP_Error
     {
-        return new \WP_Error('alpaca_bot_provider_error', $e->getMessage(), ['status' => 502]);
+        $detail = $e->getMessage();
+        if (defined('WP_DEBUG') && WP_DEBUG) {
+            error_log('[alpaca-bot] ' . $detail);
+        }
+        $data = ['status' => 502];
+        if (current_user_can('manage_options')) {
+            $data['detail'] = $detail;
+        }
+        return new \WP_Error('alpaca_bot_provider_error', __('The model provider could not complete the request.', 'alpaca-bot'), $data);
     }
 }

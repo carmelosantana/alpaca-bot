@@ -53,11 +53,25 @@ it('notFound is alpaca_bot_not_found, 404, naming the kind of thing', function (
         ->and($e->get_error_data())->toBe(['status' => 404]);
 });
 
-it('provider is alpaca_bot_provider_error, 502, with the throwable\'s message', function (): void {
-    $e = Errors::provider(new RuntimeException('connection refused'));
+it('provider is alpaca_bot_provider_error, 502, with a fixed message: the throwable\'s own text is not for the caller', function (): void {
+    // What the provider throws quotes the endpoint (Symfony: 'Could not resolve host: x for
+    // "http://x:11434/v1/chat/completions"'), and anyone who may chat can make it throw, so the
+    // message never carries it. The code and status are the wire contract and do not move.
+    $boom = new RuntimeException('Provider error: Could not resolve host: ollama-gateway.internal for "http://ollama-gateway.internal:11434/v1/chat/completions".');
+    Functions\expect('current_user_can')->once()->with('manage_options')->andReturn(false);
+    $e = Errors::provider($boom);
     expect($e->get_error_code())->toBe('alpaca_bot_provider_error')
-        ->and($e->get_error_message())->toBe('connection refused')
+        ->and($e->get_error_message())->toBe('The model provider could not complete the request.')
         ->and($e->get_error_data())->toBe(['status' => 502]);
+});
+
+it('provider hands the throwable\'s text to an administrator as data.detail, and only there', function (): void {
+    $boom = new RuntimeException('Provider error: HTTP/1.1 401 Unauthorized returned for "http://127.0.0.1:11434/v1/chat/completions".');
+    Functions\expect('current_user_can')->once()->with('manage_options')->andReturn(true);
+    $e = Errors::provider($boom);
+    expect($e->get_error_code())->toBe('alpaca_bot_provider_error')
+        ->and($e->get_error_message())->toBe('The model provider could not complete the request.')
+        ->and($e->get_error_data())->toBe(['status' => 502, 'detail' => $boom->getMessage()]);
 });
 
 it('badRequest is alpaca_bot_bad_request, 400, with the given message', function (): void {

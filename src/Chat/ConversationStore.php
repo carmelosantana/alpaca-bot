@@ -130,6 +130,11 @@ final class ConversationStore
      * Migrate04 flips them in batches (and a 0.4 site that never saved its settings still has
      * them). The author clause scopes the list either way; a row is never exposed by status.
      *
+     * The meta cache is left cold: get_posts() primes it by default, which reads every listed
+     * row's transcript (tens or hundreds of KB each) to answer with three scalars, and
+     * ConversationsController::destroyAll() lists in batches of hundreds. Nothing here reads
+     * meta, and load() primes its own row when it needs it.
+     *
      * @return array<int, array{id: int, title: string, created: int}>
      */
     public function listFor(int $userId, int $limit): array
@@ -144,6 +149,8 @@ final class ConversationStore
             'orderby' => 'date',
             'order' => 'DESC',
             'post_status' => ['private', 'publish'],
+            'update_post_meta_cache' => false,
+            'update_post_term_cache' => false,
         ]);
         return array_map(static fn(object $p): array => [
             'id' => (int) $p->ID,

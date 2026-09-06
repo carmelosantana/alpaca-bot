@@ -315,8 +315,12 @@ it('never hands out a conversation with no owner recorded', function (): void {
 // 0.4 rows are `publish` until Migrate04's batched pass reaches them (and a 0.4 site that never
 // saved its settings has rows but no options to key the pass on), so both statuses are listed.
 // The author clause is what scopes the list; user 0 never reaches the query (below).
-it('lists the user\'s conversations newest first with a limit, private or not yet migrated', function (): void {
-    Functions\expect('get_posts')->once()->withArgs(fn(array $q): bool => $q['post_type'] === 'chat_history' && $q['author'] === 3 && $q['numberposts'] === 5 && $q['orderby'] === 'date' && $q['order'] === 'DESC' && $q['post_status'] === ['private', 'publish'])
+//
+// The meta cache is left cold on purpose: get_posts() primes it by default, which reads every
+// listed row's transcript (tens or hundreds of KB each) to answer with three scalars.
+it('lists the user\'s conversations newest first with a limit, private or not yet migrated, without loading their transcripts', function (): void {
+    Functions\expect('get_posts')->once()->withArgs(fn(array $q): bool => $q['post_type'] === 'chat_history' && $q['author'] === 3 && $q['numberposts'] === 5 && $q['orderby'] === 'date' && $q['order'] === 'DESC' && $q['post_status'] === ['private', 'publish']
+        && $q['update_post_meta_cache'] === false && $q['update_post_term_cache'] === false)
         ->andReturn([(object) ['ID' => 2, 'post_title' => 'B', 'post_date_gmt' => '2024-01-02 00:00:00'], (object) ['ID' => 1, 'post_title' => 'A', 'post_date_gmt' => '2024-01-01 00:00:00']]);
     expect((new ConversationStore(new Store()))->listFor(3, 5))->toBe([['id' => 2, 'title' => 'B', 'created' => 1704153600], ['id' => 1, 'title' => 'A', 'created' => 1704067200]]);
 });
