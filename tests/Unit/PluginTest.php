@@ -6,6 +6,7 @@ use AlpacaBot\Chat\CapPolicy;
 use AlpacaBot\Chat\ConversationStore;
 use AlpacaBot\Chat\Pipeline;
 use AlpacaBot\Chat\UsageMeter;
+use AlpacaBot\Cli\ChatCommand;
 use AlpacaBot\Context\Collector;
 use AlpacaBot\Plugin;
 use AlpacaBot\Provider\Factory;
@@ -69,4 +70,30 @@ it('registers the settings store, provider factory, model catalog, conversation 
     Functions\when('get_posts')->justReturn([]);
     $onAdminInit();
     expect($plugin->get(Store::class)->get('provider.base_url'))->toBe('http://localhost:11434/v1');
+});
+
+it('registers the wp alpaca-bot command when WP-CLI is the running process', function (): void {
+    // WP_CLI (the constant and the class) is process-wide once defined, and Pest runs every test
+    // in one process, so this test is the one place that defines it. The stand-in records what
+    // add_command() was given; every later register() in the run goes through it harmlessly.
+    if (!class_exists('WP_CLI', false)) {
+        class_alias(get_class(new class {
+            /** @var list<array{0: string, 1: mixed}> */
+            public static array $commands = [];
+
+            public static function add_command(string $name, mixed $callable): bool
+            {
+                self::$commands[] = [$name, $callable];
+                return true;
+            }
+        }), 'WP_CLI');
+    }
+    if (!defined('WP_CLI')) {
+        define('WP_CLI', true);
+    }
+    $plugin = Plugin::boot();
+    $plugin->register();
+    expect(\WP_CLI::$commands)->toHaveCount(1)
+        ->and(\WP_CLI::$commands[0][0])->toBe('alpaca-bot')
+        ->and(\WP_CLI::$commands[0][1])->toBeInstanceOf(ChatCommand::class);
 });

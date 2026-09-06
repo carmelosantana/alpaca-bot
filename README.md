@@ -16,6 +16,29 @@
 
 ---
 
+## 1.0 development status
+
+The `1.0` branch is a ground-up rewrite of the 0.4 plugin, in five phases. Everything below this
+section describes 0.4; it is refreshed as each phase lands.
+
+- **P1 — foundations, provider, pipeline** (in progress): settings schema and 0.4 migration,
+  provider factory with streaming, usage meter and monthly caps, the chat pipeline and its hooks,
+  and a WP-CLI command (`wp alpaca-bot chat|models|usage|settings`) as the only user surface.
+  There is deliberately no admin UI in this phase.
+- **P2 — REST API and settings screen**
+- **P3 — view layer and assets**: the admin chat page returns here.
+- **P4 — toolkits, shortcodes, abilities, WordPress AI adapter**
+- **P5 — hardening and release**
+
+Spec: [1.0 core refactor](docs/superpowers/specs/2026-09-05-alpaca-bot-1-0-core-refactor.md).
+Plans: [P1](docs/superpowers/plans/2026-09-05-alpaca-bot-p1-foundations-provider-pipeline.md),
+[P2](docs/superpowers/plans/2026-09-05-alpaca-bot-p2-rest-and-settings.md),
+[P3](docs/superpowers/plans/2026-09-05-alpaca-bot-p3-view-layer-and-assets.md),
+[P4](docs/superpowers/plans/2026-09-05-alpaca-bot-p4-toolkits-abilities-wp-ai.md),
+[P5](docs/superpowers/plans/2026-09-05-alpaca-bot-p5-hardening-and-release.md).
+
+---
+
 Easily draft a post or page from any conversation. Dynamically create new content on the fly or with remote resources collected via `agents`. **Alpaca Bot** offers a familiar chat interface on both desktop and mobile. You can expect a seamless chat experience on any device!
 
 An [Ollama](https://github.com/ollama/ollama) instance is required. [Ollama](https://github.com/ollama/ollama) makes it incredibly easy to self-host large language models locally or in the cloud.

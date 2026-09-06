@@ -6,6 +6,7 @@ use AlpacaBot\Chat\CapPolicy;
 use AlpacaBot\Chat\ConversationStore;
 use AlpacaBot\Chat\Pipeline;
 use AlpacaBot\Chat\UsageMeter;
+use AlpacaBot\Cli\ChatCommand;
 use AlpacaBot\Context\Collector;
 use AlpacaBot\Context\ContextSourceInterface;
 use AlpacaBot\Plugin;
@@ -212,4 +213,40 @@ function pipelineProvider(array $chunks, ?array &$call = null): ProviderInterfac
         }
     });
     return $provider;
+}
+
+/**
+ * ChatCommandTest: a ChatCommand over the given (real) pipeline whose stdout lands in `$c->out`
+ * and whose failures land in `$c->errors` instead of going through WP_CLI::error(). The catalog,
+ * meter and store are real too, over `$settings` (the same array the pipeline harness was given).
+ */
+function cliCommand(Pipeline $pipeline, array $settings = []): object
+{
+    $c = new class {
+        public ChatCommand $command;
+        public string $out = '';
+        /** @var list<string> */
+        public array $errors = [];
+    };
+    $store = new Store($settings);
+    $c->command = new ChatCommand(
+        $pipeline,
+        new ModelCatalog(new Factory($store)),
+        new UsageMeter($store),
+        $store,
+        static function (string $s) use ($c): void {
+            $c->out .= $s;
+        },
+        static function (string $message) use ($c): void {
+            $c->errors[] = $message;
+        },
+    );
+    return $c;
+}
+
+/** ChatCommandTest: the WordPress user table as the command sees it: `$existing` ids resolve through get_userdata(), `$current` is get_current_user_id(). */
+function cliUsers(array $existing = [3], int $current = 0): void
+{
+    Functions\when('get_userdata')->alias(static fn(int $id): object|false => in_array($id, $existing, true) ? (object) ['ID' => $id] : false);
+    Functions\when('get_current_user_id')->justReturn($current);
 }
