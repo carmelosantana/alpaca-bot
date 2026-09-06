@@ -366,10 +366,12 @@ it('lets a requested model through when the catalog is unreachable, so the outag
     });
     Actions\expectDone('alpaca_bot/chat/completed')->never();
 
-    expect(fn() => $h->pipeline->complete(3, 'Hi', ['model' => 'llama3.2']))
+    // The requested id differs from the harness's models.default ('llama3.2') on purpose: were
+    // the pipeline to fall through to the default on an empty catalog, this would see it.
+    expect(fn() => $h->pipeline->complete(3, 'Hi', ['model' => 'qwen3:8b']))
         ->toThrow(\RuntimeException::class, 'Provider error: connection refused')
         ->and($failed)->toBe($down)
-        ->and($h->model)->toBe('llama3.2');
+        ->and($h->model)->toBe('qwen3:8b');
 });
 
 it('falls back to the first catalogued model when models.default is unset', function (): void {
