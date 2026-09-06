@@ -52,8 +52,11 @@ final class Plugin
         $meter = new Chat\UsageMeter($store);
         $this->set(Chat\UsageMeter::class, $meter);
         add_action('init', [$meter, 'registerPostType']);
-        $this->set(Chat\CapPolicy::class, new Chat\CapPolicy($store, $meter));
-        $this->set(Context\Collector::class, new Context\Collector([new Context\CurrentScreenSource()]));
+        $caps = new Chat\CapPolicy($store, $meter);
+        $this->set(Chat\CapPolicy::class, $caps);
+        $collector = new Context\Collector([new Context\CurrentScreenSource()]);
+        $this->set(Context\Collector::class, $collector);
+        $this->set(Chat\Pipeline::class, new Chat\Pipeline($store, $factory, $this->get(Provider\ModelCatalog::class), $conversations, $meter, $caps, $collector));
         add_action('admin_init', function () use ($store): void {
             $migration = new Migrate04($store);
             if ($migration->needed()) {
