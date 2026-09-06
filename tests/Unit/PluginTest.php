@@ -3,6 +3,8 @@
 declare(strict_types=1);
 
 use AlpacaBot\Plugin;
+use AlpacaBot\Provider\Factory;
+use AlpacaBot\Provider\ModelCatalog;
 use AlpacaBot\Settings\Migrate04;
 use AlpacaBot\Settings\Store;
 use Brain\Monkey\Actions;
@@ -24,7 +26,7 @@ it('exposes a version and boots once', function (): void {
         ->and(Plugin::VERSION)->toMatch('/^1\.0\.0/');
 });
 
-it('registers the settings store and runs the 0.4 migration once on admin_init', function (): void {
+it('registers the settings store, provider factory and model catalog, and runs the 0.4 migration once on admin_init', function (): void {
     $onAdminInit = null;
     Actions\expectAdded('admin_init')->once()->with(Mockery::on(
         static function (mixed $cb) use (&$onAdminInit): bool {
@@ -34,7 +36,9 @@ it('registers the settings store and runs the 0.4 migration once on admin_init',
     ));
     $plugin = Plugin::boot();
     $plugin->register();
-    expect($plugin->get(Store::class))->toBeInstanceOf(Store::class);
+    expect($plugin->get(Store::class))->toBeInstanceOf(Store::class)
+        ->and($plugin->get(Factory::class))->toBeInstanceOf(Factory::class)
+        ->and($plugin->get(ModelCatalog::class))->toBeInstanceOf(ModelCatalog::class);
 
     // A 0.4 site: one legacy option present, no flag -> the hook migrates and flags.
     $legacy = ['alpaca_bot_api_url' => 'http://localhost:11434'];

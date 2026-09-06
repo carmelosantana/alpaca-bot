@@ -43,6 +43,9 @@ final class Plugin
     {
         $store = new Store();
         $this->set(Store::class, $store);
+        $factory = new Provider\Factory($store);
+        $this->set(Provider\Factory::class, $factory);
+        $this->set(Provider\ModelCatalog::class, new Provider\ModelCatalog($factory));
         add_action('admin_init', function () use ($store): void {
             $migration = new Migrate04($store);
             if ($migration->needed()) {
