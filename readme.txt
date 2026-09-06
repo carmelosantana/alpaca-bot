@@ -2,10 +2,10 @@
 Contributors: carmelosantana  
 Donate link: https://www.patreon.com/carmelosantana  
 Tags: ai, large language model, embedding, chatbot, ollama  
-Requires at least: 6.9  
+Requires at least: 6.4  
 Tested up to: 6.5.5  
 Stable tag: 0.4.17  
-Requires PHP: 8.4  
+Requires PHP: 8.1  
 License: GPLv2 or later  
 License URI: https://www.gnu.org/licenses/gpl-2.0.html  
   
