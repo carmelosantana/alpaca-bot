@@ -337,9 +337,14 @@ final class Pipeline
     }
 
     /**
-     * The system text plus the context block, then the transcript. Stored roles other than
-     * user/assistant/system (a `tool` turn, which nothing writes yet) are left out rather than
-     * sent as the wrong role.
+     * The system text plus the context block, then the transcript, bounded to the most recent
+     * `chat.context_messages` turns (the one being sent included; 0 sends everything). The
+     * bound is on what goes to the model, never on what is stored: the conversation keeps every
+     * turn. Without it every turn re-sends the whole transcript, the model host truncates to
+     * num_ctx from the oldest end without saying so, and the prompt tokens billed against the
+     * monthly cap grow to num_ctx on every request. The slice never touches the system message,
+     * which is built here, not stored. Stored roles other than user/assistant/system (a `tool`
+     * turn, which nothing writes yet) are left out rather than sent as the wrong role.
      *
      * The context block has no ceiling here: every source bounds its own text, and the sources
      * are code the site registered, so the site's own `alpaca_bot/context` filter is where a
@@ -356,7 +361,8 @@ final class Pipeline
         if ($systemText !== '') {
             $out[] = new SystemMessage($systemText);
         }
-        foreach ($c->messages as $m) {
+        $limit = (int) $this->store->get('chat.context_messages');
+        foreach ($limit > 0 ? array_slice($c->messages, -$limit) : $c->messages as $m) {
             $out[] = match ($m->role) {
                 'user' => self::userMessage($m),
                 'assistant' => new AssistantMessage($m->content),

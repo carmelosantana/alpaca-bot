@@ -430,6 +430,44 @@ it('continues a conversation the user owns, replaying its history to the model',
         ->and(array_map(static fn(array $w): array => [$w[0], $w[1]], $h->writes))->toBe([['update_post_meta', 'ab_messages'], ['wp_update_post', 42], ['wp_insert_post', 'chat_log']]);
 });
 
+// chat.context_messages bounds what is *sent*, counting the new turn, and never what is stored:
+// 0.4 sliced the stored transcript to chat_history_limit the same way (its documented 0 meant
+// "send all"). Without a bound every turn re-sends the whole conversation, Ollama truncates
+// server-side to num_ctx (dropping the oldest context silently) and the prompt tokens billed
+// against the monthly cap grow to num_ctx on every request.
+it('sends only the most recent chat.context_messages turns, keeps the system prompt, and stores the whole conversation', function (): void {
+    $provider = pipelineProvider([new Response('A3', ProviderFinishReason::Stop)], $call);
+    $h = pipelineWith($provider, ['chat.context_messages' => 2, 'chat.system_prompt' => 'Be brief']);
+    Functions\when('metadata_exists')->justReturn(false);
+    Functions\when('get_post_meta')->alias(static fn(int $id, string $key): mixed => $key === 'ab_messages'
+        ? [['role' => 'user', 'content' => 'Q1'], ['role' => 'assistant', 'content' => 'A1'], ['role' => 'user', 'content' => 'Q2'], ['role' => 'assistant', 'content' => 'A2']]
+        : '');
+
+    $r = $h->pipeline->complete(3, 'Q3', ['conversation_id' => 42]);
+
+    expect(array_map(static fn(object $m): array => [$m::class, $m->content()], $call['messages']))->toBe([
+        [SystemMessage::class, 'Be brief'],
+        [AssistantMessage::class, 'A2'],
+        [UserMessage::class, 'Q3'],
+    ])
+        ->and($r->conversation->messages)->toHaveCount(6)
+        // The stored transcript (the ab_messages write) is unbounded.
+        ->and(array_column($h->writes[0][2], 'content'))->toBe(['Q1', 'A1', 'Q2', 'A2', 'Q3', 'A3']);
+});
+
+it('sends the whole transcript when chat.context_messages is 0', function (): void {
+    $provider = pipelineProvider([new Response('A3', ProviderFinishReason::Stop)], $call);
+    $h = pipelineWith($provider, ['chat.context_messages' => 0]);
+    Functions\when('metadata_exists')->justReturn(false);
+    Functions\when('get_post_meta')->alias(static fn(int $id, string $key): mixed => $key === 'ab_messages'
+        ? [['role' => 'user', 'content' => 'Q1'], ['role' => 'assistant', 'content' => 'A1'], ['role' => 'user', 'content' => 'Q2'], ['role' => 'assistant', 'content' => 'A2']]
+        : '');
+
+    $h->pipeline->complete(3, 'Q3', ['conversation_id' => 42]);
+
+    expect(array_map(static fn(object $m): string => $m->content(), $call['messages']))->toBe(['Q1', 'A1', 'Q2', 'A2', 'Q3']);
+});
+
 it('refuses a conversation id the user does not own rather than silently starting a new one', function (): void {
     $h = pipelineWith(null);
     $h->post = conversationChatPost(42, '9');

@@ -17,6 +17,14 @@ it('has defaults for every field and a section for each', function (): void {
         ->and(Schema::defaults()['models.temperature'])->toBe(0.7);
 });
 
+it('bounds the transcript sent to the model with chat.context_messages, 20 by default, 0 allowed for everything', function (): void {
+    expect(Schema::defaults()['chat.context_messages'])->toBe(20)
+        ->and(Schema::fields()['chat.context_messages']['section'])->toBe('chat')
+        ->and(Schema::sanitize(['chat.context_messages' => '0'])['chat.context_messages'])->toBe(0)
+        ->and(Schema::sanitize(['chat.context_messages' => '-3'])['chat.context_messages'])->toBe(0)
+        ->and(Schema::sanitize(['chat.context_messages' => 'x'])['chat.context_messages'])->toBe(20);
+});
+
 it('sanitizes by type, clamps ranges, and drops unknown keys', function (): void {
     $out = Schema::sanitize([
         'provider.base_url' => ' http://ollama:11434/v1/ ',

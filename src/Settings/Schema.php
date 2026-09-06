@@ -44,6 +44,7 @@ final class Schema
             'chat.welcome' => ['type' => 'string', 'default' => __('How can I help?', 'alpaca-bot'), 'section' => 'chat', 'label' => __('Welcome message', 'alpaca-bot')],
             'chat.placeholder' => ['type' => 'string', 'default' => __('Message Alpaca Bot', 'alpaca-bot'), 'section' => 'chat', 'label' => __('Input placeholder', 'alpaca-bot')],
             'chat.user_can_change_model' => ['type' => 'boolean', 'default' => true, 'section' => 'chat', 'label' => __('Users can change model', 'alpaca-bot')],
+            'chat.context_messages' => ['type' => 'integer', 'default' => 20, 'section' => 'chat', 'label' => __('Messages sent to the model', 'alpaca-bot'), 'description' => __('The most recent messages of the conversation sent with each request, the new one included. 0 sends the whole conversation. Fewer messages cost fewer tokens per turn but lose older context.', 'alpaca-bot'), 'min' => 0, 'max' => 1000],
             'chat.history_limit' => ['type' => 'integer', 'default' => 20, 'section' => 'chat', 'label' => __('Conversations shown in history', 'alpaca-bot'), 'min' => 1, 'max' => 200],
             'chat.spellcheck' => ['type' => 'boolean', 'default' => true, 'section' => 'chat', 'label' => __('Spellcheck the input', 'alpaca-bot')],
             'chat.assistant_avatar' => ['type' => 'string', 'default' => '', 'section' => 'chat', 'label' => __('Assistant avatar URL', 'alpaca-bot'), 'sanitize' => [self::class, 'sanitizeUrl']],

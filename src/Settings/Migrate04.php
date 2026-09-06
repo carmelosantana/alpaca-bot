@@ -44,12 +44,12 @@ final class Migrate04
         'default_assistant_welcome_message' => 'chat.welcome',
         'default_assistant_prompt_placeholder' => 'chat.placeholder',
         'user_can_change_model' => 'chat.user_can_change_model',
-        // Semantic change: in 0.4 this was the number of *messages sent to the model*
-        // (0 = all); in 1.0 it is the number of *conversations shown in history*.
-        // The number is carried anyway: it yields a merely arbitrary list length,
-        // visible in the UI and one setting away from fixed, whereas dropping it
-        // would discard user intent for no safety gain.
-        'chat_history_limit' => 'chat.history_limit',
+        // 0.4's "Limit chat history" was the number of messages sent to the model, which
+        // is chat.context_messages, not chat.history_limit (conversations listed in the
+        // history UI; that one starts at its 1.0 default). A stored 0 or '' is skipped
+        // below like any other non-boolean, which matches what 0.4 actually did with it:
+        // its Options::get() read 0 as unset and fell back to the placeholder.
+        'chat_history_limit' => 'chat.context_messages',
         'spellcheck' => 'chat.spellcheck',
         'default_avatar' => 'chat.assistant_avatar',
         'chat_history_save' => 'privacy.save_history',

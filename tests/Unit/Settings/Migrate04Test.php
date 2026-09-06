@@ -40,7 +40,9 @@ it('maps 0.4 options into the new schema and appends /v1 to the base url', funct
         ->and($out['models.num_ctx'])->toBe(4096)
         ->and($out['privacy.save_history'])->toBeTrue()
         ->and($out['privacy.usage_log'])->toBeFalse()
-        ->and($out['chat.history_limit'])->toBe(10)
+        // 0.4's chat_history_limit was the number of messages sent to the model: that is chat.context_messages.
+        ->and($out['chat.context_messages'])->toBe(10)
+        ->and($out['chat.history_limit'])->toBe(20)
         ->and($out['toolkits.user_agent'])->toBe('Custom UA')
         ->and($out['chat.welcome'])->toBe('Hi!')
         ->and($out['chat.placeholder'])->toBe('Ask me')
