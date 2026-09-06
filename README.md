@@ -97,9 +97,7 @@ An [Ollama](https://github.com/ollama/ollama) instance is required. [Ollama](htt
 
 ## Requirements
 
-- Access to [Ollama](https://github.com/ollama/ollama) v0.1.24 or later.
-- PHP `^8.1`
-- WordPress `^6.4`
+- PHP 8.4+, WordPress 6.9+, an Ollama instance (or any provider php-agents supports)
   - Permalinks enabled
 
 ## Installation

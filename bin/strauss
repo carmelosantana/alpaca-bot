@@ -1,0 +1,27 @@
+#!/usr/bin/env php
+<?php
+/**
+ * Run strauss from its isolated manifest (tools/strauss) against the repo root.
+ *
+ * strauss lives in tools/strauss because its psr/simple-cache pin conflicts
+ * with Pest 5 in the root manifest. Its own bin stub loads the first
+ * autoloader it finds, which from the repo root is vendor/autoload.php (no
+ * strauss in it). This launcher loads the tools/strauss autoloader explicitly
+ * and keeps the working directory at the repo root so strauss reads
+ * extra.strauss from the root composer.json.
+ */
+
+declare(strict_types=1);
+
+$autoload = __DIR__ . '/../tools/strauss/vendor/autoload.php';
+if (!is_file($autoload)) {
+    fwrite(STDERR, "strauss is not installed: run `composer install --working-dir=tools/strauss`.\n");
+    exit(1);
+}
+require $autoload;
+
+chdir(dirname(__DIR__));
+
+$version = \Composer\InstalledVersions::getPrettyVersion('brianhenryie/strauss') ?? 'unknown';
+
+exit((new \BrianHenryIE\Strauss\Console\Application($version))->run());

@@ -2,5 +2,8 @@ _builds/
 vendor/
 vendor-wordpress/
 composer.phar
-composer.lock
 .DS_Store
+vendor-prefixed/
+node_modules/
+tools/strauss/vendor/
+.phpunit.cache/

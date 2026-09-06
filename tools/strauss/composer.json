@@ -1,0 +1,12 @@
+{
+    "name": "carmelosantana/alpaca-bot-tools-strauss",
+    "description": "Isolated manifest for strauss (its psr/simple-cache pin conflicts with Pest 5 in the root manifest).",
+    "type": "project",
+    "license": "GPL-2.0-or-later",
+    "require": {
+        "brianhenryie/strauss": "^0.29"
+    },
+    "config": {
+        "sort-packages": true
+    }
+}
