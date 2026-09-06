@@ -10,6 +10,8 @@
 
 **Spec:** `docs/superpowers/specs/2026-09-05-alpaca-bot-1-0-core-refactor.md` (sequencing steps 3-4). Decisions: Kanboard #2943 (API), #2948 (options), #2951 (tests).
 
+> **Corrections from P1 execution (2026-09-05):** (1) `UsageMeter::record()` now ALWAYS writes a `chat_log` row so caps work when `privacy.usage_log` is off; the row then holds only numbers (tokens, duration, model, author), never content. The Privacy tab copy in Task 6 must say so, and Task 6 gains a `privacy.usage_retention_days` integer field (default 90, 0 = keep) with a daily `wp_schedule_event` cleanup in `UsageMeter`, plus a unit test. (2) `ConversationStore::listFor()` reads `post_status IN (private, publish)` because unmigrated 0.4 rows are `publish`; the P2 conversations route inherits that. (3) Hook order is `before_send` → `system_prompt`; the `Pipeline` class docblock is the truth, not P1's summary list.
+
 ## Global Constraints
 
 - All P1 constraints hold (PHP 8.4, prefixed vendor, `alpaca_bot/*` hooks, branch `1.0`, `composer check` green per task).
