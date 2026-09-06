@@ -24,17 +24,6 @@ beforeEach(function (): void {
     });
 });
 
-/** A chat_history post as get_post() hands it back (stdClass: WP_Post is not loaded here). */
-function chatPost(int $id = 42, string $author = '3', string $type = 'chat_history', string $date = '2024-01-01 00:00:00'): object
-{
-    return (object) ['ID' => $id, 'post_author' => $author, 'post_title' => 'T', 'post_type' => $type, 'post_date_gmt' => $date];
-}
-
-function nWords(int $n, string $prefix = 'w'): string
-{
-    return implode(' ', array_map(static fn(int $i): string => $prefix . $i, range(1, $n)));
-}
-
 // ---------------------------------------------------------------- Message
 
 it('converts the 0.4 message shape', function (): void {
@@ -83,7 +72,7 @@ it('creates a post and saves messages under ab_messages', function (): void {
     Functions\expect('wp_insert_post')->once()->withArgs(fn(array $p): bool => $p['post_type'] === 'chat_history' && $p['post_author'] === 3 && $p['post_status'] === 'private')->andReturn(42);
     Functions\expect('update_post_meta')->once()->withArgs(fn(int $id, string $k, array $v): bool => $id === 42 && $k === ConversationStore::META_MESSAGES && $v[0]['role'] === 'user' && $v[1]['role'] === 'assistant');
     Functions\expect('wp_update_post')->once()->withArgs(fn(array $p): bool => $p['ID'] === 42 && $p['post_title'] === 'What is WordPress' && $p['post_excerpt'] === 'WordPress is a CMS.')->andReturn(42);
-    Functions\when('get_post')->justReturn(chatPost());
+    Functions\when('get_post')->justReturn(conversationChatPost());
     $s = new ConversationStore(new Store());
     $c = $s->create(3);
     expect($c->id)->toBe(42);
@@ -96,19 +85,19 @@ it('creates a post and saves messages under ab_messages', function (): void {
 it('truncates a long first message into the title and a long reply into an ellipsised excerpt', function (): void {
     Functions\when('wp_insert_post')->justReturn(42);
     Functions\when('update_post_meta')->justReturn(true);
-    Functions\when('get_post')->justReturn(chatPost());
-    Functions\expect('wp_update_post')->once()->withArgs(fn(array $p): bool => $p['post_title'] === nWords(8, 'q') && $p['post_excerpt'] === nWords(30, 'a') . '…')->andReturn(42);
+    Functions\when('get_post')->justReturn(conversationChatPost());
+    Functions\expect('wp_update_post')->once()->withArgs(fn(array $p): bool => $p['post_title'] === conversationWords(8, 'q') && $p['post_excerpt'] === conversationWords(30, 'a') . '…')->andReturn(42);
     $s = new ConversationStore(new Store());
     $c = $s->create(3);
-    $c->append(new Message('user', nWords(10, 'q') . '?'));
-    $c->append(new Message('assistant', nWords(35, 'a')));
+    $c->append(new Message('user', conversationWords(10, 'q') . '?'));
+    $c->append(new Message('assistant', conversationWords(35, 'a')));
     $s->save($c);
-    expect($c->title)->toBe(nWords(8, 'q'));
+    expect($c->title)->toBe(conversationWords(8, 'q'));
 });
 
 it('keeps a title the caller chose instead of deriving one', function (): void {
     Functions\when('wp_insert_post')->justReturn(42);
-    Functions\when('get_post')->justReturn(chatPost());
+    Functions\when('get_post')->justReturn(conversationChatPost());
     Functions\when('update_post_meta')->justReturn(true);
     Functions\expect('wp_update_post')->once()->withArgs(fn(array $p): bool => $p['post_title'] === 'Mine')->andReturn(42);
     $s = new ConversationStore(new Store());
@@ -118,7 +107,7 @@ it('keeps a title the caller chose instead of deriving one', function (): void {
 });
 
 it('writes an empty message list but leaves title and excerpt alone', function (): void {
-    Functions\when('get_post')->justReturn(chatPost());
+    Functions\when('get_post')->justReturn(conversationChatPost());
     Functions\expect('update_post_meta')->once()->with(42, ConversationStore::META_MESSAGES, []);
     Functions\expect('wp_update_post')->never();
     (new ConversationStore(new Store()))->save(new Conversation(42, 3, 'T'));
@@ -169,7 +158,7 @@ it('does not persist when history saving is off and the conversation is new', fu
 // transcript never silently diverges from what the user sees.
 it('still updates an already-persisted conversation when history saving is off', function (): void {
     Functions\when('get_option')->justReturn(['privacy.save_history' => false]);
-    Functions\when('get_post')->justReturn(chatPost());
+    Functions\when('get_post')->justReturn(conversationChatPost());
     Functions\expect('update_post_meta')->once()->withArgs(fn(int $id, string $k, array $v): bool => $id === 42 && $k === ConversationStore::META_MESSAGES && count($v) === 1);
     Functions\expect('wp_update_post')->once()->withArgs(fn(array $p): bool => $p['ID'] === 42 && $p['post_title'] === 'T' && $p['post_excerpt'] === 'x')->andReturn(42);
     $c = new Conversation(42, 3, 'T');
@@ -185,9 +174,9 @@ it('refuses to save onto a post the conversation\'s user does not own', function
     $s = new ConversationStore(new Store());
     $c = new Conversation(42, 9, 'T');
     $c->append(new Message('user', 'x'));
-    Functions\when('get_post')->justReturn(chatPost(author: '3'));
+    Functions\when('get_post')->justReturn(conversationChatPost(author: '3'));
     $s->save($c);
-    Functions\when('get_post')->justReturn(chatPost(type: 'post', author: '9'));
+    Functions\when('get_post')->justReturn(conversationChatPost(type: 'post', author: '9'));
     $s->save($c);
     Functions\when('get_post')->justReturn(null);
     $s->save($c);
@@ -237,7 +226,7 @@ it('reads ab_messages directly once converted and never touches the legacy key a
 });
 
 it('drops a stale legacy blob left beside ab_messages without reading or converting it', function (): void {
-    Functions\when('get_post')->justReturn(chatPost());
+    Functions\when('get_post')->justReturn(conversationChatPost());
     Functions\expect('get_post_meta')->once()->with(42, ConversationStore::META_MESSAGES, true)->andReturn([['role' => 'user', 'content' => 'q']]);
     Functions\expect('get_post_meta')->never()->with(42, 'messages', true);
     Functions\expect('get_post_meta')->once()->with(42, 'chat_mode_generate', true)->andReturn('');
@@ -251,7 +240,7 @@ it('drops a stale legacy blob left beside ab_messages without reading or convert
 // The conversion is proven end to end: what the first load writes under ab_messages is exactly
 // what a later load, reading only that key, hands back.
 it('round-trips a legacy transcript through convert, write and re-read', function (): void {
-    Functions\when('get_post')->justReturn(chatPost());
+    Functions\when('get_post')->justReturn(conversationChatPost());
     $legacy = [
         ['model' => 'llama3.2', 'message' => ['role' => 3, 'content' => 'q']],
         ['model' => 'llama3.2', 'created_at' => '2024-01-01T00:00:00.5Z', 'message' => ['role' => 'assistant', 'content' => 'a'], 'done' => true, 'eval_count' => 12, 'prompt_eval_count' => 5],

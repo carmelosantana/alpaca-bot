@@ -7,24 +7,6 @@ use AlpacaBot\Settings\Schema;
 use AlpacaBot\Settings\Store;
 use Brain\Monkey\Functions;
 
-/** A tiny options table: get_option()/update_option() read and write $stored, so flags persist across calls. */
-function migrate04Options(array &$stored): void
-{
-    Functions\when('get_option')->alias(function (string $k, mixed $d = false) use (&$stored): mixed {
-        return $stored[$k] ?? ($k === 'alpaca_bot_settings' ? [] : $d);
-    });
-    Functions\when('update_option')->alias(function (string $k, mixed $v) use (&$stored): bool {
-        $stored[$k] = $v;
-        return true;
-    });
-}
-
-/** A legacy chat_history row as get_posts() hands it back. */
-function legacyRow(int $id, string $author = '0'): object
-{
-    return (object) ['ID' => $id, 'post_author' => $author, 'post_type' => 'chat_history', 'post_status' => 'publish'];
-}
-
 it('maps 0.4 options into the new schema and appends /v1 to the base url', function (): void {
     $legacy = [
         'alpaca_bot_api_url' => 'http://host.docker.internal:11434',
@@ -190,7 +172,7 @@ it('makes legacy chat_history rows private and recovers a missing owner from the
     $stored = ['alpaca_bot_api_url' => 'http://localhost:11434'];
     migrate04Options($stored);
     Functions\expect('get_posts')->once()->withArgs(fn(array $q): bool => $q['post_type'] === 'chat_history' && $q['post_status'] === 'publish' && $q['numberposts'] === 100 && $q['orderby'] === 'ID' && $q['order'] === 'ASC' && !isset($q['fields']))
-        ->andReturn([legacyRow(10), legacyRow(11), legacyRow(12), legacyRow(13, '3')]);
+        ->andReturn([migrate04LegacyRow(10), migrate04LegacyRow(11), migrate04LegacyRow(12), migrate04LegacyRow(13, '3')]);
     // Only an unowned row has its transcript read.
     Functions\expect('get_post_meta')->once()->with(10, 'messages', true)->andReturn([['model' => 'm', 'message' => ['role' => 7, 'content' => 'q']], ['model' => 'm', 'message' => ['role' => 'assistant', 'content' => 'a']]]);
     Functions\expect('get_post_meta')->once()->with(11, 'messages', true)->andReturn([['model' => 'm', 'message' => ['role' => 0, 'content' => 'q']]]);
@@ -212,7 +194,7 @@ it('migrates conversations in bounded batches across requests without re-running
     migrate04Options($stored);
     Functions\when('get_post_meta')->justReturn('');
     Functions\expect('get_posts')->twice()->withArgs(fn(array $q): bool => $q['post_status'] === 'publish' && $q['numberposts'] === 100)
-        ->andReturn(array_map(fn(int $id): object => legacyRow($id, '3'), range(1, 100)), [legacyRow(101, '3'), legacyRow(102, '3')]);
+        ->andReturn(array_map(fn(int $id): object => migrate04LegacyRow($id, '3'), range(1, 100)), [migrate04LegacyRow(101, '3'), migrate04LegacyRow(102, '3')]);
     Functions\expect('wp_update_post')->times(102)->withArgs(fn(array $p): bool => $p['post_status'] === 'private')->andReturn(1);
 
     // Request 1: options moved and flagged at once; a full batch, so the conversation pass is still pending.
