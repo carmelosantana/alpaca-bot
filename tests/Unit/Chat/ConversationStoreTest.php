@@ -346,6 +346,36 @@ it('deletes only the owner\'s conversation, permanently, and reports a second de
     expect($s->delete(42, 3))->toBeFalse();
 });
 
+// ---------------------------------------------------------- deleteIfEmpty()
+
+// Pipeline takes back the post it made for a turn that then failed. "Empty" is judged on what is
+// stored, not on the in-memory Conversation: a row with a 1.0 transcript, or a 0.4 one that has
+// not been converted yet, is a conversation somebody can still open and stays.
+it('deletes the owner\'s conversation only while nothing is stored on it, checking both transcript keys', function (): void {
+    $post = (object) ['ID' => 42, 'post_author' => '3', 'post_title' => 'T', 'post_type' => 'chat_history', 'post_date_gmt' => '2024-01-01 00:00:00'];
+    Functions\when('get_post')->justReturn($post);
+    $meta = [];
+    Functions\when('get_post_meta')->alias(static function (int $id, string $key) use (&$meta): mixed {
+        return $meta[$key] ?? '';
+    });
+    Functions\expect('update_post_meta')->never(); // no legacy conversion on the way out
+    $deleted = 0;
+    Functions\when('wp_delete_post')->alias(static function (int $id, bool $force) use (&$deleted, $post): object {
+        $deleted += $force ? 1 : 0;
+        return $post;
+    });
+    $s = new ConversationStore(new Store());
+
+    expect($s->deleteIfEmpty(42, 9))->toBeFalse()->and($deleted)->toBe(0); // not the owner
+    expect($s->deleteIfEmpty(42, 3))->toBeTrue()->and($deleted)->toBe(1); // no meta at all
+    $meta = ['ab_messages' => []];
+    expect($s->deleteIfEmpty(42, 3))->toBeTrue()->and($deleted)->toBe(2); // an empty transcript is still empty
+    $meta = ['ab_messages' => [['role' => 'user', 'content' => 'Hi']]];
+    expect($s->deleteIfEmpty(42, 3))->toBeFalse()->and($deleted)->toBe(2);
+    $meta = ['messages' => [['model' => 'm', 'message' => ['role' => 0, 'content' => 'q']]]];
+    expect($s->deleteIfEmpty(42, 3))->toBeFalse()->and($deleted)->toBe(2);
+});
+
 // ------------------------------------------------------- registerPostType()
 
 it('registers a private, non-searchable chat_history type that dies with its user and cannot be created from the UI', function (): void {

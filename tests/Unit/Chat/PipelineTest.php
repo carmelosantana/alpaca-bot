@@ -203,8 +203,9 @@ it('fires chat/failed with the original exception, then wraps it as a provider e
     $provider = pipelineProvider([new Response('par', ProviderFinishReason::Stop), $boom]);
     $h = pipelineWith($provider);
     $failed = [];
-    Actions\expectDone('alpaca_bot/chat/failed')->once()->whenHappen(function (\Throwable $e, Conversation $c) use (&$failed): void {
-        $failed = [$e, $c];
+    Actions\expectDone('alpaca_bot/chat/failed')->once()->whenHappen(function (\Throwable $e, Conversation $c) use (&$failed, $h): void {
+        // The listener runs before the empty post is taken back, so it can still look the conversation up.
+        $failed = [$e, $c, array_map(static fn(array $w): string => $w[0], $h->writes)];
     });
     Filters\expectApplied('alpaca_bot/message/after_receive')->never();
     Actions\expectDone('alpaca_bot/chat/completed')->never();
@@ -230,7 +231,56 @@ it('fires chat/failed with the original exception, then wraps it as a provider e
         ->and($failed[1])->toBeInstanceOf(Conversation::class)
         ->and($failed[1]->id)->toBe(42)
         ->and($failed[1]->messages)->toHaveCount(1)
-        ->and(array_map(static fn(array $w): string => $w[0], $h->writes))->toBe(['wp_insert_post']); // the empty conversation post only
+        ->and($failed[2])->toBe(['wp_insert_post']) // the empty conversation post only, still there for the listener
+        // ... and gone once the turn has failed: no transcript was ever written, so nothing is lost.
+        ->and(array_map(static fn(array $w): string => $w[0], $h->writes))->toBe(['wp_insert_post', 'wp_delete_post'])
+        ->and($h->writes[1])->toBe(['wp_delete_post', 42, true]);
+});
+
+// A failed turn must not leave an empty conversation behind: P1's real-world run found that a
+// provider timeout left a private "New chat" post with no messages and no usage row, which the
+// history list then showed. The post is taken back only when this turn made it and it still
+// holds no stored transcript; a conversation the caller named, or one something has since saved
+// a turn onto, is never touched.
+it('keeps the conversation the caller passed in when the provider fails', function (): void {
+    $h = pipelineWith(pipelineProvider([new \RuntimeException('connection refused')]));
+    Functions\when('get_post_meta')->alias(static fn(int $id, string $key): mixed => $key === 'ab_messages'
+        ? [['role' => 'user', 'content' => 'First question', 'created' => 1], ['role' => 'assistant', 'content' => 'First answer', 'created' => 2]]
+        : '');
+    Actions\expectDone('alpaca_bot/chat/failed')->once();
+    expect(fn() => $h->pipeline->complete(3, 'Second question', ['conversation_id' => 42]))->toThrow(\RuntimeException::class, 'Provider error')
+        ->and($h->writes)->toBe([]);
+});
+
+it('keeps the conversation it created when a chat/failed listener has saved a turn onto it', function (): void {
+    // A listener that stores the user's turn for a retry gets to keep it: the check is on what
+    // is stored when the turn fails, not on who created the post.
+    $h = pipelineWith(pipelineProvider([new \RuntimeException('connection refused')]));
+    $store = new \AlpacaBot\Chat\ConversationStore($h->store);
+    Actions\expectDone('alpaca_bot/chat/failed')->once()->whenHappen(static function (\Throwable $e, Conversation $c) use ($store): void {
+        $store->save($c);
+    });
+    expect(fn() => $h->pipeline->complete(3, 'Hi'))->toThrow(\RuntimeException::class, 'Provider error')
+        ->and(array_map(static fn(array $w): string => $w[0], $h->writes))->toBe(['wp_insert_post', 'update_post_meta', 'wp_update_post']);
+});
+
+it('takes back the conversation it created when the turn fails before the provider is reached', function (): void {
+    // before_send blanking the message is refused after the post exists (the filter sees the
+    // conversation), so it is the same empty post as a provider failure leaves.
+    $h = pipelineWith(null);
+    Filters\expectApplied('alpaca_bot/message/before_send')->once()->andReturn('   ');
+    Actions\expectDone('alpaca_bot/chat/started')->never();
+    Actions\expectDone('alpaca_bot/chat/failed')->never();
+    expect(fn() => $h->pipeline->complete(3, 'Hi'))->toThrow(\InvalidArgumentException::class)
+        ->and(array_map(static fn(array $w): string => $w[0], $h->writes))->toBe(['wp_insert_post', 'wp_delete_post']);
+});
+
+it('has nothing to take back when history saving is off and the provider fails', function (): void {
+    // The harness records a wp_delete_post as a write, so an empty write list is the whole assertion.
+    $h = pipelineWith(pipelineProvider([new \RuntimeException('connection refused')]), ['privacy.save_history' => false]);
+    Actions\expectDone('alpaca_bot/chat/failed')->once();
+    expect(fn() => $h->pipeline->complete(3, 'Hi'))->toThrow(\RuntimeException::class, 'Provider error')
+        ->and($h->writes)->toBe([]);
 });
 
 it('persists the partial reply, records a receipt, and fires chat/failed when the consumer abandons the stream', function (): void {

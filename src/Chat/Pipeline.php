@@ -32,10 +32,16 @@ use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Message\UserMessage;
  * the plan's order it would have seen a conversation with no turn yet.
  *
  * A provider failure fires action `alpaca_bot/chat/failed` (Throwable, Conversation) instead of
- * the last two, and nothing is persisted. A consumer that stops iterating before the stream
- * ends (a client disconnecting mid-stream) also fires `chat/failed`, with a RuntimeException
- * saying so, but only after the partial reply has been stored (meta `partial: true`) and a
- * receipt recorded for the time spent and whatever usage had arrived; `after_receive` and
+ * the last two, and nothing is persisted: the post a new conversation was given before the
+ * provider was called is taken back once the action has fired, so a failed first turn leaves no
+ * empty "New chat" in the history. A conversation the caller passed in is never deleted, and
+ * neither is one a `chat/failed` listener has meanwhile saved a turn onto (the check is on what
+ * is stored: ConversationStore::deleteIfEmpty()). The same applies to a turn refused after the
+ * post exists (`before_send` blanking the message), which throws without `chat/failed`. A
+ * consumer that stops iterating before the stream ends (a client disconnecting mid-stream)
+ * also fires `chat/failed`, with a RuntimeException saying so, but only after the partial
+ * reply has been stored (meta `partial: true`) and a receipt recorded for the time spent and
+ * whatever usage had arrived; that conversation is not empty and stays. `after_receive` and
  * `completed` are for finished turns and do not fire.
  *
  * `send()` is a generator, so nothing at all runs until the caller first advances it: the cap
@@ -110,55 +116,70 @@ final class Pipeline
         }
         $this->caps->assertAllowed($userId);
         $model = $this->model($options);
-        $conversation = $this->conversation($userId, (int) ($options['conversation_id'] ?? 0));
-        $text = trim((string) apply_filters('alpaca_bot/message/before_send', $text, $conversation, $options));
-        if ($text === '' && $images === []) {
-            throw new \InvalidArgumentException(__('The message is empty.', 'alpaca-bot'));
-        }
-        $conversation->append(new Message('user', $text, $model, null, 0, $images));
-        $contexts = $this->collector->collect($userId, (array) ($options['context'] ?? []));
-        $messages = $this->buildMessages($conversation, $model, $contexts, isset($options['system']) ? (string) $options['system'] : null);
-        $generation = $this->store->modelOverrides($model);
-        $providerOptions = [
-            'temperature' => (float) $generation['temperature'],
-            'num_ctx' => (int) $generation['num_ctx'],
-            'keep_alive' => (string) $generation['keep_alive'],
-        ];
-
-        do_action('alpaca_bot/chat/started', $conversation, $model);
-        $started = microtime(true);
-        $content = '';
-        $reasoning = '';
-        $prompt = 0;
-        $completion = 0;
-        // Set once the provider stream has ended, by exhaustion or by throwing. Still false in
-        // the finally means the generator was destroyed while suspended at a yield: the
-        // consumer stopped iterating, and PHP runs the finally on destruction.
-        $streamEnded = false;
+        $requested = (int) ($options['conversation_id'] ?? 0);
+        $conversation = $this->conversation($userId, $requested);
+        // From here the conversation has its post (when saving is on). Nothing is written to it
+        // until the turn finishes, or the consumer abandons the stream (settle(), which does not
+        // throw), so any exception out of this block is a turn that stored nothing: the post
+        // made for it, if this turn made it, is taken back on the way out.
         try {
-            // The vendored stream() marks text and reasoning deltas with finishReason Stop too,
-            // so Stop says nothing about the end of the stream: the generator is drained to
-            // exhaustion. Usage rides on the final stop chunk or on a usage-only chunk after it
-            // (both with empty content); whichever chunk carries it, it is taken from there.
-            foreach ($this->factory->make($model)->stream($messages, [], $providerOptions) as $chunk) {
-                if ($chunk->usage !== null) {
-                    $prompt = max($prompt, $chunk->usage->promptTokens);
-                    $completion = max($completion, $chunk->usage->completionTokens);
-                }
-                if ($chunk->content === '' && $chunk->reasoning === '') {
-                    continue;
-                }
-                $content .= $chunk->content;
-                $reasoning .= $chunk->reasoning;
-                yield new Delta($chunk->content, $chunk->reasoning);
+            $text = trim((string) apply_filters('alpaca_bot/message/before_send', $text, $conversation, $options));
+            if ($text === '' && $images === []) {
+                throw new \InvalidArgumentException(__('The message is empty.', 'alpaca-bot'));
             }
-            $streamEnded = true;
+            $conversation->append(new Message('user', $text, $model, null, 0, $images));
+            $contexts = $this->collector->collect($userId, (array) ($options['context'] ?? []));
+            $messages = $this->buildMessages($conversation, $model, $contexts, isset($options['system']) ? (string) $options['system'] : null);
+            $generation = $this->store->modelOverrides($model);
+            $providerOptions = [
+                'temperature' => (float) $generation['temperature'],
+                'num_ctx' => (int) $generation['num_ctx'],
+                'keep_alive' => (string) $generation['keep_alive'],
+            ];
+
+            do_action('alpaca_bot/chat/started', $conversation, $model);
+            $started = microtime(true);
+            $content = '';
+            $reasoning = '';
+            $prompt = 0;
+            $completion = 0;
+            // Set once the provider stream has ended, by exhaustion or by throwing. Still false in
+            // the finally means the generator was destroyed while suspended at a yield: the
+            // consumer stopped iterating, and PHP runs the finally on destruction.
+            $streamEnded = false;
+            try {
+                // The vendored stream() marks text and reasoning deltas with finishReason Stop too,
+                // so Stop says nothing about the end of the stream: the generator is drained to
+                // exhaustion. Usage rides on the final stop chunk or on a usage-only chunk after it
+                // (both with empty content); whichever chunk carries it, it is taken from there.
+                foreach ($this->factory->make($model)->stream($messages, [], $providerOptions) as $chunk) {
+                    if ($chunk->usage !== null) {
+                        $prompt = max($prompt, $chunk->usage->promptTokens);
+                        $completion = max($completion, $chunk->usage->completionTokens);
+                    }
+                    if ($chunk->content === '' && $chunk->reasoning === '') {
+                        continue;
+                    }
+                    $content .= $chunk->content;
+                    $reasoning .= $chunk->reasoning;
+                    yield new Delta($chunk->content, $chunk->reasoning);
+                }
+                $streamEnded = true;
+            } catch (\Throwable $e) {
+                $streamEnded = true;
+                do_action('alpaca_bot/chat/failed', $e, $conversation);
+                throw new \RuntimeException('Provider error: ' . $e->getMessage(), 0, $e);
+            } finally {
+                $this->settle($streamEnded, $userId, $conversation, $model, $content, $reasoning, $prompt, $completion, $started);
+            }
         } catch (\Throwable $e) {
-            $streamEnded = true;
-            do_action('alpaca_bot/chat/failed', $e, $conversation);
-            throw new \RuntimeException('Provider error: ' . $e->getMessage(), 0, $e);
-        } finally {
-            $this->settle($streamEnded, $userId, $conversation, $model, $content, $reasoning, $prompt, $completion, $started);
+            // After chat/failed (the inner catch), so a listener saw the conversation and had
+            // the chance to save it; deleteIfEmpty() then leaves a saved one alone. A
+            // conversation the caller named was theirs before this turn and stays theirs.
+            if ($requested <= 0 && $conversation->id > 0) {
+                $this->conversations->deleteIfEmpty($conversation->id, $userId);
+            }
+            throw $e;
         }
         $durationMs = self::elapsedMs($started);
 

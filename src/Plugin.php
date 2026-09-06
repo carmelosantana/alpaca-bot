@@ -82,17 +82,23 @@ final class Plugin
 
     /**
      * The REST controllers to register, through filter `alpaca_bot/rest/controllers`. The plugin's
-     * own controllers are appended to the array handed to the filter as later tasks add them; a
-     * third party appends its own Rest\Controller subclass to get the same namespace, capability
-     * filters and rate limit. Resolved on rest_api_init, not at register(), so a filter added on
-     * plugins_loaded or init is seen. Anything that is not a Controller is dropped rather than
-     * left to fatal inside register().
+     * own controllers are the array handed to the filter (later tasks add theirs here); a third
+     * party appends its own Rest\Controller subclass to get the same namespace, capability
+     * filters and rate limit, or drops one of ours to unregister its routes. Resolved on
+     * rest_api_init, not at register(), so a filter added on plugins_loaded or init is seen, and
+     * the controllers are built then too: they hold the container's services, which all exist by
+     * plugins_loaded, but building them only for a REST request keeps every other request free
+     * of them. Anything that is not a Controller is dropped rather than left to fatal inside
+     * register().
      *
      * @return list<Rest\Controller>
      */
     private function controllers(): array
     {
-        $controllers = apply_filters('alpaca_bot/rest/controllers', []);
+        $controllers = apply_filters('alpaca_bot/rest/controllers', [
+            new Rest\ChatController($this->get(Chat\Pipeline::class)),
+            new Rest\ConversationsController($this->get(Chat\ConversationStore::class), $this->get(Store::class)),
+        ]);
         return array_values(array_filter(
             is_array($controllers) ? $controllers : [],
             static fn(mixed $controller): bool => $controller instanceof Rest\Controller,

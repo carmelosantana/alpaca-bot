@@ -55,6 +55,17 @@ final class Errors
         );
     }
 
+    /**
+     * 400 for a request the pipeline refused as the caller's mistake: an empty message, an image
+     * that is not a data URL, a model the catalog does not list, a conversation that is not
+     * theirs. The pipeline's InvalidArgumentException messages are already written for the
+     * person who sent the request, so a route passes them through as the message.
+     */
+    public static function badRequest(string $message): \WP_Error
+    {
+        return new \WP_Error('alpaca_bot_bad_request', $message, ['status' => 400]);
+    }
+
     /** `$what` is the (translated) noun, e.g. "Conversation"; used for another user's resource too, so existence is not leaked. */
     public static function notFound(string $what): \WP_Error
     {

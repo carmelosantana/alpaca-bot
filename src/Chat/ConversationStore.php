@@ -162,6 +162,31 @@ final class ConversationStore
     }
 
     /**
+     * Permanently deletes the conversation, but only while nothing is stored on it; false when
+     * it is missing, not owned by $userId, or has a transcript.
+     *
+     * For Pipeline, which creates the post before the provider is called and takes it back when
+     * the turn then fails: a failed turn must not leave an empty "New chat" in the history list.
+     * "Empty" is judged on what is stored, not on the in-memory Conversation, so a turn a
+     * `chat/failed` listener has meanwhile saved is kept. Both transcript keys are checked and
+     * neither is read through readMessages(): a 0.4 row that has not been converted yet is a
+     * conversation someone can still open, and taking it back must not convert it either.
+     */
+    public function deleteIfEmpty(int $id, int $userId): bool
+    {
+        if ($this->owned($id, $userId) === null) {
+            return false;
+        }
+        foreach ([self::META_MESSAGES, self::META_LEGACY] as $key) {
+            $stored = get_post_meta($id, $key, true);
+            if (is_array($stored) && $stored !== []) {
+                return false;
+            }
+        }
+        return (bool) wp_delete_post($id, true);
+    }
+
+    /**
      * The post when it is a conversation owned by $userId, else null. Nobody owns an authorless row.
      *
      * Ordering dependency: Migrate04::migrateConversations() recovers post_author for 0.4's

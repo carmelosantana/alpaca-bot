@@ -59,3 +59,13 @@ it('provider is alpaca_bot_provider_error, 502, with the throwable\'s message', 
         ->and($e->get_error_message())->toBe('connection refused')
         ->and($e->get_error_data())->toBe(['status' => 502]);
 });
+
+it('badRequest is alpaca_bot_bad_request, 400, with the given message', function (): void {
+    // The pipeline's InvalidArgumentException messages are already written for the person who
+    // sent the request (an image that is not a data URL, a model the catalog does not list, a
+    // conversation that is not theirs), so a route passes them through as the 400's message.
+    $e = Errors::badRequest('Images must be data URLs.');
+    expect($e->get_error_code())->toBe('alpaca_bot_bad_request')
+        ->and($e->get_error_message())->toBe('Images must be data URLs.')
+        ->and($e->get_error_data())->toBe(['status' => 400]);
+});

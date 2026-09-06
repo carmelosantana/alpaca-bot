@@ -78,6 +78,22 @@ function restController(array $routes): Controller
     };
 }
 
+/**
+ * ChatControllerTest and ConversationsControllerTest: a request with its parameters already set.
+ * The stub's constructor takes route attributes as its third argument, as core's does, so
+ * parameters go in through set_param(), the way core sets URL, query and body values.
+ *
+ * @param array<string, mixed> $params
+ */
+function restRequest(string $method, string $route, array $params = []): WP_REST_Request
+{
+    $request = new WP_REST_Request($method, $route);
+    foreach ($params as $key => $value) {
+        $request->set_param($key, $value);
+    }
+    return $request;
+}
+
 /** ConversationStoreTest: a chat_history post as get_post() hands it back (stdClass: WP_Post is not loaded here). */
 function conversationChatPost(int $id = 42, string $author = '3', string $type = 'chat_history', string $date = '2024-01-01 00:00:00'): object
 {
@@ -159,8 +175,12 @@ function currentScreenPost(int $id, string $title, string $content, string $type
  * The clock is 1_725_000_000 (2024-08-30 06:40:00 UTC). The conversation post is 42, owned by
  * user 3 unless a test swaps `$h->post`; a chat_log insert is post 9. Transients are served from
  * `$h->transients` (pre-seeded with the model catalog). The harness records every persisted
- * write in `$h->writes` as [function, post type or meta key, payload] in order, and the model
- * the factory was asked for in `$h->model`. The Store, ModelCatalog and UsageMeter the pipeline
+ * write in `$h->writes` as [function, post type or meta key, payload] in order (a
+ * wp_delete_post as [function, post id, force]), and the model the factory was asked for in
+ * `$h->model`. Post meta written through update_post_meta is readable back through
+ * get_post_meta (`$h->meta[post id][key]`), so a store method that checks what a turn has
+ * persisted before acting sees the turn's own writes; a test that needs a pre-existing
+ * transcript stubs get_post_meta itself, after this. The Store, ModelCatalog and UsageMeter the pipeline
  * was built over are `$h->store`, `$h->catalog` and `$h->meter`, for a caller (cliCommand())
  * that must share them the way Plugin::register() shares one container's instances.
  *
@@ -182,6 +202,8 @@ function pipelineWith(mixed $provider, array $settings = [], array $contexts = [
         public object $post;
         /** @var array<string, mixed> */
         public array $transients = [];
+        /** @var array<int, array<string, mixed>> */
+        public array $meta = [];
     };
     $h->post = conversationChatPost();
     if ($catalog !== null) {
@@ -198,7 +220,14 @@ function pipelineWith(mixed $provider, array $settings = [], array $contexts = [
     });
     Functions\when('update_post_meta')->alias(static function (int $id, string $key, mixed $value) use ($h): bool {
         $h->writes[] = ['update_post_meta', $key, $value];
+        $h->meta[$id][$key] = $value;
         return true;
+    });
+    Functions\when('get_post_meta')->alias(static fn(int $id, string $key = '', bool $single = false): mixed => $h->meta[$id][$key] ?? '');
+    Functions\when('wp_delete_post')->alias(static function (int $id, bool $force = false) use ($h): object {
+        $h->writes[] = ['wp_delete_post', $id, $force];
+        unset($h->meta[$id]);
+        return (object) ['ID' => $id];
     });
     Functions\when('wp_update_post')->alias(static function (array $post) use ($h): int {
         $h->writes[] = ['wp_update_post', (int) $post['ID'], $post];

@@ -3,7 +3,9 @@
 declare(strict_types=1);
 
 use AlpacaBot\Plugin;
+use AlpacaBot\Rest\ChatController;
 use AlpacaBot\Rest\Controller;
+use AlpacaBot\Rest\ConversationsController;
 use Brain\Monkey\Actions;
 use Brain\Monkey\Filters;
 use Brain\Monkey\Functions;
@@ -124,9 +126,12 @@ it('Plugin registers every controller the alpaca_bot/rest/controllers filter han
     Plugin::boot()->register();
     expect($onRestInit)->toBeInstanceOf(Closure::class);
 
-    // Task 1 ships no controllers: the seam starts empty and a third party (or a later task)
-    // appends to it. Anything that is not a Controller is dropped rather than fatal on register().
-    Filters\expectApplied('alpaca_bot/rest/controllers')->once()->with([])->andReturn([$this->ping, 'not-a-controller', $this->limited]);
+    // The plugin's own controllers (chat, conversations) are what the filter is handed; what it
+    // returns is what registers, so a third party can append to the list or replace it outright.
+    // Anything that is not a Controller is dropped rather than fatal on register().
+    Filters\expectApplied('alpaca_bot/rest/controllers')->once()->with(Mockery::on(static fn(array $own): bool => count($own) === 2
+        && $own[0] instanceof ChatController
+        && $own[1] instanceof ConversationsController))->andReturn([$this->ping, 'not-a-controller', $this->limited]);
     Functions\expect('register_rest_route')->once()->with('alpaca-bot/v1', '/ping', Mockery::type('array'));
     Functions\expect('register_rest_route')->once()->with('alpaca-bot/v1', '/limited', Mockery::type('array'));
     $onRestInit();
