@@ -15,9 +15,15 @@ use AlpacaBot\Settings\Store;
  * than the body, so the body stays a plain list a client can bind to a picker as is.
  *
  * `refresh=1` bypasses the catalog's five-minute transient and asks the provider again: what a
- * settings screen wants after the operator pulled a new model. It is open to anyone who may
- * chat, unlimited, on purpose: a listing costs the provider far less than one of the thirty
- * chat turns a minute the same person is already allowed.
+ * settings screen wants after the operator pulled a new model.
+ *
+ * The route is open to anyone who may chat and shares the chat routes' rate limit. A listing is
+ * cheaper than a chat turn, but the limiter is about rate, not cost per request: the catalog
+ * does not cache an empty list, so while the provider is down every request here, not only a
+ * refresh, is a synchronous upstream call that holds a PHP worker for up to the provider
+ * timeout, and an unlimited route lets one editor's script (or one leaked Application Password)
+ * pin every worker the site has. Under the shared 'chat' bucket a client that lists models as
+ * often as it chats never notices; a loop does.
  *
  * An unreachable provider is not an error here: the catalog reads it as an empty list, and an
  * empty list is what the client needs to render ("no models") rather than a 5xx it would have to
@@ -36,6 +42,7 @@ final class ModelsController extends Controller
             'methods' => 'GET',
             'callback' => [$this, 'index'],
             'capability' => 'edit_posts',
+            'rate_limit' => true,
             'args' => ['refresh' => ['type' => 'boolean', 'default' => false]],
         ]];
     }

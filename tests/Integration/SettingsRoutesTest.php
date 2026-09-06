@@ -6,7 +6,6 @@ namespace AlpacaBot\Tests\Integration;
 
 use AlpacaBot\Chat\UsageMeter;
 use AlpacaBot\Plugin;
-use AlpacaBot\Rest\SettingsController;
 use AlpacaBot\Settings\Schema;
 
 /**
@@ -72,18 +71,31 @@ final class SettingsRoutesTest extends TestCase
     {
         $this->asAdmin();
         $res = $this->rest('PUT', '/settings', ['provider.api_key' => 'sk-live-1234']);
-        $this->assertSame(SettingsController::MASK, $res->get_data()['provider.api_key']);
+        $this->assertSame(Schema::MASK, $res->get_data()['provider.api_key']);
         $this->assertSame('sk-live-1234', get_option('alpaca_bot_settings')['provider.api_key']);
-        $this->assertSame(SettingsController::MASK, $this->rest('GET', '/settings')->get_data()['provider.api_key']);
+        $this->assertSame(Schema::MASK, $this->rest('GET', '/settings')->get_data()['provider.api_key']);
         $this->assertStringNotContainsString('sk-live', (string) wp_json_encode($this->rest('GET', '/settings')->get_data()));
 
         $revealed = $this->rest('GET', '/settings', ['reveal' => '1']);
         $this->assertSame('sk-live-1234', $revealed->get_data()['provider.api_key']);
         $this->assertSame('no-store', $revealed->get_headers()['Cache-Control']);
 
-        $this->rest('PUT', '/settings', ['provider.api_key' => SettingsController::MASK, 'models.num_ctx' => 2048]);
+        $this->rest('PUT', '/settings', ['provider.api_key' => Schema::MASK, 'models.num_ctx' => 2048]);
         $this->assertSame('sk-live-1234', get_option('alpaca_bot_settings')['provider.api_key']);
         $this->assertSame(2048, get_option('alpaca_bot_settings')['models.num_ctx']);
+
+        // Not a string at all (a typed client's null, an untouched form control serialised as
+        // null, a stray array) is neither "clear" nor a new key: the stored one stays.
+        $request = new \WP_REST_Request('PUT', '/alpaca-bot/v1/settings');
+        $request->set_header('Content-Type', 'application/json');
+        $request->set_body('{"provider.api_key": null, "models.num_ctx": 4096}');
+        $res = rest_get_server()->dispatch($request);
+        $this->assertSame(200, $res->get_status(), print_r($res->get_data(), true));
+        $this->assertSame(Schema::MASK, $res->get_data()['provider.api_key']);
+        $this->assertSame('sk-live-1234', get_option('alpaca_bot_settings')['provider.api_key']);
+        $this->assertSame(4096, get_option('alpaca_bot_settings')['models.num_ctx']);
+        $this->rest('PUT', '/settings', ['provider.api_key' => ['sk-live-9999']]);
+        $this->assertSame('sk-live-1234', get_option('alpaca_bot_settings')['provider.api_key']);
 
         $res = $this->rest('PUT', '/settings', ['provider.api_key' => '']);
         $this->assertSame('', $res->get_data()['provider.api_key']);
@@ -98,7 +110,7 @@ final class SettingsRoutesTest extends TestCase
         $this->assertSame(200, $res->get_status());
         $data = $res->get_data();
         $this->assertSame(Schema::sections(), $data['sections']);
-        $this->assertSame(SettingsController::MASK, $data['mask']);
+        $this->assertSame(Schema::MASK, $data['mask']);
         $this->assertSame(array_keys(Schema::fields()), array_keys($data['fields']));
         $this->assertTrue($data['fields']['provider.api_key']['secret']);
         foreach ($data['fields'] as $key => $field) {
@@ -126,14 +138,19 @@ final class SettingsRoutesTest extends TestCase
         $this->assertSame(['tokens' => 30, 'requests' => 1, 'month' => gmdate('Y-m'), 'caps' => ['user' => 5000, 'site' => 0]], $mine);
         $all = $this->rest('GET', '/usage', ['user' => 'all'])->get_data();
         $this->assertSame(['tokens' => 33, 'requests' => 2, 'month' => gmdate('Y-m'), 'caps' => ['user' => 5000, 'site' => 0]], $all);
+        $this->rest('PUT', '/settings', ['governance.site_monthly_tokens' => 90000]);
+        $this->assertSame(90000, $this->rest('GET', '/usage')->get_data()['caps']['site']);
 
         // Anything but me|all is core's schema refusal.
         $refused = $this->rest('GET', '/usage', ['user' => '7']);
         $this->assertSame(400, $refused->get_status());
         $this->assertSame('rest_invalid_param', $refused->get_data()['code']);
 
+        // An editor sees their own figures and the per-user cap only: the site-wide cap is the
+        // operator's number, as the site-wide total is.
         wp_set_current_user($other);
-        $this->assertSame(3, $this->rest('GET', '/usage')->get_data()['tokens']);
+        $theirs = $this->rest('GET', '/usage')->get_data();
+        $this->assertSame(['tokens' => 3, 'requests' => 1, 'month' => gmdate('Y-m'), 'caps' => ['user' => 5000]], $theirs);
         $forbidden = $this->rest('GET', '/usage', ['user' => 'all']);
         $this->assertSame(403, $forbidden->get_status());
         $this->assertSame('rest_forbidden', $forbidden->get_data()['code']);
@@ -152,5 +169,17 @@ final class SettingsRoutesTest extends TestCase
         $this->assertSame('fake-model', $res->get_headers()['X-Alpaca-Bot-Default-Model']);
         $this->assertSame($res->get_data(), $this->rest('GET', '/models')->get_data());
         $this->assertSame(400, $this->rest('GET', '/models', ['refresh' => 'maybe'])->get_status());
+    }
+
+    public function test_models_route_shares_the_chat_rate_limit(): void
+    {
+        $this->fakeProvider();
+        wp_set_current_user(self::factory()->user->create(['role' => 'editor']));
+        add_filter('alpaca_bot/rate_limit', static fn(): int => 1);
+        $this->assertSame(200, $this->rest('GET', '/models')->get_status());
+        $blocked = $this->rest('GET', '/models', ['refresh' => '1']);
+        $this->assertSame(429, $blocked->get_status());
+        $this->assertSame('alpaca_bot_rate_limited', $blocked->get_data()['code']);
+        $this->assertArrayHasKey('Retry-After', $blocked->get_headers());
     }
 }

@@ -12,14 +12,18 @@ use AlpacaBot\Settings\Store;
  * array (every Schema key, defaults filled in), `PUT /settings` a partial update of it, and
  * `GET /settings/schema` the field list a client renders a form from.
  *
- * Secrets (SECRETS, today the provider API key) read back as MASK when set and as '' when not,
- * so a client can show "there is a key" without holding it. The mask is also what a client
- * sends back when it has not touched the field: a PUT whose secret is MASK keeps the stored
- * value, one whose secret is '' clears it, and anything else is the new value. The three cases
- * are distinct on the wire, so "clear the key" is always reachable and an untouched form never
- * wipes it. `?reveal=1` on the GET answers the raw secret instead of the mask: only the flag is
- * on the URL, the secret is in the body, and the body is marked `Cache-Control: no-store` so
- * neither a browser nor a proxy keeps a copy. A PUT never reveals, whatever its body says.
+ * Secrets (Schema::SECRETS, today the provider API key) read back as Schema::MASK when set and
+ * as '' when not, so a client can show "there is a key" without holding it. The mask is also
+ * what a client sends back when it has not touched the field: a PUT whose secret is MASK keeps
+ * the stored value, one whose secret is '' clears it, and any other string is the new value. The
+ * three cases are distinct on the wire, so "clear the key" is always reachable and an untouched
+ * form never wipes it. A secret that is not a string at all (`null`, an array) keeps the stored
+ * value too, and the reply shows the mask so the client can see it did: the rule and its reasons
+ * are Schema::sanitize()'s, shared with every other writer of the option, and this route only
+ * hands the body through. `?reveal=1` on the GET answers the raw secret instead of the mask:
+ * only the flag is on the URL, the secret is in the body, and the body is marked
+ * `Cache-Control: no-store` so neither a browser nor a proxy keeps a copy. A PUT never reveals,
+ * whatever its body says.
  *
  * A PUT is partial at the top level only: each key sent replaces the stored value outright,
  * keys not sent are untouched. That includes `models.overrides`, a map of model id to its
@@ -36,14 +40,14 @@ use AlpacaBot\Settings\Store;
  * of `models.temperature` arrives as `models_temperature` and matches nothing. Rather than
  * answer 200 with nothing changed, a PUT that names no known key is a 400 that says to send
  * JSON.
+ *
+ * Capability filters follow Controller::routeKey(): `alpaca_bot/capability/settings` covers
+ * both verbs on `/settings`, and `/settings/schema` has its own, `alpaca_bot/capability/settings/schema`.
+ * A site that loosens the first for a custom role has not loosened the second; a client of that
+ * role reads the settings and gets a 403 on the schema until the site names it too.
  */
 final class SettingsController extends Controller
 {
-    public const MASK = '••••';
-
-    /** @var list<string> */
-    private const SECRETS = ['provider.api_key'];
-
     public function __construct(private Store $store) {}
 
     public function routes(): array
@@ -71,13 +75,7 @@ final class SettingsController extends Controller
         if ($input === []) {
             return Errors::badRequest(__('No settings were sent. Send a JSON body of dotted keys, e.g. {"models.temperature": 0.7}.', 'alpaca-bot'));
         }
-        $current = $this->store->all();
-        foreach (self::SECRETS as $key) {
-            if (($input[$key] ?? null) === self::MASK) {
-                $input[$key] = $current[$key] ?? '';
-            }
-        }
-        $this->store->replace(array_merge($current, $input));
+        $this->store->replace(array_merge($this->store->all(), $input));
         return new \WP_REST_Response($this->masked($this->store->all()));
     }
 
@@ -92,12 +90,12 @@ final class SettingsController extends Controller
         $fields = [];
         foreach (Schema::fields() as $key => $field) {
             unset($field['sanitize']);
-            if (in_array($key, self::SECRETS, true)) {
+            if (in_array($key, Schema::SECRETS, true)) {
                 $field['secret'] = true;
             }
             $fields[$key] = $field;
         }
-        return new \WP_REST_Response(['sections' => Schema::sections(), 'fields' => $fields, 'mask' => self::MASK]);
+        return new \WP_REST_Response(['sections' => Schema::sections(), 'fields' => $fields, 'mask' => Schema::MASK]);
     }
 
     /**
@@ -106,9 +104,9 @@ final class SettingsController extends Controller
      */
     private function masked(array $settings): array
     {
-        foreach (self::SECRETS as $key) {
+        foreach (Schema::SECRETS as $key) {
             if (($settings[$key] ?? '') !== '') {
-                $settings[$key] = self::MASK;
+                $settings[$key] = Schema::MASK;
             }
         }
         return $settings;

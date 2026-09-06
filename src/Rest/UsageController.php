@@ -9,12 +9,14 @@ use AlpacaBot\Settings\Store;
 
 /**
  * `GET /usage`: this calendar month's token spend, `{tokens, requests, month, caps: {user,
- * site}}`, from UsageMeter's cached month summary. `user=me` (the default) is the current
+ * site?}}`, from UsageMeter's cached month summary. `user=me` (the default) is the current
  * user's own figures, the ones the per-user cap is measured against; `user=all` is the whole
  * site's, which only an administrator may read: what other people spend is theirs, and the
  * site-wide total is the operator's concern (CapExceeded keeps it out of the user-facing
- * message for the same reason). The caps come with either answer so a client can draw
- * "used of allowed" without a second request; 0 means no cap, as the schema says.
+ * message for the same reason). The caps come with the answer so a client can draw "used of
+ * allowed" without a second request; 0 means no cap, as the schema says. `caps.user` is in
+ * every answer; `caps.site` only in an administrator's, because the site-wide cap is the
+ * operator's number as much as the site-wide total is, and a user's own bar needs only their own.
  *
  * `user` is an enum in the route schema, so a user id or anything else is core's 400 before
  * this runs: the route has two answers, and a client that wants another person's figures is
@@ -38,13 +40,15 @@ final class UsageController extends Controller
     public function show(\WP_REST_Request $request): \WP_REST_Response|\WP_Error
     {
         $all = $request->get_param('user') === 'all';
-        if ($all && !current_user_can('manage_options')) {
+        $admin = current_user_can('manage_options');
+        if ($all && !$admin) {
             return Errors::forbidden();
         }
         $summary = $this->meter->monthSummary($all ? null : $this->userId());
-        return new \WP_REST_Response($summary + ['caps' => [
-            'user' => (int) $this->store->get('governance.user_monthly_tokens'),
-            'site' => (int) $this->store->get('governance.site_monthly_tokens'),
-        ]]);
+        $caps = ['user' => (int) $this->store->get('governance.user_monthly_tokens')];
+        if ($admin) {
+            $caps['site'] = (int) $this->store->get('governance.site_monthly_tokens');
+        }
+        return new \WP_REST_Response($summary + ['caps' => $caps]);
     }
 }

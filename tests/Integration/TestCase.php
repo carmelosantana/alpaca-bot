@@ -26,11 +26,19 @@ use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Provider\Usage;
  * rest_api_init with the current test's filters in place, so route-time filters work in any test,
  * in any order.
  *
- * Every test also starts from default settings. The plugin's Store is memoised on the Plugin
- * singleton for the whole process, so a setting one test wrote (through PUT /settings, say)
- * would still be in the memo for the next test after core rolled the option row back; writing
- * the defaults through the Store on set_up refreshes the memo and the row together, inside the
- * transaction, so both read as defaults and neither outlives the test.
+ * Every test also starts from default settings, written through the Store on set_up. That one
+ * write does two things. It creates the `alpaca_bot_settings` option row: wp-phpunit never
+ * activates the plugin (bootstrap.php loads the main file instead), so without it the row does
+ * not exist and get_option() is false; SettingsRoutesTest reads the row directly and is coupled
+ * to this. And it refreshes the Store's memo, which lives on the Plugin singleton for the whole
+ * process and would otherwise still hold what an earlier test wrote after core rolled that
+ * test's row back. Both happen inside the transaction, so neither outlives the test, and a
+ * second write on tear_down would add nothing: core's rollback removes the row, the next set_up
+ * recreates it, and a filter a test registered on `pre_update_option_alpaca_bot_settings` would
+ * still be in place on tear_down (parent::tear_down() restores hooks afterwards) and fire on it.
+ *
+ * The consequence is that no test in this suite sees the fresh-install state, option row absent:
+ * a test that needs it (register_setting()'s default handling, say) starts with delete_option().
  */
 abstract class TestCase extends \WP_UnitTestCase
 {
@@ -44,7 +52,6 @@ abstract class TestCase extends \WP_UnitTestCase
     public function tear_down(): void
     {
         $GLOBALS['wp_rest_server'] = null;
-        Plugin::instance()->get(Store::class)->replace([]);
         parent::tear_down();
     }
 

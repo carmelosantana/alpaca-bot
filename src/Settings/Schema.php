@@ -10,10 +10,22 @@ namespace AlpacaBot\Settings;
  * Keys are dotted `section.name` strings. The label/description metadata is
  * consumed by the settings screen that arrives in a later phase.
  *
+ * SECRETS are the fields whose stored value must never be shown back or lost by accident
+ * (today the provider API key). They read out as MASK wherever they are shown, and a write that
+ * carries MASK back means "keep what is stored"; sanitize() owns that rule so every writer of the
+ * option (the REST route, the Settings API's sanitize callback, Store) resolves it the same way
+ * and none can store the literal mask as the key.
+ *
  * @phpstan-type Field array{type:'string'|'integer'|'number'|'boolean'|'array'|'select', default:mixed, section:string, label:string, description?:string, options?:array<string,string>, min?:int|float, max?:int|float, sanitize?:callable(mixed, array<string, mixed>): mixed}
  */
 final class Schema
 {
+    /** What a secret reads back as when one is stored, and what a writer sends to leave it alone. */
+    public const MASK = '••••';
+
+    /** @var list<string> the fields sanitize() applies the mask rule to */
+    public const SECRETS = ['provider.api_key'];
+
     /** @return array<string, array{label:string, description:string}> */
     public static function sections(): array
     {
@@ -65,17 +77,46 @@ final class Schema
     /**
      * Full, validated settings array. Missing keys take their default; unknown keys are dropped.
      *
+     * `$current` is what the option holds now, and is where a SECRETS field keeps its value from:
+     * a secret sent as MASK, or as anything that is not a string, resolves to `$current`'s value
+     * (secret()). There is no default for it on purpose. `[]` would turn an echoed mask into a
+     * cleared key, and reading the option here would hide a database read inside a pure function;
+     * every caller knows what it is writing over (Store has its memo, a `register_setting()`
+     * sanitize callback has get_option()), so it says so. Core calls that callback with the option
+     * name as the second argument, so it must be a closure that passes the stored array, not
+     * `[Schema::class, 'sanitize']` itself: that fails with a TypeError rather than storing a mask.
+     *
      * @param array<string, mixed> $input
+     * @param array<string, mixed> $current the stored settings this write replaces
      * @return array<string, mixed>
      */
-    public static function sanitize(array $input): array
+    public static function sanitize(array $input, array $current): array
     {
         $out = [];
         foreach (self::fields() as $key => $f) {
             $raw = array_key_exists($key, $input) ? $input[$key] : $f['default'];
+            if (in_array($key, self::SECRETS, true)) {
+                $raw = self::secret($raw, $current[$key] ?? '');
+            }
             $out[$key] = isset($f['sanitize']) ? ($f['sanitize'])($raw, $f) : self::coerce($raw, $f);
         }
         return $out;
+    }
+
+    /**
+     * The three-valued rule for a secret on the way in: '' clears it, MASK keeps what is stored,
+     * any other string is the new value. A value that is not a string is read as "keep" too. It
+     * cannot be the new key, and it is not the one spelling of "clear", so the only safe reading
+     * is the one that loses nothing: a typed client's `null`, an untouched password control a
+     * form serialised as `null`, a stray array, all leave the stored key as it was. The reply to
+     * a write shows the mask when a key is stored, so a client that meant "clear" sees it did not.
+     */
+    private static function secret(mixed $raw, mixed $stored): string
+    {
+        if (is_string($raw) && $raw !== self::MASK) {
+            return $raw;
+        }
+        return is_string($stored) ? $stored : '';
     }
 
     /** @param Field $f */

@@ -29,18 +29,20 @@ it('declares one route for editors whose user switch is me or all, not rate limi
         ->and($routes[0])->not->toHaveKey('rate_limit');
 });
 
-it('reports the current user\'s month with both caps by default', function (): void {
-    Functions\expect('current_user_can')->never();
+it('reports the current user\'s month with only the user cap by default', function (): void {
+    Functions\expect('current_user_can')->twice()->with('manage_options')->andReturn(false);
     $res = $this->controller->show(restRequest('GET', '/alpaca-bot/v1/usage'));
     expect($res)->toBeInstanceOf(WP_REST_Response::class)
-        ->and($res->get_data())->toBe(['tokens' => 1500, 'requests' => 1, 'month' => '2024-08', 'caps' => ['user' => 10000, 'site' => 0]]);
+        ->and($res->get_data())->toBe(['tokens' => 1500, 'requests' => 1, 'month' => '2024-08', 'caps' => ['user' => 10000]]);
     expect($this->controller->show(restRequest('GET', '/alpaca-bot/v1/usage', ['user' => 'me']))->get_data()['tokens'])->toBe(1500);
 });
 
-it('reports the whole site for an administrator asking for all', function (): void {
-    Functions\expect('current_user_can')->once()->with('manage_options')->andReturn(true);
-    $res = $this->controller->show(restRequest('GET', '/alpaca-bot/v1/usage', ['user' => 'all']));
-    expect($res->get_data())->toBe(['tokens' => 90000, 'requests' => 1, 'month' => '2024-08', 'caps' => ['user' => 10000, 'site' => 0]]);
+it('adds the site cap for an administrator, on their own figures as on the site\'s', function (): void {
+    Functions\expect('current_user_can')->twice()->with('manage_options')->andReturn(true);
+    $mine = $this->controller->show(restRequest('GET', '/alpaca-bot/v1/usage'));
+    expect($mine->get_data())->toBe(['tokens' => 1500, 'requests' => 1, 'month' => '2024-08', 'caps' => ['user' => 10000, 'site' => 0]]);
+    $all = $this->controller->show(restRequest('GET', '/alpaca-bot/v1/usage', ['user' => 'all']));
+    expect($all->get_data())->toBe(['tokens' => 90000, 'requests' => 1, 'month' => '2024-08', 'caps' => ['user' => 10000, 'site' => 0]]);
 });
 
 it('refuses all to anyone else with a 403', function (): void {

@@ -9,8 +9,9 @@ use AlpacaBot\Plugin;
 /**
  * Read/write access to the single `alpaca_bot_settings` option.
  *
- * The option is read at most once per request and memoized; every write goes
- * through Schema::sanitize() so the stored array is always complete and valid.
+ * The option is read at most once per request and memoized; every write goes through
+ * Schema::sanitize() over what is held now, so the stored array is always complete and valid
+ * and a secret written as Schema::MASK keeps its stored value rather than becoming the mask.
  */
 final class Store
 {
@@ -54,7 +55,7 @@ final class Store
     /** @param array<string, mixed> $settings */
     public function replace(array $settings): void
     {
-        $clean = Schema::sanitize($settings);
+        $clean = Schema::sanitize($settings, $this->all());
         update_option(Plugin::OPTION, $clean);
         $this->cache = $clean;
     }

@@ -39,7 +39,7 @@ it('declares read, write and schema routes for administrators only, none rate li
 
 it('masks a stored api key on read and leaves an empty one empty', function (): void {
     $data = $this->controller->show(restRequest('GET', '/alpaca-bot/v1/settings'))->get_data();
-    expect($data['provider.api_key'])->toBe(SettingsController::MASK)
+    expect($data['provider.api_key'])->toBe(Schema::MASK)
         ->and($data['models.temperature'])->toBe(0.5)
         ->and(array_keys($data))->toBe(array_keys(Schema::fields()));
 
@@ -57,14 +57,25 @@ it('reveals the raw key on request, and marks that response no-store', function 
 });
 
 it('keeps the stored key when a write echoes the mask back, and merges the other keys', function (): void {
-    $res = $this->controller->update(restRequest('PUT', '/alpaca-bot/v1/settings', ['provider.api_key' => SettingsController::MASK, 'models.num_ctx' => 2048]));
+    $res = $this->controller->update(restRequest('PUT', '/alpaca-bot/v1/settings', ['provider.api_key' => Schema::MASK, 'models.num_ctx' => 2048]));
     expect($this->written['provider.api_key'])->toBe('secret')
         ->and($this->written['models.num_ctx'])->toBe(2048)
         ->and($this->written['models.temperature'])->toBe(0.5)
         ->and(array_keys($this->written))->toBe(array_keys(Schema::fields()))
         // The reply is the masked read, never the raw key, whatever the body carried.
-        ->and($res->get_data()['provider.api_key'])->toBe(SettingsController::MASK)
+        ->and($res->get_data()['provider.api_key'])->toBe(Schema::MASK)
         ->and($res->get_data()['models.num_ctx'])->toBe(2048);
+});
+
+it('keeps the stored key when the write sends a non-string for it, and still applies the rest', function (): void {
+    foreach ([null, [], ['sk-x'], false, 0] as $raw) {
+        $this->written = null;
+        $res = $this->controller->update(restRequest('PUT', '/alpaca-bot/v1/settings', ['provider.api_key' => $raw, 'models.num_ctx' => 2048]));
+        expect($res)->toBeInstanceOf(WP_REST_Response::class)
+            ->and($this->written['provider.api_key'])->toBe('secret', var_export($raw, true))
+            ->and($this->written['models.num_ctx'])->toBe(2048)
+            ->and($res->get_data()['provider.api_key'])->toBe(Schema::MASK);
+    }
 });
 
 it('clears the key when the write sends an empty string', function (): void {
@@ -75,7 +86,7 @@ it('clears the key when the write sends an empty string', function (): void {
 
 it('never reveals in a write reply, even when the body asks', function (): void {
     $res = $this->controller->update(restRequest('PUT', '/alpaca-bot/v1/settings', ['reveal' => true, 'models.num_ctx' => 2048]));
-    expect($res->get_data()['provider.api_key'])->toBe(SettingsController::MASK)
+    expect($res->get_data()['provider.api_key'])->toBe(Schema::MASK)
         ->and($res->get_headers())->toBe([]);
 });
 
@@ -115,7 +126,7 @@ it('refuses a write that names no setting at all with a 400', function (): void 
 it('exposes the schema without the sanitize callables, flagging the secret and naming the mask', function (): void {
     $data = $this->controller->schema(restRequest('GET', '/alpaca-bot/v1/settings/schema'))->get_data();
     expect($data['sections'])->toBe(Schema::sections())
-        ->and($data['mask'])->toBe(SettingsController::MASK)
+        ->and($data['mask'])->toBe(Schema::MASK)
         ->and(array_keys($data['fields']))->toBe(array_keys(Schema::fields()))
         ->and($data['fields']['provider.api_key']['secret'])->toBeTrue()
         ->and($data['fields']['provider.base_url'])->not->toHaveKey('sanitize')

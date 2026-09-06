@@ -50,3 +50,23 @@ it('replace sanitizes, persists, and refreshes the memoized cache', function ():
         ->and($s->all())->not->toHaveKey('nope')
         ->and($s->get('provider.kind'))->toBe('ollama');
 });
+
+it('resolves a masked secret against what it already holds, on set and on replace', function (): void {
+    Functions\when('get_option')->justReturn(['provider.api_key' => 'sk-stored']);
+    $written = [];
+    Functions\when('update_option')->alias(function (string $name, array $value) use (&$written): bool {
+        $written[] = $value['provider.api_key'];
+        return true;
+    });
+    $s = new Store();
+    $s->set('provider.api_key', Schema::MASK);
+    expect($s->get('provider.api_key'))->toBe('sk-stored');
+    $s->replace(['provider.api_key' => Schema::MASK, 'models.num_ctx' => 1024]);
+    expect($s->get('provider.api_key'))->toBe('sk-stored')
+        ->and($s->get('models.num_ctx'))->toBe(1024);
+    $s->replace(['provider.api_key' => null]);
+    expect($s->get('provider.api_key'))->toBe('sk-stored');
+    $s->replace(['provider.api_key' => '']);
+    expect($s->get('provider.api_key'))->toBe('')
+        ->and($written)->toBe(['sk-stored', 'sk-stored', 'sk-stored', '']);
+});

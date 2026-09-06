@@ -25,12 +25,11 @@ beforeEach(function (): void {
     $this->controller = new ModelsController(new ModelCatalog(new Factory($this->store)), $this->store);
 });
 
-it('declares one route for editors with a boolean refresh switch, not rate limited', function (): void {
+it('declares one route for editors with a boolean refresh switch, rate limited with the chat routes', function (): void {
     $routes = $this->controller->routes();
     expect($routes)->toHaveCount(1)
-        ->and($routes[0])->toMatchArray(['path' => '/models', 'methods' => 'GET', 'capability' => 'edit_posts'])
-        ->and($routes[0]['args'])->toBe(['refresh' => ['type' => 'boolean', 'default' => false]])
-        ->and($routes[0])->not->toHaveKey('rate_limit');
+        ->and($routes[0])->toMatchArray(['path' => '/models', 'methods' => 'GET', 'capability' => 'edit_posts', 'rate_limit' => true])
+        ->and($routes[0]['args'])->toBe(['refresh' => ['type' => 'boolean', 'default' => false]]);
 });
 
 it('lists the catalog as plain arrays and names the default model in a header', function (): void {

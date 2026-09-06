@@ -20,9 +20,9 @@ it('has defaults for every field and a section for each', function (): void {
 it('bounds the transcript sent to the model with chat.context_messages, 20 by default, 0 allowed for everything', function (): void {
     expect(Schema::defaults()['chat.context_messages'])->toBe(20)
         ->and(Schema::fields()['chat.context_messages']['section'])->toBe('chat')
-        ->and(Schema::sanitize(['chat.context_messages' => '0'])['chat.context_messages'])->toBe(0)
-        ->and(Schema::sanitize(['chat.context_messages' => '-3'])['chat.context_messages'])->toBe(0)
-        ->and(Schema::sanitize(['chat.context_messages' => 'x'])['chat.context_messages'])->toBe(20);
+        ->and(Schema::sanitize(['chat.context_messages' => '0'], [])['chat.context_messages'])->toBe(0)
+        ->and(Schema::sanitize(['chat.context_messages' => '-3'], [])['chat.context_messages'])->toBe(0)
+        ->and(Schema::sanitize(['chat.context_messages' => 'x'], [])['chat.context_messages'])->toBe(20);
 });
 
 it('sanitizes by type, clamps ranges, and drops unknown keys', function (): void {
@@ -34,7 +34,7 @@ it('sanitizes by type, clamps ranges, and drops unknown keys', function (): void
         'provider.kind' => 'bogus',
         'models.overrides' => ['llama3.2' => ['temperature' => '0.2', 'junk' => 1]],
         'nope' => 'x',
-    ]);
+    ], []);
     expect($out['provider.base_url'])->toBe('http://ollama:11434/v1')
         ->and($out['models.temperature'])->toBe(2.0)
         ->and($out['models.num_ctx'])->toBe(512)
@@ -46,7 +46,34 @@ it('sanitizes by type, clamps ranges, and drops unknown keys', function (): void
 });
 
 it('sanitizing an empty input yields exactly the defaults', function (): void {
-    expect(Schema::sanitize([]))->toBe(Schema::defaults());
+    expect(Schema::sanitize([], []))->toBe(Schema::defaults());
+});
+
+it('names the secret fields and the mask that stands in for them', function (): void {
+    expect(Schema::SECRETS)->toBe(['provider.api_key'])
+        ->and(Schema::MASK)->toBe('••••')
+        ->and(Schema::fields())->toHaveKey('provider.api_key');
+});
+
+it('keeps a stored secret when handed the mask, clears it on an empty string, replaces it on any other string', function (): void {
+    $stored = ['provider.api_key' => 'sk-stored'];
+    expect(Schema::sanitize(['provider.api_key' => Schema::MASK], $stored)['provider.api_key'])->toBe('sk-stored')
+        ->and(Schema::sanitize(['provider.api_key' => ''], $stored)['provider.api_key'])->toBe('')
+        ->and(Schema::sanitize(['provider.api_key' => ' sk-new '], $stored)['provider.api_key'])->toBe('sk-new')
+        // Absent is not the mask: a full replacement that leaves the key out clears it, as for any field.
+        ->and(Schema::sanitize([], $stored)['provider.api_key'])->toBe('')
+        // The mask over nothing stored is nothing stored, never the literal mask.
+        ->and(Schema::sanitize(['provider.api_key' => Schema::MASK], [])['provider.api_key'])->toBe('');
+});
+
+it('keeps a stored secret when handed anything that is not a string, rather than clearing it', function (): void {
+    $stored = ['provider.api_key' => 'sk-stored'];
+    foreach ([null, [], ['x'], 0, false, true, 1.5] as $raw) {
+        expect(Schema::sanitize(['provider.api_key' => $raw], $stored)['provider.api_key'])->toBe('sk-stored', var_export($raw, true));
+    }
+    // With nothing stored there is nothing to keep, and a non-string is still not a key.
+    expect(Schema::sanitize(['provider.api_key' => null], [])['provider.api_key'])->toBe('')
+        ->and(Schema::sanitize(['provider.api_key' => null], ['provider.api_key' => 7])['provider.api_key'])->toBe('');
 });
 
 it('clamps per-model overrides to the same bounds as the global fields', function (): void {
@@ -55,7 +82,7 @@ it('clamps per-model overrides to the same bounds as the global fields', functio
         'hot' => ['temperature' => '99', 'num_ctx' => '999999999999'],
         'cold' => ['temperature' => '-3', 'num_ctx' => '1', 'keep_alive' => ' 1h ', 'system' => ' be terse '],
         'junk' => ['temperature' => 'warm', 'num_ctx' => 'lots'],
-    ]]);
+    ]], []);
     expect($out['models.overrides']['hot'])->toBe(['temperature' => (float) $fields['models.temperature']['max'], 'num_ctx' => $fields['models.num_ctx']['max']])
         ->and($out['models.overrides']['cold'])->toBe(['temperature' => (float) $fields['models.temperature']['min'], 'num_ctx' => $fields['models.num_ctx']['min'], 'keep_alive' => '1h', 'system' => 'be terse'])
         ->and($out['models.overrides'])->not->toHaveKey('junk');
@@ -67,11 +94,11 @@ it('validates URL fields through esc_url_raw and falls back to the default when 
     $out = Schema::sanitize([
         'provider.base_url' => 'gopher://ollama:11434/v1/',
         'chat.assistant_avatar' => 'javascript:alert(1)',
-    ]);
+    ], []);
     expect($out['provider.base_url'])->toBe(Schema::defaults()['provider.base_url'])
         ->and($out['chat.assistant_avatar'])->toBe('');
 
-    $ok = Schema::sanitize(['provider.base_url' => ' https://ollama.example/v1/ ', 'chat.assistant_avatar' => 'https://example.com/a.png']);
+    $ok = Schema::sanitize(['provider.base_url' => ' https://ollama.example/v1/ ', 'chat.assistant_avatar' => 'https://example.com/a.png'], []);
     expect($ok['provider.base_url'])->toBe('https://ollama.example/v1')
         ->and($ok['chat.assistant_avatar'])->toBe('https://example.com/a.png');
 });
