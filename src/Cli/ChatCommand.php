@@ -28,6 +28,19 @@ final class ChatCommand
     /** A reply with a broken UTF-8 sequence in it is still printed, with the sequence replaced, rather than as `false`. */
     private const JSON = JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE;
 
+    /**
+     * Settings that hold a credential. The whole dump (`wp alpaca-bot settings`, no key) is what
+     * ends up in CI logs and shell history, so these are shown as MASK there when set; asking
+     * for one by name (`wp alpaca-bot settings provider.api_key`) prints it, since that is an
+     * operator deliberately asking. Schema has no "secret" field type yet: when P2's settings
+     * screen needs one, this list should move there and the dump should read it from the field.
+     *
+     * @var list<string>
+     */
+    private const SECRET_KEYS = ['provider.api_key'];
+
+    private const MASK = '***';
+
     /** @var callable(string): void */
     private $write;
 
@@ -60,11 +73,14 @@ final class ChatCommand
     /**
      * Send a message and stream the reply.
      *
-     * The turn runs as a WordPress user: the one named by WP-CLI's global `--user=<id|login|email>`
-     * flag when given (it may sit anywhere on the command line), else the first administrator.
-     * That user is who the monthly cap is charged to, who owns the conversation, and whose
-     * capabilities the context sources check. There is no capability check here: whoever runs
-     * WP-CLI already has the site.
+     * The turn runs as one WordPress user: the one named by WP-CLI's global `--user=<id|login|email>`
+     * flag when given (it is a global flag, not an option of this command, and may sit anywhere
+     * on the command line), else the administrator with the lowest id. That user is who the
+     * monthly token cap is charged to, who owns the conversation (and the only one whose existing
+     * conversation --conversation may continue), whose id authors the chat_history and chat_log
+     * posts, and whose capabilities the context sources check. The receipt names them as
+     * `as user <id>`, so a run that fell back to the administrator says so. There is no
+     * capability check here: whoever runs WP-CLI already has the site.
      *
      * Only the reply text is streamed; a thinking model's reasoning is not shown.
      *
@@ -97,8 +113,12 @@ final class ChatCommand
             $userId = $this->userId($assoc);
             $model = trim((string) ($assoc['model'] ?? ''));
             if ($model !== '' && !(bool) $this->store->get('chat.user_can_change_model')) {
-                // The pipeline would quietly use the default and the receipt would name it;
-                // better to say why the flag did nothing.
+                // Pipeline::model() owns this policy: it honours a requested model only while
+                // chat.user_can_change_model is on and otherwise quietly uses the default, so the
+                // receipt would name a model the operator did not ask for. This is a pre-check of
+                // the same rule so the flag never silently does nothing. If Pipeline::model()
+                // ever grows an operator override, this check must change with it or it will
+                // refuse what the pipeline would accept.
                 throw new \InvalidArgumentException('--model is ignored while chat.user_can_change_model is off. Turn it on with: wp alpaca-bot settings chat.user_can_change_model 1');
             }
             $conversation = (string) ($assoc['conversation'] ?? '0');
@@ -162,31 +182,43 @@ final class ChatCommand
     }
 
     /**
-     * This month's token usage: site-wide, or one user's under WP-CLI's global `--user` flag.
+     * This month's token usage: one user's under WP-CLI's global `--user=<id|login|email>` flag
+     * (the same user resolution `chat` uses, minus the administrator fallback), else site-wide.
+     *
+     * ## EXAMPLES
+     *
+     *     wp alpaca-bot usage
+     *     wp alpaca-bot usage --user=editor
      *
      * @param list<string> $args
      * @param array<string, mixed> $assoc
      */
     public function usage(array $args, array $assoc): void
     {
-        $userId = isset($assoc['user']) ? (int) $assoc['user'] : (int) get_current_user_id();
-        $summary = $this->meter->monthSummary($userId > 0 ? $userId : null);
+        try {
+            $userId = $this->requestedUser($assoc);
+        } catch (\InvalidArgumentException $e) {
+            $this->error($e->getMessage());
+            return;
+        }
+        $summary = $this->meter->monthSummary($userId);
         $this->emit(sprintf(
             "%s: %d tokens over %d requests (%s)\n",
             $summary['month'],
             $summary['tokens'],
             $summary['requests'],
-            $userId > 0 ? "user {$userId}" : 'site-wide',
+            $userId !== null ? "user {$userId}" : 'site-wide',
         ));
     }
 
     /**
      * Read or write a setting.
      *
-     * With no key, prints every setting as JSON. With a key, prints that setting's value as JSON;
-     * with a key and a value, stores the value first (through the same schema the settings screen
-     * uses, so what is echoed is what was kept). An array setting such as models.overrides takes
-     * its value as a JSON object.
+     * With no key, prints every setting as JSON, with provider.api_key shown as `***` when it is
+     * set (ask for it by key to see it). With a key, prints that setting's value as JSON; with a
+     * key and a value, stores the value first (through the same schema the settings screen uses,
+     * so what is echoed is what was kept). An array setting such as models.overrides takes its
+     * value as a JSON object.
      *
      * ## OPTIONS
      *
@@ -207,7 +239,14 @@ final class ChatCommand
     public function settings(array $args, array $assoc): void
     {
         if (!isset($args[0])) {
-            $this->json($this->store->all());
+            $all = $this->store->all();
+            foreach (self::SECRET_KEYS as $secret) {
+                // An unset key stays visibly empty: "is one configured?" is still answerable.
+                if (($all[$secret] ?? '') !== '') {
+                    $all[$secret] = self::MASK;
+                }
+            }
+            $this->json($all);
             return;
         }
         $key = $args[0];
@@ -231,38 +270,76 @@ final class ChatCommand
     }
 
     /**
-     * The user the turn runs as. `$assoc['user']` is honoured for a caller that hands it in
-     * directly (WP-CLI never does: its global `--user` flag is consumed before the command runs,
-     * and shows up here as the current user instead).
+     * The user the caller asked for, or null when nobody was named. `$assoc['user']` is honoured
+     * for a caller that hands it in directly (WP-CLI never does: its global `--user` flag is
+     * consumed before the command runs, and shows up here as the current user instead). Both
+     * `chat` and `usage` resolve through here, so a bad id is refused the same way in each.
      *
      * @param array<string, mixed> $assoc
-     * @throws \InvalidArgumentException when the user does not exist, or nobody could be chosen
+     * @throws \InvalidArgumentException when the id is not a positive number, or names no user
+     */
+    private function requestedUser(array $assoc): ?int
+    {
+        if (isset($assoc['user'])) {
+            $raw = (string) $assoc['user'];
+            if (!ctype_digit($raw) || (int) $raw < 1) {
+                // (int) would read anything else as 0: chat would quietly fall back to the
+                // administrator, and usage would quietly report site-wide totals.
+                throw new \InvalidArgumentException('--user takes a user id (a number).');
+            }
+            $id = (int) $raw;
+        } else {
+            $id = (int) get_current_user_id();
+            if ($id < 1) {
+                return null;
+            }
+        }
+        return self::existing($id);
+    }
+
+    /**
+     * The user the turn runs as: the requested one, else the administrator with the lowest id.
+     *
+     * @param array<string, mixed> $assoc
+     * @throws \InvalidArgumentException when the requested user is refused, or nobody could be chosen
      */
     private function userId(array $assoc): int
     {
-        $id = isset($assoc['user']) ? (int) $assoc['user'] : (int) get_current_user_id();
-        if ($id < 1) {
-            $admins = get_users(['role' => 'administrator', 'number' => 1, 'fields' => 'ID', 'orderby' => 'ID', 'order' => 'ASC']);
-            $id = (int) ($admins[0] ?? 0);
-            if ($id < 1) {
-                throw new \InvalidArgumentException('No user to run as: pass --user=<id> (no administrator was found).');
-            }
+        $id = $this->requestedUser($assoc);
+        if ($id !== null) {
+            return $id;
         }
+        $admins = get_users(['role' => 'administrator', 'number' => 1, 'fields' => 'ID', 'orderby' => 'ID', 'order' => 'ASC']);
+        $id = (int) ($admins[0] ?? 0);
+        if ($id < 1) {
+            throw new \InvalidArgumentException('No user to run as: pass --user=<id> (no administrator was found).');
+        }
+        return self::existing($id);
+    }
+
+    /** @throws \InvalidArgumentException when no such user exists (a typo'd id would otherwise author posts under nobody) */
+    private static function existing(int $id): int
+    {
         if (get_userdata($id) === false) {
             throw new \InvalidArgumentException(sprintf('User %d does not exist.', $id));
         }
         return $id;
     }
 
-    /** `[model · N tokens · N ms · conversation N]`, or `not saved` when privacy.save_history left it unsaved. */
+    /**
+     * `[model · N tokens · N ms · conversation N · as user N]`, with `not saved` in place of the
+     * conversation when privacy.save_history left it unsaved. The user is always named: it is
+     * who was charged and who owns what was written, and nothing else in the output says so.
+     */
     private static function receiptLine(Result $r): string
     {
         return sprintf(
-            '[%s · %d tokens · %d ms · %s]',
+            '[%s · %d tokens · %d ms · %s · as user %d]',
             $r->receipt['model'],
             $r->receipt['total_tokens'],
             $r->receipt['duration_ms'],
             $r->conversation->id > 0 ? "conversation {$r->conversation->id}" : 'not saved',
+            $r->receipt['user_id'],
         );
     }
 

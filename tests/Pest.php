@@ -134,7 +134,9 @@ function currentScreenPost(int $id, string $title, string $content, string $type
  * user 3 unless a test swaps `$h->post`; a chat_log insert is post 9. Transients are served from
  * `$h->transients` (pre-seeded with the model catalog). The harness records every persisted
  * write in `$h->writes` as [function, post type or meta key, payload] in order, and the model
- * the factory was asked for in `$h->model`.
+ * the factory was asked for in `$h->model`. The Store, ModelCatalog and UsageMeter the pipeline
+ * was built over are `$h->store`, `$h->catalog` and `$h->meter`, for a caller (cliCommand())
+ * that must share them the way Plugin::register() shares one container's instances.
  *
  * @param array<string, mixed> $settings seeded into the shared Store
  * @param \AlpacaBot\Context\Context[] $contexts what the one registered source returns
@@ -145,6 +147,9 @@ function pipelineWith(mixed $provider, array $settings = [], array $contexts = [
 {
     $h = new class {
         public Pipeline $pipeline;
+        public Store $store;
+        public ModelCatalog $catalog;
+        public UsageMeter $meter;
         /** @var list<array{0: string, 1: int|string, 2: mixed}> */
         public array $writes = [];
         public ?string $model = null;
@@ -184,16 +189,17 @@ function pipelineWith(mixed $provider, array $settings = [], array $contexts = [
             return $provider;
         });
     }
-    $store = new Store($settings + ['models.default' => 'llama3.2']);
-    $factory = new Factory($store);
-    $meter = new UsageMeter($store);
+    $h->store = new Store($settings + ['models.default' => 'llama3.2']);
+    $factory = new Factory($h->store);
+    $h->catalog = new ModelCatalog($factory);
+    $h->meter = new UsageMeter($h->store);
     $h->pipeline = new Pipeline(
-        $store,
+        $h->store,
         $factory,
-        new ModelCatalog($factory),
-        new ConversationStore($store),
-        $meter,
-        new CapPolicy($store, $meter),
+        $h->catalog,
+        new ConversationStore($h->store),
+        $h->meter,
+        new CapPolicy($h->store, $h->meter),
         new Collector([collectorSource('test', $contexts)]),
     );
     return $h;
@@ -216,11 +222,12 @@ function pipelineProvider(array $chunks, ?array &$call = null): ProviderInterfac
 }
 
 /**
- * ChatCommandTest: a ChatCommand over the given (real) pipeline whose stdout lands in `$c->out`
- * and whose failures land in `$c->errors` instead of going through WP_CLI::error(). The catalog,
- * meter and store are real too, over `$settings` (the same array the pipeline harness was given).
+ * ChatCommandTest: a ChatCommand over a pipelineWith() harness `$h`, sharing its pipeline,
+ * catalog, meter and store: the same four instances, as Plugin::register() hands the command
+ * the container's. Stdout lands in `$c->out` and failures in `$c->errors` instead of going
+ * through WP_CLI::error().
  */
-function cliCommand(Pipeline $pipeline, array $settings = []): object
+function cliCommand(object $h): object
 {
     $c = new class {
         public ChatCommand $command;
@@ -228,12 +235,11 @@ function cliCommand(Pipeline $pipeline, array $settings = []): object
         /** @var list<string> */
         public array $errors = [];
     };
-    $store = new Store($settings);
     $c->command = new ChatCommand(
-        $pipeline,
-        new ModelCatalog(new Factory($store)),
-        new UsageMeter($store),
-        $store,
+        $h->pipeline,
+        $h->catalog,
+        $h->meter,
+        $h->store,
         static function (string $s) use ($c): void {
             $c->out .= $s;
         },
