@@ -4,14 +4,20 @@ declare(strict_types=1);
 
 use AlpacaBot\Plugin;
 use Brain\Monkey;
+use Brain\Monkey\Functions;
 
 uses()->beforeEach(function (): void {
     Monkey\setUp();
+    // Schema labels run through __(); pass the strings through untouched.
+    Functions\stubTranslationFunctions();
     // Plugin is a process-wide singleton and Pest runs the suite in one process:
     // reset it so every test's boot() starts from a cold state.
     $instance = new ReflectionProperty(Plugin::class, 'instance');
     $instance->setValue(null, null);
 })->afterEach(function (): void {
+    // Mockery expectations are the only assertions in some tests; count them
+    // before tearDown() closes the container so those tests are not "risky".
+    $this->addToAssertionCount(Mockery::getContainer()->mockery_getExpectationCount());
     Monkey\tearDown();
     Mockery::close();
 })->in('Unit');

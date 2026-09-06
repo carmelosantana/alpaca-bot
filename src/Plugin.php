@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace AlpacaBot;
 
+use AlpacaBot\Settings\Migrate04;
+use AlpacaBot\Settings\Store;
+
 final class Plugin
 {
     public const VERSION = '1.0.0-dev';
@@ -38,7 +41,14 @@ final class Plugin
 
     public function register(): void
     {
-        // Services are attached here by later tasks, e.g. $this->set(Settings\Store::class, new Settings\Store());
+        $store = new Store();
+        $this->set(Store::class, $store);
+        add_action('admin_init', function () use ($store): void {
+            $migration = new Migrate04($store);
+            if ($migration->needed()) {
+                $migration->run();
+            }
+        });
     }
 
     public function set(string $id, object $service): void
