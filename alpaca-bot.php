@@ -30,15 +30,31 @@ define('ALPACA_BOT_FILE', __FILE__);
 define('ALPACA_BOT_DIR', plugin_dir_path(__FILE__));
 define('ALPACA_BOT_URL', plugin_dir_url(__FILE__));
 
-$autoload = ALPACA_BOT_DIR . 'vendor-prefixed/autoload.php';
-$psr4 = ALPACA_BOT_DIR . 'vendor/autoload.php';
-if (!is_readable($autoload) || !is_readable($psr4)) {
+// The plugin's own classes: a PSR-4 loader for AlpacaBot\ over src/, registered here rather
+// than by requiring vendor/autoload.php. Composer's autoloader is dev/test only (tests/Pest.php
+// loads it): at runtime it would register every third-party namespace unprefixed (php-agents,
+// commonmark, symfony, psr) next to the strauss-prefixed copies and eagerly require the vendor
+// polyfill bootstraps and function files, on every request, for every other plugin on the site
+// to collide with. That is the conflict vendor-prefixed/ exists to prevent.
+spl_autoload_register(static function (string $class): void {
+    if (!str_starts_with($class, 'AlpacaBot\\') || str_starts_with($class, 'AlpacaBot\\Vendor\\')) {
+        return;
+    }
+    $file = ALPACA_BOT_DIR . 'src/' . strtr(substr($class, strlen('AlpacaBot\\')), '\\', '/') . '.php';
+    if (is_file($file)) {
+        require $file;
+    }
+});
+
+// Third-party code, prefixed under AlpacaBot\Vendor\ by strauss (composer install builds it on
+// a dev checkout; the release zip ships it). This is the only autoloader file the runtime loads.
+$prefixed = ALPACA_BOT_DIR . 'vendor-prefixed/autoload.php';
+if (!is_readable($prefixed)) {
     add_action('admin_notices', static function (): void {
-        echo '<div class="notice notice-error"><p>' . esc_html__('Alpaca Bot: run composer install (dev checkout) or reinstall the release zip.', 'alpaca-bot') . '</p></div>';
+        echo '<div class="notice notice-error"><p>' . esc_html__('Alpaca Bot: vendor-prefixed/ is missing. Run composer install (dev checkout) or reinstall the release zip.', 'alpaca-bot') . '</p></div>';
     });
     return;
 }
-require_once $psr4;
-require_once $autoload;
+require_once $prefixed;
 
 \AlpacaBot\Plugin::boot();
