@@ -61,6 +61,23 @@ it('prints the whole turn as JSON with --json, and no deltas', function (): void
         ->and($decoded['receipt']['user_id'])->toBe(3);
 });
 
+it('treats --format=json the same as --json, because WP-CLI 2.12 rewrites --json into --format=json before the command sees it', function (): void {
+    $h = pipelineWith(pipelineProvider([
+        new Response('Hi ', ProviderFinishReason::Stop),
+        new Response('you', ProviderFinishReason::Stop, usage: new Usage(5, 2, 7)),
+    ]));
+    cliUsers();
+    $c = cliCommand($h);
+
+    $c->command->chat(['hello'], ['user' => '3', 'format' => 'json']);
+
+    $decoded = json_decode($c->out, true);
+    expect($c->errors)->toBe([])
+        ->and($decoded)->toBeArray()
+        ->and($decoded['reply']['content'])->toBe('Hi you')
+        ->and($c->out)->not->toStartWith('Hi ');
+});
+
 it('says when the conversation was not saved instead of naming conversation 0', function (): void {
     $h = pipelineWith(pipelineProvider([new Response('ok', ProviderFinishReason::Stop)]), ['privacy.save_history' => false]);
     cliUsers();

@@ -95,8 +95,18 @@ final class ChatCommand
      * [--conversation=<id>]
      * : Continue one of the user's conversations instead of starting a new one.
      *
-     * [--json]
+     * [--format=<format>]
      * : Print the finished turn as JSON (conversation_id, reply, receipt) instead of streaming it.
+     * WP-CLI 2.12+ rewrites `--json` into `--format=json` before the command runs, so both spellings work.
+     * ---
+     * default: text
+     * options:
+     *   - text
+     *   - json
+     * ---
+     *
+     * [--json]
+     * : Same as --format=json, for WP-CLI releases before 2.12.
      *
      * ## EXAMPLES
      *
@@ -108,7 +118,7 @@ final class ChatCommand
      */
     public function chat(array $args, array $assoc): void
     {
-        $json = isset($assoc['json']);
+        $json = isset($assoc['json']) || ($assoc['format'] ?? 'text') === 'json';
         try {
             $userId = $this->userId($assoc);
             $model = trim((string) ($assoc['model'] ?? ''));
