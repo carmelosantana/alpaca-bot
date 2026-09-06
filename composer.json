@@ -57,7 +57,7 @@
     },
     "scripts": {
         "prefix": [
-            "composer install --working-dir=tools/strauss --no-interaction --quiet",
+            "@composer install --working-dir=tools/strauss --no-interaction",
             "@php bin/strauss"
         ],
         "post-install-cmd": [

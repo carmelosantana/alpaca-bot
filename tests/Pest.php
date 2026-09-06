@@ -2,10 +2,15 @@
 
 declare(strict_types=1);
 
+use AlpacaBot\Plugin;
 use Brain\Monkey;
 
 uses()->beforeEach(function (): void {
     Monkey\setUp();
+    // Plugin is a process-wide singleton and Pest runs the suite in one process:
+    // reset it so every test's boot() starts from a cold state.
+    $instance = new ReflectionProperty(Plugin::class, 'instance');
+    $instance->setValue(null, null);
 })->afterEach(function (): void {
     Monkey\tearDown();
     Mockery::close();
