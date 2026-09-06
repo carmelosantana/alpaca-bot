@@ -25,7 +25,9 @@ section describes 0.4; it is refreshed as each phase lands.
   provider factory with streaming, usage meter and monthly caps, the chat pipeline and its hooks,
   and a WP-CLI command (`wp alpaca-bot chat|models|usage|settings`) as the only user surface.
   There is deliberately no admin UI in this phase.
-- **P2 — REST API and settings screen**
+- **P2 — REST API and settings screen**: one namespace, `alpaca-bot/v1` (chat, streaming,
+  conversations, models, settings, usage), and the Settings API admin page. Reference, with
+  auth, streaming and error examples: [docs/api.md](docs/api.md).
 - **P3 — view layer and assets**: the admin chat page returns here.
 - **P4 — toolkits, shortcodes, abilities, WordPress AI adapter**
 - **P5 — hardening and release**
