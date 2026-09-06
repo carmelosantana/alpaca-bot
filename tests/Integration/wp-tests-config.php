@@ -11,6 +11,10 @@ declare(strict_types=1);
 // database name differs, so wp-phpunit's per-run reinstall (prefix wptests_) lands in
 // wordpress_tests and the site's database is never touched. The `db` fallback is the compose
 // service alias, which resolves on the site's network whatever the container is called.
+//
+// ABSPATH is the site's own WordPress on the shared `wp` volume; only the database is separate.
+// The one thing on that volume tests would write to, wp-content/uploads, is redirected to /tmp by
+// bootstrap.php (upload_path), so the site's media library is never touched either.
 define('ABSPATH', '/var/www/html/');
 define('DB_NAME', getenv('WP_TESTS_DB_NAME') ?: 'wordpress_tests');
 define('DB_USER', getenv('WORDPRESS_DB_USER') ?: 'wordpress');

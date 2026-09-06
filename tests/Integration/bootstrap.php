@@ -2,10 +2,12 @@
 
 declare(strict_types=1);
 
-// This suite's PHPUnit, wp-phpunit, the polyfills and the AlpacaBot\Tests\Integration\ namespace
-// all come from tools/integration (its composer.json says why it is not the root manifest).
-// The root vendor/autoload.php is deliberately not loaded: it would register PHPUnit 13's
-// classes, Pest 5's dependency, on top of the PHPUnit 12 running this process.
+// This suite's PHPUnit 9.6, wp-phpunit, the polyfills and the AlpacaBot\Tests\Integration\
+// namespace all come from tools/integration (its composer.json says why it is not the root
+// manifest: WordPress core's test library still targets PHPUnit 9, calling getName(false) and
+// Util\Test::parseTestMethodAnnotations(), both removed in PHPUnit 10). The root
+// vendor/autoload.php is deliberately not loaded: it would register PHPUnit 13's classes, Pest 5's
+// dependency, on top of the PHPUnit 9.6 running this process.
 $plugin = dirname(__DIR__, 2);
 require_once $plugin . '/tools/integration/vendor/autoload.php';
 
@@ -23,5 +25,13 @@ require_once $tests . '/includes/functions.php';
 tests_add_filter('muplugins_loaded', static function () use ($plugin): void {
     require $plugin . '/alpaca-bot.php';
 });
+
+// ABSPATH is the running site's /var/www/html (wp-tests-config.php), and the fresh test install
+// leaves upload_path empty, so wp_upload_dir() would resolve to the site's own wp-content/uploads:
+// WP_UnitTestCase scans it on set_up() and any test that creates an attachment would write into
+// the site's media library. Point uploads at the container's /tmp instead, the same writable,
+// per-run location as PHPUnit's cache (uid 33 cannot write the bind-mounted checkout); the option
+// is filtered rather than stored because wp-phpunit reinstalls the database on every run.
+tests_add_filter('pre_option_upload_path', static fn(): string => '/tmp/alpaca-bot-integration/uploads');
 
 require $tests . '/includes/bootstrap.php';

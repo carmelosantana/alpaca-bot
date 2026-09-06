@@ -1,6 +1,6 @@
 {
     "name": "carmelosantana/alpaca-bot-tools-integration",
-    "description": "Isolated manifest for the WordPress integration suite. The root pins PHPUnit 13 through Pest 5; wp-phpunit (WordPress core's own test library) still targets PHPUnit 9, calling getName() and Util\\Test::parseTestMethodAnnotations() that PHPUnit 10 removed, and no released yoast/phpunit-polyfills supports 13, so the suite runs on its own PHPUnit 9.",
+    "description": "Isolated manifest for the WordPress integration suite. The root pins PHPUnit 13 through Pest 5; wp-phpunit (WordPress core's own test library) still targets PHPUnit 9, calling getName(false) and Util\\Test::parseTestMethodAnnotations() that PHPUnit 10 removed, and no released yoast/phpunit-polyfills supports 13, so the suite runs on its own PHPUnit 9.",
     "type": "project",
     "license": "GPL-2.0-or-later",
     "require": {
