@@ -26,8 +26,10 @@ final class Factory
      * A non-empty OLLAMA_API_URL constant wins over `provider.base_url`; an empty
      * value from either source falls back to the schema default. The providers
      * append their own routes to the `/v1` root, so a deeper path stored by mistake
-     * (`…/v1/chat`) is cut back to its first `/v1` segment rather than getting a
-     * second `/v1` appended.
+     * (`…/v1/chat`) is cut back to its last `/v1` segment rather than getting a
+     * second `/v1` appended. A URL that already ends in `/v1` is returned as is, so
+     * a gateway mount with an earlier `/v1` in its path (`…/v1/ai/ollama/v1`) is
+     * never truncated.
      */
     public function baseUrl(): string
     {
@@ -36,7 +38,11 @@ final class Factory
         if ($url === '') {
             $url = (string) Schema::defaults()['provider.base_url'];
         }
-        $url = (string) preg_replace('~/v1(?:/.*)?$~', '/v1', rtrim($url, '/'));
+        $url = rtrim($url, '/');
+        if (str_ends_with($url, '/v1')) {
+            return $url;
+        }
+        $url = (string) preg_replace('~^(.*/v1)/.*$~', '$1', $url);
 
         return str_ends_with($url, '/v1') ? $url : $url . '/v1';
     }

@@ -125,6 +125,16 @@ it('returns an empty list and caches nothing when the provider fails or has no m
         ->and((new ModelCatalog($factory))->defaultId(new Store(['models.default' => 'configured'])))->toBe('configured');
 });
 
+it('reads as an empty catalog when a filter-supplied provider returns something other than ModelDefinition[] from models()', function (): void {
+    Functions\when('get_transient')->justReturn(false);
+    Functions\expect('set_transient')->never();
+    $malformed = Mockery::mock(ProviderInterface::class);
+    $malformed->shouldReceive('models')->once()->andReturn(['llama3.2', ['id' => 'qwen3:8b'], null]);
+    $catalog = new ModelCatalog(catalogFactory($malformed));
+    expect($catalog->all())->toBe([])
+        ->and($catalog->find('llama3.2'))->toBeNull();
+});
+
 it('lets a broken alpaca_bot/provider filter fail loudly instead of reading as an empty catalog', function (): void {
     Functions\when('get_transient')->justReturn(false);
     Functions\expect('set_transient')->never();

@@ -72,17 +72,19 @@ final class ModelCatalog
         }
 
         // make() stays outside the try: a broken alpaca_bot/provider filter must be as loud
-        // here as it is from the pipeline. Only the provider's network call is forgiven.
+        // here as it is from the pipeline. The provider's network call and its models()
+        // contract are forgiven: a downed provider, or a filter-supplied one returning
+        // something other than ModelDefinition[], reads as an empty (uncached) catalog.
         $provider = $this->factory->make();
         try {
-            $definitions = $provider->models();
+            $models = array_map(Model::fromDefinition(...), $provider->models());
         } catch (\Throwable) {
-            $definitions = [];
+            $models = [];
         }
 
         // Embedding models cannot chat; this is the one place they are excluded.
         $models = array_values(array_filter(
-            array_map(Model::fromDefinition(...), $definitions),
+            $models,
             static fn(Model $m): bool => !str_contains(strtolower($m->id), 'embed'),
         ));
 
