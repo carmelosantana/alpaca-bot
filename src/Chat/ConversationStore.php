@@ -18,7 +18,13 @@ final class ConversationStore
     public const POST_TYPE = 'chat_history';
     public const META_MESSAGES = 'ab_messages';
 
-    /** 0.4's key: read once by load() and converted into META_MESSAGES. */
+    /**
+     * 0.4's key: converted into META_MESSAGES on the first load() of a row that has no
+     * META_MESSAGES yet, and left in place afterwards. The conversion is lossy (see
+     * Message::fromLegacy()), so the legacy blob stays as the record of what 0.4 stored, and
+     * Migrate04 still reads it to recover an owner. Never written, never deleted here; P3
+     * sweeps it once the 0.4 migration story is closed.
+     */
     private const META_LEGACY = 'messages';
 
     /** 0.4 flagged generate-mode transcripts with this meta; 1.0 reads it, never writes it. */
@@ -158,6 +164,11 @@ final class ConversationStore
     /**
      * The post when it is a conversation owned by $userId, else null. Nobody owns an authorless row.
      *
+     * Ordering dependency: Migrate04::migrateConversations() recovers post_author for 0.4's
+     * author-0 rows from META_LEGACY; this author check is what keeps load() (and so
+     * readMessages()) off such a row until the migration has claimed it, so it must stay ahead
+     * of every read and must keep rejecting author 0.
+     *
      * Typed `object` natively so the store can be exercised without WP_Post loaded.
      *
      * @return \WP_Post|null
@@ -175,12 +186,12 @@ final class ConversationStore
     }
 
     /**
-     * The stored transcript, migrating 0.4's `messages` meta into META_MESSAGES on first read.
+     * The stored transcript, converting 0.4's `messages` meta into META_MESSAGES on the first
+     * read of a row that has none. Once META_MESSAGES exists it is the only key read.
      *
-     * A legacy value that is not an array is left where it is (there is nothing to convert, and
-     * deleting it would destroy whatever it was); entries that are not arrays are skipped, as
-     * 0.4's own reader did. A legacy key still sitting beside a converted transcript is dropped:
-     * the first read primed the post's meta cache, so the presence check costs no query.
+     * The conversion only adds: the legacy key is never deleted (see META_LEGACY). A legacy
+     * value that is not an array converts to nothing and is likewise left alone; entries that
+     * are not arrays are skipped, as 0.4's own reader did.
      *
      * @return list<array<string, mixed>>
      */
@@ -188,9 +199,6 @@ final class ConversationStore
     {
         $raw = get_post_meta($id, self::META_MESSAGES, true);
         if (is_array($raw)) {
-            if (metadata_exists('post', $id, self::META_LEGACY)) {
-                delete_post_meta($id, self::META_LEGACY);
-            }
             return array_values(array_filter($raw, 'is_array'));
         }
         $legacy = get_post_meta($id, self::META_LEGACY, true);
@@ -204,7 +212,6 @@ final class ConversationStore
             }
         }
         update_post_meta($id, self::META_MESSAGES, $converted);
-        delete_post_meta($id, self::META_LEGACY);
         return $converted;
     }
 

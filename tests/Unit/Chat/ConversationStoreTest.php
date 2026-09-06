@@ -193,28 +193,31 @@ it('refuses to save a conversation that names an id but no owner, without a look
 
 // ------------------------------------------------------------------ load()
 
-it('loads only the owner\'s conversation and reads legacy meta once', function (): void {
+// The 0.4 -> 1.0 conversion is lossy (Message::fromLegacy() keeps role, content, model, timestamp,
+// token counts and images; 0.4's total_duration, load_duration, done, context and the authoring
+// user id it stored as the role are gone), so the legacy key is left in place as the record of
+// what 0.4 stored. P3 sweeps it once the migration story is closed.
+it('loads only the owner\'s conversation, converts legacy meta once and keeps it', function (): void {
     $post = (object) ['ID' => 42, 'post_author' => '3', 'post_title' => 'T', 'post_type' => 'chat_history', 'post_date_gmt' => '2024-01-01 00:00:00'];
     Functions\when('get_post')->justReturn($post);
     Functions\expect('get_post_meta')->once()->with(42, ConversationStore::META_MESSAGES, true)->andReturn('');
     Functions\expect('get_post_meta')->once()->with(42, 'messages', true)->andReturn([['model' => 'm', 'message' => ['role' => 3, 'content' => 'q']], ['model' => 'm', 'message' => ['role' => 'assistant', 'content' => 'a']]]);
     Functions\expect('get_post_meta')->once()->with(42, 'chat_mode_generate', true)->andReturn('');
     Functions\expect('update_post_meta')->once()->with(42, ConversationStore::META_MESSAGES, Mockery::type('array'));
-    Functions\expect('delete_post_meta')->once()->with(42, 'messages');
+    Functions\expect('delete_post_meta')->never();
     $s = new ConversationStore(new Store());
     $c = $s->load(42, 3);
     expect($c)->toBeInstanceOf(Conversation::class)->and($c->messages)->toHaveCount(2)->and($c->messages[0]->role)->toBe('user');
     expect($s->load(42, 9))->toBeNull();
 });
 
-it('reads ab_messages directly once converted and never touches the legacy key again', function (): void {
+it('reads ab_messages directly once converted and never looks at the legacy key again', function (): void {
     $post = (object) ['ID' => 42, 'post_author' => '3', 'post_title' => 'T', 'post_type' => 'chat_history', 'post_date_gmt' => '2024-01-02 00:00:00'];
     Functions\when('get_post')->justReturn($post);
     Functions\expect('get_post_meta')->once()->with(42, ConversationStore::META_MESSAGES, true)->andReturn([['role' => 'user', 'content' => 'q', 'model' => '', 'usage' => null, 'created' => 1, 'images' => [], 'meta' => []]]);
     Functions\expect('get_post_meta')->never()->with(42, 'messages', true);
     Functions\expect('get_post_meta')->once()->with(42, 'chat_mode_generate', true)->andReturn('1');
-    // Presence is checked from the meta cache the first read primed, never by reading the key.
-    Functions\expect('metadata_exists')->once()->with('post', 42, 'messages')->andReturn(false);
+    Functions\expect('metadata_exists')->never();
     Functions\expect('update_post_meta')->never();
     Functions\expect('delete_post_meta')->never();
     $c = (new ConversationStore(new Store()))->load(42, 3);
@@ -225,14 +228,14 @@ it('reads ab_messages directly once converted and never touches the legacy key a
         ->and($c?->created)->toBe(1704153600);
 });
 
-it('drops a stale legacy blob left beside ab_messages without reading or converting it', function (): void {
+it('leaves a legacy blob sitting beside ab_messages alone: not read, not converted, not deleted', function (): void {
     Functions\when('get_post')->justReturn(conversationChatPost());
     Functions\expect('get_post_meta')->once()->with(42, ConversationStore::META_MESSAGES, true)->andReturn([['role' => 'user', 'content' => 'q']]);
     Functions\expect('get_post_meta')->never()->with(42, 'messages', true);
     Functions\expect('get_post_meta')->once()->with(42, 'chat_mode_generate', true)->andReturn('');
-    Functions\expect('metadata_exists')->once()->with('post', 42, 'messages')->andReturn(true);
+    Functions\expect('metadata_exists')->never();
     Functions\expect('update_post_meta')->never();
-    Functions\expect('delete_post_meta')->once()->with(42, 'messages')->andReturn(true);
+    Functions\expect('delete_post_meta')->never();
     $c = (new ConversationStore(new Store()))->load(42, 3);
     expect($c?->messages)->toHaveCount(1)->and($c?->messages[0]->content)->toBe('q');
 });
@@ -257,13 +260,12 @@ it('round-trips a legacy transcript through convert, write and re-read', functio
     Functions\when('delete_post_meta')->alias(function () use (&$deletes): bool { $deletes++; return true; });
     $s = new ConversationStore(new Store());
     $first = $s->load(42, 3);
-    expect($writes)->toBe(1)->and($deletes)->toBe(1)->and($written)->toBeArray()->toHaveCount(2);
+    expect($writes)->toBe(1)->and($deletes)->toBe(0)->and($written)->toBeArray()->toHaveCount(2);
 
-    // The row now carries ab_messages only.
-    Functions\when('get_post_meta')->alias(fn(int $id, string $k) => $k === ConversationStore::META_MESSAGES ? $written : '');
-    Functions\when('metadata_exists')->justReturn(false);
+    // The row now carries ab_messages beside the untouched legacy key; only ab_messages is read.
+    Functions\when('get_post_meta')->alias(fn(int $id, string $k) => $k === ConversationStore::META_MESSAGES ? $written : ($k === 'messages' ? $legacy : ''));
     $second = $s->load(42, 3);
-    expect($writes)->toBe(1)->and($deletes)->toBe(1)
+    expect($writes)->toBe(1)->and($deletes)->toBe(0)
         ->and($second?->messages)->toEqual($first?->messages)
         ->and($second?->messages)->toEqual([
             new Message('user', 'q', 'llama3.2'),
@@ -283,7 +285,7 @@ it('skips non-array legacy entries while converting, as 0.4 did', function (): v
     Functions\when('get_post')->justReturn((object) ['ID' => 42, 'post_author' => '3', 'post_title' => 'T', 'post_type' => 'chat_history', 'post_date_gmt' => '2024-01-01 00:00:00']);
     Functions\when('get_post_meta')->alias(fn(int $id, string $k) => $k === 'messages' ? ['garbage', ['model' => 'm', 'message' => ['role' => 3, 'content' => 'q']]] : '');
     Functions\expect('update_post_meta')->once()->withArgs(fn(int $id, string $k, array $v): bool => $id === 42 && $k === ConversationStore::META_MESSAGES && count($v) === 1 && $v[0]['content'] === 'q');
-    Functions\expect('delete_post_meta')->once()->with(42, 'messages');
+    Functions\expect('delete_post_meta')->never();
     expect((new ConversationStore(new Store()))->load(42, 3)?->messages)->toHaveCount(1);
 });
 
