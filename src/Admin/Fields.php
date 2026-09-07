@@ -47,6 +47,7 @@ final class Fields
         $name = esc_attr(self::name($key));
         $id = esc_attr(self::id($key));
         $desc = isset($f['description']) ? '<p class="description">' . esc_html((string) $f['description']) . '</p>' : '';
+        $desc .= self::override($key);
         switch ($f['type']) {
             case 'boolean':
                 // The hidden 0 before the box is what an unchecked box posts; without it the
@@ -129,6 +130,31 @@ final class Fields
             return $out;
         }
         return self::hiddenInput(self::name($key), self::scalar($value));
+    }
+
+    /**
+     * The warning under a field whose stored value something outside the settings overrides, or
+     * '' when nothing does. Only `provider.base_url` has one: Provider\Factory::baseUrl() prefers
+     * a non-empty `OLLAMA_API_URL` constant, so on a site that defines it (wp-config.php,
+     * usually) the field still saves and still reads back, and every request goes somewhere
+     * else. Without this the only symptom of pointing the site at a new gateway is that nothing
+     * changes.
+     *
+     * The constant's value is printed because this is the admin screen and the reader is an
+     * administrator who can read wp-config.php anyway; that is also why it stays here and not in
+     * Schema, whose descriptions the REST schema route serves as data.
+     */
+    private static function override(string $key): string
+    {
+        if ($key !== 'provider.base_url' || !defined('OLLAMA_API_URL') || trim((string) constant('OLLAMA_API_URL')) === '') {
+            return '';
+        }
+        return '<p class="description"><strong>' . sprintf(
+            /* translators: 1: PHP constant name, 2: the URL the constant is set to */
+            esc_html__('Overridden: the %1$s constant is set to %2$s, and the provider uses that. This field is saved but ignored until the constant is removed.', 'alpaca-bot'),
+            '<code>OLLAMA_API_URL</code>',
+            '<code>' . esc_html(trim((string) constant('OLLAMA_API_URL'))) . '</code>',
+        ) . '</strong></p>';
     }
 
     /** What the page shows for a value: the mask for a stored secret, the value for anything else. */

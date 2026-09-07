@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace AlpacaBot\Rest;
 
+use AlpacaBot\Capability;
+
 /**
  * Base for every route under `alpaca-bot/v1`. A subclass lists its routes; register() hands each
  * to core with a permission callback that resolves the capability through filter
@@ -53,18 +55,15 @@ abstract class Controller
      * sees the request, so a site can tighten (or, for a route it exposes to subscribers, loosen)
      * per request.
      *
-     * Only a capability name is honoured. WP_User::has_cap() reads a numeric capability as a
-     * legacy user level ('1' is level_1, which every Contributor holds), so a filter that
-     * returns a bool or a number by mistake, say `fn() => current_user_can('manage_options')`,
-     * would cast to '1' and quietly open the route to Contributors. Anything that is not a
-     * non-empty, non-numeric string is treated as no opinion and the declared capability is
-     * what gets checked; a filter cannot loosen a route by accident, only by naming a capability.
+     * Only a capability name is honoured, and Capability::filtered() is where that rule lives:
+     * a filter returning a bool or a number would otherwise cast to a legacy user-level check
+     * and open the route rather than close it. The admin menu's filter goes through the same
+     * guard.
      */
     public function permission(string $route, string $capability): \Closure
     {
         return static function (\WP_REST_Request $request) use ($route, $capability): bool|\WP_Error {
-            $filtered = apply_filters("alpaca_bot/capability/{$route}", $capability, $request);
-            $cap = is_string($filtered) && $filtered !== '' && !is_numeric($filtered) ? $filtered : $capability;
+            $cap = Capability::filtered("alpaca_bot/capability/{$route}", $capability, $request);
             return current_user_can($cap) ? true : Errors::forbidden();
         };
     }

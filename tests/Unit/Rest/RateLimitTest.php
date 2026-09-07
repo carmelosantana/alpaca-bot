@@ -17,7 +17,7 @@ it('counts hits per user per minute and blocks past the limit', function (): voi
         $count = $v;
         return true;
     });
-    $rl = new RateLimit(30);
+    $rl = new RateLimit();
     expect($rl->hit(3)['allowed'])->toBeTrue()->and($rl->hit(3))->toMatchArray(['allowed' => true, 'remaining' => 0]);
     $third = $rl->hit(3);
     expect($third['allowed'])->toBeFalse()->and($third['retry_after'])->toBeGreaterThan(0)->and($third['retry_after'])->toBeLessThanOrEqual(60);

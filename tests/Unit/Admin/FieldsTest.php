@@ -71,3 +71,54 @@ it('carries a field as a hidden input: booleans as 0/1, arrays nested, secrets m
         ->not->toContain('[bad]');
     expect(Fields::hidden('models.overrides', []))->toBe('');
 });
+
+/**
+ * `provider.base_url` rendered with OLLAMA_API_URL set to `$constant`, in a fresh PHP process:
+ * the constant is process-wide and the suite never defines it in its own (freshProcess() in
+ * Pest.php says why).
+ *
+ * @param string|null $constant null leaves the constant undefined
+ */
+function fieldsBaseUrlInFreshProcess(?string $constant): string
+{
+    $script = <<<'PHP_SCRIPT'
+    <?php
+    [, $root, $defined, $constant] = $argv;
+    require $root . '/vendor/autoload.php';
+    function __(string $text, string $domain = 'default'): string { return $text; }
+    function esc_html__(string $text, string $domain = 'default'): string { return $text; }
+    function esc_html(string $text): string { return htmlspecialchars($text, ENT_QUOTES); }
+    function esc_attr(string $text): string { return htmlspecialchars($text, ENT_QUOTES); }
+    if ($defined === '1') { define('OLLAMA_API_URL', $constant); }
+    echo AlpacaBot\Admin\Fields::render(
+        'provider.base_url',
+        ['type' => 'string', 'label' => 'Base URL', 'default' => '', 'description' => 'OpenAI-compatible endpoint. For Ollama this ends in /v1.'],
+        'http://stored.example:11434/v1',
+    );
+    PHP_SCRIPT;
+
+    return freshProcess($script, [dirname(__DIR__, 3), $constant === null ? '0' : '1', (string) $constant]);
+}
+
+// An admin can point the site at a new gateway, save, and read the new value back in the field
+// while every request keeps going to the constant's host: without this note the only symptom is
+// that nothing changed. The constant's value is printed because the reader is an administrator,
+// who can read wp-config.php anyway.
+it('warns under the base URL field when OLLAMA_API_URL overrides it, naming the constant and its value', function (): void {
+    $overridden = fieldsBaseUrlInFreshProcess('http://gateway.example:11434/v1');
+    expect($overridden)->toContain('value="http://stored.example:11434/v1"')
+        ->toContain('<code>OLLAMA_API_URL</code>')
+        ->toContain('<code>http://gateway.example:11434/v1</code>')
+        ->toContain('This field is saved but ignored')
+        // The field's own description is still there; the warning is an extra paragraph.
+        ->toContain('For Ollama this ends in /v1.');
+});
+
+// Factory::baseUrl() ignores an empty constant, so the warning must too, or a site that defines
+// it blank is told its setting does nothing when in fact the setting is what is used.
+it('says nothing when OLLAMA_API_URL is undefined or empty, and never on another field', function (): void {
+    expect(fieldsBaseUrlInFreshProcess(null))->not->toContain('OLLAMA_API_URL');
+    expect(fieldsBaseUrlInFreshProcess(''))->not->toContain('OLLAMA_API_URL');
+    expect(fieldsBaseUrlInFreshProcess('   '))->not->toContain('OLLAMA_API_URL');
+    expect(Fields::render('provider.timeout', ['type' => 'integer', 'label' => 'T', 'default' => 60], 60))->not->toContain('OLLAMA_API_URL');
+});

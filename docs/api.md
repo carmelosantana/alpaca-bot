@@ -183,6 +183,39 @@ The 200 body is `{conversation_id, message, receipt, contexts}`:
 - `contexts` lists the context sources folded into the system prompt (`[]` when the request
   carried no `context`).
 
+Two site settings change what this route does with a body it accepted, and neither shows up as
+an error. Read them from `GET /settings` (or `GET /settings/schema` for the labels) before you
+build a UI on top of this route:
+
+- **`chat.user_can_change_model`** (default on). With it off, `model` is *ignored*: the turn runs
+  on `models.default` and the answer is a 200, not a 400. Only a `model` the catalog does not
+  list is ever refused, and only while the setting is on. `message.model` in the reply is the
+  authority on what actually ran — show that, not what you asked for.
+
+  ```
+  $ curl -s -u "admin:$PW" -H 'Content-Type: application/json' \
+      -d '{"message":"Say only: ok","model":"minicpm-v4.6:1b"}' "$B/chat"     # setting off
+  {"conversation_id":182,"message":{…,"model":"qwen3-vl:2b",…},"receipt":{…,"model":"qwen3-vl:2b",…}, …}
+  ```
+
+- **`privacy.save_history`** (default on). With it off nothing is persisted, so *every* turn
+  answers `conversation_id: 0` and `receipt.conversation_id: 0`, a streamed turn's `stream_url`
+  always names `/chat/0/stream`, and `GET /conversations` stays empty however much you chat.
+  Sending a 0 back as `conversation_id` starts another new conversation rather than continuing
+  one; there is no continuation to be had on such a site, and each turn stands alone. A client
+  that builds a history list should check this setting rather than read an empty list as "no
+  chats yet".
+
+  ```
+  $ curl -s -u "admin:$PW" "$B/conversations" | jq length                     # setting off
+  4
+  $ curl -s -u "admin:$PW" -H 'Content-Type: application/json' \
+      -d '{"message":"Say only: ok"}' "$B/chat"
+  {"conversation_id":0,…,"receipt":{…,"conversation_id":0,…}, …}
+  $ curl -s -u "admin:$PW" "$B/conversations" | jq length                     # the turn left nothing
+  4
+  ```
+
 An empty turn (no `message`, no `images`) is a 400 in the route's own words; the pipeline's
 refusals (a model the catalog does not list, an image that is not a data URL, a
 `conversation_id` that is not yours) are 400 too, with the pipeline's message:
@@ -200,10 +233,13 @@ $ curl -s -u "admin:$PW" -H 'Content-Type: application/json' \
 {"conversation_id":0,"token":"5FYrSY7ONThOQWOk4n8jVGyaAufsHTVb","stream_url":"https:\/\/alpaca10.wp.test\/index.php?rest_route=%2Falpaca-bot%2Fv1%2Fchat%2F0%2Fstream&token=5FYrSY7ONThOQWOk4n8jVGyaAufsHTVb"}
 ```
 
-`conversation_id` is 0 for a new conversation (so the URL names `/chat/0/stream`) and the real
-id arrives in the stream's `start` event. The ticket is a 120-second, single-use transient bound
-to the user who asked; the rate limit was counted on this POST, not on the stream. Section 4
-covers reading it.
+The ticket's `conversation_id` is the one you sent, so it is 0 whenever the turn is not
+continuing a conversation you named — and the URL then says `/chat/0/stream`. The real id
+arrives in the stream's `start` event. Two different things produce that 0, and only the `start`
+event tells them apart: a new conversation, which gets a real id there; or a site with
+`privacy.save_history` off, where the `start` event says 0 too and there is no conversation to
+go back to. The ticket is a 120-second, single-use transient bound to the user who asked; the
+rate limit was counted on this POST, not on the stream. Section 4 covers reading it.
 
 ### `GET /chat/{conversation}/stream?token=…`
 
@@ -306,14 +342,29 @@ $ curl -s -u "admin:$PW" "$B/settings"
 {"provider.kind":"ollama","provider.base_url":"http:\/\/ollama.example:11434\/v1","provider.api_key":"","provider.timeout":60,"models.default":"qwen3-vl:2b","models.temperature":0.7,"models.num_ctx":8192,"models.keep_alive":"5m","models.overrides":[],"chat.system_prompt":"","chat.welcome":"How can I help?","chat.placeholder":"Message Alpaca Bot","chat.user_can_change_model":true,"chat.context_messages":20,"chat.history_limit":20,"chat.spellcheck":true,"chat.assistant_avatar":"","privacy.save_history":true,"privacy.usage_log":true,"privacy.usage_retention_days":0,"governance.site_monthly_tokens":0,"governance.user_monthly_tokens":0,"toolkits.user_agent":"AlpacaBot\/1.0 (+https:\/\/github.com\/carmelosantana\/alpaca-bot)"}
 ```
 
-(`provider.base_url` is the site's own value.) `?reveal=1` answers the raw key instead; the
-response is marked `no-store` so nothing between you and the site keeps a copy:
+(`provider.base_url` is the site's own value.) What this route answers is what is *stored*, which
+for two keys is not the same as what the plugin *uses*:
+
+- `provider.base_url` loses to a non-empty `OLLAMA_API_URL` constant — see the rule below the
+  `PUT` examples. There is nothing in this response that says the constant is set, so a client
+  that shows the base URL is showing a value the provider may be ignoring. (The settings screen
+  does say so, under the field.)
+- `chat.user_can_change_model` and `privacy.save_history` change what `POST /chat` does with a
+  body it accepts, silently; section 3's `POST /chat` covers both.
+
+`?reveal=1` answers the raw key instead. The response is not cacheable — WordPress sends its own
+no-cache headers on any REST response to a logged-in user, and this route sets `no-store` on the
+reveal itself so the guarantee still holds on a site that has filtered core's headers off:
 
 ```
 $ curl -si -u "admin:$PW" "$B/settings&reveal=1" | grep -iE '^(HTTP|cache-control)'
 HTTP/2 200
 cache-control: no-cache, must-revalidate, max-age=0, no-store, private
 ```
+
+(That is core's string, which already contains `no-store`; it is the same on `/settings` without
+the flag. Filter `rest_send_nocache_headers` to false and the plain `GET` answers no
+`Cache-Control` at all while `?reveal=1` answers `cache-control: no-store` — the route's own.)
 
 `PUT /settings` is a partial update: send the keys you are changing, as a JSON body of dotted
 keys, and the reply is the whole array as stored (masked). Values go through the schema on the
@@ -357,6 +408,12 @@ Rules worth knowing before you write:
   num_ctx?, keep_alive?, system?}`; a PUT of the map is the whole map, and a model left out is
   gone. To change one model, read the map, edit it, send it back. A blank or missing cell means
   "inherit the global value", never "empty". `sanitizeOverrides()` drops anything else.
+
+- **Line endings are normalised.** Every string field goes through `Schema::coerce()`, which
+  rewrites `\r\n` and a bare `\r` to `\n`, so a client that PUTs `"a\r\nb"` into
+  `chat.system_prompt` reads back `"a\nb"` in that same response. Textareas in a browser post
+  CRLF, and a prompt that round-trips through both surfaces would otherwise grow a `\r` per line
+  per save. Compare against the reply, not against what you sent.
 
 - **`provider.base_url` may not be what the provider uses.** A non-empty `OLLAMA_API_URL`
   constant (typically in `wp-config.php`) wins over the option, silently: the setting still
@@ -589,9 +646,26 @@ retry-after: 10
 The plugin's menu slug is `alpaca-bot`: `admin.php?page=alpaca-bot` is the chat screen (the P3
 plan supplies it) and `admin.php?page=alpaca-bot-settings&tab={provider|models|chat|privacy|governance|toolkits}`
 the settings page, one Schema section per tab, saved through core's `options.php` with the same
-`Schema::sanitize()` the REST route uses. The chat screen's capability is `edit_posts` through
-`alpaca_bot/admin/menu_capability`, filtered separately from the REST routes so a site can open
-the screen to a role without the API or the reverse; Settings is always `manage_options`.
+`Schema::sanitize()` the REST route uses. Settings is always `manage_options`.
+
+The chat screen's capability is `edit_posts` through `alpaca_bot/admin/menu_capability`, with
+signature `(string $capability)` — no request, since a menu is built once per admin load. It is
+filtered separately from the REST routes, so a site can open the screen to a role without the
+API or the reverse:
+
+```php
+add_filter('alpaca_bot/admin/menu_capability', static fn(string $cap): string => 'publish_posts');
+```
+
+The same rule §2 gives for the REST capability filters applies here, for the same reason: only a
+non-empty, non-numeric string is honoured, and anything else (`true`, `false`, `null`, a number)
+is ignored in favour of `edit_posts`. `__return_true` is the trap this closes — it is the obvious
+thing to reach for when a menu will not appear, and `(string) true` is `'1'`, which
+`current_user_can()` reads as the legacy `level_1` check rather than as a capability. Stock
+`edit_posts` and `level_1` cover the same roles, so on a default site the swap would show no
+symptom at all; on a site that has narrowed the capability, or that has roles built from user
+levels, it silently replaces the answer with a different question. To widen the screen, name a
+capability.
 
 ## 8. Adding routes
 

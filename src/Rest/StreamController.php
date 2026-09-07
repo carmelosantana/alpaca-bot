@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace AlpacaBot\Rest;
 
-use AlpacaBot\Chat\CapExceeded;
 use AlpacaBot\Chat\Conversation;
 use AlpacaBot\Chat\Pipeline;
 
@@ -166,11 +165,11 @@ final class StreamController extends Controller
      * frame that did not reach it; the generator is then left undrained, which the pipeline
      * treats as an abandoned turn (the partial reply is stored, `chat/failed` fires).
      *
-     * What the pipeline throws is mapped as ChatController maps it, through Errors, so the
-     * policy is one: CapExceeded is the 402's data, an InvalidArgumentException the 400's, and
-     * anything else the 502's, whose message is fixed and whose raw text reaches administrators
-     * only. A provider that fails mid-reply has already had its deltas written; the error frame
-     * follows them.
+     * What the pipeline throws goes through Errors::fromPipeline(), the same call the buffered
+     * route makes, so the policy is one function rather than one convention: CapExceeded is the
+     * 402's data, an InvalidArgumentException the 400's, and anything else the 502's, whose
+     * message is fixed and whose raw text reaches administrators only. A provider that fails
+     * mid-reply has already had its deltas written; the error frame follows them.
      *
      * @param array<string, mixed> $ticket as ChatController stored it: user_id, conversation_id, message, options
      * @param callable(string): void $write
@@ -193,12 +192,8 @@ final class StreamController extends Controller
                 }
             }
             $write(Sse::frame('done', ChatController::body($turn->getReturn())));
-        } catch (CapExceeded $e) {
-            $write(self::error(Errors::capExceeded($e)));
-        } catch (\InvalidArgumentException $e) {
-            $write(self::error(Errors::badRequest($e->getMessage())));
         } catch (\Throwable $e) {
-            $write(self::error(Errors::provider($e)));
+            $write(self::error(Errors::fromPipeline($e)));
         } finally {
             remove_action('alpaca_bot/chat/started', $started, 10);
         }

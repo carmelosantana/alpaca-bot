@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace AlpacaBot\Rest;
 
-use AlpacaBot\Chat\CapExceeded;
 use AlpacaBot\Chat\Pipeline;
 use AlpacaBot\Chat\Result;
 use AlpacaBot\Context\Context;
@@ -26,8 +25,9 @@ use AlpacaBot\Context\Context;
  * This POST is where the rate limit is counted for a streamed turn as well as a direct one.
  *
  * Every refusal is a WP_Error with Errors' shapes; what the pipeline throws is mapped, not
- * leaked: CapExceeded is 402, an InvalidArgumentException (the caller's mistake, in the
- * pipeline's own words) is 400, anything else is a 502 provider error.
+ * leaked, by Errors::fromPipeline(): CapExceeded is 402, an InvalidArgumentException (the
+ * caller's mistake, in the pipeline's own words) is 400, anything else is a 502 provider error.
+ * The stream route maps its turn through the same function, so the two cannot drift.
  */
 final class ChatController extends Controller
 {
@@ -75,12 +75,8 @@ final class ChatController extends Controller
         }
         try {
             $result = $this->pipeline->complete($this->userId(), $message, $options);
-        } catch (CapExceeded $e) {
-            return Errors::capExceeded($e);
-        } catch (\InvalidArgumentException $e) {
-            return Errors::badRequest($e->getMessage());
         } catch (\Throwable $e) {
-            return Errors::provider($e);
+            return Errors::fromPipeline($e);
         }
         return new \WP_REST_Response(self::body($result), 200);
     }

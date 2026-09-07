@@ -111,6 +111,42 @@ final class SettingsPageTest extends TestCase
     }
 
     /**
+     * `__return_true` is what a site reaches for when a menu will not appear, and it is the one
+     * value that must not work: `(string) true` is '1', which core reads as the legacy `level_1`
+     * check rather than as a capability. On stock roles `edit_posts` and `level_1` happen to
+     * cover the same set, so the harm is not visible there; what the cast really does is throw
+     * away whatever capability the site settled on and check a user level instead. Asserted
+     * against a real WordPress, because the point is what core's capability map makes of '1' —
+     * which is also why this test is the one place that asks core a deprecated question.
+     *
+     * @expectedDeprecated has_cap
+     */
+    public function test_menu_capability_filter_returning_true_does_not_open_the_chat_screen(): void
+    {
+        add_filter('alpaca_bot/admin/menu_capability', '__return_true');
+        set_current_screen('dashboard');
+        do_action('admin_menu');
+        global $menu;
+        $entry = null;
+        foreach ($menu as $item) {
+            if (($item[2] ?? null) === Menu::SLUG) {
+                $entry = $item;
+            }
+        }
+        $this->assertNotNull($entry);
+        $this->assertSame('edit_posts', $entry[1], 'a filter that is not a capability name must leave the declared one in place');
+
+        // A role with a legacy user level and none of the plugin's capability: the two checks
+        // are not the same question, and the cast would have answered the wrong one. Plugins
+        // that build roles from user levels still produce roles shaped like this.
+        add_role('ab_leveller', 'Leveller', ['read' => true, 'level_0' => true, 'level_1' => true]);
+        $leveller = self::factory()->user->create_and_get(['role' => 'ab_leveller']);
+        $this->assertTrue($leveller->has_cap('1'), "'1' is the level_1 check, which this role passes");
+        $this->assertFalse($leveller->has_cap('edit_posts'), 'and edit_posts, which it does not');
+        remove_role('ab_leveller');
+    }
+
+    /**
      * The whole old first-save bug, in-process: render the Chat tab, post back exactly what
      * the form carries plus one change, and every other tab's value survives, the key included
      * and never printed. The posted array is rebuilt from the hidden inputs the way a browser

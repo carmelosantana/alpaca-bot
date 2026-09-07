@@ -83,6 +83,37 @@ function restController(array $routes): Controller
 }
 
 /**
+ * FactoryTest and FieldsTest: runs `$script` (PHP source, fed on stdin) in a fresh PHP process
+ * with `$args` following `$argv[0]`, and returns its stdout.
+ *
+ * OLLAMA_API_URL is a process-wide constant and Pest runs the whole suite in one process, so a
+ * define() anywhere would silently retarget every other test that reads it. The suite never
+ * defines it; the two places that must see it defined — Factory::baseUrl() preferring it, and
+ * the Fields note that warns the administrator it is preferred — are probed out here instead,
+ * which keeps the suite order-independent.
+ *
+ * @param list<string> $args
+ */
+function freshProcess(string $script, array $args): string
+{
+    $process = proc_open(
+        [PHP_BINARY, '--', ...$args],
+        [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
+        $pipes,
+    );
+    expect($process)->toBeResource();
+    fwrite($pipes[0], $script);
+    fclose($pipes[0]);
+    $stdout = (string) stream_get_contents($pipes[1]);
+    $stderr = (string) stream_get_contents($pipes[2]);
+    fclose($pipes[1]);
+    fclose($pipes[2]);
+    expect(proc_close($process))->toBe(0, "probe failed: {$stderr}{$stdout}")->and($stderr)->toBe('');
+
+    return $stdout;
+}
+
+/**
  * Admin\SettingsPageTest: a page over a pre-seeded Store and a catalog that is never asked
  * (do_settings_sections() is stubbed there, so the overrides table never renders).
  *

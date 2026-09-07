@@ -15,9 +15,9 @@
 ## Global Constraints
 
 - All P1 constraints hold (PHP 8.4, prefixed vendor, `alpaca_bot/*` hooks, branch `1.0`, `composer check` green per task).
-- One namespace: `alpaca-bot/v1`. Route list (final): `POST /chat`, `GET /chat/{conversation}/stream`, `GET|DELETE /conversations`, `GET|DELETE /conversations/{id}`, `GET /models`, `GET|PUT /settings`, `GET /usage`. `/view/*` fragment routes are P3.
-- Capabilities (defaults, each filterable via `alpaca_bot/capability/{route}`): chat/stream/conversations/models/usage → `edit_posts`; settings → `manage_options`. Filter signature: `(string $capability, \WP_REST_Request $request)`.
-- Rate limit default: 30 chat requests per user per minute (transient), filter `alpaca_bot/rate_limit` `(int $perMinute, int $userId)`; 429 with `Retry-After`.
+- One namespace: `alpaca-bot/v1`. Route list (final): `POST /chat`, `GET /chat/{conversation}/stream`, `GET|DELETE /conversations`, `GET|DELETE /conversations/{id}`, `GET /models`, `GET|PUT /settings`, `GET /settings/schema`, `GET /usage`. `/view/*` fragment routes are P3.
+- Capabilities (defaults, each filterable via `alpaca_bot/capability/{route}`): chat/stream/conversations/models/usage → `edit_posts`; settings and settings/schema → `manage_options` (two keys, not one: loosening `settings` does not loosen `settings/schema`). Filter signature: `(string $capability, \WP_REST_Request $request)`; only a non-empty, non-numeric string is honoured, and the admin menu's `alpaca_bot/admin/menu_capability` `(string $capability)` goes through the same guard.
+- Rate limit default: 30 chat requests per user per minute (transient), filter `alpaca_bot/rate_limit` `(int $perMinute, int $userId, string $bucket)`; 429 with `Retry-After`.
 - No legacy routes remain registered: the old `Api\Htmx` is not booted (P1) and its file is deleted in P3.
 - Integration tests: `composer test:integration` runs `bin/test-integration.sh`, which executes phpunit inside the harness site container. CI wiring is P5.
 

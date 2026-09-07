@@ -5,8 +5,9 @@ declare(strict_types=1);
 namespace AlpacaBot\Rest;
 
 /**
- * A fixed-window counter: N hits per user per UTC calendar minute, kept in a transient. Filter
- * `alpaca_bot/rate_limit` (int perMinute, int userId, string bucket) sets the limit per call.
+ * A fixed-window counter: PER_MINUTE hits per user per UTC calendar minute, kept in a transient.
+ * Filter `alpaca_bot/rate_limit` (int $perMinute, int $userId, string $bucket) sets the limit
+ * per call, and is the only way the limit changes.
  *
  * Calendar minutes rather than a sliding window because the counter must survive across PHP
  * processes and the only shared store a plain WordPress is guaranteed to have is options or
@@ -31,7 +32,13 @@ final class RateLimit
     /** The window is one minute; the transient outlives it so a late hit still sees the count, then core reaps it. */
     private const TTL = 120;
 
-    public function __construct(private int $perMinute = 30) {}
+    /**
+     * The limit before the filter sees it. A constant rather than a constructor argument
+     * because there is one limiter and the filter is the knob: it receives the user and the
+     * bucket, so a site that wants a different limit per route or per role says so there. A
+     * settable default would be a second way to do the same thing that nothing constructs.
+     */
+    public const PER_MINUTE = 30;
 
     /**
      * Records one hit and reports whether it was within the limit.
@@ -51,7 +58,7 @@ final class RateLimit
         // so the route stays reachable and the mistake shows up as a 429 rather than an outage.
         // An operator who means "off" removes the route or returns a capability nobody holds
         // from the capability filter; a limit is not the tool for that.
-        $limit = max(1, (int) apply_filters('alpaca_bot/rate_limit', $this->perMinute, $userId, $bucket));
+        $limit = max(1, (int) apply_filters('alpaca_bot/rate_limit', self::PER_MINUTE, $userId, $bucket));
         $subject = $userId > 0 ? (string) $userId : 'ip_' . self::client();
         $key = sprintf('alpaca_bot_rl_%s_%s_%s', $bucket, $subject, gmdate('YmdHi', $now));
         $count = (int) get_transient($key) + 1;

@@ -107,4 +107,24 @@ final class Errors
         }
         return new \WP_Error('alpaca_bot_provider_error', __('The model provider could not complete the request.', 'alpaca-bot'), $data);
     }
+
+    /**
+     * What a pipeline turn's failure becomes, for every caller that runs one: CapExceeded is the
+     * 402, an InvalidArgumentException (the caller's mistake, in the pipeline's own words) the
+     * 400, anything else the 502.
+     *
+     * The buffered route returns this and the stream route writes it into an `error` frame, so
+     * one turn told two ways refuses the same way. It is a function rather than the same three
+     * catch blocks in both because the policy has to stay one when a later phase adds a fourth
+     * exception class: prose saying "these must match" does not fail a build, and the second
+     * copy is the one that gets missed.
+     */
+    public static function fromPipeline(\Throwable $e): \WP_Error
+    {
+        return match (true) {
+            $e instanceof CapExceeded => self::capExceeded($e),
+            $e instanceof \InvalidArgumentException => self::badRequest($e->getMessage()),
+            default => self::provider($e),
+        };
+    }
 }

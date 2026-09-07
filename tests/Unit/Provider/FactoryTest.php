@@ -21,8 +21,8 @@ function providerProp(object $object, string $property, ?string $class = null): 
 }
 
 /**
- * OLLAMA_API_URL is a process-wide constant, so each value is probed in a fresh PHP
- * process; the suite itself never defines it, and stays order-independent.
+ * Factory::baseUrl() with OLLAMA_API_URL set to `$constant`, read in a fresh PHP process
+ * (freshProcess() in Pest.php says why the suite never defines it in this one).
  *
  * @param string|null $constant null leaves the constant undefined
  * @param array<string, mixed> $settings seeded into the Store
@@ -39,21 +39,7 @@ function baseUrlInFreshProcess(?string $constant, array $settings = []): string
     echo (new AlpacaBot\Provider\Factory(new AlpacaBot\Settings\Store(json_decode($settings, true))))->baseUrl();
     PHP_SCRIPT;
 
-    $process = proc_open(
-        [PHP_BINARY, '--', dirname(__DIR__, 3), $constant === null ? '0' : '1', (string) $constant, json_encode($settings, JSON_THROW_ON_ERROR)],
-        [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
-        $pipes,
-    );
-    expect($process)->toBeResource();
-    fwrite($pipes[0], $script);
-    fclose($pipes[0]);
-    $stdout = (string) stream_get_contents($pipes[1]);
-    $stderr = (string) stream_get_contents($pipes[2]);
-    fclose($pipes[1]);
-    fclose($pipes[2]);
-    expect(proc_close($process))->toBe(0, "probe failed: {$stderr}{$stdout}")->and($stderr)->toBe('');
-
-    return $stdout;
+    return freshProcess($script, [dirname(__DIR__, 3), $constant === null ? '0' : '1', (string) $constant, json_encode($settings, JSON_THROW_ON_ERROR)]);
 }
 
 beforeEach(function (): void {

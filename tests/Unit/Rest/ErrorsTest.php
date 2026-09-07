@@ -83,3 +83,19 @@ it('badRequest is alpaca_bot_bad_request, 400, with the given message', function
         ->and($e->get_error_message())->toBe('Images must be data URLs.')
         ->and($e->get_error_data())->toBe(['status' => 400]);
 });
+
+// The buffered route returns this and the stream route writes it into an `error` frame, so the
+// two cannot answer a failed turn differently. Kept as one function because "these two catch
+// blocks must match" is prose a build cannot check, and a fourth exception class lands in one
+// place.
+it('fromPipeline maps what a turn throws: CapExceeded to 402, InvalidArgumentException to 400, anything else to the 502', function (): void {
+    Functions\when('current_user_can')->justReturn(false);
+    expect(Errors::fromPipeline(new CapExceeded('user', 10, 11))->get_error_data()['status'])->toBe(402);
+    expect(Errors::fromPipeline(new InvalidArgumentException('Model "x" is not available.'))->get_error_data()['status'])->toBe(400);
+    expect(Errors::fromPipeline(new InvalidArgumentException('Model "x" is not available.'))->get_error_message())->toBe('Model "x" is not available.');
+    expect(Errors::fromPipeline(new RuntimeException('Provider error: boom'))->get_error_data()['status'])->toBe(502);
+    // An Error is not an Exception; the pipeline's outer catch is on Throwable, and so is this.
+    expect(Errors::fromPipeline(new TypeError('nope'))->get_error_code())->toBe('alpaca_bot_provider_error');
+    // A subclass of InvalidArgumentException is still the caller's mistake.
+    expect(Errors::fromPipeline(new class ('too long') extends InvalidArgumentException {})->get_error_data()['status'])->toBe(400);
+});

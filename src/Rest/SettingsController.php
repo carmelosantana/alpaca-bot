@@ -21,9 +21,20 @@ use AlpacaBot\Settings\Store;
  * value too, and the reply shows the mask so the client can see it did: the rule and its reasons
  * are Schema::sanitize()'s, shared with every other writer of the option, and this route only
  * hands the body through. `?reveal=1` on the GET answers the raw secret instead of the mask:
- * only the flag is on the URL, the secret is in the body, and the body is marked
- * `Cache-Control: no-store` so neither a browser nor a proxy keeps a copy. A PUT never reveals,
- * whatever its body says.
+ * only the flag is on the URL, and the secret is in the body. A PUT never reveals, whatever its
+ * body says.
+ *
+ * The reveal response sets `Cache-Control: no-store` itself even though core normally supplies
+ * it. WP_REST_Server::serve_request() sends a response's own headers first and then, when
+ * `rest_send_nocache_headers` holds (by default, for any logged-in user, which every caller of
+ * this route is), replaces Cache-Control with its own string — which already contains
+ * `no-store`, so on an ordinary site this header is the one that loses. It is set anyway for the
+ * site that filters that off: the block does not run, nothing replaces the header, and the
+ * reveal response is the one response here that must not be cached whatever the site has decided
+ * about the rest. Verified both ways on the harness: with core's headers on, `/settings` and
+ * `/settings?reveal=1` answer the identical core string; with `rest_send_nocache_headers`
+ * filtered false, `/settings` answers no Cache-Control at all and `/settings?reveal=1` answers
+ * `no-store`.
  *
  * A PUT is partial at the top level only: each key sent replaces the stored value outright,
  * keys not sent are untouched (Schema::sanitize() keeps the stored value for a key the input
