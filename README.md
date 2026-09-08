@@ -18,18 +18,19 @@
 
 ## 0.5.0 development status
 
-The `develop` branch is a ground-up rewrite of the 0.4 plugin that ships as **0.5.0**, in five phases. 1.0 is reserved for feature complete and fully tested (see `CLAUDE.md`). Everything below this
-section describes 0.4; it is refreshed as each phase lands.
+The `develop` branch is a ground-up rewrite of the 0.4 plugin that ships as **0.5.0**, in five phases. 1.0 is reserved for feature complete and fully tested (see `CLAUDE.md`). Everything below
+this section describes the 0.5 code on this branch.
 
-- **P1 — foundations, provider, pipeline** (in progress): settings schema and 0.4 migration,
-  provider factory with streaming, usage meter and monthly caps, the chat pipeline and its hooks,
-  and a WP-CLI command (`wp alpaca-bot chat|models|usage|settings`) as the only user surface.
-  There is deliberately no admin UI in this phase.
-- **P2 — REST API and settings screen**: one namespace, `alpaca-bot/v1` (chat, streaming,
+- **P1 — foundations, provider, pipeline** (done): settings schema and 0.4 migration, provider
+  factory with streaming, usage meter and monthly caps, the chat pipeline and its hooks, and a
+  WP-CLI command (`wp alpaca-bot chat|models|usage|settings`).
+- **P2 — REST API and settings screen** (done): one namespace, `alpaca-bot/v1` (chat, streaming,
   conversations, models, settings, usage), and the Settings API admin page. Reference, with
   auth, streaming and error examples: [docs/api.md](docs/api.md).
-- **P3 — view layer and assets**: the admin chat page returns here.
-- **P4 — toolkits, shortcodes, abilities, WordPress AI adapter**
+- **P3 — view layer and assets** (done): the admin chat screen, rendered server-side from
+  components, with htmx swapping the selects and a small TypeScript bundle driving the streamed
+  turn; Lucide icons, a stylesheet on the admin colour variables, and the 0.4 tree deleted.
+- **P4 — toolkits, shortcodes, abilities, WordPress AI adapter** (next)
 - **P5 — hardening and release**
 
 `readme.txt` (the wordpress.org listing) intentionally keeps describing the shipped 0.4.x release
@@ -48,46 +49,28 @@ Plans: [P1](docs/superpowers/plans/2026-09-05-alpaca-bot-p1-foundations-provider
 
 ---
 
-Easily draft a post or page from any conversation. Dynamically create new content on the fly or with remote resources collected via `agents`. **Alpaca Bot** offers a familiar chat interface on both desktop and mobile. You can expect a seamless chat experience on any device!
-
-An [Ollama](https://github.com/ollama/ollama) instance is required. [Ollama](https://github.com/ollama/ollama) makes it incredibly easy to self-host large language models locally or in the cloud.
+**Alpaca Bot** is a chat screen inside WordPress admin, talking to a model you host. Conversations stay on your site, in your own database, and only their author can open them. It runs against [Ollama](https://github.com/ollama/ollama) out of the box, or any OpenAI-compatible endpoint.
 
 ### Features
 
-- Chose to store conversation history **privately** in your `wp_` database or not at all.
-- Use `[alpacabot_agent]` to execute tasks on your behalf, generate dynamic content and more.
-- Chat with dozens of pre-trained LLMs or [train your own](https://github.com/ollama/ollama/blob/main/docs/api.md#generate-embeddings).
-- Switch conversational model on the fly.
-- Create your own custom [system messages](https://github.com/ollama/ollama/blob/main/docs/modelfile.md#system) for highly predictable or formatted responses.
+- A chat screen in wp-admin: replies stream in as they are written, with a copy button on every message and code block, "Edit and resend" on your own, and an image attached from the media library for a model that can see.
+- Your conversations, stored **privately** on your site (or not at all: the Privacy tab decides) and listed in the screen's history.
+- Switch models per conversation; where the site allows it, your pick is remembered as your default.
+- A system prompt, per-model overrides (temperature, context window, keep-alive) and a receipt under every reply: model, tokens, time.
+- Monthly usage caps, per site and per user, with the meter behind them.
+- A REST API under `alpaca-bot/v1` ([docs/api.md](docs/api.md)) and a WP-CLI command.
 
 ---
 
 - [Screenshots](#screenshots)
-  - [Chat Interface](#chat-interface)
-  - [Custom Assistants](#custom-assistants)
-  - [Dynamic Content Generation](#dynamic-content-generation)
 - [Requirements](#requirements)
 - [Installation](#installation)
 - [Setup](#setup)
 - [Usage](#usage)
-  - [Text Completion](#text-completion)
-  - [Agents](#agents)
-    - [Example](#example)
+  - [The chat screen](#the-chat-screen)
+  - [Settings](#settings)
+  - [REST API and WP-CLI](#rest-api-and-wp-cli)
 - [Shortcodes](#shortcodes)
-  - [`[alpacabot]` - Chat with Alpaca Bot](#alpacabot---chat-with-alpaca-bot)
-    - [Attributes](#attributes)
-  - [`[alpacabot_agent]` - Execute tasks on your behalf](#alpacabot_agent---execute-tasks-on-your-behalf)
-    - [Attributes](#attributes-1)
-  - [Caching](#caching)
-    - [Transient](#transient)
-    - [Post Meta](#post-meta)
-    - [Option](#option)
-    - [Disable](#disable)
-- [Core Agents](#core-agents)
-  - [`get`](#get)
-    - [Attributes](#attributes-2)
-  - [`summarize`](#summarize)
-    - [Attributes](#attributes-3)
 - [Support](#support)
 - [Funding](#funding)
 - [Made Possible By](#made-possible-by)
@@ -97,35 +80,13 @@ An [Ollama](https://github.com/ollama/ollama) instance is required. [Ollama](htt
 
 ## Screenshots
 
-### Chat Interface
+![The chat screen on a new conversation](docs/screenshots/2026-09-08-p3-default-1440-welcome.png)
 
-![Alpaca Bot](https://carmelosantana.org/alpacabot/wp-content/uploads/sites/4/2024/03/screenshot-1.png)
+> A new conversation: the model and history selects in the header, the composer at the foot.
 
-> Main chat interface with model list, chat history and prompt input.
+![A reply with a code block](docs/screenshots/2026-09-08-p3-default-1440-code.png)
 
-![Chat interface with a conversation history](https://carmelosantana.org/alpacabot/wp-content/uploads/sites/4/2024/03/screenshot-2.png)
-
-> Chat interface with a conversation history.
-
-![Draft to post](https://carmelosantana.org/alpacabot/wp-content/uploads/sites/4/2024/03/screenshot-3.png)
-
-> Drafting a post from generated responses.
-
-### Custom Assistants
-
-![Custom assistant](https://carmelosantana.org/alpacabot/wp-content/uploads/sites/4/2024/03/screenshot-4.png)
-
-> Override `system` message for custom responses.
-
-![Assistant tab](https://carmelosantana.org/alpacabot/wp-content/uploads/sites/4/2024/03/screenshot-5.png)
-
-> Custom assistant settings.
-
-### Dynamic Content Generation
-
-![Shortcodes](https://carmelosantana.org/alpacabot/wp-content/uploads/sites/4/2024/03/screenshot-6.png)
-
-> Shortcode examples.
+> A reply with a code block, its copy button, and the receipt under it.
 
 ## Requirements
 
@@ -138,121 +99,47 @@ An [Ollama](https://github.com/ollama/ollama) instance is required. [Ollama](htt
 2. Upload the plugin to your WordPress site.
 3. Activate the plugin.
 
+A checkout needs `composer install` (which builds `vendor-prefixed/`) and `pnpm install && pnpm build` (the script, stylesheet and icon sprite under `assets/`, which are not committed).
+
 ## Setup
 
 1. Install [Ollama](https://github.com/ollama/ollama) on your localhost or server.
-2. Add your [Ollama](https://github.com/ollama/ollama) API URL to the settings page by navigating to `Alpaca Bot > Settings` in your WordPress admin dashboard.
-3. Enter your [Ollama](https://github.com/ollama/ollama) API URL.
-4. Click `Save Changes`.
+2. In your WordPress admin, open `Alpaca Bot > Settings` and, on the Provider tab, enter the endpoint's base URL. For Ollama it ends in `/v1`: `http://localhost:11434/v1`.
+3. Click `Save Changes`. The Models tab then lists what the provider serves; pick a default.
 
-⭐️ **[Become a Patreon](https://www.patreon.com/carme$$losantana)** and support [Alpaca Bot](https://carmelosantana.org/alpacabot/) development. ⭐️
+⭐️ **[Become a Patreon](https://www.patreon.com/carmelosantana)** and support [Alpaca Bot](https://carmelosantana.org/alpacabot/) development. ⭐️
 
 ## Usage
 
-### Text Completion
+### The chat screen
 
-You have two options to communicate with your AI models;
+Click **Alpaca Bot** in the admin menu, below Dashboard and above Posts. The screen is open to every user who can edit posts (filter `alpaca_bot/admin/menu_capability` to change that).
 
-1. Click **Alpaca Bot** found in the admin menu, below Dashboard and above Posts.
-2. **Use the shortcode** `[alpacabot]` to generate a response within any post or page.
+- The **model** select in the header picks the model for this conversation; where the site allows it, your pick is saved as your default. The **history** select opens one of your earlier conversations, and **New chat** starts a fresh one.
+- Type in the box at the foot of the screen. **Enter** sends, **Shift+Enter** adds a line, **Escape** clears the box.
+- The image button attaches a picture from the media library to your next message, for a model that can see. The largest image the screen takes is the site's own upload limit.
+- Replies stream in as they are written. Every message has a **Copy** button, your own have **Edit and resend**, and a code block has its own copy button. Under a reply is its receipt: the model, the tokens it used and how long it took.
+- The **Help** tab at the top right of the screen repeats this, and says what became of 0.4's shortcodes.
 
-### Agents
+### Settings
 
-Use the `[alpacabot_agent]` shortcode to execute tasks on your behalf. Agents are a powerful way to empower your AI models to perform tasks on your behalf.
+`Alpaca Bot > Settings` (administrators) is one page in six tabs: **Provider** (the endpoint, its key, the timeout), **Models** (the default, temperature, context window, keep-alive, and per-model overrides), **Chat** (system prompt, welcome text, what users may change), **Privacy** (whether conversations and the usage log are stored, and for how long), **Limits** (monthly token caps for the site and per user) and **Tools**. Every field is also readable and writable over the REST API (`GET`/`PUT /settings`).
 
-For example, you can use the `[alpacabot_agent]` shortcode to retrieve content from a remote source. `[alpacabot_agent]`s can interact directly with your models and help summarize a webpage or rewrite content.
+### REST API and WP-CLI
 
-#### Example
-
-Basic webpage summarization:
-
-`[alpacabot_agent name=summarize model=tinyllama url=https://example.com/]`
+Everything the screen does is a route under `alpaca-bot/v1`: a turn (`POST /chat`, then its stream as server-sent events), conversations, models, settings and usage. [docs/api.md](docs/api.md) is the reference, with authentication, streaming and error examples. From the command line, `wp alpaca-bot chat|models|usage|settings` does the same.
 
 ## Shortcodes
 
-### `[alpacabot]` - Chat with Alpaca Bot
+0.5 registers no shortcodes. 0.4's `[alpacabot]` and `[alpacabot_agent]` were removed in the rewrite and return with the toolkits in a later 0.x release.
 
-*Chat with Alpaca Bot from any post or page.*
-
-#### Attributes
-
-- `model` - The model to use for the text generation. *(optional)*
-- `system` - Specifies the [system message](https://github.com/ollama/ollama/blob/main/docs/modelfile.md#system) that will be set in the template. *(optional)*
-
-### `[alpacabot_agent]` - Execute tasks on your behalf
-
-*Execute tasks via Agents.*
-
-#### Attributes
-
-The following are core attributes that are supported by all agents.
-
-- `name` - The agent to execute.
-
-Agent's communicating with [Ollama](https:/github.com/ollama/ollama) support `[alpacabot]` attributes.
-
-### Caching
-
-Requests can be cached by setting the `cache` attribute. `cache` supports short and long term options.
-
-By default responses are cached to the current post or page.
-
-#### Transient
-
-Numeric values are treated as seconds and will cache the response for the specified duration.
-
-- `cache=60` - Cache the response for 60 seconds.
-- `cache=3600` - Cache the response for 1 hour.
-
-#### Post Meta
-
-This is useful for caching responses permanently and associating them with a specific post or page.
-
-- `cache=postmeta` - Cache to current post or page.
-
-#### Option
-
-Use WordPress option storage to cache permanently but not associated with a specific post or page.
-
-This can be useful for sharing responses across multiple pages.
-
-- `cache=option` - Cache to WordPress options.
-
-#### Disable
-
-The following values can disable caching.
-
-- `cache=0` - Disable caching.
-- `cache=disable` - Disable caching.
-- `cache=false` - Disable caching.
-
-## Core Agents
-
-The following are core agents that are provided by the **Alpaca Bot** plugin.
-
-### `get`
-
-Retrieve content from a remote source.
-
-#### Attributes
-
-- `url` - The URL to retrieve content from.
-
-### `summarize`
-
-Summarize remote content.
-
-#### Attributes
-
-- `url` - The URL to summarize.
-- `length` - Describe the length of the summary.
-- `content` - The type of content we want to summarize.
+**If you upgrade a 0.4 site, check your content.** WordPress prints a shortcode nothing registers exactly as written, so a post or page that still contains one shows the shortcode itself to visitors, as plain text, where the generated content used to be. Search your posts and pages for `[alpacabot` and, in each, remove the shortcode or replace it with the text you want shown.
 
 ## Support
 
 If you need help or have questions, please join our [Discord](https://discord.gg/vWQTHphkVt) community.
 
-Premium support and video calls are available to our [Patreon](https://www.patreon.com/carmelosantana) subscribers. We can help  setup your [Ollama](https://github.com/ollama/ollama) instance, troubleshoot issues, demonstrate shortcode functionality and more.
+Premium support and video calls are available to our [Patreon](https://www.patreon.com/carmelosantana) subscribers. We can help set up your [Ollama](https://github.com/ollama/ollama) instance, troubleshoot issues, and more.
 
 Patreon's also receive;
 
@@ -274,11 +161,11 @@ If you find this project useful or use it in a commercial environment please con
 ## Made Possible By
 
 - Emma Delaney's [How to Create Your Own ChatGPT in HTML CSS and JavaScript](https://emma-delaney.medium.com/how-to-create-your-own-chatgpt-in-html-css-and-javascript-78e32b70b4be)
-- Google [Material Design Icons](https://material.io/resources/icons/?style=baseline) - Apache-2.0 license
-- [Hint.css](https://github.com/chinchang/hint.css) A CSS only tooltip library - MIT license
-- [TextRank](https://github.com/DavidBelicza/PHP-Science-TextRank) Automatic text summarization for PHP - MIT license
+- [Lucide](https://lucide.dev) Beautiful & consistent icons - ISC license
+- [htmx](https://htmx.org/) High power tools for HTML - 0BSD license
+- [league/commonmark](https://commonmark.thephpleague.com/) Markdown parser for PHP - BSD-3-Clause license
+- [php-agents](https://github.com/carmelosantana/php-agents) Provider-agnostic AI agents for PHP - MIT license
 - [Ollama](https://github.com/ollama/ollama) Get up and running with large language models locally - MIT license
-- [Parsedown](https://github.com/erusev/parsedown) A better Markdown parser - MIT license
 
 ## License
 
