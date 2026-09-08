@@ -262,7 +262,7 @@ pre > .ab-code__copy:focus-visible { outline-color: var(--ab-code-text); }
 }
 
 /* A turn's actions sit at the top of its bubble, and the first bubble at the scroller's edge, so the
-   tooltip goes below the button, as 0.4's hint--bottom did. */
+   tooltip goes below the button, as 0.4's tooltips did. */
 .ab-msg__action[aria-label]:hover::after { top: calc(100% + 6px); bottom: auto; }
 
 /* Inside a scrolling <pre> a tooltip above the button would be clipped; put it to the left. */

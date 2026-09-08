@@ -3,18 +3,6 @@ includes:
 parameters:
     level: 6
     paths: [src]
-    excludePaths:
-        # Legacy 0.4.x tree: stays on disk until P3 deletes it; references removed deps.
-        - src/AlpacaBot.php
-        - src/Agents.php
-        - src/Agents
-        - src/Api
-        - src/Chat/Post.php
-        - src/Chat/Screen.php
-        - src/Define.php
-        - src/Help.php
-        - src/Log
-        - src/Utils
     scanFiles:
         - alpaca-bot.php
         # WP-CLI is not a dependency and php-stubs/wp-cli-stubs conflicts with wordpress-stubs ^7.1,
