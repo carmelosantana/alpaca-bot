@@ -21,10 +21,11 @@ use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Tool\ToolResult;
  * The acting user comes from a closure, not an int: Plugin::register() builds the toolkits on
  * plugins_loaded, before the current user is resolved, so an id taken at construction would be
  * 0 for every turn and the draft would be authored by nobody. The closure is
- * get_current_user_id(...) in the plugin's own wiring, and the capability check is
- * current_user_can(): both name the same user, which is the only arrangement this toolkit is
- * meant for. A wiring that answered a different id from the closure would author a post as one
- * user under another's permission, so do not. The capability is the post type's own
+ * get_current_user_id(...) in the plugin's own wiring, and the capability is asked about the
+ * id it answers, user_can($userId, …), never about whoever is logged in: the shortcode and
+ * Abilities surfaces later in this phase can run a toolkit for a user who is not the current
+ * one, and the check and the authorship have to be one id so they cannot disagree (the same
+ * reason Context\CurrentScreenSource asks user_can()). The capability is the post type's own
  * (`edit_posts` for a post, `edit_pages` for a page), which is what the editor itself asks
  * before it shows a New button; wp_insert_post() checks nothing on its own.
  *
@@ -72,7 +73,7 @@ final class DraftPostToolkit implements ToolkitInterface
             return ToolResult::error(__('Nobody is logged in, so there is no one to own the draft.', 'alpaca-bot'));
         }
         $capability = self::TYPES[$type] ?? null;
-        if ($capability === null || !current_user_can($capability)) {
+        if ($capability === null || !user_can($userId, $capability)) {
             return ToolResult::error(__('You cannot create this kind of content on this site.', 'alpaca-bot'));
         }
         $id = wp_insert_post([
