@@ -21,6 +21,10 @@ use AlpacaBot\Rest\StreamController;
 use AlpacaBot\Rest\ViewController;
 use AlpacaBot\Settings\Migrate04;
 use AlpacaBot\Settings\Store;
+use AlpacaBot\Toolkit\DraftPostToolkit;
+use AlpacaBot\Toolkit\Registry;
+use AlpacaBot\Toolkit\SummarizeToolkit;
+use AlpacaBot\Toolkit\WebFetchToolkit;
 use Brain\Monkey\Actions;
 use Brain\Monkey\Filters;
 use Brain\Monkey\Functions;
@@ -82,6 +86,9 @@ it('registers the settings store, provider factory, model catalog, conversation 
             && ($cb[0] ?? null) instanceof Menu
             && ($cb[1] ?? null) === 'register'
     ));
+    // plugins_loaded runs before the current user is resolved, so a toolkit that read the id at
+    // construction would get 0 for every turn: the id must not be asked for here at all.
+    Functions\expect('get_current_user_id')->never();
     $plugin = Plugin::boot();
     $plugin->register();
     expect($plugin->get(SettingsPage::class))->toBeInstanceOf(SettingsPage::class);
@@ -93,6 +100,18 @@ it('registers the settings store, provider factory, model catalog, conversation 
         ->and($plugin->get(CapPolicy::class))->toBeInstanceOf(CapPolicy::class)
         ->and($plugin->get(Collector::class))->toBeInstanceOf(Collector::class)
         ->and($plugin->get(Pipeline::class))->toBeInstanceOf(Pipeline::class);
+    // The three built-in toolkits, registered under the ids the schema's default names, in that
+    // order. The setting enables all three by default, and a stubbed get_option() answers
+    // nothing here, so all three are enabled; the filter runs with the user id it was given.
+    Functions\when('get_option')->justReturn([]);
+    Filters\expectApplied('alpaca_bot/toolkits')->once()->with(Mockery::type('array'), 3)->andReturnFirstArg();
+    $registry = $plugin->get(Registry::class);
+    expect($registry)->toBeInstanceOf(Registry::class)
+        ->and($registry->ids())->toBe(['web_fetch', 'summarize', 'draft_post']);
+    $enabled = $registry->enabled(3);
+    expect($enabled['web_fetch'])->toBeInstanceOf(WebFetchToolkit::class)
+        ->and($enabled['summarize'])->toBeInstanceOf(SummarizeToolkit::class)
+        ->and($enabled['draft_post'])->toBeInstanceOf(DraftPostToolkit::class);
 
     // A 0.4 site: one legacy option present, no flag -> the hook migrates and flags.
     $legacy = ['alpaca_bot_api_url' => 'http://localhost:11434'];

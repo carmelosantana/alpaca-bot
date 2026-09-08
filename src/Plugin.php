@@ -67,6 +67,16 @@ final class Plugin
         $prefs = new Chat\UserPrefs();
         $this->set(Chat\UserPrefs::class, $prefs);
         $this->set(Chat\Pipeline::class, new Chat\Pipeline($store, $factory, $this->get(Provider\ModelCatalog::class), $conversations, $meter, $caps, $collector, $prefs));
+        // The built-in toolkits, under the ids Schema's `toolkits.enabled` options name. This
+        // runs on plugins_loaded, before the current user is resolved, so the two toolkits that
+        // act as a user take get_current_user_id as a closure and ask it when a tool runs, not
+        // here: an id read now would be 0 for every turn. The registry decides what is enabled
+        // when a turn asks (Toolkit\Registry), so nothing about the setting is read here either.
+        $registry = new Toolkit\Registry($store);
+        $registry->register('web_fetch', new Toolkit\WebFetchToolkit($store));
+        $registry->register('summarize', new Toolkit\SummarizeToolkit($this->get(Chat\Pipeline::class), get_current_user_id(...)));
+        $registry->register('draft_post', new Toolkit\DraftPostToolkit(get_current_user_id(...)));
+        $this->set(Toolkit\Registry::class, $registry);
         // On init, after the post types (priority 10), not on admin_init: WP-CLI loads WordPress
         // and fires init but never admin_init, and in P1 the CLI is the whole user surface, so an
         // upgraded 0.4 site's first `wp alpaca-bot chat` must already see its configured
