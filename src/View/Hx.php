@@ -13,7 +13,15 @@ namespace AlpacaBot\View;
  */
 final class Hx
 {
-    private const ALLOWED = ['get', 'post', 'put', 'delete', 'target', 'swap', 'trigger', 'vals', 'headers', 'indicator', 'include', 'select', 'sync', 'disabled-elt', 'push-url', 'on:', 'swap-oob'];
+    /** Exact keys. `on:<event>` keys are the one open form and are checked by ON_EVENT instead. */
+    private const ALLOWED = ['get', 'post', 'put', 'delete', 'target', 'swap', 'trigger', 'vals', 'headers', 'indicator', 'include', 'select', 'sync', 'disabled-elt', 'push-url', 'swap-oob'];
+
+    /**
+     * The key lands in the attribute *name*, which esc_attr never sees, so the event suffix is
+     * held to the characters an htmx event name can contain (`on:click`, `on:htmx:after-request`,
+     * `on::before-request`) and nothing that could close the attribute or open another.
+     */
+    private const ON_EVENT = '/^on:[a-zA-Z:][a-zA-Z0-9:_.-]*$/';
 
     /** The REST URL for a view path: `/history` becomes `…/wp-json/alpaca-bot/v1/view/history`. */
     public static function url(string $viewPath): string
@@ -39,20 +47,24 @@ final class Hx
      * their event name (htmx's `hx-on:click`).
      *
      * @param array<string, string|array<string, mixed>> $attrs
-     * @throws \InvalidArgumentException for a key that is not on the allowed list
+     * @throws \InvalidArgumentException for a key that is not on the allowed list, an `on:` key
+     *   whose event name is not a plain token, or an array value that cannot be JSON-encoded
      */
     public static function attrs(array $attrs): string
     {
         $out = '';
         foreach ($attrs as $k => $v) {
-            $base = str_starts_with($k, 'on:') ? 'on:' : $k;
-            if (!in_array($base, self::ALLOWED, true)) {
+            $ok = str_starts_with($k, 'on:') ? (bool) preg_match(self::ON_EVENT, $k) : in_array($k, self::ALLOWED, true);
+            if (!$ok) {
                 throw new \InvalidArgumentException("Unknown htmx attribute: {$k}");
             }
             if (in_array($k, ['get', 'post', 'put', 'delete'], true)) {
                 $v = esc_url(self::url((string) $v));
             } elseif (is_array($v)) {
                 $v = wp_json_encode($v);
+                if ($v === false) {
+                    throw new \InvalidArgumentException("Value for hx-{$k} cannot be JSON-encoded");
+                }
             }
             $out .= sprintf(' hx-%s="%s"', $k, esc_attr((string) $v));
         }

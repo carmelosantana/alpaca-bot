@@ -21,3 +21,19 @@ it('renders hx attributes with the view URL, escaping, and JSON vals', function 
 it('rejects unknown attributes', function (): void {
     expect(fn() => Hx::attrs(['onclick' => 'x']))->toThrow(InvalidArgumentException::class);
 });
+
+it('renders a valid on: event key', function (): void {
+    expect(Hx::attrs(['on:click' => 'this.remove()']))->toBe(' hx-on:click="this.remove()"');
+});
+
+it('rejects an on: key whose event name is not a plain token', function (): void {
+    // The key is interpolated into the attribute *name*, so a quote in it would break out of
+    // the attribute; only the suffix's characters keep it in.
+    expect(fn() => Hx::attrs(['on:click" onmouseover="alert(document.cookie)' => 'foo']))->toThrow(InvalidArgumentException::class);
+    expect(fn() => Hx::attrs(['on:' => 'x']))->toThrow(InvalidArgumentException::class);
+});
+
+it('throws when an array value cannot be JSON-encoded instead of emitting an empty payload', function (): void {
+    Functions\when('wp_json_encode')->justReturn(false);
+    expect(fn() => Hx::attrs(['vals' => ['a' => "\xB1\x31"]]))->toThrow(InvalidArgumentException::class, 'hx-vals');
+});

@@ -12,6 +12,9 @@ namespace AlpacaBot\View;
  */
 abstract class Component
 {
+    /** Elements that take no closing tag. */
+    private const VOID = ['area', 'br', 'col', 'hr', 'img', 'input', 'source', 'wbr'];
+
     abstract public function render(): string;
 
     public function __toString(): string
@@ -28,7 +31,8 @@ abstract class Component
      * An element with attribute-escaped values. A null value drops the attribute, so a
      * conditional attribute (`'disabled' => $busy ? '' : null`) needs no branching at the
      * call site. `$inner` is used as given: the caller has already escaped it, or it is
-     * another component's output.
+     * another component's output. Only attribute *values* are escaped: `$name` and the
+     * attribute names are written raw, so they must be literals in the calling code, never data.
      *
      * @param array<string, string|null> $attrs
      */
@@ -41,6 +45,6 @@ abstract class Component
             }
             $a .= sprintf(' %s="%s"', $k, $this->a($v));
         }
-        return in_array($name, ['input', 'img', 'br'], true) ? "<{$name}{$a}>" : "<{$name}{$a}>{$inner}</{$name}>";
+        return in_array($name, self::VOID, true) ? "<{$name}{$a}>" : "<{$name}{$a}>{$inner}</{$name}>";
     }
 }
