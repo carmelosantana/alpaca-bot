@@ -16,7 +16,7 @@ namespace AlpacaBot\Settings;
  * option (the REST route, the Settings API's sanitize callback, Store) resolves it the same way
  * and none can store the literal mask as the key.
  *
- * @phpstan-type Field array{type:'string'|'integer'|'number'|'boolean'|'array'|'select', default:mixed, section:string, label:string, description?:string, options?:array<string,string>, min?:int|float, max?:int|float, sanitize?:callable(mixed, array<string, mixed>): mixed}
+ * @phpstan-type Field array{type:'string'|'integer'|'number'|'boolean'|'array'|'select'|'checkbox-list', default:mixed, section:string, label:string, description?:string, options?:array<string,string>, min?:int|float, max?:int|float, sanitize?:callable(mixed, array<string, mixed>): mixed}
  */
 final class Schema
 {
@@ -65,6 +65,11 @@ final class Schema
             'privacy.usage_retention_days' => ['type' => 'integer', 'default' => 90, 'section' => 'privacy', 'label' => __('Keep usage receipts for (days)', 'alpaca-bot'), 'description' => __('A daily cleanup deletes receipts older than this. 0 keeps them forever; 3650 (ten years) is the most, and a larger number is stored as 3650. Conversations are never touched. A receipt is counted toward the caps until its month ends, so keep this at 31 or more while a cap is set.', 'alpaca-bot'), 'min' => 0, 'max' => 3650],
             'governance.site_monthly_tokens' => ['type' => 'integer', 'default' => 0, 'section' => 'governance', 'label' => __('Site-wide monthly token cap', 'alpaca-bot'), 'min' => 0, 'max' => PHP_INT_MAX],
             'governance.user_monthly_tokens' => ['type' => 'integer', 'default' => 0, 'section' => 'governance', 'label' => __('Per-user monthly token cap', 'alpaca-bot'), 'min' => 0, 'max' => PHP_INT_MAX],
+            // One list, not a boolean per toolkit: a toolkit is enabled by the id it registers
+            // under (Toolkit\Registry), so a later release adds one by adding an option here and
+            // nothing else changes shape. The default switches every built-in on; the schema is
+            // the single place that knows what the built-ins are called.
+            'toolkits.enabled' => ['type' => 'checkbox-list', 'default' => ['web_fetch', 'summarize', 'draft_post'], 'section' => 'toolkits', 'label' => __('Enabled tools', 'alpaca-bot'), 'description' => __('What the assistant may do besides answer. A tool that is off is not offered to the model at all.', 'alpaca-bot'), 'options' => ['web_fetch' => __('Fetch a web page the user names', 'alpaca-bot'), 'summarize' => __('Summarize text', 'alpaca-bot'), 'draft_post' => __('Draft a post or page (never publishes)', 'alpaca-bot')]],
             'toolkits.user_agent' => ['type' => 'string', 'default' => 'AlpacaBot/0.5 (+https://github.com/carmelosantana/alpaca-bot)', 'section' => 'toolkits', 'label' => __('User agent for fetch tools', 'alpaca-bot')],
         ];
     }
@@ -146,6 +151,18 @@ final class Schema
                 return is_scalar($raw) && array_key_exists((string) $raw, $f['options'] ?? []) ? (string) $raw : $f['default'];
             case 'array':
                 return is_array($raw) ? $raw : $f['default'];
+            case 'checkbox-list':
+                // The checked subset of the options, in option order, so the stored list is
+                // canonical whatever order a client sent. Unknown ids are dropped, and the ''
+                // sentinel the page posts ahead of the boxes (Fields::render()) is just one more
+                // unknown id: a form with every box unchecked stores []. Anything that is not
+                // a list stores [] too, not the default: `array` falls back to its default, but
+                // this field's default enables every tool, and a malformed write (a PUT of a
+                // bare string) must fail closed rather than switch things on.
+                if (!is_array($raw)) {
+                    return [];
+                }
+                return array_values(array_filter(array_keys($f['options'] ?? []), static fn(string $id): bool => in_array($id, $raw, true)));
             case 'string':
             default:
                 // One line ending. A textarea posts CRLF, a JSON client LF, and a hidden

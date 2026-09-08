@@ -8,13 +8,34 @@ use Brain\Monkey\Functions;
 it('has defaults for every field and a section for each', function (): void {
     $fields = Schema::fields();
     $sections = Schema::sections();
-    expect($fields)->toHaveKeys(['provider.kind', 'provider.base_url', 'models.default', 'models.temperature', 'models.num_ctx', 'models.keep_alive', 'models.overrides', 'chat.system_prompt', 'chat.history_limit', 'privacy.save_history', 'privacy.usage_log', 'governance.site_monthly_tokens', 'governance.user_monthly_tokens', 'toolkits.user_agent']);
+    expect($fields)->toHaveKeys(['provider.kind', 'provider.base_url', 'models.default', 'models.temperature', 'models.num_ctx', 'models.keep_alive', 'models.overrides', 'chat.system_prompt', 'chat.history_limit', 'privacy.save_history', 'privacy.usage_log', 'governance.site_monthly_tokens', 'governance.user_monthly_tokens', 'toolkits.user_agent', 'toolkits.enabled']);
     foreach ($fields as $key => $f) {
         expect($f)->toHaveKeys(['type', 'default', 'section', 'label'], $key);
         expect($sections)->toHaveKey($f['section'], message: $key);
     }
     expect(Schema::defaults()['provider.base_url'])->toBe('http://localhost:11434/v1')
         ->and(Schema::defaults()['models.temperature'])->toBe(0.7);
+});
+
+// The toolkit switches are one field, a list of ids, so a toolkit is enabled by name and the
+// page can render one checkbox per built-in. What is stored is always the checked subset of
+// the field's options, in option order: an unknown id (a toolkit that was removed, a typo in a
+// PUT) is dropped rather than kept for a registry to trip on, and a duplicate is one entry.
+it('stores toolkits.enabled as the checked subset of its options, in option order, all three built-ins by default', function (): void {
+    $f = Schema::fields()['toolkits.enabled'];
+    expect($f['type'])->toBe('checkbox-list')
+        ->and($f['section'])->toBe('toolkits')
+        ->and($f['default'])->toBe(['web_fetch', 'summarize', 'draft_post'])
+        ->and(array_keys($f['options'] ?? []))->toBe(['web_fetch', 'summarize', 'draft_post']);
+    expect(Schema::sanitize(['toolkits.enabled' => ['draft_post', 'nope', '', 'web_fetch', 'web_fetch']], [])['toolkits.enabled'])->toBe(['web_fetch', 'draft_post']);
+    // The page posts a hidden '' ahead of the boxes (Fields::render()), so a save with every box
+    // unchecked arrives as [''] and is heard as "none", not as "absent, keep what is stored".
+    expect(Schema::sanitize(['toolkits.enabled' => ['']], ['toolkits.enabled' => ['summarize']])['toolkits.enabled'])->toBe([]);
+    // Not a list at all (a PUT of a bare string): fail closed. `array` falls back to its default
+    // here, but this default switches every tool on, and a malformed write must not do that.
+    expect(Schema::sanitize(['toolkits.enabled' => 'web_fetch'], ['toolkits.enabled' => ['summarize']])['toolkits.enabled'])->toBe([]);
+    // Left out of the write: keeps what is stored, as every field does.
+    expect(Schema::sanitize([], ['toolkits.enabled' => ['summarize']])['toolkits.enabled'])->toBe(['summarize']);
 });
 
 it('bounds the transcript sent to the model with chat.context_messages, 20 by default, 0 allowed for everything', function (): void {
