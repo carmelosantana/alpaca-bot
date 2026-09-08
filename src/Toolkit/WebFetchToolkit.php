@@ -36,11 +36,12 @@ use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Tool\ToolResult;
  * blank setting falls back to the schema's default rather than sending an empty header);
  * five seconds, so a slow host cannot hold a chat turn for the provider timeout on top of its
  * own; and 1 MiB on the wire, which the HTTP API enforces as it reads. What comes back is
- * reduced to text: script, style and noscript blocks go whole, block-level closes become
- * paragraph breaks, tags are stripped, entities decoded, and the result is cut at MAX_CHARS
+ * read in the charset it declares (utf8() says how that is decided), reduced to text in time
+ * linear in its size (text() says how, and why not wp_strip_all_tags()), and cut at MAX_CHARS
  * characters (not bytes) with a marker. A response whose Content-Type is not a text type is
  * refused outright: 1 MiB of a PDF or an image stripped of "tags" is noise the model would
- * have to pay for in context, and it would tell the user nothing.
+ * have to pay for in context, and it would tell the user nothing. A page PCRE gives up on is
+ * refused too, naming the reason, never returned as the part that survived.
  *
  * Nothing here executes what it fetched, and nothing the model sends reaches the shell or
  * eval(): the page is text in, text out (wordpress.org guideline 8).
@@ -125,12 +126,18 @@ final class WebFetchToolkit implements ToolkitInterface
             /* translators: 1: HTTP status code, 2: the URL */
             return ToolResult::error(sprintf(__('HTTP %1$d from %2$s', 'alpaca-bot'), $code, $safe));
         }
-        $type = strtolower(trim((string) explode(';', (string) wp_remote_retrieve_header($response, 'content-type'))[0]));
+        $header = (string) wp_remote_retrieve_header($response, 'content-type');
+        $type = strtolower(trim(explode(';', $header)[0]));
         if ($type !== '' && !str_starts_with($type, 'text/') && !in_array($type, self::TEXT_TYPES, true)) {
             /* translators: %s: the response's content type, e.g. application/pdf */
             return ToolResult::error(sprintf(__('That URL is not a text page (it answered %s), so there is nothing to read from it.', 'alpaca-bot'), $type));
         }
-        $text = self::text((string) wp_remote_retrieve_body($response));
+        try {
+            $text = self::text(self::utf8((string) wp_remote_retrieve_body($response), $header));
+        } catch (\UnexpectedValueException $e) {
+            /* translators: %s: why the page's bytes could not be read, e.g. a charset name or a PCRE error */
+            return ToolResult::error(sprintf(__('The page could not be read as text: %s', 'alpaca-bot'), $e->getMessage()));
+        }
         if (mb_strlen($text) > self::MAX_CHARS) {
             $text = mb_substr($text, 0, self::MAX_CHARS) . '…';
         }
@@ -195,16 +202,133 @@ final class WebFetchToolkit implements ToolkitInterface
     }
 
     /**
-     * The readable text of a page. A block-level close becomes a paragraph break before the
-     * tags go, so headings, paragraphs, list items and table rows keep their separation
-     * instead of running into one line; runs of blank lines collapse to one paragraph break.
+     * The page's bytes as UTF-8, which is what the regexes in text() and the character cut in
+     * fetch() require. The charset is the Content-Type header's parameter, else a `<meta>`
+     * charset in the first 4 KiB (a browser prescans 1 KiB and revises later; 4 KiB covers the
+     * head of nearly every page in one look), else UTF-8 if the bytes are UTF-8, else
+     * windows-1252, which is what the HTML standard says an undeclared page is. A page whose
+     * bytes contradict a declared UTF-8 keeps every line, with each bad byte replaced by
+     * mbstring's substitute character, since dropping the line was the failure this replaces.
+     * A charset this PHP cannot convert is a refusal that names it; guessing would hand the
+     * model text in the wrong alphabet as if it were the page.
+     *
+     * @throws \UnexpectedValueException with a message fit for the tool's error
+     */
+    private static function utf8(string $body, string $contentType): string
+    {
+        $charset = self::charset($contentType, $body) ?? (mb_check_encoding($body, 'UTF-8') ? 'utf-8' : 'windows-1252');
+        if ($charset === 'utf-8' || $charset === 'utf8') {
+            return mb_check_encoding($body, 'UTF-8') ? $body : mb_scrub($body, 'UTF-8');
+        }
+        try {
+            $converted = mb_convert_encoding($body, 'UTF-8', $charset);
+        } catch (\ValueError) {
+            $converted = false;
+        }
+        if (!is_string($converted)) {
+            /* translators: %s: the charset the page declared, e.g. x-mac-roman */
+            throw new \UnexpectedValueException(sprintf(__('its charset, %s, is not one this server can convert', 'alpaca-bot'), $charset));
+        }
+        return $converted;
+    }
+
+    /**
+     * The charset a page declares, lower-cased, or null: the header's `charset` parameter
+     * first, then a `<meta charset>` or `<meta http-equiv>` in the first 4 KiB. The ISO-8859-1
+     * family of labels is read as windows-1252, as browsers read it (WHATWG Encoding): pages
+     * labelled Latin-1 use the 0x80-0x9F range for the windows-1252 punctuation, which
+     * mbstring's ISO-8859-1 would turn into control characters.
+     */
+    private static function charset(string $contentType, string $body): ?string
+    {
+        $found = self::pcre(preg_match('/;\s*charset\s*=\s*["\']?\s*([a-z0-9._:-]+)/i', $contentType, $m)) === 1
+            || self::pcre(preg_match('/<meta\s[^>]*charset\s*=\s*["\']?\s*([a-z0-9._:-]+)/i', substr($body, 0, 4096), $m)) === 1;
+        if (!$found) {
+            return null;
+        }
+        $charset = strtolower($m[1]);
+        return in_array($charset, ['iso-8859-1', 'iso8859-1', 'iso_8859-1', 'latin1', 'l1', 'us-ascii', 'ascii', 'cp1252', 'cp-1252', 'x-cp1252'], true) ? 'windows-1252' : $charset;
+    }
+
+    /**
+     * The readable text of a page. Script, style, noscript and template elements go whole
+     * (their content is code, not prose; an unclosed one runs to the end of the page, as a
+     * browser reads it), then a block-level close becomes a paragraph break before the tags
+     * go, so headings, paragraphs, list items and table rows keep their separation instead of
+     * running into one line; runs of blank lines collapse to one paragraph break.
+     *
+     * Every step is linear in the page: the elements are found by one split on their open and
+     * close tags and a walk over the pieces, and the tags go through strip_tags(), a state
+     * machine. wp_strip_all_tags() is not used on purpose: its own `<(script|style)…>.*?</\1>`
+     * carries the quadratic scan this replaced (15 s at 432 KB of `<script>x` here, with the
+     * 1 MiB cap as the bound), and it casts the null PCRE answers when it gives up. Entities are
+     * decoded after the tags go, not before: a page that shows markup as text (a code sample
+     * on a docs page is `&lt;div&gt;` in the source) would otherwise have that text stripped as
+     * markup. So the result can spell `<script>`; it is text, never markup, and whoever renders
+     * it escapes it as text, as with any tool result.
+     *
+     * @throws \UnexpectedValueException when PCRE gave up on the page (see pcre())
      */
     private static function text(string $html): string
     {
-        $html = (string) preg_replace('#<(script|style|noscript|template)\b[^>]*>.*?</\1\s*>#is', '', $html);
-        $html = (string) preg_replace('#</(p|div|h[1-6]|li|tr|blockquote|pre|section|article|header|footer|title)\s*>|<br\s*/?>#i', "\n\n", $html);
-        $text = html_entity_decode(wp_strip_all_tags($html, false), ENT_QUOTES | ENT_HTML5, 'UTF-8');
-        $lines = array_map(static fn(string $line): string => trim((string) preg_replace('/[ \t\x{00A0}]+/u', ' ', $line)), explode("\n", str_replace(["\r\n", "\r"], "\n", $text)));
-        return trim((string) preg_replace("/\n{3,}/", "\n\n", implode("\n", $lines)));
+        $html = self::withoutContentless($html);
+        $html = self::pcre(preg_replace('#</(p|div|h[1-6]|li|tr|blockquote|pre|section|article|header|footer|title)\s*>|<br\s*/?>#i', "\n\n", $html));
+        $text = html_entity_decode(strip_tags($html), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        $lines = [];
+        foreach (explode("\n", str_replace(["\r\n", "\r"], "\n", $text)) as $line) {
+            $lines[] = trim(self::pcre(preg_replace('/[ \t\x{00A0}]+/u', ' ', $line)));
+        }
+        return trim(self::pcre(preg_replace("/\n{3,}/", "\n\n", implode("\n", $lines))));
+    }
+
+    /**
+     * The page without its script, style, noscript and template elements: one split on the
+     * open and close tags of those four, and a walk that drops every piece from an open tag to
+     * the matching close (a nested opener of another kind inside is content of the outer one,
+     * as in HTML) or to the end of the page when it never closes.
+     */
+    private static function withoutContentless(string $html): string
+    {
+        $parts = self::pcre(preg_split('#(<(?:script|style|noscript|template)\b[^>]*>|</(?:script|style|noscript|template)\s*>)#i', $html, -1, PREG_SPLIT_DELIM_CAPTURE));
+        $out = '';
+        $inside = null;
+        foreach ($parts as $i => $part) {
+            if ($i % 2 === 0) {
+                if ($inside === null) {
+                    $out .= $part;
+                }
+                continue;
+            }
+            $closing = $part[1] === '/';
+            $name = strtolower(rtrim(ltrim($part, '</'), "> \t\r\n"));
+            $name = (string) strtok($name, " \t\r\n/>");
+            if ($closing) {
+                if ($inside === $name) {
+                    $inside = null;
+                }
+            } elseif ($inside === null) {
+                $inside = $name;
+            }
+        }
+        return $out;
+    }
+
+    /**
+     * A preg_* answer, or an exception when PCRE gave up (a match or backtrack limit, a JIT
+     * stack limit, bad UTF-8 under `/u`). preg_replace() answers null then, preg_match() false,
+     * and preg_split() the pieces it had matched so far with no other sign, so the error code
+     * is read after every call: a `(string)` cast over the null, or a walk over the partial
+     * split, is a page silently emptied or truncated and reported as read.
+     *
+     * @template T
+     * @param T|null|false $result
+     * @return T
+     */
+    private static function pcre(mixed $result): mixed
+    {
+        if ($result === null || $result === false || preg_last_error() !== PREG_NO_ERROR) {
+            throw new \UnexpectedValueException(preg_last_error_msg());
+        }
+        return $result;
     }
 }
