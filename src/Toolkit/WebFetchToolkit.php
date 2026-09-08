@@ -14,16 +14,22 @@ use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Tool\ToolResult;
 /**
  * `web_fetch(url)`: one public web page as readable text, for a URL the user named.
  *
- * The model chooses the URL, so the fetch is held to what the HTTP API calls safe:
- * wp_http_validate_url() first, which refuses anything but http(s), a URL with credentials, a
- * port outside 80/443/8080, and a host that is or resolves to loopback, a private range, link
- * local (the cloud metadata address) and the rest of the special-purpose space; then
- * wp_safe_remote_get(), which applies the same check to every redirect hop. Both are core's,
- * and both honour core's `http_request_host_is_external` and `http_allowed_safe_ports` filters,
- * so a site that must reach an internal host opts in the way it would for any plugin. The
- * guard is asked here as well as inside the request so that the refusal is the tool's own
- * message, not a WP_Error about a blocked URL, and so that nothing is built for a URL that was
- * never going anywhere.
+ * The model chooses the URL, so the fetch is held to two checks in turn, and a URL has to pass
+ * both. Core's first: wp_http_validate_url(), which refuses anything but http(s), a URL with
+ * credentials, a port outside 80/443/8080, and a host that is or resolves to what the running
+ * core version knows to be local; then wp_safe_remote_get(), which applies the same check to
+ * every redirect hop. What core knows depends on its version: 6.9, the plugin's floor, refuses
+ * loopback, RFC 1918 and 0/8 and passes the link-local address where a cloud instance's
+ * metadata service answers with the instance's credentials; 7.1 refuses the IPv4 registry; no
+ * version reads an AAAA record. So the plugin's own check runs second, on the URL core returned
+ * and on every redirect target (through the `requests.before_redirect` action core fires for
+ * its own redirect validation): SpecialPurposeAddress, both families, over every address a
+ * name resolves to. Two of core's rules are kept on purpose, and hostIsPublic() says what each
+ * costs: the site's own host is exempt, and `http_request_host_is_external` opts a host in for
+ * this tool as it does for any plugin; `http_allowed_safe_ports` is core's and stays core's.
+ * Core's check is asked here as well as inside the request so that the refusal is the tool's
+ * own message, not a WP_Error about a blocked URL, and so that nothing is built for a URL that
+ * was never going anywhere.
  *
  * Three limits that are not negotiable from the model's side: the `toolkits.user_agent`
  * setting on every request, so a site owner can name the bot to the servers it visits (a
@@ -60,7 +66,10 @@ final class WebFetchToolkit implements ToolkitInterface
     /** Content types past `text/*` that are text: an API answer or a feed a user pasted the URL of. */
     private const TEXT_TYPES = ['application/json', 'application/xml', 'application/xhtml+xml', 'application/rss+xml', 'application/atom+xml', 'application/ld+json'];
 
-    public function __construct(private Store $store) {}
+    /**
+     * @param null|\Closure(string): list<string> $resolver every address a host name answers with, A and AAAA, or [] when it does not resolve; the default asks the system resolver, a test hands in its own
+     */
+    public function __construct(private Store $store, private ?\Closure $resolver = null) {}
 
     public function tools(): array
     {
@@ -80,21 +89,33 @@ final class WebFetchToolkit implements ToolkitInterface
     private function fetch(string $url): ToolResult
     {
         $safe = wp_http_validate_url(trim($url));
-        if (!is_string($safe)) {
+        if (!is_string($safe) || !$this->hostIsPublic($safe)) {
             return ToolResult::error(__('That URL is not allowed: only public http(s) addresses can be fetched, never a private, local, or malformed one.', 'alpaca-bot'));
         }
         $userAgent = trim((string) $this->store->get('toolkits.user_agent'));
         if ($userAgent === '') {
             $userAgent = (string) Schema::defaults()['toolkits.user_agent'];
         }
-        $response = wp_safe_remote_get($safe, [
-            'user-agent' => $userAgent,
-            'timeout' => self::TIMEOUT,
-            'redirection' => 3,
-            'limit_response_size' => self::MAX_BYTES,
-            // wp_safe_remote_get() sets this itself; spelled out so the intent is in one place.
-            'reject_unsafe_urls' => true,
-        ]);
+        // Every redirect hop through the same check. Core registers its own validate_redirects()
+        // on the Requests hook and re-fires it as this action, after its own callback has run.
+        $guard = function (string $location): void {
+            if (!$this->hostIsPublic($location)) {
+                throw new \WpOrg\Requests\Exception(__('The page redirected to an address that is not allowed.', 'alpaca-bot'), 'alpaca_bot.redirect_refused');
+            }
+        };
+        add_action('requests-requests.before_redirect', $guard);
+        try {
+            $response = wp_safe_remote_get($safe, [
+                'user-agent' => $userAgent,
+                'timeout' => self::TIMEOUT,
+                'redirection' => 3,
+                'limit_response_size' => self::MAX_BYTES,
+                // wp_safe_remote_get() sets this itself; spelled out so the intent is in one place.
+                'reject_unsafe_urls' => true,
+            ]);
+        } finally {
+            remove_action('requests-requests.before_redirect', $guard);
+        }
         if (is_wp_error($response)) {
             /* translators: %s: the HTTP API's error message */
             return ToolResult::error(sprintf(__('The page could not be fetched: %s', 'alpaca-bot'), $response->get_error_message()));
@@ -114,6 +135,63 @@ final class WebFetchToolkit implements ToolkitInterface
             $text = mb_substr($text, 0, self::MAX_CHARS) . '…';
         }
         return ToolResult::success($text);
+    }
+
+    /**
+     * Whether the URL's host is somewhere a model-chosen fetch may go: an address in none of
+     * SpecialPurposeAddress::RANGES, or a name every one of whose A and AAAA answers is. A name
+     * that does not resolve is refused (the fetch would fail anyway, and core below 7.1 lets it
+     * through). The site's own host is exempt, as it is in core: a local site resolves to a
+     * private address and can still read its own pages. The cost of the exemption is core's
+     * too: whatever else listens on that host on 80, 443 or 8080 is reachable. A special-purpose
+     * address a site has opted in through core's `http_request_host_is_external` filter is
+     * allowed here as well, so that opt-in means the same thing for this tool as for any plugin.
+     */
+    private function hostIsPublic(string $url): bool
+    {
+        $host = strtolower(trim((string) parse_url($url, PHP_URL_HOST), '.'));
+        if ($host === '') {
+            return false;
+        }
+        if ($host === strtolower((string) parse_url(home_url(), PHP_URL_HOST))) {
+            return true;
+        }
+        $literal = trim($host, '[]');
+        $addresses = SpecialPurposeAddress::isAddress($literal) ? [$literal] : ($this->resolver ?? self::resolve(...))($host);
+        if ($addresses === []) {
+            return false;
+        }
+        foreach ($addresses as $address) {
+            if (!SpecialPurposeAddress::isAddress($address)) {
+                return false;
+            }
+            if (SpecialPurposeAddress::match($address) !== null && !apply_filters('http_request_host_is_external', false, $host, $url)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * Every address a name answers with, both families, through the system resolver: A through
+     * gethostbynamel(), AAAA through dns_get_record(). The connection will use whichever the
+     * transport prefers, so both have to be looked at. Cost: two lookups on top of the one
+     * wp_http_validate_url() already made, normally answered from the resolver's cache since it
+     * just made the first; a resolver that times out costs its timeout. dns_get_record() warns on
+     * a failed query rather than returning false, and a warning here is a refused fetch, not an
+     * error worth logging, hence the suppression.
+     *
+     * @return list<string>
+     */
+    private static function resolve(string $host): array
+    {
+        $addresses = gethostbynamel($host) ?: [];
+        foreach ((array) @dns_get_record($host, DNS_AAAA) as $record) {
+            if (is_array($record) && is_string($record['ipv6'] ?? null)) {
+                $addresses[] = $record['ipv6'];
+            }
+        }
+        return $addresses;
     }
 
     /**

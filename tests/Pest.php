@@ -56,6 +56,9 @@ require_once dirname(__DIR__) . '/vendor-prefixed/autoload.php';
 if (!class_exists('WP_Error', false)) {
     require_once __DIR__ . '/stubs/wp-rest.php';
 }
+if (!class_exists(\WpOrg\Requests\Exception::class, false)) {
+    require_once __DIR__ . '/stubs/wp-requests.php';
+}
 
 // ---------------------------------------------------------------- test helpers
 // Pest loads every test file into one process, so a helper declared at the root of a test

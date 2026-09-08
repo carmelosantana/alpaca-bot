@@ -103,10 +103,13 @@ final class ToolkitsTest extends TestCase
     }
 
     /**
-     * Core's wp_http_validate_url() is the guard, and it resolves a hostname to decide, so a
-     * loopback name, a private address and a scheme the HTTP API does not speak are all refused
-     * before any request is built. The list is what the guard documents refusing, not every
-     * range it knows.
+     * What core's wp_http_validate_url() answers on the harness's WordPress: it resolves a
+     * hostname to decide, so a loopback name, a private address and a scheme the HTTP API does
+     * not speak are all refused before any request is built. This proves core, on this core
+     * version only: 7.1 refuses the link-local address here, 6.9 does not. The plugin's own
+     * check, which refuses these on every version, is pinned in tests/Unit/Toolkit/
+     * WebFetchToolkitTest.php with core's guard stubbed to accept everything, and its table in
+     * SpecialPurposeAddressTest.php; this test cannot tell the two apart and does not try to.
      */
     public function test_web_fetch_refuses_private_loopback_and_malformed_urls_through_core(): void
     {
@@ -131,7 +134,9 @@ final class ToolkitsTest extends TestCase
             $seen = ['args' => $args, 'url' => $url];
             return ['headers' => ['content-type' => 'text/html; charset=utf-8'], 'body' => '<html><body><h1>Hi</h1><script>x()</script><p>there</p></body></html>', 'response' => ['code' => 200, 'message' => 'OK'], 'cookies' => [], 'filename' => null];
         }, 10, 3);
-        // The site's own host is the one wp_http_validate_url() passes without a DNS lookup.
+        // The site's own host is the one wp_http_validate_url() passes without a DNS lookup, and
+        // the one the plugin's check exempts: in the container it resolves to a docker bridge
+        // address (172.17.0.1, private), so a check without the exemption fails here.
         $url = home_url('/a-page/');
         $tool = (new WebFetchToolkit(Plugin::instance()->get(Store::class)))->tools()[0];
         $res = $tool->execute(['url' => $url]);

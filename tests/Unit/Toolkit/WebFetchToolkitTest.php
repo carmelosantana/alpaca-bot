@@ -6,12 +6,17 @@ use AlpacaBot\Settings\Store;
 use AlpacaBot\Toolkit\WebFetchToolkit;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Enum\ToolResultStatus;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Tool\Tool;
+use Brain\Monkey\Actions;
+use Brain\Monkey\Filters;
 use Brain\Monkey\Functions;
 
 // The HTTP API is stubbed: wp_http_validate_url() decides what may be fetched, wp_safe_remote_get()
 // does the fetch. What core makes of a loopback address or a private range is pinned in
 // tests/Integration/ToolkitsTest.php against real core; here the guard's answer is given and
-// what the tool does with it is what is under test.
+// what the tool does with it is what is under test. The plugin's own address check runs after
+// core's, over the addresses a resolver answers: the helper hands in a resolver that says
+// "public" so the tests about everything else never touch DNS, and the tests about the check
+// hand in their own.
 
 /** The response `wp_safe_remote_get()` answers, in the array shape the HTTP API uses, and the retrieve_* helpers reading it. */
 function webFetchResponse(string $body, int $code = 200, string $contentType = 'text/html; charset=utf-8'): array
@@ -23,15 +28,16 @@ function webFetchResponse(string $body, int $code = 200, string $contentType = '
     return ['headers' => ['content-type' => $contentType], 'body' => $body, 'response' => ['code' => $code]];
 }
 
-function webFetchTool(string $userAgent = 'UA/1'): Tool
+function webFetchTool(string $userAgent = 'UA/1', ?\Closure $resolver = null): Tool
 {
-    $tool = (new WebFetchToolkit(new Store(['toolkits.user_agent' => $userAgent])))->tools()[0];
+    $tool = (new WebFetchToolkit(new Store(['toolkits.user_agent' => $userAgent]), $resolver ?? static fn(string $host): array => ['93.184.216.34']))->tools()[0];
     expect($tool)->toBeInstanceOf(Tool::class);
     return $tool;
 }
 
 beforeEach(function (): void {
     Functions\when('wp_strip_all_tags')->alias(static fn(string $s): string => strip_tags($s));
+    Functions\when('home_url')->justReturn('https://site.test/');
 });
 
 it('fetches a URL the guard passes, with the configured user agent under the timeout and size caps, and returns the readable text', function (): void {
@@ -48,6 +54,15 @@ it('fetches a URL the guard passes, with the configured user agent under the tim
     $res = $tool->execute(['url' => 'https://example.test/a']);
     expect($res->status)->toBe(ToolResultStatus::Success)
         ->and($res->content)->toBe("T\n\nHi\n\nFish & chips\n\none\n\ntwo");
+});
+
+// The guard's return value is what is fetched, not what was passed in: core returns the
+// wp_kses_bad_protocol() form of the URL, which can differ from the input, so a stub that
+// answered the same string could not tell `wp_safe_remote_get($safe)` from `($url)`.
+it('fetches the URL the guard returns, not the one it was given', function (): void {
+    Functions\expect('wp_http_validate_url')->once()->with('https://example.test/a')->andReturn('https://example.test/normalised');
+    Functions\expect('wp_safe_remote_get')->once()->withArgs(static fn(string $url): bool => $url === 'https://example.test/normalised')->andReturn(webFetchResponse('<p>ok</p>'));
+    expect(webFetchTool()->execute(['url' => ' https://example.test/a '])->content)->toBe('ok');
 });
 
 it('refuses a URL the guard rejects before any request is made, and says why', function (): void {
@@ -111,4 +126,73 @@ it('carries guidelines for the system prompt', function (): void {
     $kit = new WebFetchToolkit(new Store([]));
     expect($kit->tools())->toHaveCount(1)
         ->and($kit->guidelines())->toContain('web_fetch');
+});
+
+// ---------------------------------------------------------------- the plugin's own address check
+// wp_http_validate_url() accepts everything in these tests, which is what core below 7.1 does
+// for link-local (the cloud metadata address), CGNAT, multicast and every IPv6 address; the
+// refusal has to be the plugin's. SpecialPurposeAddressTest walks the whole table; these pin
+// that the tool asks it: for a literal, for every address a name resolves to, and for a
+// redirect target, with the site's own host exempt as it is in core.
+
+it('refuses a special-purpose address itself when core accepts it: a literal, a name that resolves to one among public ones, and a name that does not resolve', function (): void {
+    Functions\when('wp_http_validate_url')->returnArg();
+    Functions\expect('wp_safe_remote_get')->never();
+    $answers = [
+        'mixed.test' => ['93.184.216.34', '10.0.0.7'],
+        'v6.test' => ['93.184.216.34', '::1'],
+        'nowhere.test' => [],
+    ];
+    $tool = webFetchTool(resolver: static fn(string $host): array => $answers[$host] ?? ['1.2.3.4']);
+    foreach ([
+        'http://169.254.169.254/latest/meta-data/iam/security-credentials/',
+        'http://[::ffff:169.254.169.254]/latest/meta-data/',
+        'http://[fe80::1]/', 'http://[::1]/', 'http://[fd00::1]/', 'http://[ff02::1]/',
+        'http://100.64.0.1/', 'http://0.0.0.0/', 'http://224.0.0.1/', 'http://255.255.255.255/',
+        'http://127.0.0.1/', 'http://10.0.0.1/', 'http://172.16.0.1/', 'http://192.168.1.1/',
+        'http://mixed.test/', 'http://v6.test/', 'http://nowhere.test/',
+    ] as $url) {
+        $res = $tool->execute(['url' => $url]);
+        expect($res->status)->toBe(ToolResultStatus::Error, $url)
+            ->and($res->content)->toContain('not allowed');
+    }
+});
+
+it('lets a public address through, resolves a name once for both families, and exempts the site\'s own host the way core does', function (): void {
+    Functions\when('wp_http_validate_url')->returnArg();
+    $asked = [];
+    $tool = webFetchTool(resolver: static function (string $host) use (&$asked): array {
+        $asked[] = $host;
+        return $host === 'site.test' ? ['127.0.0.1'] : ['93.184.216.34', '2606:4700::1'];
+    });
+    Functions\expect('wp_safe_remote_get')->times(3)->andReturn(webFetchResponse('<p>ok</p>'));
+    expect($tool->execute(['url' => 'https://public.test/page'])->content)->toBe('ok')
+        ->and($tool->execute(['url' => 'http://93.184.216.34/'])->content)->toBe('ok')
+        // The site's own host resolves privately here (a local site does), and is fetched anyway.
+        ->and($tool->execute(['url' => 'https://SITE.test/about/'])->content)->toBe('ok')
+        ->and($asked)->toBe(['public.test']);
+});
+
+it('honours core\'s http_request_host_is_external opt-in for a special-purpose address, as the docblock promises', function (): void {
+    Functions\when('wp_http_validate_url')->returnArg();
+    Filters\expectApplied('http_request_host_is_external')->once()->with(false, '169.254.169.254', 'http://169.254.169.254/')->andReturn(true);
+    Functions\expect('wp_safe_remote_get')->once()->andReturn(webFetchResponse('<p>internal</p>'));
+    expect(webFetchTool()->execute(['url' => 'http://169.254.169.254/'])->content)->toBe('internal');
+});
+
+it('applies the same check to every redirect hop through the HTTP API\'s before_redirect hook, and unhooks after the fetch', function (): void {
+    Functions\when('wp_http_validate_url')->returnArg();
+    $guard = null;
+    Actions\expectAdded('requests-requests.before_redirect')->once()->whenHappen(static function (\Closure $callback) use (&$guard): void {
+        $guard = $callback;
+    });
+    Actions\expectRemoved('requests-requests.before_redirect')->once();
+    $tool = webFetchTool(resolver: static fn(string $host): array => $host === 'internal.test' ? ['10.0.0.7'] : ['93.184.216.34']);
+    Functions\expect('wp_safe_remote_get')->once()->andReturn(webFetchResponse('<p>ok</p>'));
+    expect($tool->execute(['url' => 'https://public.test/'])->content)->toBe('ok')
+        ->and($guard)->toBeInstanceOf(\Closure::class);
+    $guard('https://elsewhere.test/');
+    foreach (['http://169.254.169.254/', 'http://internal.test/', 'http://[::1]/'] as $location) {
+        expect(fn() => $guard($location))->toThrow(\WpOrg\Requests\Exception::class, 'not allowed');
+    }
 });
