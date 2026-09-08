@@ -45,3 +45,23 @@ it('sends the model one system message holding the site text and every toolkit\'
         ->and($seen['messages'][2]->content())->toBe('now')
         ->and(array_map(static fn(object $t): string => $t->name(), $seen['tools']))->toBe(['echo_a', 'echo_b', 'done']);
 });
+
+// Ollama routes some thinking models' whole completion into reasoning and leaves the content
+// empty (the vendored loop names qwen and gemma). The library's default is to nudge twice and
+// then give up with an EmptyResponse finish; a chat should show the answer the model wrote,
+// even if it wrote it as a thought, rather than a line saying it gave none.
+it('nudges a model that answers only in reasoning twice, then takes the reasoning as the answer', function (): void {
+    $provider = Mockery::mock(ProviderInterface::class);
+    $nudges = [];
+    $provider->shouldReceive('stream')->times(3)->andReturnUsing(static function (array $messages) use (&$nudges): \Generator {
+        $last = $messages[array_key_last($messages)];
+        $nudges[] = $last instanceof UserMessage ? $last->content() : '';
+        yield new Response('', ProviderFinishReason::Stop, reasoning: 'the thought');
+    });
+    $output = (new Assistant($provider, 'Site'))->run(new UserMessage('now'));
+    expect($output->content)->toBe('the thought')
+        ->and($output->finishReason)->toBe(\AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Enum\AgentFinishReason::Stop)
+        ->and($nudges[0])->toBe('now')
+        ->and($nudges[1])->toContain('Reply again')
+        ->and($nudges[2])->toContain('Reply again');
+});

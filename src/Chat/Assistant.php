@@ -6,6 +6,7 @@ namespace AlpacaBot\Chat;
 
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Agent\AbstractAgent;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Contract\ProviderInterface;
+use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Enum\EmptyResponseHandling;
 
 /**
  * The chat assistant as a php-agents agent: the site's system prompt as its instructions, the
@@ -34,13 +35,21 @@ use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Contract\ProviderInterface;
  * iteration is a provider call the monthly cap pays for. The budget is told to the model in
  * the prompt (SystemPrompt::withIterationBudget()), so it can wrap up rather than be cut off.
  *
+ * An empty reply is nudged, then taken from the reasoning (EmptyResponseHandling::
+ * NudgeThenFallback), against the library's default of nudging and then giving up. Ollama
+ * routes some thinking models' whole completion into reasoning and leaves the content empty
+ * (run() names qwen and gemma; the harness model is one), and for a chat the answer the model
+ * wrote as a thought is worth more than a line saying it gave none. The nudges stay: a model
+ * that can answer plainly when asked should, and the fallback is the last resort, after the
+ * library's two retries.
+ *
  * @since 0.5.0
  */
 final class Assistant extends AbstractAgent
 {
     public function __construct(ProviderInterface $provider, private string $instructionsText, int $maxIter = 6)
     {
-        parent::__construct($provider, $maxIter);
+        parent::__construct($provider, $maxIter, emptyResponseHandling: EmptyResponseHandling::NudgeThenFallback);
     }
 
     public function instructions(): string

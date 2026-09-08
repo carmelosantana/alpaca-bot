@@ -66,13 +66,17 @@ final class Plugin
         $this->set(Context\Collector::class, $collector);
         $prefs = new Chat\UserPrefs();
         $this->set(Chat\UserPrefs::class, $prefs);
-        $this->set(Chat\Pipeline::class, new Chat\Pipeline($store, $factory, $this->get(Provider\ModelCatalog::class), $conversations, $meter, $caps, $collector, $prefs));
+        // The registry is built empty before the pipeline and filled after it: the pipeline asks
+        // the registry what a turn may run, and the summarize toolkit runs its inner turn through
+        // the pipeline, so one of the two has to exist before the other is complete. Nothing is
+        // read from the registry until a turn runs, well after plugins_loaded.
+        $registry = new Toolkit\Registry($store);
+        $this->set(Chat\Pipeline::class, new Chat\Pipeline($store, $factory, $this->get(Provider\ModelCatalog::class), $conversations, $meter, $caps, $collector, $prefs, $registry));
         // The built-in toolkits, under the ids Schema's `toolkits.enabled` options name. This
         // runs on plugins_loaded, before the current user is resolved, so the two toolkits that
         // act as a user take get_current_user_id as a closure and ask it when a tool runs, not
         // here: an id read now would be 0 for every turn. The registry decides what is enabled
         // when a turn asks (Toolkit\Registry), so nothing about the setting is read here either.
-        $registry = new Toolkit\Registry($store);
         $registry->register('web_fetch', new Toolkit\WebFetchToolkit($store));
         $registry->register('summarize', new Toolkit\SummarizeToolkit($this->get(Chat\Pipeline::class), get_current_user_id(...)));
         $registry->register('draft_post', new Toolkit\DraftPostToolkit(get_current_user_id(...)));

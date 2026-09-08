@@ -112,6 +112,10 @@ it('registers the settings store, provider factory, model catalog, conversation 
     expect($enabled['web_fetch'])->toBeInstanceOf(WebFetchToolkit::class)
         ->and($enabled['summarize'])->toBeInstanceOf(SummarizeToolkit::class)
         ->and($enabled['draft_post'])->toBeInstanceOf(DraftPostToolkit::class);
+    // The pipeline holds that same registry, so a chat turn can run the toolkits: the two are
+    // built in a cycle (summarize runs through the pipeline; the pipeline asks the registry),
+    // which register() resolves by building the registry empty first and filling it after.
+    expect((new ReflectionProperty(Pipeline::class, 'toolkits'))->getValue($plugin->get(Pipeline::class)))->toBe($registry);
 
     // A 0.4 site: one legacy option present, no flag -> the hook migrates and flags.
     $legacy = ['alpaca_bot_api_url' => 'http://localhost:11434'];
