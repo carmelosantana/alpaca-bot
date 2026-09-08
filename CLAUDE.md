@@ -10,7 +10,7 @@ Kanboard project 17 (hosted) is the tracker of record; ticket ids are Kanboard t
 | After that | Stay on 0.x, one minor per release: 0.6 admin-wide panel + MCP toolkit, 0.7 front-end chat, then whatever the board says next. |
 | 1.0 | **Reserved** for feature complete and fully tested. Do not write "1.0" in code, docs, commit messages, or ticket titles for current work. |
 | Old wording | Specs, plans, and tickets titled "1.0" (written 2026-09-05) mean this 0.x line. They are not rewritten; this file wins. |
-| Branch | Integration branch is `develop` (was `1.0` until the P2 chip finished). Merge to `main` only at a release. Draft PR #66 tracks it. |
+| Branch | Integration branch is `develop` (was `1.0` until the P2 chip finished). Merge to `main` only at a release. Draft PR #67 tracks it (GitHub closed #66 when the branch was renamed). |
 | Public headers | `readme.txt` keeps `Stable tag: 0.4.17` until 0.5.0 is tagged; `Version:` and `Plugin::VERSION` carry `0.5.0-dev`. |
 
 ## Local site
