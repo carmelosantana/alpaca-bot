@@ -245,8 +245,9 @@ function currentScreenPost(int $id, string $title, string $content, string $type
  * @param \AlpacaBot\Context\Context[] $contexts what the one registered source returns
  * @param list<string>|null $catalog model ids the cached catalog lists; null leaves the catalog transient expired,
  *   so the catalog is discovered from `$provider` (its models() is called) and the provider filter fires twice
+ * @param \AlpacaBot\Chat\UserPrefs|null $prefs the per-user preferences the pipeline consults; null is the CLI's case (none)
  */
-function pipelineWith(mixed $provider, array $settings = [], array $contexts = [], ?array $catalog = ['llama3.2']): object
+function pipelineWith(mixed $provider, array $settings = [], array $contexts = [], ?array $catalog = ['llama3.2'], ?AlpacaBot\Chat\UserPrefs $prefs = null): object
 {
     $h = new class {
         public Pipeline $pipeline;
@@ -313,6 +314,7 @@ function pipelineWith(mixed $provider, array $settings = [], array $contexts = [
         $h->meter,
         new CapPolicy($h->store, $h->meter),
         new Collector([collectorSource('test', $contexts)]),
+        $prefs,
     );
     return $h;
 }

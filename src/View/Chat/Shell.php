@@ -27,28 +27,24 @@ final class Shell extends Component
      * @param list<array{id: int, title: string, created: int}> $history
      * @param int $postId the post being edited when the screen was opened from one, else 0
      * @param string|null $sprite path to the icon sprite; null means the plugin's own assets/img/icons.svg
+     * @param string|null $model the model the select and the composer start on (the user's effective model, UserPrefs::modelFor()); null means the catalog's default
      */
-    public function __construct(private Store $store, private ModelCatalog $catalog, private ?Conversation $conversation, private array $history, private string $nonce, private int $postId = 0, private ?string $sprite = null) {}
+    public function __construct(private Store $store, private ModelCatalog $catalog, private ?Conversation $conversation, private array $history, private string $nonce, private int $postId = 0, private ?string $sprite = null, private ?string $model = null) {}
 
     public function render(): string
     {
         $id = $this->conversation === null ? 0 : $this->conversation->id;
         $title = $this->conversation === null ? '' : $this->conversation->title;
         $messages = $this->conversation === null ? [] : $this->conversation->messages;
-        $model = $this->catalog->defaultId($this->store);
-        $user = wp_get_current_user();
-        $userAvatar = get_avatar_url($user->ID);
-        $assistantAvatar = (string) $this->store->get('chat.assistant_avatar');
-        if ($assistantAvatar === '') {
-            $assistantAvatar = plugins_url('assets/img/icon-80.png', ALPACA_BOT_FILE);
-        }
+        $model = $this->model ?? $this->catalog->defaultId($this->store);
+        $who = Participants::current($this->store);
 
         $header = new Header(
             $this->t('Alpaca Bot'),
             new ModelSelect($this->catalog->all(), $model, (bool) $this->store->get('chat.user_can_change_model')),
             new HistorySelect($this->history, $id, $title),
         );
-        $list = new MessageList($messages, new Markdown(), $this->store, $user->display_name, is_string($userAvatar) ? $userAvatar : '', $assistantAvatar, $id);
+        $list = new MessageList($messages, new Markdown(), $this->store, $who->userName, $who->userAvatar, $who->assistantAvatar, $id);
         $chat = $this->tag('div', ['id' => 'ab-chat', 'data-conversation' => (string) $id, 'data-rest' => $this->u(rest_url('alpaca-bot/v1')), 'data-history-limit' => (string) (int) $this->store->get('chat.history_limit')],
             $this->tag('div', ['id' => 'ab-status', 'class' => 'ab-status', 'role' => 'status', 'aria-live' => 'polite'], '') . $list->render());
         $composer = new Composer($this->store, $this->nonce, $id, $model, $this->postId);

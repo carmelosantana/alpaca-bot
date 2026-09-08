@@ -57,6 +57,7 @@ final class Pipeline
         private UsageMeter $meter,
         private CapPolicy $caps,
         private Collector $collector,
+        private ?UserPrefs $prefs = null,
     ) {}
 
     /**
@@ -115,7 +116,7 @@ final class Pipeline
             throw new \InvalidArgumentException(__('The message is empty.', 'alpaca-bot'));
         }
         $this->caps->assertAllowed($userId);
-        $model = $this->model($options);
+        $model = $this->model($userId, $options);
         $requested = (int) ($options['conversation_id'] ?? 0);
         $conversation = $this->conversation($userId, $requested);
         // From here the conversation has its post (when saving is on). Nothing is written to it
@@ -260,7 +261,9 @@ final class Pipeline
             ['prompt_tokens' => $prompt, 'completion_tokens' => $completion],
             0,
             [],
-            ['partial' => true] + ($reasoning !== '' ? ['reasoning' => $reasoning] : []),
+            // duration_ms as the finished path stores it: the usage is non-null, so a reloaded
+            // transcript shows a receipt for this turn too, and that receipt reads the seconds.
+            ['partial' => true, 'duration_ms' => $durationMs] + ($reasoning !== '' ? ['reasoning' => $reasoning] : []),
         ));
         $this->conversations->save($conversation);
         $this->meter->record($userId, $model, $prompt, $completion, $durationMs, $conversation->id);
@@ -321,8 +324,10 @@ final class Pipeline
     /**
      * The model for this turn: the caller's choice while users may change model, provided the
      * catalog lists it (the catalog is the allow-list: `alpaca_bot/models` has run over it and
-     * embedding models are already out); else the catalog's default, which is never '' as long
-     * as the provider lists anything.
+     * embedding models are already out); else the user's stored default (UserPrefs::modelFor(),
+     * under the same setting and the same catalog check, when the pipeline was given the
+     * preferences: the CLI is not); else the catalog's default, which is never '' as long as the
+     * provider lists anything.
      *
      * The allow-list only applies when there is one. ModelCatalog reads a provider it cannot
      * reach as an empty, uncached list, indistinguishable from a provider that lists nothing,
@@ -335,7 +340,7 @@ final class Pipeline
      * @throws \InvalidArgumentException when the catalog lists models and the requested one is not among them
      * @throws \RuntimeException when no model is configured and the provider lists none
      */
-    private function model(array $options): string
+    private function model(int $userId, array $options): string
     {
         $requested = trim((string) ($options['model'] ?? ''));
         if ($requested !== '' && (bool) $this->store->get('chat.user_can_change_model')) {
@@ -346,7 +351,7 @@ final class Pipeline
             }
             return $requested;
         }
-        $model = $this->catalog->defaultId($this->store);
+        $model = $this->prefs?->modelFor($userId, $this->catalog, $this->store) ?? $this->catalog->defaultId($this->store);
         if ($model === '') {
             throw new \RuntimeException(__('No model is configured and the provider lists none.', 'alpaca-bot'));
         }

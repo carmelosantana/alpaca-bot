@@ -64,9 +64,12 @@ final class StreamRoutesTest extends TestCase
     {
         $server = rest_get_server();
         $this->assertArrayHasKey('/alpaca-bot/v1/chat/(?P<id>\d+)/stream', $server->get_routes());
+        // ViewController hooks its own serve() at the same priority; only this controller's is counted.
         $hooked = [];
         foreach ($GLOBALS['wp_filter']['rest_pre_serve_request']->callbacks[PHP_INT_MAX] ?? [] as $hook) {
-            $hooked[] = is_array($hook['function']) && $hook['function'][0] instanceof StreamController ? $hook['function'][1] : null;
+            if (is_array($hook['function']) && $hook['function'][0] instanceof StreamController) {
+                $hooked[] = $hook['function'][1];
+            }
         }
         $this->assertSame(['serve'], $hooked);
     }

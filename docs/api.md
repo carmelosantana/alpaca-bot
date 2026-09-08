@@ -108,6 +108,11 @@ Each route declares a capability. Chat, streaming, conversations, models and usa
 | `usage` | `GET /usage` | `edit_posts` |
 | `settings` | `GET\|PUT /settings` | `manage_options` |
 | `settings/schema` | `GET /settings/schema` | `manage_options` |
+| `view/messages` | `GET /view/messages/{id}` | `edit_posts` |
+| `view/history` | `GET /view/history` | `edit_posts` |
+| `view/models` | `GET /view/models` | `edit_posts` |
+| `view/default-model` | `POST /view/default-model` | `edit_posts` |
+| `view/bubble` | `GET\|POST /view/bubble` | `edit_posts` |
 
 The filter is `alpaca_bot/capability/{key}` with signature `(string $capability,
 \WP_REST_Request $request)`, and the key is the route path with its `{id}` segment removed, so
@@ -147,8 +152,15 @@ the route rather than close it.
 | `PUT` | `/settings` | `manage_options` | no |
 | `GET` | `/settings/schema` | `manage_options` | no |
 | `GET` | `/usage?user=` | `edit_posts` (`user=all` needs `manage_options`) | no |
+| `GET` | `/view/messages/{id}` | `edit_posts` | no |
+| `GET` | `/view/history?conversation_id=` | `edit_posts` | no |
+| `GET` | `/view/models?refresh=` | `edit_posts` | yes (`chat` bucket) |
+| `POST` | `/view/default-model` | `edit_posts` | no |
+| `GET` | `/view/bubble?role=&streaming=` | `edit_posts` | no |
+| `POST` | `/view/bubble` | `edit_posts` | no |
 
-Every response is JSON except a redeemed stream, which is `text/event-stream`. In the examples,
+Every response is JSON except a redeemed stream, which is `text/event-stream`, and the `/view/*`
+fragments, which are `text/html` (section 3, "The `/view/*` fragments"). In the examples,
 `$B` is the base URL and `$PW` the Application Password:
 
 ```
@@ -458,6 +470,56 @@ $ curl -s -u "admin:$PW" "$B/usage&user=7"
 (The harness site has one user, so `me` and `all` agree.) An Editor asking for `user=all` gets a
 403 and sees `caps: {user}` only, per `SettingsRoutesTest::test_usage_route_reports_the_month`.
 
+### The `/view/*` fragments
+
+The chat screen (section 7) is server-rendered, and these routes render its pieces again on
+demand: htmx swaps the selects, and the screen's script asks for the bubbles. They are for the
+screen. A client that wants data reads the JSON routes above; these answer HTML, escaped where
+it is built, under `Content-Type: text/html; charset=utf-8` and an `X-Alpaca-Bot-View: 1`
+header. An error is still core's JSON error shape.
+
+| Route | Answers | Parameters |
+|---|---|---|
+| `GET /view/messages/{id}` | The transcript (`#ab-messages`) of one of your conversations; 404 for anyone else's, as `/conversations/{id}` | |
+| `GET /view/history` | The history select (`#ab-history`) | `conversation_id`: the open conversation, selected; one the `chat.history_limit` cut is listed with its own title; one that is not yours renders as a new chat |
+| `GET /view/models` | The model select (`#ab-model`) on your effective model | `refresh` (boolean): ask the provider again, as `/models` |
+| `POST /view/default-model` | An inline admin notice; stores `model` as your default (Kanboard #565) | `model` (string, required). 403 while `chat.user_can_change_model` is off, whatever the select says |
+| `GET /view/bubble` | An empty bubble for the screen to stream into | `role` (`user`\|`assistant`, default `assistant`), `streaming` (boolean: a polite live region) |
+| `POST /view/bubble` | A finished bubble, an assistant's content rendered as markdown | `role` (required), `content`, `model`, `usage` (`{prompt_tokens, completion_tokens}` or null), `duration_ms` |
+
+Your effective model is the one you last chose in the select (stored as user meta
+`alpaca_bot_default_model`) while the site lets users choose and the provider still lists it,
+else the site's `models.default`. The same rule picks the model for a `POST /chat` that names
+none, so the model the screen shows is the model the turn runs on.
+
+```
+$ curl -si -u "admin:$PW" "$B/view/history" | grep -iE '^(HTTP|content-type|x-alpaca)'
+HTTP/2 200
+content-type: text/html; charset=utf-8
+x-alpaca-bot-view: 1
+
+$ curl -s -u "admin:$PW" -d 'model=qwen3-vl:2b' "$B/view/default-model"
+<div class="notice notice-success inline"><p>Default model saved.</p></div>
+
+$ curl -s -u "admin:$PW" -H 'Content-Type: application/json' \
+    -d '{"role":"assistant","content":"Hello **you**","model":"qwen3-vl:2b","usage":{"prompt_tokens":16,"completion_tokens":3776},"duration_ms":14941}' "$B/view/bubble"
+<article class="ab-msg ab-msg--assistant" data-role="assistant">…<div class="ab-msg__content"><p>Hello <strong>you</strong></p>
+</div><footer class="ab-receipt">qwen3-vl:2b · 3,792 tokens · 14.9 s</footer></div></article>
+
+$ curl -s -u "admin:$PW" "$B/view/messages/999999"
+{"code":"alpaca_bot_not_found","message":"Conversation not found.","data":{"status":404}}
+```
+
+With `chat.user_can_change_model` off:
+
+```
+$ curl -s -u "admin:$PW" -d 'model=qwen3-vl:2b' "$B/view/default-model"
+{"code":"rest_forbidden","message":"This site does not let users change the model.","data":{"status":403}}
+```
+
+`?_envelope=1` rebuilds the response, so the view mark is lost with it and the fragment comes
+back as the JSON envelope's `body` string; the fragments are not meant to be enveloped.
+
 ## 4. Streaming (server-sent events)
 
 Two requests: `POST /chat` with `"stream": true` for a ticket, then `GET` on its `stream_url`.
@@ -569,7 +631,7 @@ route the same object is the `error` frame's data.
 | 400 | `rest_invalid_param`, `rest_missing_callback_param` | Core's schema validation: `limit` out of 0-200, `user` not `me`/`all`, `refresh` not a boolean, a stream GET with no `token` | `params`, `details` |
 | 401 | `rest_forbidden` | Not authenticated (no cookie+nonce, no Application Password) | |
 | 402 | `alpaca_bot_cap_exceeded` | The monthly token cap is spent (`governance.user_monthly_tokens` or `governance.site_monthly_tokens`) | `scope` (`user`/`site`); `limit` and `used` only when `scope` is `user` |
-| 403 | `rest_forbidden` | Authenticated but lacking the capability; a stream token that is not yours, spent, or expired | |
+| 403 | `rest_forbidden` | Authenticated but lacking the capability; a stream token that is not yours, spent, or expired; a default model posted while `chat.user_can_change_model` is off | |
 | 404 | `alpaca_bot_not_found` | A conversation that does not exist or is not yours | |
 | 404 | `rest_no_route` | Core: no such route for that method (e.g. `POST` on the stream route) | |
 | 405 | `alpaca_bot_method_not_allowed` | `HEAD` on the stream route (`Allow: GET`) | |
@@ -653,8 +715,8 @@ retry-after: 10
 
 ## 7. The admin surface
 
-The plugin's menu slug is `alpaca-bot`: `admin.php?page=alpaca-bot` is the chat screen (the P3
-plan supplies it) and `admin.php?page=alpaca-bot-settings&tab={provider|models|chat|privacy|governance|toolkits}`
+The plugin's menu slug is `alpaca-bot`: `admin.php?page=alpaca-bot` is the chat screen and
+`admin.php?page=alpaca-bot-settings&tab={provider|models|chat|privacy|governance|toolkits}`
 the settings page, one Schema section per tab, saved through core's `options.php` with the same
 `Schema::sanitize()` the REST route uses. Settings is always `manage_options`.
 
@@ -676,6 +738,12 @@ thing to reach for when a menu will not appear, and `(string) true` is `'1'`, wh
 symptom at all; on a site that has narrowed the capability, or that has roles built from user
 levels, it silently replaces the answer with a different question. To widen the screen, name a
 capability.
+
+The bare chat screen is a new chat. `admin.php?page=alpaca-bot&conversation={id}` opens one of
+your own (anyone else's, or a missing one, is a new chat again), and `&post={id}` names the post
+the screen was opened from, which rides on the first turn as its context. The screen's requests
+are the `/view/*` fragments (section 3) and `POST /chat`; its model select posts your choice to
+`/view/default-model` on change, and the screen opens on that choice next time.
 
 ## 8. Adding routes
 

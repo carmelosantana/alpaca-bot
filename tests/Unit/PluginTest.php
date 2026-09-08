@@ -2,20 +2,26 @@
 
 declare(strict_types=1);
 
+use AlpacaBot\Admin\Assets;
+use AlpacaBot\Admin\ChatScreen;
 use AlpacaBot\Admin\Menu;
 use AlpacaBot\Admin\SettingsPage;
 use AlpacaBot\Chat\CapPolicy;
 use AlpacaBot\Chat\ConversationStore;
 use AlpacaBot\Chat\Pipeline;
 use AlpacaBot\Chat\UsageMeter;
+use AlpacaBot\Chat\UserPrefs;
 use AlpacaBot\Cli\ChatCommand;
 use AlpacaBot\Context\Collector;
 use AlpacaBot\Plugin;
 use AlpacaBot\Provider\Factory;
 use AlpacaBot\Provider\ModelCatalog;
+use AlpacaBot\Rest\StreamController;
+use AlpacaBot\Rest\ViewController;
 use AlpacaBot\Settings\Migrate04;
 use AlpacaBot\Settings\Store;
 use Brain\Monkey\Actions;
+use Brain\Monkey\Filters;
 use Brain\Monkey\Functions;
 
 it('exposes a version and boots once', function (): void {
@@ -145,4 +151,54 @@ it('registers the wp alpaca-bot command when WP-CLI is the running process, and 
 it('deactivate() clears the daily usage cleanup so a deactivated plugin leaves no cron event behind', function (): void {
     Functions\expect('wp_clear_scheduled_hook')->once()->with(UsageMeter::CLEANUP_HOOK)->andReturn(1);
     Plugin::deactivate();
+});
+
+it('renders the chat screen, enqueues its assets, hands the pipeline the user preferences, and registers the view routes with their HTML serving hook', function (): void {
+    // The P3 wiring: the menu's chat renderer is Admin\ChatScreen (no placeholder), Admin\Assets
+    // listens on admin_enqueue_scripts, and the REST controllers gathered on rest_api_init
+    // include the ViewController, whose register() hooks rest_pre_serve_request.
+    $menuRenderer = null;
+    Functions\when('add_menu_page')->alias(function (mixed ...$args) use (&$menuRenderer): void {
+        $menuRenderer = $args[4];
+    });
+    Functions\when('add_submenu_page')->justReturn(false);
+    Filters\expectApplied('alpaca_bot/admin/menu_capability')->once()->andReturn('edit_posts');
+    Actions\expectAdded('admin_enqueue_scripts')->once()->with(Mockery::on(
+        static fn (mixed $cb): bool => is_array($cb) && ($cb[0] ?? null) instanceof Assets && ($cb[1] ?? null) === 'enqueue'
+    ));
+    $onRestInit = null;
+    Actions\expectAdded('rest_api_init')->once()->with(Mockery::on(static function (mixed $cb) use (&$onRestInit): bool {
+        $onRestInit = $cb;
+        return $cb instanceof Closure;
+    }));
+    $onAdminMenu = null;
+    Actions\expectAdded('admin_menu')->once()->with(Mockery::on(static function (mixed $cb) use (&$onAdminMenu): bool {
+        $onAdminMenu = $cb;
+        return is_array($cb) && $cb[0] instanceof Menu && $cb[1] === 'register';
+    }));
+    $plugin = Plugin::boot();
+    $plugin->register();
+    expect($plugin->get(UserPrefs::class))->toBeInstanceOf(UserPrefs::class)
+        ->and($plugin->get(ChatScreen::class))->toBeInstanceOf(ChatScreen::class);
+
+    // The menu is built on admin_menu; run it as core would and read the renderer it was given.
+    $onAdminMenu();
+    expect($menuRenderer)->toBe([$plugin->get(ChatScreen::class), 'render']);
+
+    $registered = [];
+    Functions\when('register_rest_route')->alias(static function (string $ns, string $path) use (&$registered): void {
+        $registered[] = $path;
+    });
+    $servers = [];
+    Filters\expectAdded('rest_pre_serve_request')->times(2)->with(Mockery::on(static function (mixed $cb) use (&$servers): bool {
+        if (!is_array($cb) || ($cb[1] ?? null) !== 'serve') {
+            return false;
+        }
+        $servers[] = $cb[0]::class;
+        return true;
+    }), PHP_INT_MAX, 4);
+    Filters\expectApplied('alpaca_bot/rest/controllers')->once()->andReturnFirstArg();
+    $onRestInit();
+    expect($registered)->toContain('/view/history')->toContain('/view/messages/(?P<id>\d+)')->toContain('/chat')
+        ->and($servers)->toBe([StreamController::class, ViewController::class]);
 });

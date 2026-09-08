@@ -64,7 +64,9 @@ final class Plugin
         $this->set(Chat\CapPolicy::class, $caps);
         $collector = new Context\Collector([new Context\CurrentScreenSource()]);
         $this->set(Context\Collector::class, $collector);
-        $this->set(Chat\Pipeline::class, new Chat\Pipeline($store, $factory, $this->get(Provider\ModelCatalog::class), $conversations, $meter, $caps, $collector));
+        $prefs = new Chat\UserPrefs();
+        $this->set(Chat\UserPrefs::class, $prefs);
+        $this->set(Chat\Pipeline::class, new Chat\Pipeline($store, $factory, $this->get(Provider\ModelCatalog::class), $conversations, $meter, $caps, $collector, $prefs));
         // On init, after the post types (priority 10), not on admin_init: WP-CLI loads WordPress
         // and fires init but never admin_init, and in P1 the CLI is the whole user surface, so an
         // upgraded 0.4 site's first `wp alpaca-bot chat` must already see its configured
@@ -89,10 +91,13 @@ final class Plugin
         $settingsPage = new Admin\SettingsPage($store, $this->get(Provider\ModelCatalog::class));
         $this->set(Admin\SettingsPage::class, $settingsPage);
         add_action('admin_init', [$settingsPage, 'register']);
-        $menu = new Admin\Menu($settingsPage, static function (): void {
-            echo '<div class="wrap"><h1>' . esc_html__('Alpaca Bot', 'alpaca-bot') . '</h1><p>' . esc_html__('The chat screen arrives in the next milestone.', 'alpaca-bot') . '</p></div>';
-        });
+        $chatScreen = new Admin\ChatScreen($store, $this->get(Provider\ModelCatalog::class), $conversations, $prefs);
+        $this->set(Admin\ChatScreen::class, $chatScreen);
+        $menu = new Admin\Menu($settingsPage, [$chatScreen, 'render']);
         add_action('admin_menu', [$menu, 'register']);
+        // Assets::enqueue() gates on the hook suffix itself, so this listens on every admin
+        // screen and enqueues on one.
+        add_action('admin_enqueue_scripts', [new Admin\Assets(), 'enqueue']);
         // WP-CLI is not a dependency: the command is only registered when WP-CLI is the
         // process running us, and the class itself never references WP_CLI until then.
         if (defined('WP_CLI') && constant('WP_CLI')) {
@@ -132,6 +137,7 @@ final class Plugin
             new Rest\ModelsController($this->get(Provider\ModelCatalog::class), $this->get(Store::class)),
             new Rest\SettingsController($this->get(Store::class)),
             new Rest\UsageController($this->get(Chat\UsageMeter::class), $this->get(Store::class)),
+            new Rest\ViewController($this->get(Chat\ConversationStore::class), $this->get(Store::class), $this->get(Provider\ModelCatalog::class), new View\Markdown(), $this->get(Chat\UserPrefs::class)),
         ]);
         return array_values(array_filter(
             is_array($controllers) ? $controllers : [],

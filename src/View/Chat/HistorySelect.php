@@ -20,6 +20,11 @@ use AlpacaBot\View\Hx;
  * select and rewrites `evt.detail.path`, swapping the trailing 0 for the selected option's
  * `data-id`. Nothing else about the request changes.
  *
+ * The wrapper's request needs to know the open conversation, which changes without a page load
+ * (a new chat gets its id on the first turn), so it includes (Hx `include`) the composer's
+ * hidden `conversation_id`, the field chat.ts keeps current for the next send. The select
+ * inherits the include and sends the same field with `/messages/0`, where it is unread.
+ *
  * `$history` is capped by chat.history_limit, so the open conversation may not be in it (an
  * older one opened by id). It gets its own option then, right after "New chat": with no option
  * selected the browser would show "New chat" while the transcript and the composer's hidden
@@ -49,7 +54,7 @@ final class HistorySelect extends Component
         );
         return sprintf(
             '<div id="ab-history" class="ab-history"%s><label class="screen-reader-text" for="ab-history-select">%s</label>%s</div>',
-            Hx::attrs(['get' => '/history', 'trigger' => 'ab:refresh from:body', 'target' => 'this', 'swap' => 'outerHTML', 'headers' => Hx::formHeaders()]),
+            Hx::attrs(['get' => '/history', 'trigger' => 'ab:refresh from:body', 'target' => 'this', 'swap' => 'outerHTML', 'include' => '#ab-form [name=conversation_id]', 'headers' => Hx::formHeaders()]),
             $this->e($this->t('History')),
             $select,
         );

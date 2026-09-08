@@ -7,6 +7,7 @@ use AlpacaBot\Chat\Conversation;
 use AlpacaBot\Chat\Delta;
 use AlpacaBot\Chat\Message;
 use AlpacaBot\Chat\Result;
+use AlpacaBot\Chat\UserPrefs;
 use AlpacaBot\Context\Context;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Enum\ProviderFinishReason;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Message\AssistantMessage;
@@ -348,15 +349,17 @@ it('persists the partial reply, records a receipt, and fires chat/failed when th
         ->and($failed[1]->messages)->toHaveCount(2)
         ->and($failed[1]->messages[1]->role)->toBe('assistant')
         ->and($failed[1]->messages[1]->content)->toBe('par')
-        ->and($failed[1]->messages[1]->meta)->toBe(['partial' => true])
+        // Marked partial, and carrying the seconds spent: the stored reply has a non-null usage,
+        // so MessageBubble shows a receipt for it on reload, and that receipt reads duration_ms.
+        ->and($failed[1]->messages[1]->meta)->toBe(['partial' => true, 'duration_ms' => $receipt['duration_ms']])
         // Usage never arrived: the receipt is honest about it, and the clock is the consumer's.
         ->and($receipt['total_tokens'])->toBe(0)
-        ->and($receipt['duration_ms'])->toBeGreaterThanOrEqual(0)
+        ->and($receipt['duration_ms'])->toBeInt()->toBeGreaterThanOrEqual(0)
         ->and($receipt['conversation_id'])->toBe(42)
         ->and($receipt['log_id'])->toBe(9)
         ->and(array_map(static fn(array $w): string => $w[0], $h->writes))->toBe(['wp_insert_post', 'update_post_meta', 'wp_update_post', 'wp_insert_post']);
     expect($h->writes[1][2][1]['content'])->toBe('par')
-        ->and($h->writes[1][2][1]['meta'])->toEqual((object) ['partial' => true])
+        ->and($h->writes[1][2][1]['meta'])->toEqual((object) ['partial' => true, 'duration_ms' => $receipt['duration_ms']])
         ->and($h->writes[3][2]['meta_input']['total_tokens'])->toBe(0);
 });
 
@@ -422,6 +425,40 @@ it('sends the requested model when users may change it, and the default when the
     $h = pipelineWith(pipelineProvider([new Response('ok', ProviderFinishReason::Stop)]), ['chat.user_can_change_model' => false], [], ['llama3.2', 'qwen3:8b']);
     $r = $h->pipeline->complete(3, 'Hi', ['model' => 'qwen3:8b']);
     expect($h->model)->toBe('llama3.2')->and($r->reply->model)->toBe('llama3.2');
+});
+
+it('runs on the user\'s stored default model when the request names none, and only while the site lets users choose', function (): void {
+    // Kanboard #565: the model chosen in the header's select persists as user meta
+    // (UserPrefs), and a turn that names no model runs on it. The catalog still applies.
+    Functions\when('get_user_meta')->alias(static fn(int $id): string => $id === 3 ? 'qwen3:8b' : '');
+    $prefs = new UserPrefs();
+
+    $h = pipelineWith(pipelineProvider([new Response('ok', ProviderFinishReason::Stop)]), [], [], ['llama3.2', 'qwen3:8b'], $prefs);
+    $r = $h->pipeline->complete(3, 'Hi');
+    expect($h->model)->toBe('qwen3:8b')->and($r->reply->model)->toBe('qwen3:8b');
+
+    // A model named on the request still wins over the stored default.
+    $h = pipelineWith(pipelineProvider([new Response('ok', ProviderFinishReason::Stop)]), [], [], ['llama3.2', 'qwen3:8b'], $prefs);
+    $h->pipeline->complete(3, 'Hi', ['model' => 'llama3.2']);
+    expect($h->model)->toBe('llama3.2');
+
+    // Users may not change the model: the stored default is a user's choice and does not apply.
+    $h = pipelineWith(pipelineProvider([new Response('ok', ProviderFinishReason::Stop)]), ['chat.user_can_change_model' => false], [], ['llama3.2', 'qwen3:8b'], $prefs);
+    $h->pipeline->complete(3, 'Hi');
+    expect($h->model)->toBe('llama3.2');
+
+    // A stored default the catalog no longer lists: the site default, not a 400 on every turn.
+    $h = pipelineWith(pipelineProvider([new Response('ok', ProviderFinishReason::Stop)]), [], [], ['llama3.2', 'gemma3:4b'], $prefs);
+    $h->pipeline->complete(3, 'Hi');
+    expect($h->model)->toBe('llama3.2');
+
+    // Another user, nothing stored: the site default. Without preferences at all (the CLI), likewise.
+    $h = pipelineWith(pipelineProvider([new Response('ok', ProviderFinishReason::Stop)]), [], [], ['llama3.2', 'qwen3:8b'], $prefs);
+    $h->pipeline->complete(4, 'Hi');
+    expect($h->model)->toBe('llama3.2');
+    $h = pipelineWith(pipelineProvider([new Response('ok', ProviderFinishReason::Stop)]), [], [], ['llama3.2', 'qwen3:8b']);
+    $h->pipeline->complete(3, 'Hi');
+    expect($h->model)->toBe('llama3.2');
 });
 
 it('refuses a requested model the catalog does not list rather than substituting the default', function (): void {
