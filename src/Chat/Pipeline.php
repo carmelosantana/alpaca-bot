@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace AlpacaBot\Chat;
 
+use AlpacaBot\Admin\Assets;
 use AlpacaBot\Context\Collector;
 use AlpacaBot\Context\Context;
 use AlpacaBot\Provider\Factory;
@@ -92,19 +93,21 @@ final class Pipeline
      * while `chat.user_can_change_model` is on, else the default applies, and a model the
      * catalog lists other models but not this one is refused rather than swapped for the
      * default (an empty catalog, which is also what an unreachable provider reads as, refuses
-     * nothing: the provider call then fails loudly instead); `images` are data
-     * URLs attached to the user turn and are sent verbatim: anything that is not a data URL is
-     * refused, since a fetchable URL would be retrieved by the model host and rendered later by
-     * a history screen, and the pipeline never reads the filesystem on a caller's behalf;
-     * `context` is the request the context sources see (a post id, a screen); `system`
-     * replaces the configured system prompt for this turn.
+     * nothing: the provider call then fails loudly instead); `images` are base64 image data
+     * URLs (ImageData::isValid()) attached to the user turn and are sent verbatim: anything
+     * else is refused, since a fetchable URL would be retrieved by the model host and rendered
+     * later by a history screen, the pipeline never reads the filesystem on a caller's behalf,
+     * and a data URL of any other type would be stored and replayed to the provider on every
+     * later turn without ever being shown; their decoded bytes together may not exceed
+     * Admin\Assets::maxImageBytes() (images()); `context` is the request the context sources
+     * see (a post id, a screen); `system` replaces the configured system prompt for this turn.
      *
      * The cap check is check-then-act with no reservation: concurrent requests from one user can
      * overshoot a cap by roughly their number. It is a monthly budget, not a hard ceiling.
      *
      * @param array{conversation_id?: int, model?: string, images?: string[], context?: array<string, mixed>, system?: string} $options
      * @return \Generator<int, Delta, mixed, Result>
-     * @throws \InvalidArgumentException for an empty message (also one `before_send` blanked), an image that is not a data URL, a requested model a non-empty catalog does not list, or a conversation the user does not own
+     * @throws \InvalidArgumentException for an empty message (also one `before_send` blanked), an image that is not a base64 image data URL or a set of them past the site's allowance, a requested model a non-empty catalog does not list, or a conversation the user does not own
      * @throws CapExceeded before any provider call
      * @throws \RuntimeException when no model can be resolved, or wrapping a provider failure as 'Provider error: ...'
      */
@@ -285,20 +288,49 @@ final class Pipeline
     }
 
     /**
-     * The image attachments, as data URLs only.
+     * The image attachments, held to two things at intake. Every entry must be a base64 image
+     * data URL (ImageData::isValid(): PNG, JPEG, GIF or WebP, base64 alphabet, nothing after
+     * it). A bare `data:` prefix was the whole check before this, and the render side's
+     * stricter pattern was the only thing that kept a `data:text/html,...` off the screen; it
+     * was still stored and sent to the provider on every later turn. And their decoded bytes
+     * together may not exceed Admin\Assets::maxImageBytes(), the same figure image.ts holds
+     * one `Blob.size` to, so the server and the browser count in the same units.
+     *
+     * The allowance is a per-message total, not a per-image one, and that is deliberate: it is
+     * what keeps this cap coherent with the storage budget ConversationStore::save() applies,
+     * since the transcript is cumulative and the largest turn is what the budget has to absorb.
+     * One image at exactly the cap is still accepted, so the total can never be tighter than
+     * the single-image cap the browser already enforces. A `maxImageBytes()` of 0 is "no
+     * limit" (post_max_size=0, or one the body allowance alone exhausts) and the total check
+     * is skipped: there is no figure to hold the total to. The allowance is only read when
+     * there is an image to hold to it, so a text turn costs no ini lookup.
      *
      * @param array<mixed> $images
      * @return list<string>
-     * @throws \InvalidArgumentException for anything that is not a data URL
+     * @throws \InvalidArgumentException for anything that is not a base64 image data URL, or a set of them past the allowance
      */
     private static function images(array $images): array
     {
         $out = [];
+        $total = 0;
         foreach ($images as $image) {
-            if (!is_string($image) || !str_starts_with($image, 'data:')) {
-                throw new \InvalidArgumentException(__('Images must be data URLs.', 'alpaca-bot'));
+            if (!is_string($image) || !ImageData::isValid($image)) {
+                throw new \InvalidArgumentException(__('Images must be base64 PNG, JPEG, GIF, or WebP data URLs.', 'alpaca-bot'));
             }
+            $total += ImageData::decodedBytes($image);
             $out[] = $image;
+        }
+        if ($out === []) {
+            return $out;
+        }
+        $max = Assets::maxImageBytes();
+        if ($max > 0 && $total > $max) {
+            throw new \InvalidArgumentException(sprintf(
+                /* translators: 1: the decoded size of the attached images together, in bytes; 2: the most this site takes per message, in bytes */
+                __('Those images total %1$s bytes; this site takes up to %2$s bytes per message. Attach fewer or smaller images.', 'alpaca-bot'),
+                number_format_i18n($total),
+                number_format_i18n($max),
+            ));
         }
         return $out;
     }

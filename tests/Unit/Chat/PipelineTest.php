@@ -630,6 +630,72 @@ it('refuses an image that is not a data URL before checking caps or touching sto
         ->and($h->writes)->toBe([]);
 });
 
+// ---- Task 0 (P3 carry-over): images are held to ImageData's contract and to the site's allowance
+
+// Assets::maxImageBytes() is post_max_size less the 64 KiB body allowance, times 3/4: a
+// post_max_size of 64 KiB + 400 gives a cap of exactly 300 decoded bytes, small enough to build
+// by hand and exact to the byte. 400 base64 characters carry 300 bytes; "AA==" carries one.
+// Called after pipelineWith(), whose own 8M stub would otherwise be the later when() and win.
+function pipelineImageCap(): int
+{
+    Functions\when('wp_convert_hr_to_bytes')->justReturn(64 * 1024 + 400);
+    Functions\when('number_format_i18n')->alias(static fn(float|int $n): string => (string) $n);
+    return 300;
+}
+
+it('accepts a single image at exactly the site\'s allowance', function (): void {
+    $provider = pipelineProvider([new Response('A cat', ProviderFinishReason::Stop)], $call);
+    $h = pipelineWith($provider);
+    $cap = pipelineImageCap();
+    $atCap = 'data:image/png;base64,' . str_repeat('A', intdiv($cap, 3) * 4);
+    $r = $h->pipeline->complete(3, 'What is this?', ['images' => [$atCap]]);
+    expect($call['messages'][0]->content()[1]['image_url']['url'])->toBe($atCap)
+        ->and($r->conversation->messages[0]->images)->toBe([$atCap]);
+});
+
+it('refuses two images whose decoded total is one byte over the allowance, naming both figures, before caps or storage', function (): void {
+    $h = pipelineWith(null, ['governance.user_monthly_tokens' => 10]);
+    $cap = pipelineImageCap();
+    $atCap = 'data:image/png;base64,' . str_repeat('A', intdiv($cap, 3) * 4);
+    $oneByte = 'data:image/jpeg;base64,AA==';
+    $h->transients['alpaca_bot_usage_3_2024-08'] = ['tokens' => 12, 'requests' => 1];
+    Filters\expectApplied('alpaca_bot/cap/allowed')->never();
+    Actions\expectDone('alpaca_bot/chat/started')->never();
+    expect(fn() => $h->pipeline->complete(3, 'Compare these', ['images' => [$atCap, $oneByte]]))
+        ->toThrow(\InvalidArgumentException::class, 'Those images total 301 bytes; this site takes up to 300 bytes per message. Attach fewer or smaller images.')
+        ->and($h->writes)->toBe([]);
+});
+
+it('refuses every image form that is not a base64 image data URL, saying what is accepted', function (): void {
+    $h = pipelineWith(null);
+    pipelineImageCap();
+    Actions\expectDone('alpaca_bot/chat/started')->never();
+    foreach ([
+        42,
+        'data:text/html,x',
+        'data:application/json;base64,e30=',
+        'data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=',
+        'data:image/png,%89PNG',
+        "data:image/png;base64,QUJD\n",
+        'https://example.com/x.png',
+    ] as $bad) {
+        expect(fn() => $h->pipeline->complete(3, 'What is this?', ['images' => ['data:image/png;base64,AAAA', $bad]]))
+            ->toThrow(\InvalidArgumentException::class, 'Images must be base64 PNG, JPEG, GIF, or WebP data URLs.');
+    }
+    expect($h->writes)->toBe([]);
+});
+
+it('skips the total check when the site reports no allowance (maxImageBytes() is 0)', function (): void {
+    // post_max_size=0 is PHP's "no limit"; a post_max_size the body allowance alone exhausts
+    // answers 0 as well. Either way there is no figure to hold the total to.
+    $big = 'data:image/png;base64,' . str_repeat('A', 4000);
+    $provider = pipelineProvider([new Response('Two cats', ProviderFinishReason::Stop)], $call);
+    $h = pipelineWith($provider);
+    Functions\when('wp_convert_hr_to_bytes')->justReturn(0);
+    $r = $h->pipeline->complete(3, 'Compare these', ['images' => [$big, $big]]);
+    expect($r->conversation->messages[0]->images)->toBe([$big, $big]);
+});
+
 it('refuses the turn when before_send blanks the message', function (): void {
     $h = pipelineWith(null);
     Filters\expectApplied('alpaca_bot/message/before_send')->once()->andReturn('   ');

@@ -271,6 +271,10 @@ function pipelineWith(mixed $provider, array $settings = [], array $contexts = [
     Functions\when('wp_generate_uuid4')->justReturn('uuid');
     Functions\when('sanitize_text_field')->returnArg();
     Functions\when('wp_trim_words')->alias(static fn(string $text): string => $text);
+    // A stock 8M post_max_size, as AssetsTest reads it: Pipeline::images() holds a turn's images
+    // to Assets::maxImageBytes(), 6242304 decoded bytes here. A test about the cap itself stubs
+    // this again with its own figure (Brain Monkey takes the later when()).
+    Functions\when('wp_convert_hr_to_bytes')->justReturn(8 * 1024 * 1024);
     Functions\when('get_post')->alias(static fn(int $id): ?object => $id === (int) $h->post->ID ? $h->post : null);
     Functions\when('wp_insert_post')->alias(static function (array $post) use ($h): int {
         $h->writes[] = ['wp_insert_post', $post['post_type'], $post];
