@@ -1,2 +1,11 @@
+# pnpm 11 reads its settings from this file; .npmrc is auth/registry only.
+# ignoreScripts: no dependency lifecycle scripts, ever (esbuild's postinstall included).
+# allowBuilds: the explicit answer strict-dep-builds asks for, should ignoreScripts ever be relaxed.
+ignoreScripts: true
 allowBuilds:
   esbuild: false
+# Supply chain: refuse versions younger than 24h (strict: abort, never auto-exclude),
+# and refuse git/tarball/URL specifiers anywhere below the direct dependencies.
+minimumReleaseAge: 1440
+minimumReleaseAgeStrict: true
+blockExoticSubdeps: true
