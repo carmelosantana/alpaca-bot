@@ -36,10 +36,16 @@ it('sends the model one system message holding the site text and every toolkit\'
 
     $output = $agent->run(new UserMessage('now'), $history);
 
+    // Exactly once each: the vendored run() renders every toolkit's guidelines into the system
+    // prompt itself (SystemPrompt::withToolkits()), so instructions() must not append them too.
+    // toContain() would pass with them doubled; the count is the guard the brief asked for.
+    $system = $seen['messages'][0]->content();
     expect($output->content)->toBe('fine')
         ->and($seen['messages'][0])->toBeInstanceOf(SystemMessage::class)
-        ->and($seen['messages'][0]->content())->toContain('Site prompt here.')->toContain('Use echo_a for A.')->toContain('Use echo_b for B.')
-        ->not->toContain('a stale system message')
+        ->and(substr_count($system, 'Site prompt here.'))->toBe(1)
+        ->and(substr_count($system, 'Use echo_a for A.'))->toBe(1)
+        ->and(substr_count($system, 'Use echo_b for B.'))->toBe(1)
+        ->and($system)->not->toContain('a stale system message')
         ->and(count($seen['messages']))->toBe(3)
         ->and($seen['messages'][1]->content())->toBe('earlier')
         ->and($seen['messages'][2]->content())->toBe('now')
