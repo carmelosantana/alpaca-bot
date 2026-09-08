@@ -769,3 +769,43 @@ it('runs nothing until the generator is first advanced', function (): void {
     $gen = $h->pipeline->send(3, 'Hi');
     expect($gen)->toBeInstanceOf(\Generator::class)->and($h->writes)->toBe([]);
 });
+
+// A turn nobody asked to keep. Toolkit\SummarizeToolkit runs the model on a piece of text from
+// inside another turn, and that inner call must not appear in the user's history as a
+// conversation of its own. `ephemeral` skips the conversation post and the transcript write
+// while the usage receipt is still recorded: the tokens were spent and the caps count them.
+// Saving is on here (the default), which is what tells ephemeral apart from save_history off.
+it('keeps no conversation and writes no transcript for an ephemeral turn, but still records the receipt and fires completed', function (): void {
+    $provider = pipelineProvider([
+        new Response('Sum', ProviderFinishReason::Stop),
+        new Response('', ProviderFinishReason::Stop, usage: new Usage(5, 2, 7)),
+    ], $call);
+    $h = pipelineWith($provider);
+    Actions\expectDone('alpaca_bot/chat/completed')->once()->with(Mockery::type(Result::class));
+    $result = $h->pipeline->complete(3, 'Long text', ['ephemeral' => true, 'system' => 'Summarize.']);
+    expect($result->reply->content)->toBe('Sum')
+        ->and($result->conversation->id)->toBe(0)
+        ->and($result->conversation->userId)->toBe(3)
+        ->and($result->conversation->messages)->toHaveCount(2)
+        ->and($result->receipt['conversation_id'])->toBe(0)
+        ->and($result->receipt['log_id'])->toBe(9)
+        ->and($call['messages'][0]->content())->toBe('Summarize.')
+        ->and($call['messages'][1]->content())->toBe('Long text')
+        // The receipt only: no chat_history post, no transcript meta, no title update.
+        ->and(array_map(static fn(array $w): array => [$w[0], $w[1]], $h->writes))->toBe([['wp_insert_post', 'chat_log']])
+        ->and($h->writes[0][2]['meta_input']['conversation_id'])->toBe(0);
+});
+
+it('refuses ephemeral together with a conversation id, before the provider is called: a turn cannot both continue a conversation and leave no trace', function (): void {
+    // null: no provider may be built at all, so the refusal has to come before the model is resolved.
+    $h = pipelineWith(null);
+    expect(fn() => $h->pipeline->complete(3, 'Hi', ['ephemeral' => true, 'conversation_id' => 42]))->toThrow(\InvalidArgumentException::class, 'ephemeral')
+        ->and($h->writes)->toBe([]);
+});
+
+it('leaves nothing behind when an ephemeral turn fails at the provider', function (): void {
+    $h = pipelineWith(pipelineProvider([new \RuntimeException('connection refused')]));
+    Actions\expectDone('alpaca_bot/chat/failed')->once();
+    expect(fn() => $h->pipeline->complete(3, 'Hi', ['ephemeral' => true]))->toThrow(\RuntimeException::class, 'Provider error')
+        ->and($h->writes)->toBe([]);
+});

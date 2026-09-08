@@ -47,6 +47,16 @@ use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Message\UserMessage;
  *
  * `send()` is a generator, so nothing at all runs until the caller first advances it: the cap
  * check, the conversation lookup and every hook happen on the first iteration, not on the call.
+ *
+ * An `ephemeral` turn (Toolkit\SummarizeToolkit's inner call) runs the same path over a
+ * conversation that exists only in memory: no post is created, no transcript or partial reply
+ * is written, and nothing is taken back on failure because nothing was made. The usage receipt
+ * is still recorded, with conversation 0 (UsageMeter::record() already allows that), and every
+ * hook fires as for any turn: the tokens were spent, the caps count them, and a listener that
+ * meters or logs sees the turn. Not a pipeline of its own, and not `privacy.save_history`
+ * off: that setting is the user's choice about their history, and it still updates a
+ * conversation that already has a post; ephemeral is the caller's statement that this turn is
+ * not part of anyone's history at all, whatever the setting says.
  */
 final class Pipeline
 {
@@ -64,7 +74,7 @@ final class Pipeline
     /**
      * send() drained: the Result once the whole reply is in.
      *
-     * @param array{conversation_id?: int, model?: string, images?: string[], context?: array<string, mixed>, system?: string} $options see send()
+     * @param array{conversation_id?: int, model?: string, images?: string[], context?: array<string, mixed>, system?: string, ephemeral?: bool} $options see send()
      * @throws CapExceeded|\InvalidArgumentException|\RuntimeException as send()
      */
     public function complete(int $userId, string $text, array $options = []): Result
@@ -100,14 +110,16 @@ final class Pipeline
      * and a data URL of any other type would be stored and replayed to the provider on every
      * later turn without ever being shown; their decoded bytes together may not exceed
      * Admin\Assets::maxImageBytes() (images()); `context` is the request the context sources
-     * see (a post id, a screen); `system` replaces the configured system prompt for this turn.
+     * see (a post id, a screen); `system` replaces the configured system prompt for this turn;
+     * `ephemeral` keeps no conversation (the class docblock), and is refused together with a
+     * `conversation_id`, since a turn cannot both continue a conversation and leave no trace.
      *
      * The cap check is check-then-act with no reservation: concurrent requests from one user can
      * overshoot a cap by roughly their number. It is a monthly budget, not a hard ceiling.
      *
-     * @param array{conversation_id?: int, model?: string, images?: string[], context?: array<string, mixed>, system?: string} $options
+     * @param array{conversation_id?: int, model?: string, images?: string[], context?: array<string, mixed>, system?: string, ephemeral?: bool} $options
      * @return \Generator<int, Delta, mixed, Result>
-     * @throws \InvalidArgumentException for an empty message (also one `before_send` blanked), an image that is not a base64 image data URL or a set of them past the site's allowance, a requested model a non-empty catalog does not list, or a conversation the user does not own
+     * @throws \InvalidArgumentException for an empty message (also one `before_send` blanked), an image that is not a base64 image data URL or a set of them past the site's allowance, a requested model a non-empty catalog does not list, a conversation the user does not own, or `ephemeral` with a `conversation_id`
      * @throws CapExceeded before any provider call
      * @throws \RuntimeException when no model can be resolved, or wrapping a provider failure as 'Provider error: ...'
      */
@@ -118,10 +130,14 @@ final class Pipeline
         if ($text === '' && $images === []) {
             throw new \InvalidArgumentException(__('The message is empty.', 'alpaca-bot'));
         }
+        $requested = (int) ($options['conversation_id'] ?? 0);
+        $ephemeral = (bool) ($options['ephemeral'] ?? false);
+        if ($ephemeral && $requested > 0) {
+            throw new \InvalidArgumentException(__('An ephemeral turn cannot continue a conversation.', 'alpaca-bot'));
+        }
         $this->caps->assertAllowed($userId);
         $model = $this->model($userId, $options);
-        $requested = (int) ($options['conversation_id'] ?? 0);
-        $conversation = $this->conversation($userId, $requested);
+        $conversation = $ephemeral ? $this->ephemeral($userId) : $this->conversation($userId, $requested);
         // From here the conversation has its post (when saving is on). Nothing is written to it
         // until the turn finishes, or the consumer abandons the stream (settle(), which does not
         // throw), so any exception out of this block is a turn that stored nothing: the post
@@ -182,7 +198,7 @@ final class Pipeline
                     throw new \RuntimeException('Provider error: ' . $e->getMessage(), 0, $e);
                 }
             } finally {
-                $this->settle($streamEnded, $userId, $conversation, $model, $content, $reasoning, $prompt, $completion, $started);
+                $this->settle($streamEnded, $ephemeral, $userId, $conversation, $model, $content, $reasoning, $prompt, $completion, $started);
             }
         } catch (\Throwable $e) {
             // After chat/failed (the inner catch), so a listener saw the conversation and had
@@ -211,7 +227,9 @@ final class Pipeline
             $reply = $filtered;
         }
         $conversation->append($reply);
-        $this->conversations->save($conversation);
+        if (!$ephemeral) {
+            $this->conversations->save($conversation);
+        }
         $logId = $this->meter->record($userId, $model, $prompt, $completion, $durationMs, $conversation->id);
         $result = new Result($conversation, $reply, [
             'user_id' => $userId,
@@ -250,8 +268,12 @@ final class Pipeline
      *
      * The branch lives here rather than in the finally itself because static analysis does not
      * model generator destruction and reads the flag as always true at that point.
+     *
+     * An ephemeral turn stores no partial reply either (there is no post to store it on), but
+     * the receipt and `chat/failed` are the same: the time was spent whether or not anyone
+     * keeps the transcript.
      */
-    private function settle(bool $streamEnded, int $userId, Conversation $conversation, string $model, string $content, string $reasoning, int $prompt, int $completion, float $started): void
+    private function settle(bool $streamEnded, bool $ephemeral, int $userId, Conversation $conversation, string $model, string $content, string $reasoning, int $prompt, int $completion, float $started): void
     {
         if ($streamEnded) {
             return;
@@ -268,7 +290,9 @@ final class Pipeline
             // transcript shows a receipt for this turn too, and that receipt reads the seconds.
             ['partial' => true, 'duration_ms' => $durationMs] + ($reasoning !== '' ? ['reasoning' => $reasoning] : []),
         ));
-        $this->conversations->save($conversation);
+        if (!$ephemeral) {
+            $this->conversations->save($conversation);
+        }
         $this->meter->record($userId, $model, $prompt, $completion, $durationMs, $conversation->id);
         do_action(
             'alpaca_bot/chat/failed',
@@ -351,6 +375,18 @@ final class Pipeline
             throw new \InvalidArgumentException(sprintf(__('Conversation %d was not found.', 'alpaca-bot'), $id));
         }
         return $conversation;
+    }
+
+    /**
+     * The conversation an ephemeral turn runs over: the user's, in memory only, id 0 as
+     * ConversationStore::create() returns one when saving is off. Built here rather than
+     * through the store so the store is never asked: create() would insert a post while
+     * `privacy.save_history` is on, and that post is exactly what an ephemeral turn must not
+     * leave behind.
+     */
+    private function ephemeral(int $userId): Conversation
+    {
+        return new Conversation(0, $userId, '', [], 'chat', (int) current_time('timestamp', true));
     }
 
     /**
