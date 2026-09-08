@@ -81,29 +81,45 @@ final class Assets
     }
 
     /**
-     * The largest image the chat bundle sends, in bytes: the smaller of the site's upload limit
-     * (wp_max_upload_size(), which a site filters and multisite caps) and post_max_size, the
-     * limit the image actually meets, since it travels base64-encoded inside a JSON body and
-     * not as an upload. A body past post_max_size is dropped before WordPress sees it and the
-     * only answer is a bare failure, which is what image.ts's guard exists to prevent: the guard
-     * is only as good as its figure, and this is the site's own rather than a guess at it. The
-     * figure is the raw image size, not the encoded body's, so it reads as the media uploader's
-     * "maximum upload file size" does; the base64 overhead fits under post_max_size wherever the
-     * upload limit is the smaller of the two, which is where a stock PHP puts it.
+     * The part of a POST /chat body that is not the image: the message text, the ids, the model,
+     * the data URL's own prefix and the JSON around them all. 64 KiB is far more than any of that
+     * comes to, and cheap against the figures it is taken from (0.8% of a stock 8M).
+     */
+    public const IMAGE_BODY_ALLOWANCE = 64 * 1024;
+
+    /**
+     * The largest image the chat bundle sends, in bytes. The image is not an upload: it travels
+     * base64-encoded inside the JSON body of POST /chat, so the only PHP limit it meets is
+     * post_max_size. upload_max_filesize and wp_max_upload_size() govern multipart uploads and
+     * have no say here; the picker offers the media library, whose every image already passed
+     * them. A body past post_max_size is dropped before WordPress sees it and the only answer
+     * is a bare failure, which is what image.ts's guard exists to prevent: the guard is only as
+     * good as its figure, and this is the site's own rather than a guess at it.
      *
-     * 0 from either source is "no limit" (post_max_size=0 is PHP's own spelling of it) and does
-     * not cap; 0 from both means no figure, and image.ts keeps its constant. The two figures are
-     * parameters so a test can pass them; a caller passes neither.
+     * The figure is the raw image size, which is what image.ts compares and the message prints,
+     * so it is post_max_size less the allowance for the rest of the body, scaled by 3/4 for the
+     * encoding: base64 spends four characters on every three bytes, and those characters need
+     * no JSON escaping, so the body is the allowance plus 4/3 of the image. AssetsTest holds
+     * that an image at the cap fits under post_max_size and one quantum more does not.
+     *
+     * 0 is "no limit": post_max_size=0 is PHP's own spelling of it, and image.ts reads 0 as "no
+     * figure" and keeps its constant (imageLimit() says why the two are let coincide). A
+     * post_max_size the allowance alone exhausts is a site nothing posts to, and answers 0 too
+     * rather than a negative. The ini value is a parameter so a test can pass one; a caller
+     * passes nothing.
+     *
+     * A web-server body limit (nginx's client_max_body_size) is invisible to PHP and is not
+     * counted; that failure mode stays as it was.
      *
      * @internal Public only so the tests can call it; not part of the plugin's API.
      */
-    public static function maxImageBytes(?int $uploadLimit = null, ?string $postMaxSize = null): int
+    public static function maxImageBytes(?string $postMaxSize = null): int
     {
-        $limits = array_filter([
-            $uploadLimit ?? (int) wp_max_upload_size(),
-            wp_convert_hr_to_bytes($postMaxSize ?? (string) ini_get('post_max_size')),
-        ], static fn(int $bytes): bool => $bytes > 0);
-        return $limits === [] ? 0 : min($limits);
+        $postMax = wp_convert_hr_to_bytes($postMaxSize ?? (string) ini_get('post_max_size'));
+        if ($postMax <= 0) {
+            return 0;
+        }
+        return max(0, intdiv(($postMax - self::IMAGE_BODY_ALLOWANCE) * 3, 4));
     }
 
     /**

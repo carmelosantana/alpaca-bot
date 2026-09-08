@@ -70,7 +70,7 @@ final class HelpTabs
         ))
             . self::p('<strong>' . esc_html__('If you upgraded from 0.4, check your content.', 'alpaca-bot') . '</strong> ' . esc_html__('WordPress prints a shortcode nothing registers exactly as written, so a post or page that still contains one now shows the shortcode itself to visitors, as plain text, where the generated content used to be.', 'alpaca-bot'))
             . self::p(sprintf(
-                /* translators: %s: [alpacabot */
+                /* translators: %s: the search term "[alpacabot", with no closing bracket on purpose so that it finds both shortcodes */
                 esc_html__('Search your posts and pages for %s (the search box on the Posts and Pages lists searches content) and, in each one, either remove the shortcode or replace it with the text you want shown. The chat screen is the place to draft that text.', 'alpaca-bot'),
                 '<code>[alpacabot</code>',
             ));

@@ -19,7 +19,6 @@ it('enqueues htmx, the chat bundle after it, the stylesheet and the media picker
     Functions\when('plugins_url')->alias(fn(string $p) => '/plugins/alpaca-bot/' . $p);
     Functions\when('rest_url')->alias(fn(string $p) => '/wp-json/' . $p);
     Functions\when('wp_create_nonce')->justReturn('n');
-    Functions\when('wp_max_upload_size')->justReturn(2 * 1024 * 1024);
     Functions\when('wp_convert_hr_to_bytes')->justReturn(8 * 1024 * 1024);
     Functions\stubTranslationFunctions();
     Functions\expect('wp_enqueue_media')->once();
@@ -36,6 +35,7 @@ it('enqueues htmx, the chat bundle after it, the stylesheet and the media picker
         ->and(Assets::HTMX_VERSION)->toMatch('/^2\.0\.\d+$/')
         ->and($localised['rest'])->toBe('/wp-json/alpaca-bot/v1')
         ->and($localised['nonce'])->toBe('n')
+        ->and($localised['maxImageBytes'])->toBe(6242304)
         ->and($localised['offline'])->toBeString()->not->toBe('')
         ->and($localised['i18n'])->toBeArray()->not->toBeEmpty();
     foreach ($localised['i18n'] as $key => $text) {
@@ -43,22 +43,37 @@ it('enqueues htmx, the chat bundle after it, the stylesheet and the media picker
     }
 });
 
-it('ships the real image cap, the smaller of the upload limit and post_max_size, with a message that names both figures', function (): void {
+it('ships the real image cap, the raw size whose base64 body fits under post_max_size, with a message that names both figures', function (): void {
     // image.ts's constant is a guess against a default 8M post_max_size; behind a tighter
     // limit the guard fell into the opaque failure it exists to close. The figure ships from
     // PHP, and the message it shows carries placeholders for the size and the cap.
-    Functions\when('wp_convert_hr_to_bytes')->alias(static fn(string $v): int => match ($v) { '8M' => 8 * 1024 * 1024, '2M' => 2 * 1024 * 1024, '1M' => 1024 * 1024, '0' => 0, default => (int) $v });
-    expect(Assets::maxImageBytes(2 * 1024 * 1024, '8M'))->toBe(2 * 1024 * 1024)
-        ->and(Assets::maxImageBytes(64 * 1024 * 1024, '1M'))->toBe(1024 * 1024)
-        // post_max_size 0 is PHP for "no limit", and a 0 upload limit is core's answer to that: neither is a cap.
-        ->and(Assets::maxImageBytes(64 * 1024 * 1024, '0'))->toBe(64 * 1024 * 1024)
-        ->and(Assets::maxImageBytes(0, '8M'))->toBe(8 * 1024 * 1024)
-        ->and(Assets::maxImageBytes(0, '0'))->toBe(0);
+    //
+    // The image is not an upload: it travels base64-encoded inside the JSON body of POST /chat,
+    // so post_max_size is the only PHP limit it meets, and the cap is the raw size whose encoded
+    // form (4/3 of it) plus the rest of the body stays under it. wp_max_upload_size() has no say:
+    // the picker chooses from the media library, so any image it offers already passed that.
+    Functions\when('wp_convert_hr_to_bytes')->alias(static fn(string $v): int => (int) $v * match (strtoupper(substr(trim($v), -1))) { 'K' => 1024, 'M' => 1024 ** 2, 'G' => 1024 ** 3, default => 1 });
+    $allowance = Assets::IMAGE_BODY_ALLOWANCE;
+    expect($allowance)->toBe(64 * 1024)
+        ->and(Assets::maxImageBytes('8M'))->toBe(intdiv((8 * 1024 * 1024 - $allowance) * 3, 4))->toBe(6242304)
+        ->and(Assets::maxImageBytes('4M'))->toBe(intdiv((4 * 1024 * 1024 - $allowance) * 3, 4))->toBe(3096576)
+        // post_max_size 0 is PHP for "no limit": no cap, and image.ts reads 0 as "no figure".
+        ->and(Assets::maxImageBytes('0'))->toBe(0)
+        // A post_max_size the allowance alone exhausts is a site nothing posts to; the figure is 0 rather than negative.
+        ->and(Assets::maxImageBytes('64K'))->toBe(0);
+    // The arithmetic is only right if an image at the cap actually posts: its base64 form
+    // (4 chars per 3 bytes, rounded up to a whole quantum) plus the allowance must not exceed
+    // post_max_size, which PHP enforces as CONTENT_LENGTH > post_max_size.
+    foreach (['8M' => 8 * 1024 * 1024, '4M' => 4 * 1024 * 1024] as $ini => $postMax) {
+        $cap = Assets::maxImageBytes($ini);
+        expect(4 * intdiv($cap + 2, 3) + $allowance)->toBeLessThanOrEqual($postMax)
+            // and the cap is not needlessly tight: one more quantum of raw bytes would not fit.
+            ->and(4 * intdiv($cap + 3 + 2, 3) + $allowance)->toBeGreaterThan($postMax);
+    }
 
     Functions\when('plugins_url')->alias(fn(string $p) => '/plugins/alpaca-bot/' . $p);
     Functions\when('rest_url')->alias(fn(string $p) => '/wp-json/' . $p);
     Functions\when('wp_create_nonce')->justReturn('n');
-    Functions\when('wp_max_upload_size')->justReturn(2 * 1024 * 1024);
     Functions\stubTranslationFunctions();
     Functions\when('wp_enqueue_media')->justReturn();
     Functions\when('wp_enqueue_script')->justReturn(true);
@@ -69,7 +84,7 @@ it('ships the real image cap, the smaller of the upload limit and post_max_size,
         return true;
     });
     (new Assets())->enqueue(Assets::HOOK);
-    expect($localised['maxImageBytes'])->toBeInt()->toBeGreaterThan(0)->toBeLessThanOrEqual(2 * 1024 * 1024)
+    expect($localised['maxImageBytes'])->toBeInt()->toBe(Assets::maxImageBytes((string) ini_get('post_max_size')))
         ->and($localised['i18n']['imageTooLarge'])->toContain('{size}')->toContain('{max}');
 });
 
@@ -78,7 +93,6 @@ it('versions the build outputs by the plugin version outside WP_DEBUG, and under
     Functions\when('plugins_url')->alias(fn(string $p) => '/plugins/alpaca-bot/' . $p);
     Functions\when('rest_url')->alias(fn(string $p) => '/wp-json/' . $p);
     Functions\when('wp_create_nonce')->justReturn('n');
-    Functions\when('wp_max_upload_size')->justReturn(2 * 1024 * 1024);
     Functions\when('wp_convert_hr_to_bytes')->justReturn(8 * 1024 * 1024);
     Functions\stubTranslationFunctions();
     Functions\when('wp_enqueue_media')->justReturn();

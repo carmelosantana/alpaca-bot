@@ -6,9 +6,10 @@
  * post_max_size the body is dropped before WordPress sees it and the only answer is a bare
  * failure. So the cap is applied here, before encoding, with a message that says what to do.
  *
- * The cap is the site's own, shipped by Admin\Assets as `maxImageBytes` (the smaller of the
- * upload limit and post_max_size); the constant is the fallback for a payload without one, a
- * guess against a default 8M post_max_size.
+ * The cap is the site's own, shipped by Admin\Assets as `maxImageBytes`: post_max_size less
+ * the rest of the body, scaled for the encoding (the upload limit has no say; this is not an
+ * upload). The constant is the fallback for a payload without one, a conservative guess against
+ * a default 8M post_max_size.
  */
 export const MAX_IMAGE_BYTES = 4 * 1024 * 1024;
 
@@ -49,7 +50,18 @@ export function formatBytes(bytes: number): string {
   return `${figure} ${units[i]}`;
 }
 
-/** The cap to use: the figure the payload carries, which wp_localize_script ships as a string, or the constant when it carries none (0 is "no figure": Assets::maxImageBytes()). */
+/**
+ * The cap to use: the figure the payload carries, which wp_localize_script ships as a string, or
+ * the constant when it carries none.
+ *
+ * 0 conflates two things. Assets::maxImageBytes() answers 0 both when it has no figure and when
+ * post_max_size is 0, PHP's own spelling of "no limit", and both land here on the constant: so a
+ * site with no limit at all gets the tightest guess in the codebase. That is deliberate, and the
+ * two halves are only visible together from here. A guard needs a figure; a PHP limit that is
+ * genuinely absent still leaves the web server's (which PHP cannot see) and the provider's; and
+ * 4 MiB is a floor no site is worse off for. The cost is that the message then names the floor
+ * as the site's limit.
+ */
 export function imageLimit(raw: unknown): number {
   const n = typeof raw === 'string' || typeof raw === 'number' ? Number(raw) : NaN;
   return Number.isFinite(n) && n > 0 ? Math.floor(n) : MAX_IMAGE_BYTES;
