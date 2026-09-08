@@ -552,6 +552,35 @@ it('continues a conversation the user owns, replaying its history to the model',
         ->and(array_map(static fn(array $w): array => [$w[0], $w[1]], $h->writes))->toBe([['update_post_meta', 'ab_messages'], ['wp_update_post', 42], ['wp_insert_post', 'chat_log']]);
 });
 
+// Intake validation (Pipeline::images()) only covers turns sent after it existed. A
+// `data:text/html,...` a pre-0.5 turn stored under `images` is still in the transcript, and
+// replaying it would send it to the provider on every later turn while the bubble never shows
+// it: the very defect #2976 described. So the replay path holds history to the same contract.
+it('replays only the stored images that meet the image contract, so a pre-validation data URL is never sent again', function (): void {
+    $provider = pipelineProvider([new Response('Second answer', ProviderFinishReason::Stop)], $call);
+    $h = pipelineWith($provider);
+    Functions\when('get_post_meta')->alias(static fn(int $id, string $key): mixed => $key === 'ab_messages'
+        ? [
+            ['role' => 'user', 'content' => 'Look', 'created' => 1, 'images' => ['data:text/html,<script>alert(1)</script>', 'data:image/png;base64,AAAA', 'https://example.com/x.png']],
+            ['role' => 'assistant', 'content' => 'A cat', 'created' => 2],
+            ['role' => 'user', 'content' => 'And this?', 'created' => 3, 'images' => ['data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=']],
+            ['role' => 'assistant', 'content' => 'Nothing', 'created' => 4],
+        ]
+        : '');
+
+    $r = $h->pipeline->complete(3, 'Third question', ['conversation_id' => 42]);
+
+    // The valid image is sent as a part; the two invalid ones are not, and a turn left with none is sent as plain text.
+    expect($call['messages'][0]->content())->toBe([
+        ['type' => 'text', 'text' => 'Look'],
+        ['type' => 'image_url', 'image_url' => ['url' => 'data:image/png;base64,AAAA']],
+    ])
+        ->and($call['messages'][2]->content())->toBe('And this?')
+        // The stored transcript is left as it was: replay filters, it does not rewrite history.
+        ->and($r->conversation->messages[0]->images)->toHaveCount(3)
+        ->and($r->conversation->messages[2]->images)->toHaveCount(1);
+});
+
 // chat.context_messages bounds what is *sent*, counting the new turn, and never what is stored:
 // 0.4 sliced the stored transcript to chat_history_limit the same way (its documented 0 meant
 // "send all"). Without a bound every turn re-sends the whole conversation, Ollama truncates

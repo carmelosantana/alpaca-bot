@@ -445,14 +445,22 @@ final class Pipeline
      * A user turn in the OpenAI content-parts shape the vendored providers send when images are
      * attached (`UserMessage::withImages()` builds the same parts, from files); plain text
      * otherwise. An images-only turn carries no text part: some providers reject an empty one.
+     *
+     * Only images that meet ImageData's contract are replayed. images() holds a new turn to it,
+     * but a turn stored before that check existed may carry a `data:text/html,...` or a path
+     * (0.4 stored media paths) under `images`, and replaying it would send it to the provider
+     * on every later turn while MessageBubble never shows it: the defect the intake check was
+     * added for, still there for old rows. The stored transcript is not rewritten; a turn left
+     * with nothing to send is sent as its text.
      */
     private static function userMessage(Message $m): UserMessage
     {
-        if ($m->images === []) {
+        $images = array_filter($m->images, ImageData::isValid(...));
+        if ($images === []) {
             return new UserMessage($m->content);
         }
         $parts = $m->content === '' ? [] : [['type' => 'text', 'text' => $m->content]];
-        foreach ($m->images as $url) {
+        foreach ($images as $url) {
             $parts[] = ['type' => 'image_url', 'image_url' => ['url' => $url]];
         }
         return new UserMessage($parts);
