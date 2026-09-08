@@ -65,7 +65,7 @@ final class Schema
             'privacy.usage_retention_days' => ['type' => 'integer', 'default' => 90, 'section' => 'privacy', 'label' => __('Keep usage receipts for (days)', 'alpaca-bot'), 'description' => __('A daily cleanup deletes receipts older than this. 0 keeps them forever; 3650 (ten years) is the most, and a larger number is stored as 3650. Conversations are never touched. A receipt is counted toward the caps until its month ends, so keep this at 31 or more while a cap is set.', 'alpaca-bot'), 'min' => 0, 'max' => 3650],
             'governance.site_monthly_tokens' => ['type' => 'integer', 'default' => 0, 'section' => 'governance', 'label' => __('Site-wide monthly token cap', 'alpaca-bot'), 'min' => 0, 'max' => PHP_INT_MAX],
             'governance.user_monthly_tokens' => ['type' => 'integer', 'default' => 0, 'section' => 'governance', 'label' => __('Per-user monthly token cap', 'alpaca-bot'), 'min' => 0, 'max' => PHP_INT_MAX],
-            'toolkits.user_agent' => ['type' => 'string', 'default' => 'AlpacaBot/1.0 (+https://github.com/carmelosantana/alpaca-bot)', 'section' => 'toolkits', 'label' => __('User agent for fetch tools', 'alpaca-bot')],
+            'toolkits.user_agent' => ['type' => 'string', 'default' => 'AlpacaBot/0.5 (+https://github.com/carmelosantana/alpaca-bot)', 'section' => 'toolkits', 'label' => __('User agent for fetch tools', 'alpaca-bot')],
         ];
     }
 

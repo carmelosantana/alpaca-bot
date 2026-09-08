@@ -16,9 +16,9 @@
 
 ---
 
-## 1.0 development status
+## 0.5.0 development status
 
-The `1.0` branch is a ground-up rewrite of the 0.4 plugin, in five phases. Everything below this
+The `develop` branch is a ground-up rewrite of the 0.4 plugin that ships as **0.5.0**, in five phases. 1.0 is reserved for feature complete and fully tested (see `CLAUDE.md`). Everything below this
 section describes 0.4; it is refreshed as each phase lands.
 
 - **P1 — foundations, provider, pipeline** (in progress): settings schema and 0.4 migration,
@@ -33,13 +33,13 @@ section describes 0.4; it is refreshed as each phase lands.
 - **P5 — hardening and release**
 
 `readme.txt` (the wordpress.org listing) intentionally keeps describing the shipped 0.4.x release
-(`Requires at least: 6.4`, `Requires PHP: 8.1`, `Stable tag: 0.4.17`) until 1.0 is tagged. The
+(`Requires at least: 6.4`, `Requires PHP: 8.1`, `Stable tag: 0.4.17`) until 0.5.0 is tagged. The
 plugin file header in `alpaca-bot.php` is what gates the running code and already says PHP 8.4 /
 WordPress 6.9. Do not "fix" `readme.txt` on this branch: on wordpress.org, `Requires PHP: 8.4`
 next to `Stable tag: 0.4.17` would stop offering 0.4.x updates to exactly the PHP 8.1 sites that
 release stays published for.
 
-Spec: [1.0 core refactor](docs/superpowers/specs/2026-09-05-alpaca-bot-1-0-core-refactor.md).
+Spec: [0.5 core refactor](docs/superpowers/specs/2026-09-05-alpaca-bot-1-0-core-refactor.md).
 Plans: [P1](docs/superpowers/plans/2026-09-05-alpaca-bot-p1-foundations-provider-pipeline.md),
 [P2](docs/superpowers/plans/2026-09-05-alpaca-bot-p2-rest-and-settings.md),
 [P3](docs/superpowers/plans/2026-09-05-alpaca-bot-p3-view-layer-and-assets.md),
