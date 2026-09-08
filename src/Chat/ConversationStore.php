@@ -31,16 +31,24 @@ final class ConversationStore
     private const META_LEGACY_GENERATE = 'chat_mode_generate';
 
     /**
-     * Held back from `max_allowed_packet` for everything in the UPDATE that is not the meta
-     * value: the statement text, the other columns, and the escaping wpdb applies on the way
-     * (a quote or a backslash in a message doubles; base64 has neither, text may). The packet
-     * limit is on the whole query, so a value that is exactly the limit still fails. 1 MiB is
-     * far more than any of that costs, and the price of holding it back is 1 MiB of the
-     * transcript (6% of a stock packet) that a run of maximum-size images would have filled.
+     * Held back from `max_allowed_packet` for the part of the UPDATE that is not the meta value:
+     * the statement text, the column names, the WHERE clause and the packet's own header, a few
+     * hundred bytes in all. That part is the same whatever the transcript holds, so it is a
+     * constant; the other cost of the write, the escaping wpdb applies to the value, is not, and
+     * is measured per transcript instead (packetBytes() says why it cannot be a figure). 64 KiB
+     * is orders of magnitude more than the statement costs and 0.4% of a stock packet. Too small
+     * and the write fails exactly as it did before there was a budget; too large and the
+     * transcript loses room a run of maximum-size images would have filled.
      *
      * @since 0.5.0
      */
-    private const PACKET_MARGIN = 1024 * 1024;
+    private const PACKET_MARGIN = 64 * 1024;
+
+    /**
+     * The bytes mysqli_real_escape_string() doubles: NUL, newline, carriage return, ^Z, the two
+     * quotes and the backslash. What packetBytes() counts.
+     */
+    private const ESCAPED_BYTES = [0, 10, 13, 26, 34, 39, 92];
 
     /**
      * MySQL's and MariaDB's own documented default for `max_allowed_packet`, 16 MiB: what
@@ -125,10 +133,11 @@ final class ConversationStore
      * Conversation is plain data anyone can construct, so its id is not trusted on its own.
      *
      * The whole transcript is one meta value, so one row and one packet, and the invariant
-     * here is absolute: what is written always fits storageBudget(). Two images at the site's
-     * allowance are already past a stock 16 MiB packet, and past it the UPDATE fails, the
-     * false from update_post_meta() went unchecked, and the transcript silently stopped
-     * persisting from that turn on. So before the write the transcript is fitted (fit()):
+     * here is absolute: what is written always fits storageBudget(), measured as the database
+     * receives it (packetBytes()), escaping included. A few images at the site's allowance are
+     * past a stock 16 MiB packet, and past it the UPDATE fails, the false from
+     * update_post_meta() went unchecked, and the transcript silently stopped persisting from
+     * that turn on. So before the write the transcript is fitted (fit()):
      * image payloads go first, from the oldest turn that still has any, each turn keeping a
      * count of what it lost under `meta['images_evicted']`; whole messages go only once
      * every image is gone, oldest first. Text is never dropped while an image remains. The
@@ -158,13 +167,14 @@ final class ConversationStore
     }
 
     /**
-     * The bytes the serialised transcript may occupy in one meta write: the server's
-     * `max_allowed_packet` less PACKET_MARGIN, never below zero. The figure is the live one
-     * (maxAllowedPacket()), so a site that raised its packet gets the room it paid for and a
-     * site that lowered it is still safe; `$maxAllowedPacket` is a parameter so a test can pass
-     * a figure, and production passes nothing. A packet no larger than the margin gives 0,
-     * which fit() answers by storing an empty transcript: a server that small cannot take a
-     * transcript, and an empty one is the only value that fits.
+     * The bytes the serialised transcript may occupy in one meta write, counted as the
+     * database receives them (packetBytes()): the server's `max_allowed_packet` less
+     * PACKET_MARGIN, never below zero. The figure is the live one (maxAllowedPacket()), so a
+     * site that raised its packet gets the room it paid for and a site that lowered it is still
+     * safe; `$maxAllowedPacket` is a parameter so a test can pass a figure, and production
+     * passes nothing. A packet no larger than the margin gives 0, which fit() answers by
+     * emptying the transcript: a server that small cannot take one, and the six bytes an empty
+     * list serialises to are then over the budget, but not over any packet.
      *
      * @internal Public only so the tests can call it; not part of the plugin's API.
      * @since 0.5.0
@@ -196,11 +206,12 @@ final class ConversationStore
     /**
      * The transcript as the rows save() stores, fitted to storageBudget() by mutating `$c`
      * (save() says the order and why). The size is measured as the database sees it:
-     * update_post_meta() runs the value through maybe_serialize(), so that is what is measured,
-     * on the exact rows about to be written, after every eviction. Measuring the whole
-     * transcript again each round costs a serialisation per eviction, and each eviction takes
-     * megabytes off, so the rounds are few; the alternative, arithmetic on the parts, would
-     * have to reproduce serialize()'s framing to be trusted.
+     * update_post_meta() runs the value through maybe_serialize() and wpdb escapes the result
+     * into the statement, so that is what is measured (packetBytes()), on the exact rows about
+     * to be written, after every eviction. Measuring the whole transcript again each round
+     * costs a serialisation and a scan per eviction, and each eviction takes megabytes off, so
+     * the rounds are few; the alternative, arithmetic on the parts, would have to reproduce
+     * serialize()'s framing to be trusted.
      *
      * @return list<array<string, mixed>>
      */
@@ -208,7 +219,7 @@ final class ConversationStore
     {
         $budget = self::storageBudget();
         $rows = self::rows($c->messages);
-        while (strlen(maybe_serialize($rows)) > $budget && $c->messages !== []) {
+        while (self::packetBytes(maybe_serialize($rows)) > $budget && $c->messages !== []) {
             $oldestWithImages = null;
             foreach ($c->messages as $i => $m) {
                 if ($m->images !== []) {
@@ -226,6 +237,33 @@ final class ConversationStore
             $rows = self::rows($c->messages);
         }
         return $rows;
+    }
+
+    /**
+     * The bytes the value occupies in the query the database receives, which is what
+     * `max_allowed_packet` is measured against: its length, plus one for every byte
+     * mysqli_real_escape_string() doubles on the way (ESCAPED_BYTES). That cost is a share of
+     * the content, not a constant, which is why it is counted here and not folded into
+     * PACKET_MARGIN: base64 carries none of those bytes, so a transcript of images escapes to
+     * its own length and the images never showed the gap; serialize() frames every string in
+     * quotes, so even plain prose costs a little; and pasted JSON or code is one such byte in
+     * ten, which at a 15 MiB transcript is a megabyte and a half, more than any margin that is
+     * not wasted on every other transcript. Under a fixed margin such a transcript measured as
+     * fitting and the UPDATE still failed, the very bug the budget exists to close.
+     *
+     * One linear pass and no copy: count_chars() tallies every byte in one go, where escaping
+     * the value through wpdb to measure it would allocate a second transcript. wpdb also swaps
+     * `%` for a placeholder in _real_escape(), but puts it back on the `query` filter before
+     * the statement is sent, so `%` costs nothing on the wire and is not counted.
+     */
+    private static function packetBytes(string $serialised): int
+    {
+        $counts = count_chars($serialised, 1);
+        $escaped = 0;
+        foreach (self::ESCAPED_BYTES as $byte) {
+            $escaped += $counts[$byte] ?? 0;
+        }
+        return strlen($serialised) + $escaped;
     }
 
     /**

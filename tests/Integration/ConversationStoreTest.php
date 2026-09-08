@@ -22,6 +22,12 @@ use AlpacaBot\Plugin;
  * reports, so the premise is measured, not assumed. On alpaca10 (post_max_size 8M, packet 16
  * MiB) that is three images: two at the allowance come to 16,646,144 base64 bytes, 128 KiB
  * short of the packet.
+ *
+ * The second pair is the same A/B for text: `max_allowed_packet` is measured on the statement
+ * wpdb sends, and the driver doubles every quote, backslash, NUL, newline, carriage return and
+ * ^Z on the way, a cost base64 never pays. A transcript of quotes that serialises to well under
+ * the budget is twice that on the wire; through a bare update_post_meta() it fails exactly as
+ * the images did, and save() fits it by what the database will receive.
  */
 final class ConversationStoreTest extends TestCase
 {
@@ -103,6 +109,89 @@ final class ConversationStoreTest extends TestCase
         $this->assertSame(1, $loaded->messages[0]->meta['images_evicted']);
         $this->assertCount(1, $loaded->messages[2 * $images - 2]->images);
         fwrite(STDERR, sprintf("[#2977] after save(): storageBudget=%d stored=%d bytes, rows=%d, images kept=%d, evicted=%d\n", ConversationStore::storageBudget(), strlen(maybe_serialize($stored)), count($stored), $kept, $evicted));
+    }
+
+    /**
+     * A text-only conversation of `"` turns whose serialised rows are under the budget but past the packet once escaped.
+     *
+     * @return array{0: Conversation, 1: int} the conversation and the packet
+     */
+    private function transcriptPastThePacketOnceEscaped(int $uid, ConversationStore $store): array
+    {
+        global $wpdb;
+        $packet = (int) $wpdb->get_var('SELECT @@max_allowed_packet');
+        $this->assertGreaterThan(0, $packet);
+        $c = $store->create($uid);
+        $this->assertGreaterThan(0, $c->id);
+        $raw = 0;
+        $wire = 0;
+        for ($i = 0; $i < 12 && $wire <= $packet; $i++) {
+            $c->append(new Message($i % 2 === 0 ? 'user' : 'assistant', str_repeat('"', 2_000_000), 'fake-model'));
+            $serialised = maybe_serialize(array_map(static fn(Message $m): array => $m->toArray(), $c->messages));
+            $raw = strlen($serialised);
+            $wire = strlen($wpdb->remove_placeholder_escape($wpdb->_real_escape($serialised)));
+        }
+        $this->assertLessThan(ConversationStore::storageBudget(), $raw, 'measured raw, the transcript fits the budget');
+        $this->assertGreaterThan($packet, $wire, 'escaped as the driver escapes it, the transcript is past the packet');
+        fwrite(STDERR, sprintf("\n[#2977] max_allowed_packet=%d text turns=%d serialised=%d escaped=%d\n", $packet, count($c->messages), $raw, $wire));
+        return [$c, $packet];
+    }
+
+    public function test_the_driver_doubles_exactly_the_seven_bytes_the_store_counts_and_puts_the_percent_placeholder_back(): void
+    {
+        global $wpdb;
+        // NUL, newline, carriage return, ^Z, both quotes and the backslash: each becomes two bytes; `%` is swapped for a placeholder and swapped back before the query is sent.
+        $sample = "\0\n\r\x1a\"'\\%";
+        $this->assertSame(strlen($sample) + 7, strlen($wpdb->remove_placeholder_escape($wpdb->_real_escape($sample))));
+        // The rest of the printable range and multibyte text cost nothing.
+        $plain = implode('', array_map('chr', array_diff(range(32, 126), [34, 39, 92, 37]))) . 'héllo — 世界';
+        $this->assertSame(strlen($plain), strlen($wpdb->_real_escape($plain)));
+    }
+
+    public function test_a_text_transcript_past_max_allowed_packet_once_escaped_is_stored_fitted_and_reads_back(): void
+    {
+        $uid = $this->asAdmin();
+        $store = Plugin::instance()->get(ConversationStore::class);
+        [$c, $packet] = $this->transcriptPastThePacketOnceEscaped($uid, $store);
+        $turns = count($c->messages);
+        $newest = $c->last();
+        $this->assertNotNull($newest);
+
+        $store->save($c);
+
+        wp_cache_delete($c->id, 'post_meta');
+        $stored = get_post_meta($c->id, ConversationStore::META_MESSAGES, true);
+        $this->assertIsArray($stored, 'the transcript is there');
+        $this->assertLessThan($turns, count($stored), 'the oldest turns went: there were no images to let go first');
+        $this->assertGreaterThan(0, count($stored));
+        $this->assertSame($newest->content, $stored[count($stored) - 1]['content'], 'what remains ends with the newest turn');
+        $this->assertCount(count($stored), $c->messages, 'the conversation in memory agrees');
+        global $wpdb;
+        $wire = strlen($wpdb->remove_placeholder_escape($wpdb->_real_escape(maybe_serialize($stored))));
+        $this->assertLessThanOrEqual(ConversationStore::storageBudget(), $wire);
+        $this->assertLessThan($packet, $wire);
+        fwrite(STDERR, sprintf("[#2977] after save(): storageBudget=%d stored=%d rows, %d bytes serialised, %d on the wire\n", ConversationStore::storageBudget(), count($stored), strlen(maybe_serialize($stored)), $wire));
+    }
+
+    /** The before, for text: the same rows through a bare update_post_meta() fail at the server although they measure as fitting. */
+    public function test_the_same_text_rows_through_a_bare_update_post_meta_fail_against_this_database_although_they_fit_raw(): void
+    {
+        global $wpdb;
+        $uid = $this->asAdmin();
+        $store = Plugin::instance()->get(ConversationStore::class);
+        [$c] = $this->transcriptPastThePacketOnceEscaped($uid, $store);
+        $rows = array_map(static fn(Message $m): array => $m->toArray(), $c->messages);
+
+        $wpdb->suppress_errors(true);
+        $result = update_post_meta($c->id, ConversationStore::META_MESSAGES, $rows);
+        $error = $wpdb->last_error;
+        $wpdb->suppress_errors(false);
+        fwrite(STDERR, sprintf("[#2977] pre-fix update_post_meta() of the text rows returned %s; wpdb last_error: %s\n", var_export($result, true), $error));
+
+        $this->assertFalse($result);
+        $this->assertStringContainsString('max_allowed_packet', $error);
+        wp_cache_delete($c->id, 'post_meta');
+        $this->assertSame('', get_post_meta($c->id, ConversationStore::META_MESSAGES, true), 'nothing was stored');
     }
 
     /**

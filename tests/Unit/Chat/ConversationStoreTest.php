@@ -194,23 +194,23 @@ it('refuses to save a conversation that names an id but no owner, without a look
 
 // ------------------------------------------- storageBudget() and the fit save() applies
 
-// The 1 MiB margin is for the rest of the UPDATE the meta value rides in; the fallback is
-// MySQL's documented default packet.
+// The 64 KiB margin is for the statement the meta value rides in, the one part of the write
+// whose size does not depend on the transcript; the fallback is MySQL's documented default packet.
 it('derives the storage budget from max_allowed_packet less the margin, never below zero', function (): void {
-    expect(ConversationStore::storageBudget(16777216))->toBe(16777216 - 1048576)
-        ->and(ConversationStore::storageBudget(1048576 + 1))->toBe(1)
-        ->and(ConversationStore::storageBudget(1048576))->toBe(0)
+    expect(ConversationStore::storageBudget(16777216))->toBe(16777216 - 65536)
+        ->and(ConversationStore::storageBudget(65536 + 1))->toBe(1)
+        ->and(ConversationStore::storageBudget(65536))->toBe(0)
         ->and(ConversationStore::storageBudget(1))->toBe(0);
 });
 
 it('reads max_allowed_packet once per request and falls back to the documented default when the answer is empty or unparseable', function (): void {
     $db = conversationStoreDb('33554432');
-    expect(ConversationStore::storageBudget())->toBe(33554432 - 1048576)
-        ->and(ConversationStore::storageBudget())->toBe(33554432 - 1048576)
+    expect(ConversationStore::storageBudget())->toBe(33554432 - 65536)
+        ->and(ConversationStore::storageBudget())->toBe(33554432 - 65536)
         ->and($db->queries)->toBe(['SELECT @@max_allowed_packet']);
     foreach (['', null, false, 'abc', '0', '-1'] as $raw) {
         conversationStoreDb($raw);
-        expect(ConversationStore::storageBudget())->toBe(16777216 - 1048576, var_export($raw, true));
+        expect(ConversationStore::storageBudget())->toBe(16777216 - 65536, var_export($raw, true));
     }
 });
 
@@ -220,16 +220,32 @@ function conversationImage(int $n, string $fill = 'A'): string
     return 'data:image/png;base64,' . str_repeat($fill, intdiv($n, 3) * 4);
 }
 
-/** The rows save() stores for `$messages`, and their size as the database sees them. */
+/**
+ * A value as mysqli_real_escape_string() writes it into the query: the seven bytes it doubles.
+ * Spelled out here rather than taken from the store, so the store's count is checked against
+ * what the database driver does and not against itself.
+ */
+function conversationEscaped(string $s): string
+{
+    return str_replace(["\\", "\0", "\n", "\r", "'", '"', "\x1a"], ['\\\\', '\\0', '\\n', '\\r', "\\'", '\\"', '\\Z'], $s);
+}
+
+/** The rows save() stores for `$messages`. */
 function conversationRows(array $messages): array
 {
     return array_map(static fn(Message $m): array => $m->toArray(), $messages);
 }
 
-/** save() over a post the conversation's user owns, with the one meta write captured; the budget is `$budget` bytes. */
+/** The bytes `$rows` occupy in the UPDATE the database receives: serialised, then escaped as the driver escapes it. The unit the budget is in. */
+function conversationWire(array $rows): int
+{
+    return strlen(conversationEscaped(serialize($rows)));
+}
+
+/** save() over a post the conversation's user owns, with the one meta write captured; the budget is `$budget` bytes (the packet is that plus the 64 KiB margin). */
 function conversationSaveWithin(int $budget, Conversation $c): mixed
 {
-    conversationStoreDb((string) (1048576 + $budget));
+    conversationStoreDb((string) (65536 + $budget));
     Functions\when('get_post')->justReturn(conversationChatPost());
     Functions\when('wp_update_post')->justReturn(42);
     $written = null;
@@ -255,7 +271,7 @@ function conversationWithImages(): Conversation
 it('writes a transcript that fits the budget unchanged', function (): void {
     $c = conversationWithImages();
     $rows = conversationRows($c->messages);
-    $written = conversationSaveWithin(strlen(serialize($rows)), $c);
+    $written = conversationSaveWithin(conversationWire($rows), $c);
     expect($written)->toEqual($rows)
         ->and($c->messages[0]->images)->toHaveCount(1)
         ->and($c->messages[0]->meta)->toBe(['duration_ms' => 5])
@@ -264,7 +280,7 @@ it('writes a transcript that fits the budget unchanged', function (): void {
 
 it('evicts the oldest turn\'s images first, records the count on that turn, and leaves the newest turn\'s images intact', function (): void {
     $c = conversationWithImages();
-    $budget = strlen(serialize(conversationRows($c->messages))) - 1;
+    $budget = conversationWire(conversationRows($c->messages)) - 1;
     $written = conversationSaveWithin($budget, $c);
     // The in-memory conversation is what was stored: the oldest turn lost its one image and says so, in its meta beside what was there.
     expect($c->messages)->toHaveCount(4)
@@ -273,7 +289,7 @@ it('evicts the oldest turn\'s images first, records the count on that turn, and 
         ->and($c->messages[0]->content)->toBe('first')
         ->and($c->messages[2]->images)->toBe([conversationImage(300, 'B'), conversationImage(300, 'C')])
         ->and($written)->toEqual(conversationRows($c->messages))
-        ->and(strlen(maybe_serialize($written)))->toBeLessThanOrEqual($budget)
+        ->and(conversationWire($written))->toBeLessThanOrEqual($budget)
         // The marker survives the storage shape: meta goes out as an object and comes back as an array.
         ->and(Message::fromArray($written[0])->meta['images_evicted'])->toBe(1);
 });
@@ -282,7 +298,7 @@ it('adds an eviction to a count an earlier save recorded', function (): void {
     $c = new Conversation(42, 3, 'T');
     $c->append(new Message('user', 'again', 'm', null, 1, [conversationImage(300), conversationImage(300)], ['images_evicted' => 2]));
     $c->append(new Message('assistant', 'reply', 'm', null, 2));
-    $budget = strlen(serialize(conversationRows($c->messages))) - 1;
+    $budget = conversationWire(conversationRows($c->messages)) - 1;
     conversationSaveWithin($budget, $c);
     expect($c->messages[0]->images)->toBe([])->and($c->messages[0]->meta)->toBe(['images_evicted' => 4]);
 });
@@ -294,11 +310,11 @@ it('drops the oldest whole messages only once every image is gone, and the newes
         new Message('user', 'third', 'm', null, 3, [], ['images_evicted' => 2]),
         new Message('assistant', 'two', 'm', null, 4),
     ];
-    $budget = strlen(serialize(conversationRows($kept)));
+    $budget = conversationWire(conversationRows($kept));
     $written = conversationSaveWithin($budget, $c);
     expect($c->messages)->toEqual($kept)
         ->and($written)->toEqual(conversationRows($kept))
-        ->and(strlen(maybe_serialize($written)))->toBeLessThanOrEqual($budget);
+        ->and(conversationWire($written))->toBeLessThanOrEqual($budget);
 });
 
 it('drops oldest whole messages from a transcript over budget on text alone, and stores what is left', function (): void {
@@ -307,12 +323,35 @@ it('drops oldest whole messages from a transcript over budget on text alone, and
         $c->append(new Message($i % 2 === 0 ? 'user' : 'assistant', str_repeat($word . ' ', 40), 'm', null, $i + 1));
     }
     $kept = array_slice($c->messages, 2);
-    $budget = strlen(serialize(conversationRows($kept)));
+    $budget = conversationWire(conversationRows($kept));
     $written = conversationSaveWithin($budget, $c);
     expect($c->messages)->toEqual($kept)
         ->and($written)->toEqual(conversationRows($kept))
         ->and($written[0]['content'])->toStartWith('three ')
-        ->and(strlen(maybe_serialize($written)))->toBeLessThanOrEqual($budget);
+        ->and(conversationWire($written))->toBeLessThanOrEqual($budget);
+});
+
+// max_allowed_packet bounds the query the database receives, and wpdb escapes the value on the
+// way: every quote, backslash, NUL, newline, carriage return and ^Z is two bytes on the wire.
+// That cost is a share of the text, not a constant, so a fixed margin cannot cover it; the store
+// measures it. Base64 carries none of those bytes, which is why the image fixtures never showed
+// this: pasted JSON or code does.
+it('fits the transcript by its size on the wire, so escape-dense text that fits raw but not escaped is still fitted', function (): void {
+    $c = new Conversation(42, 3, 'T');
+    $c->append(new Message('user', str_repeat('"\\', 200), 'm', null, 1));
+    $c->append(new Message('assistant', 'plain', 'm', null, 2));
+    $rows = conversationRows($c->messages);
+    $raw = strlen(serialize($rows));
+    $wire = conversationWire($rows);
+    // The budget is the raw size exactly: measured raw the transcript fits and is written whole; on
+    // the wire it is 444 bytes over (400 from the content, 44 from the quotes serialize() frames
+    // its 22 strings in, which is why even a plain transcript escapes to more than its length).
+    $written = conversationSaveWithin($raw, $c);
+    expect($wire)->toBe($raw + 444)
+        ->and($c->messages)->toHaveCount(1)
+        ->and($c->messages[0]->content)->toBe('plain')
+        ->and($written)->toEqual(conversationRows($c->messages))
+        ->and(conversationWire($written))->toBeLessThanOrEqual($raw);
 });
 
 // ------------------------------------------------------------------ load()
