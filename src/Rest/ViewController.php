@@ -135,13 +135,15 @@ final class ViewController extends Controller
      * The model is stored as sent (sanitized, not checked against the catalog): the catalog is
      * consulted when the preference is used (UserPrefs::modelFor()), so a model that is listed
      * later, or unlisted while the provider is down, is neither refused here nor run blindly.
+     * Sanitizing strips markup and caps nothing, so the length is capped here: a model id is a
+     * short token, and the preference is a usermeta row any editor writes to at will.
      */
     public function defaultModel(\WP_REST_Request $request): \WP_REST_Response|\WP_Error
     {
         if (!(bool) $this->store->get('chat.user_can_change_model')) {
             return Errors::forbidden(__('This site does not let users change the model.', 'alpaca-bot'));
         }
-        $model = trim(sanitize_text_field((string) $request->get_param('model')));
+        $model = mb_substr(trim(sanitize_text_field((string) $request->get_param('model'))), 0, 200);
         if ($model === '') {
             return Errors::badRequest(__('Choose a model.', 'alpaca-bot'));
         }

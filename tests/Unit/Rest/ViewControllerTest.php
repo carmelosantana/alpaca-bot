@@ -104,6 +104,18 @@ it('refuses to save a default model while the site does not let users change the
         ->and($res->get_error_data()['status'])->toBe(403);
 });
 
+it('caps the stored default model at 200 characters, so a user cannot write an unbounded string into their own usermeta', function (): void {
+    // sanitize_text_field() strips markup and caps nothing; a model id is a short token, and
+    // the preference is per user, so the cap is the guard.
+    $long = str_repeat('m', 300);
+    Functions\expect('update_user_meta')->once()->with(3, 'alpaca_bot_default_model', str_repeat('m', 200));
+    viewController()->defaultModel(restRequest('POST', '/x', ['model' => $long]));
+    // Multibyte: the cap counts characters, not bytes, so it never splits one.
+    $wide = str_repeat('é', 250);
+    Functions\expect('update_user_meta')->once()->with(3, 'alpaca_bot_default_model', str_repeat('é', 200));
+    viewController()->defaultModel(restRequest('POST', '/x', ['model' => $wide]));
+});
+
 it('refuses an empty default model as a bad request', function (): void {
     Functions\expect('update_user_meta')->never();
     $c = viewController();

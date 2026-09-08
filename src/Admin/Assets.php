@@ -11,7 +11,8 @@ use AlpacaBot\Plugin;
  * only: htmx, then the chat bundle (which needs it, plus core's api-fetch and heartbeat), the
  * stylesheet, and the media library for the image picker. `alpacaBot` is the bundle's settings
  * object: the REST root (rest_url(), so it is right under either permalink form), the REST
- * nonce it signs requests with, and the strings it shows.
+ * nonce it signs requests with, the largest image the site takes (maxImageBytes()), and the
+ * strings it shows.
  *
  * The files are build outputs (`pnpm build`) and gitignored, enqueued by URL as any asset is:
  * a checkout that has not built them gets a 404 for each, and the screen still renders. Under
@@ -43,6 +44,7 @@ final class Assets
         wp_localize_script('alpaca-bot-chat', 'alpacaBot', [
             'rest' => rest_url('alpaca-bot/v1'),
             'nonce' => wp_create_nonce('wp_rest'),
+            'maxImageBytes' => self::maxImageBytes(),
             'i18n' => [
                 'copy' => __('Copy', 'alpaca-bot'),
                 'copied' => __('Copied', 'alpaca-bot'),
@@ -52,8 +54,9 @@ final class Assets
                 'sessionExpired' => __('Your session has expired. Reload the page to keep chatting.', 'alpaca-bot'),
                 'imageTitle' => __('Attach an image', 'alpaca-bot'),
                 'imageButton' => __('Use this image', 'alpaca-bot'),
-                // The figure is MAX_IMAGE_BYTES in resources/ts/image.ts.
-                'imageTooLarge' => __('That image is too large to send. Pick one under 4 MB.', 'alpaca-bot'),
+                // image.ts fills {size} with the image's size and {max} with maxImageBytes, both formatted.
+                /* translators: {size} and {max} are filled in by the browser with figures such as "4 MB". */
+                'imageTooLarge' => __('That image is {size}; this site takes an image up to {max}. Pick a smaller one.', 'alpaca-bot'),
                 'thinking' => __('Thinking…', 'alpaca-bot'),
             ],
             'offline' => __('You are offline. Messages will send once the connection is back.', 'alpaca-bot'),
@@ -75,6 +78,32 @@ final class Assets
             $response['alpaca_bot_nonce'] = wp_create_nonce('wp_rest');
         }
         return $response;
+    }
+
+    /**
+     * The largest image the chat bundle sends, in bytes: the smaller of the site's upload limit
+     * (wp_max_upload_size(), which a site filters and multisite caps) and post_max_size, the
+     * limit the image actually meets, since it travels base64-encoded inside a JSON body and
+     * not as an upload. A body past post_max_size is dropped before WordPress sees it and the
+     * only answer is a bare failure, which is what image.ts's guard exists to prevent: the guard
+     * is only as good as its figure, and this is the site's own rather than a guess at it. The
+     * figure is the raw image size, not the encoded body's, so it reads as the media uploader's
+     * "maximum upload file size" does; the base64 overhead fits under post_max_size wherever the
+     * upload limit is the smaller of the two, which is where a stock PHP puts it.
+     *
+     * 0 from either source is "no limit" (post_max_size=0 is PHP's own spelling of it) and does
+     * not cap; 0 from both means no figure, and image.ts keeps its constant. The two figures are
+     * parameters so a test can pass them; a caller passes neither.
+     *
+     * @internal Public only so the tests can call it; not part of the plugin's API.
+     */
+    public static function maxImageBytes(?int $uploadLimit = null, ?string $postMaxSize = null): int
+    {
+        $limits = array_filter([
+            $uploadLimit ?? (int) wp_max_upload_size(),
+            wp_convert_hr_to_bytes($postMaxSize ?? (string) ini_get('post_max_size')),
+        ], static fn(int $bytes): bool => $bytes > 0);
+        return $limits === [] ? 0 : min($limits);
     }
 
     /**

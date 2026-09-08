@@ -10,10 +10,11 @@
 import { decorate } from './highlight';
 import { readSse } from './stream';
 import { watchNonce } from './nonce';
-import { ImageTooLarge, fetchDataUrl } from './image';
+import { ImageTooLarge, fetchDataUrl, formatBytes, imageLimit } from './image';
 import { $, $$, asId, el, fromHtml, icon, notice } from './dom';
 
-interface Settings { rest: string; nonce: string; i18n: Record<string, string>; offline: string }
+// wp_localize_script() ships every scalar as a string, so the byte figure arrives as one; imageLimit() reads it.
+interface Settings { rest: string; nonce: string; i18n: Record<string, string>; offline: string; maxImageBytes?: string | number }
 interface Attachment { url: string; sizes?: Record<string, { url: string }> }
 interface MediaFrame { on(event: string, cb: () => void): void; open(): void; state(): { get(key: string): { first(): { toJSON(): Attachment } } } }
 interface HtmxDetail { path: string; headers: Record<string, string>; xhr?: XMLHttpRequest }
@@ -229,12 +230,13 @@ function boot(cfg: Settings, form: HTMLFormElement): void {
     });
     frame.open();
   }
-  /** An image past the cap (image.ts) is refused with a message that says so, not a bare failure. */
+  /** An image past the cap is refused with a message that names its size and the site's limit, not a bare failure. The limit is the site's own where the payload carries one (Assets::maxImageBytes()), else image.ts's constant. */
   async function attach(url: string): Promise<void> {
+    const max = imageLimit(cfg.maxImageBytes);
     try {
-      setImage(await fetchDataUrl(url));
+      setImage(await fetchDataUrl(url, max));
     } catch (e) {
-      notice('error', e instanceof ImageTooLarge ? t('imageTooLarge') : t('failed'));
+      notice('error', e instanceof ImageTooLarge ? t('imageTooLarge').replace('{size}', formatBytes(e.size)).replace('{max}', formatBytes(e.max)) : t('failed'));
     }
   }
   async function copy(button: HTMLElement, text: string): Promise<void> {

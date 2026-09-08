@@ -29,6 +29,6 @@ final class Composer extends Component
         $buttons = $this->tag('button', ['type' => 'button', 'class' => 'ab-btn ab-btn--icon', 'data-action' => 'image', 'aria-label' => $this->t('Attach an image')], Icon::svg('image'))
             . $this->tag('button', ['type' => 'button', 'class' => 'ab-btn ab-btn--icon', 'data-action' => 'image-remove', 'aria-label' => $this->t('Remove image'), 'hidden' => 'hidden'], Icon::svg('image-off'))
             . $this->tag('button', ['type' => 'submit', 'class' => 'ab-btn ab-btn--send', 'data-action' => 'send', 'aria-label' => $this->t('Send')], Icon::svg('send-horizontal'));
-        return $this->tag('form', ['id' => 'ab-form', 'class' => 'ab-composer', 'autocomplete' => 'off'], $hidden . $this->tag('div', ['class' => 'ab-composer__row'], $textarea . $this->tag('div', ['class' => 'ab-composer__buttons'], $buttons)) . $this->tag('p', ['class' => 'ab-composer__status', 'role' => 'status', 'aria-live' => 'polite'], ''));
+        return $this->tag('form', ['id' => 'ab-form', 'class' => 'ab-composer', 'autocomplete' => 'off'], $hidden . $this->tag('div', ['class' => 'ab-composer__row'], $textarea . $this->tag('div', ['class' => 'ab-composer__buttons'], $buttons)));
     }
 }

@@ -19,6 +19,8 @@ it('enqueues htmx, the chat bundle after it, the stylesheet and the media picker
     Functions\when('plugins_url')->alias(fn(string $p) => '/plugins/alpaca-bot/' . $p);
     Functions\when('rest_url')->alias(fn(string $p) => '/wp-json/' . $p);
     Functions\when('wp_create_nonce')->justReturn('n');
+    Functions\when('wp_max_upload_size')->justReturn(2 * 1024 * 1024);
+    Functions\when('wp_convert_hr_to_bytes')->justReturn(8 * 1024 * 1024);
     Functions\stubTranslationFunctions();
     Functions\expect('wp_enqueue_media')->once();
     Functions\expect('wp_enqueue_script')->once()->with('alpaca-bot-htmx', '/plugins/alpaca-bot/assets/js/htmx.min.js', [], Assets::HTMX_VERSION, true);
@@ -41,11 +43,43 @@ it('enqueues htmx, the chat bundle after it, the stylesheet and the media picker
     }
 });
 
+it('ships the real image cap, the smaller of the upload limit and post_max_size, with a message that names both figures', function (): void {
+    // image.ts's constant is a guess against a default 8M post_max_size; behind a tighter
+    // limit the guard fell into the opaque failure it exists to close. The figure ships from
+    // PHP, and the message it shows carries placeholders for the size and the cap.
+    Functions\when('wp_convert_hr_to_bytes')->alias(static fn(string $v): int => match ($v) { '8M' => 8 * 1024 * 1024, '2M' => 2 * 1024 * 1024, '1M' => 1024 * 1024, '0' => 0, default => (int) $v });
+    expect(Assets::maxImageBytes(2 * 1024 * 1024, '8M'))->toBe(2 * 1024 * 1024)
+        ->and(Assets::maxImageBytes(64 * 1024 * 1024, '1M'))->toBe(1024 * 1024)
+        // post_max_size 0 is PHP for "no limit", and a 0 upload limit is core's answer to that: neither is a cap.
+        ->and(Assets::maxImageBytes(64 * 1024 * 1024, '0'))->toBe(64 * 1024 * 1024)
+        ->and(Assets::maxImageBytes(0, '8M'))->toBe(8 * 1024 * 1024)
+        ->and(Assets::maxImageBytes(0, '0'))->toBe(0);
+
+    Functions\when('plugins_url')->alias(fn(string $p) => '/plugins/alpaca-bot/' . $p);
+    Functions\when('rest_url')->alias(fn(string $p) => '/wp-json/' . $p);
+    Functions\when('wp_create_nonce')->justReturn('n');
+    Functions\when('wp_max_upload_size')->justReturn(2 * 1024 * 1024);
+    Functions\stubTranslationFunctions();
+    Functions\when('wp_enqueue_media')->justReturn();
+    Functions\when('wp_enqueue_script')->justReturn(true);
+    Functions\when('wp_enqueue_style')->justReturn(true);
+    $localised = null;
+    Functions\when('wp_localize_script')->alias(static function (string $h, string $n, array $data) use (&$localised): bool {
+        $localised = $data;
+        return true;
+    });
+    (new Assets())->enqueue(Assets::HOOK);
+    expect($localised['maxImageBytes'])->toBeInt()->toBeGreaterThan(0)->toBeLessThanOrEqual(2 * 1024 * 1024)
+        ->and($localised['i18n']['imageTooLarge'])->toContain('{size}')->toContain('{max}');
+});
+
 it('versions the build outputs by the plugin version outside WP_DEBUG, and under it by mtime only for a file that is there', function (): void {
     // The unit process has no WP_DEBUG: the enqueue path takes the plugin version for both files.
     Functions\when('plugins_url')->alias(fn(string $p) => '/plugins/alpaca-bot/' . $p);
     Functions\when('rest_url')->alias(fn(string $p) => '/wp-json/' . $p);
     Functions\when('wp_create_nonce')->justReturn('n');
+    Functions\when('wp_max_upload_size')->justReturn(2 * 1024 * 1024);
+    Functions\when('wp_convert_hr_to_bytes')->justReturn(8 * 1024 * 1024);
     Functions\stubTranslationFunctions();
     Functions\when('wp_enqueue_media')->justReturn();
     Functions\when('wp_localize_script')->justReturn(true);

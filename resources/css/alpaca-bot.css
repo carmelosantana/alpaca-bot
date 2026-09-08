@@ -207,9 +207,6 @@ pre > .ab-code__copy:focus-visible { outline-color: var(--ab-code-text); }
 .ab-composer__buttons { display: flex; align-items: center; gap: 4px; }
 .ab-composer__preview { height: 40px; width: auto; border-radius: 4px; }
 
-/* The status line is written by no one yet; an empty <p> would still add its margin. */
-.ab-composer__status:empty { display: none; }
-
 /* ---- buttons and icons ----------------------------------------------------------------- */
 .ab-icon { width: 1.25em; height: 1.25em; vertical-align: -0.25em; }
 .ab-btn, .ab-msg__action {
