@@ -1,10 +1,11 @@
 /*
  * Alpaca Bot admin chat screen (0.5). Every selector here is emitted by src/View/Chat/*,
  * src/View/Icon.php, or resources/ts/{chat,dom,highlight}.ts; the markdown elements are
- * Markdown::allowedTags(). The accent is never a literal: --wp-admin-theme-color and its
- * derivatives are what core sets on <body> for every admin colour scheme, so the screen
- * follows whichever one the user picked. The surfaces, text and borders are core's fixed
- * greys, which do not change between schemes.
+ * Markdown::allowedTags(). The accent comes from core's --wp-admin-theme-color and its
+ * derivatives, set on <body> for every admin colour scheme, so the screen follows whichever
+ * one the user picked; the Default scheme's values stand behind them as fallbacks so a missing
+ * variable cannot blank a control. The surfaces, text and borders are core's fixed greys,
+ * which do not change between schemes.
  */
 
 .ab-wrap {

@@ -63,7 +63,9 @@ it('tells a site that upgraded from 0.4 that both shortcodes are gone, print as 
 it('describes what the chat screen does now, and points support at Discord, Patreon and the issue tracker', function (): void {
     Functions\when('esc_url')->returnArg();
     $chat = helpTabContent('alpaca-bot-chat');
-    expect($chat)->toContain('New chat')->toContain('Enter')->toContain('Shift')->toContain('image')->toContain('Copy')->toContain('Edit and resend');
+    expect($chat)->toContain('New chat')->toContain('Enter')->toContain('Shift')->toContain('image')->toContain('Copy')->toContain('Edit and resend')
+        // The image cap is Assets::maxImageBytes(), which reads post_max_size alone; the tab must name that setting, not the upload limit that has no say.
+        ->toContain('post_max_size')->not->toMatch('/is the site.s own upload limit/');
     $support = helpTabContent('alpaca-bot-support');
     expect($support)->toContain('href="https://discord.gg/vWQTHphkVt"')
         ->toContain('href="https://www.patreon.com/carmelosantana"')

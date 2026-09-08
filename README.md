@@ -91,7 +91,6 @@ Plans: [P1](docs/superpowers/plans/2026-09-05-alpaca-bot-p1-foundations-provider
 ## Requirements
 
 - PHP 8.4+, WordPress 6.9+, an Ollama instance (or any provider php-agents supports)
-  - Permalinks enabled
 
 ## Installation
 
@@ -117,7 +116,7 @@ Click **Alpaca Bot** in the admin menu, below Dashboard and above Posts. The scr
 
 - The **model** select in the header picks the model for this conversation; where the site allows it, your pick is saved as your default. The **history** select opens one of your earlier conversations, and **New chat** starts a fresh one.
 - Type in the box at the foot of the screen. **Enter** sends, **Shift+Enter** adds a line, **Escape** clears the box.
-- The image button attaches a picture from the media library to your next message, for a model that can see. The largest image the screen takes is the site's own upload limit.
+- The image button attaches a picture from the media library to your next message, for a model that can see. The largest image the screen takes is set by the site's PHP `post_max_size`, not its upload limit: the image travels inside the message, not as an upload.
 - Replies stream in as they are written. Every message has a **Copy** button, your own have **Edit and resend**, and a code block has its own copy button. Under a reply is its receipt: the model, the tokens it used and how long it took.
 - The **Help** tab at the top right of the screen repeats this, and says what became of 0.4's shortcodes.
 

@@ -353,7 +353,7 @@ stored and `""` when none is:
 
 ```
 $ curl -s -u "admin:$PW" "$B/settings"
-{"provider.kind":"ollama","provider.base_url":"http:\/\/ollama.example:11434\/v1","provider.api_key":"","provider.timeout":60,"models.default":"qwen3-vl:2b","models.temperature":0.7,"models.num_ctx":8192,"models.keep_alive":"5m","models.overrides":[],"chat.system_prompt":"","chat.welcome":"How can I help?","chat.placeholder":"Message Alpaca Bot","chat.user_can_change_model":true,"chat.context_messages":20,"chat.history_limit":20,"chat.spellcheck":true,"chat.assistant_avatar":"","privacy.save_history":true,"privacy.usage_log":true,"privacy.usage_retention_days":0,"governance.site_monthly_tokens":0,"governance.user_monthly_tokens":0,"toolkits.user_agent":"AlpacaBot\/1.0 (+https:\/\/github.com\/carmelosantana\/alpaca-bot)"}
+{"provider.kind":"ollama","provider.base_url":"http:\/\/ollama.example:11434\/v1","provider.api_key":"","provider.timeout":60,"models.default":"qwen3-vl:2b","models.temperature":0.7,"models.num_ctx":8192,"models.keep_alive":"5m","models.overrides":[],"chat.system_prompt":"","chat.welcome":"How can I help?","chat.placeholder":"Message Alpaca Bot","chat.user_can_change_model":true,"chat.context_messages":20,"chat.history_limit":20,"chat.spellcheck":true,"chat.assistant_avatar":"","privacy.save_history":true,"privacy.usage_log":true,"privacy.usage_retention_days":0,"governance.site_monthly_tokens":0,"governance.user_monthly_tokens":0,"toolkits.user_agent":"AlpacaBot\/0.5 (+https:\/\/github.com\/carmelosantana\/alpaca-bot)"}
 ```
 
 (`provider.base_url` is the site's own value.) What this route answers is what is *stored*, which
