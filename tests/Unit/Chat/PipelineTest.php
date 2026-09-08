@@ -57,7 +57,10 @@ it('streams deltas, persists both messages, records usage, and returns a Result'
         ->and($result->reply->role)->toBe('assistant')
         ->and($result->reply->model)->toBe('llama3.2')
         ->and($result->reply->usage)->toBe(['prompt_tokens' => 5, 'completion_tokens' => 2])
-        ->and($result->reply->meta)->toBe([])
+        // The reply carries the turn's wall time, so a reloaded transcript can show the same
+        // receipt a live turn does (MessageBubble reads meta.duration_ms).
+        ->and($result->reply->meta)->toBe(['duration_ms' => $result->receipt['duration_ms']])
+        ->and($result->reply->meta['duration_ms'])->toBeInt()->toBeGreaterThanOrEqual(0)
         ->and($result->conversation->id)->toBe(42)
         ->and($result->conversation->messages)->toHaveCount(2)
         ->and($result->conversation->messages[0]->content)->toBe('Hi there')
@@ -100,6 +103,7 @@ it('streams deltas, persists both messages, records usage, and returns a Result'
     expect($transcript[0]['role'])->toBe('user')
         ->and($transcript[1]['role'])->toBe('assistant')
         ->and($transcript[1]['content'])->toBe('Hello')
+        ->and($transcript[1]['meta'])->toEqual((object) ['duration_ms' => $result->receipt['duration_ms']])
         ->and($h->writes[3][2]['post_author'])->toBe(3)
         ->and($h->writes[3][2]['meta_input']['total_tokens'])->toBe(7)
         ->and($h->writes[3][2]['meta_input']['conversation_id'])->toBe(42);
@@ -393,7 +397,7 @@ it('yields reasoning deltas, stores the reasoning on the reply, and copes with a
     $r = $gen->getReturn();
     expect(array_map(static fn(Delta $d): array => [$d->text, $d->reasoning], $deltas))->toBe([['', 'thinking'], [' hard', '…'], ['Answer', '']])
         ->and($r->reply->content)->toBe(' hardAnswer')
-        ->and($r->reply->meta)->toBe(['reasoning' => 'thinking…'])
+        ->and($r->reply->meta)->toBe(['duration_ms' => $r->receipt['duration_ms'], 'reasoning' => 'thinking…'])
         ->and($r->reply->usage)->toBe(['prompt_tokens' => 0, 'completion_tokens' => 0])
         ->and($r->receipt['total_tokens'])->toBe(0)
         ->and($h->writes[3][2]['meta_input']['total_tokens'])->toBe(0);

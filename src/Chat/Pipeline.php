@@ -191,6 +191,8 @@ final class Pipeline
         }
         $durationMs = self::elapsedMs($started);
 
+        // The duration rides on the stored reply as well as the receipt, so a reloaded
+        // transcript shows the same `model · tokens · seconds` line a live turn did.
         $reply = new Message(
             'assistant',
             $content,
@@ -198,7 +200,7 @@ final class Pipeline
             ['prompt_tokens' => $prompt, 'completion_tokens' => $completion],
             0,
             [],
-            $reasoning !== '' ? ['reasoning' => $reasoning] : [],
+            ['duration_ms' => $durationMs] + ($reasoning !== '' ? ['reasoning' => $reasoning] : []),
         );
         $filtered = apply_filters('alpaca_bot/message/after_receive', $reply, $conversation);
         if ($filtered instanceof Message) {

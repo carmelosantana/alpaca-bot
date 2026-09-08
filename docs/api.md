@@ -174,7 +174,9 @@ $ curl -s -u "admin:$PW" -H 'Content-Type: application/json' \
 The 200 body is `{conversation_id, message, receipt, contexts}`:
 
 - `message` is the assistant reply: `{role, content, model, usage: {prompt_tokens,
-  completion_tokens}, created, images, meta}`. A thinking model (the site's default here,
+  completion_tokens}, created, images, meta}`. `message.meta.duration_ms` is the turn's
+  wall time, the same number as `receipt.duration_ms`, kept on the stored reply so a reloaded
+  transcript can show it. A thinking model (the site's default here,
   `qwen3-vl:2b`, is one) returns its reasoning in `message.meta.reasoning`; those tokens are
   completion tokens and count against the monthly caps, which is why a three-word answer above
   cost 3,776 of them.
@@ -285,7 +287,8 @@ $ curl -s -u "admin:$PW" "$B/conversations/163"
 {"id":163,"title":"Reply with exactly three words","created":1788736220,"mode":"chat","messages":[{"role":"user","content":"Reply with exactly three words.","model":"qwen3-vl:2b","usage":null,"created":1788736220,"images":[],"meta":{}},{"role":"assistant","content":"Boring is right.","model":"qwen3-vl:2b","usage":{"prompt_tokens":16,"completion_tokens":3776},"created":1788736235,"images":[],"meta":{"reasoning":"Hmm, the user asked me to reply with exactly three words. …"}}]}
 ```
 
-`meta` is always an object, `{}` when there is none. A reply cut short by a client that
+`meta` is always an object, `{}` when there is none. A completed assistant reply carries
+`meta.duration_ms` (the samples above predate it). A reply cut short by a client that
 disconnected mid-stream is stored with `meta.partial: true`.
 
 A conversation that is not yours reads as missing, so its existence is not leaked:

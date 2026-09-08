@@ -269,7 +269,8 @@ it('writes a start frame with the real conversation id, a delta per chunk, then 
     $done = json_decode(substr($frames[4], strlen("event: done\ndata: ")), true);
     expect($done)->toHaveKeys(['conversation_id', 'message', 'receipt', 'contexts'])
         ->and($done['conversation_id'])->toBe(42)
-        ->and($done['message'])->toMatchArray(['role' => 'assistant', 'content' => 'ab', 'model' => 'qwen3:8b', 'usage' => ['prompt_tokens' => 5, 'completion_tokens' => 2], 'meta' => ['reasoning' => 'thinking']])
+        // message.meta carries the turn's duration on the wire too: the same number as receipt.duration_ms.
+        ->and($done['message'])->toMatchArray(['role' => 'assistant', 'content' => 'ab', 'model' => 'qwen3:8b', 'usage' => ['prompt_tokens' => 5, 'completion_tokens' => 2], 'meta' => ['duration_ms' => $done['receipt']['duration_ms'], 'reasoning' => 'thinking']])
         ->and($done['receipt'])->toMatchArray(['user_id' => 3, 'model' => 'qwen3:8b', 'total_tokens' => 7, 'conversation_id' => 42, 'log_id' => 9])
         ->and($done['contexts'])->toBe([])
         // The stored transcript is what was streamed.

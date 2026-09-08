@@ -27,7 +27,7 @@ final class Message
     ) {}
 
     /**
-     * Builds a message from its stored array — the 1.0 shape written by toArray(), or the 0.4
+     * Builds a message from its stored array — the 0.5 shape written by toArray(), or the 0.4
      * shape `{model, message: {role, content}, ...}`, which was the raw Ollama chat response.
      *
      * @param array<string, mixed> $a
@@ -50,7 +50,9 @@ final class Message
 
     /**
      * The wire and storage shape. `meta` goes out as an object so an empty one serialises as
-     * `{}`, the same JSON type as a populated one; fromArray() reads that object back.
+     * `{}`, the same JSON type as a populated one; fromArray() reads that object back. A row
+     * written this way and read by a pre-0.5 fromArray() (a mid-0.5 rollback) fails its
+     * `is_array()` check and silently drops `reasoning`, `partial` and `duration_ms`.
      *
      * @return array<string, mixed>
      */
