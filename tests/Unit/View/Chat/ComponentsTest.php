@@ -219,3 +219,30 @@ it('renders a user turn\'s attached image from its data URL and drops anything t
         ->and((new MessageBubble(new Message('assistant', 'hi', 'm', null, 0, [$png]), new Markdown(), 'C', '/u.png', '/a.png'))->render())->not->toContain('ab-msg__images');
 });
 
+// ---- Task 0 (P3 carry-over): images ConversationStore::save() evicted leave a marker, not a broken image
+
+it('renders a placeholder for the images the store evicted, escaped, and nothing of the kind for an unevicted turn', function (): void {
+    Functions\when('esc_attr')->alias(fn(string $s) => htmlspecialchars($s, ENT_QUOTES));
+    Functions\when('esc_html')->alias(fn(string $s) => 'E(' . $s . ')');
+    Functions\when('_n')->alias(fn(string $one, string $many, int $n) => $n === 1 ? $one : $many);
+    $png = 'data:image/png;base64,iVBORw0KGgo=';
+    $bubble = fn(Message $m): string => (new MessageBubble($m, new Markdown(), 'C', '/u.png', '/a.png'))->render();
+    // Read back through the storage shape, as a history screen does: meta is an object on the way in.
+    $stored = fn(array $images, array $meta): Message => Message::fromArray((new Message('user', 'look', '', null, 0, $images, $meta))->toArray());
+
+    // One image still stored beside two the store let go: the image first, then the marker, in the images row.
+    expect($bubble($stored([$png], ['images_evicted' => 2])))
+        ->toContain('<div class="ab-msg__images"><img class="ab-msg__image" src="' . $png . '" alt="Attached image"><span class="ab-msg__evicted">E(2 attached images are no longer stored.)</span></div>');
+    // Every image gone: the row is the marker alone, and there is no <img> to break.
+    expect($bubble($stored([], ['images_evicted' => 1])))
+        ->toContain('<div class="ab-msg__images"><span class="ab-msg__evicted">E(1 attached image is no longer stored.)</span></div>')
+        ->not->toContain('<img class="ab-msg__image"');
+    // Unevicted, or a marker that says nothing was evicted, or one that is not a count: as before.
+    foreach ([[], ['images_evicted' => 0], ['images_evicted' => -1], ['images_evicted' => 'x'], ['duration_ms' => 3]] as $meta) {
+        expect($bubble($stored([$png], $meta)))->not->toContain('ab-msg__evicted')->toContain('<img class="ab-msg__image"');
+        expect($bubble($stored([], $meta)))->not->toContain('ab-msg__images');
+    }
+    // An assistant turn never has an images row, marker or not.
+    expect($bubble(new Message('assistant', 'hi', 'm', null, 0, [], ['images_evicted' => 1])))->not->toContain('ab-msg__images');
+});
+

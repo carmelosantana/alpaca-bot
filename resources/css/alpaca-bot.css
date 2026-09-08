@@ -98,6 +98,8 @@
 
 .ab-msg__images { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
 .ab-msg__image { max-width: 200px; max-height: 200px; border: 1px solid var(--ab-border); border-radius: 4px; }
+/* An image the store let go (MessageBubble's evicted marker): a dashed, muted note in the images row, not a broken image. */
+.ab-msg__evicted { display: inline-flex; align-items: center; padding: 8px 12px; border: 1px dashed var(--ab-border); border-radius: 4px; color: var(--ab-muted); font-size: 12px; }
 .ab-receipt { margin-top: 4px; color: var(--ab-muted); font-size: 12px; }
 
 /* ---- message content: the markdown allowlist, the highlighter, the stream ----------- */

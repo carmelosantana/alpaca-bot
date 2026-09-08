@@ -19,6 +19,10 @@ use AlpacaBot\View\Markdown;
  * shown above its text: `esc_url()` strips a `data:` URL (it is not in wp_allowed_protocols),
  * so each is held to a base64 image data URL by pattern (ImageData::PATTERN, the same contract
  * Pipeline::images() admits at intake) and attribute-escaped; anything else is not rendered.
+ * Images ConversationStore::save() evicted to fit the transcript into the database's packet
+ * limit leave a count under `meta['images_evicted']`; the row then ends with one line saying
+ * how many are no longer stored, so the turn reads as it was, not as a turn that never had
+ * them and not as a broken image.
  */
 final class MessageBubble extends Component
 {
@@ -50,6 +54,13 @@ final class MessageBubble extends Component
             if (ImageData::isValid($src)) {
                 $imgs .= $this->tag('img', ['class' => 'ab-msg__image', 'src' => $src, 'alt' => $this->t('Attached image')]);
             }
+        }
+        // The marker is read as stored (an int, or whatever a filter left there): only a count above zero says anything.
+        $evicted = $this->m->meta['images_evicted'] ?? 0;
+        $evicted = is_int($evicted) ? $evicted : 0;
+        if ($evicted > 0) {
+            /* translators: %s: how many of the turn's attached images the store let go to fit the transcript into the database */
+            $imgs .= $this->tag('span', ['class' => 'ab-msg__evicted'], $this->e(sprintf(_n('%s attached image is no longer stored.', '%s attached images are no longer stored.', $evicted, 'alpaca-bot'), number_format_i18n($evicted))));
         }
         return $imgs === '' ? '' : $this->tag('div', ['class' => 'ab-msg__images'], $imgs);
     }
