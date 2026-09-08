@@ -8,7 +8,8 @@ use AlpacaBot\Plugin;
 
 /**
  * The chat screen's scripts and stylesheet, enqueued on `admin_enqueue_scripts` for that screen
- * only: htmx, then the chat bundle (which needs it, plus core's api-fetch and heartbeat), the
+ * only: htmx, then the chat bundle (which needs it, plus core's heartbeat for the nonce
+ * refresh; it fetches with bare fetch(), so api-fetch is not among its dependencies), the
  * stylesheet, and the media library for the image picker. `alpacaBot` is the bundle's settings
  * object: the REST root (rest_url(), so it is right under either permalink form), the REST
  * nonce it signs requests with, the largest image the site takes (maxImageBytes()), and the
@@ -39,7 +40,7 @@ final class Assets
         }
         wp_enqueue_media();
         wp_enqueue_script('alpaca-bot-htmx', plugins_url('assets/js/htmx.min.js', ALPACA_BOT_FILE), [], self::HTMX_VERSION, true);
-        wp_enqueue_script('alpaca-bot-chat', plugins_url('assets/js/chat.js', ALPACA_BOT_FILE), ['alpaca-bot-htmx', 'wp-api-fetch', 'heartbeat'], self::version('assets/js/chat.js'), true);
+        wp_enqueue_script('alpaca-bot-chat', plugins_url('assets/js/chat.js', ALPACA_BOT_FILE), ['alpaca-bot-htmx', 'heartbeat'], self::version('assets/js/chat.js'), true);
         wp_enqueue_style('alpaca-bot', plugins_url('assets/css/alpaca-bot.css', ALPACA_BOT_FILE), [], self::version('assets/css/alpaca-bot.css'));
         wp_localize_script('alpaca-bot-chat', 'alpacaBot', [
             'rest' => rest_url('alpaca-bot/v1'),

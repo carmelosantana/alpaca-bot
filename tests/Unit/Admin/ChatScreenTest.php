@@ -63,7 +63,7 @@ it('renders a new chat on the bare screen, on the user\'s effective model, with 
         ->toContain('id="ab-model"')->toContain('<option value="llava:7b" selected>')
         ->toContain('id="ab-history"')->toContain('<option value="5" data-id="5">T</option>')->toContain('<option value="0" data-id="0" selected>')
         ->toContain('data-conversation="0"')->toContain('ab-welcome')->toContain('id="ab-form"')
-        ->toContain('name="model" value="llava:7b"')->toContain('name="context[post_id]" value="0"')->toContain('name="_wpnonce" value="nonce"');
+        ->toContain('name="model" value="llava:7b"')->toContain('name="context[post_id]" value="0"')->not->toContain('_wpnonce');
 });
 
 it('opens the conversation ?conversation= names when it is the user\'s, and the post being edited rides along as context', function (): void {

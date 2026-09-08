@@ -23,7 +23,7 @@ it('enqueues htmx, the chat bundle after it, the stylesheet and the media picker
     Functions\stubTranslationFunctions();
     Functions\expect('wp_enqueue_media')->once();
     Functions\expect('wp_enqueue_script')->once()->with('alpaca-bot-htmx', '/plugins/alpaca-bot/assets/js/htmx.min.js', [], Assets::HTMX_VERSION, true);
-    Functions\expect('wp_enqueue_script')->once()->with('alpaca-bot-chat', '/plugins/alpaca-bot/assets/js/chat.js', ['alpaca-bot-htmx', 'wp-api-fetch', 'heartbeat'], Mockery::type('string'), true);
+    Functions\expect('wp_enqueue_script')->once()->with('alpaca-bot-chat', '/plugins/alpaca-bot/assets/js/chat.js', ['alpaca-bot-htmx', 'heartbeat'], Mockery::type('string'), true);
     Functions\expect('wp_enqueue_style')->once()->with('alpaca-bot', '/plugins/alpaca-bot/assets/css/alpaca-bot.css', [], Mockery::type('string'));
     $localised = null;
     Functions\expect('wp_localize_script')->once()->with('alpaca-bot-chat', 'alpacaBot', Mockery::on(static function (array $data) use (&$localised): bool {

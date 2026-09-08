@@ -150,8 +150,10 @@ pre > .ab-code__copy:focus-visible { outline-color: var(--ab-code-text); }
 .tok-num { color: #f2d675; }
 .tok-fn { color: #ff8085; }
 
-/* Streamed deltas are raw text until the server's rendering replaces the bubble. */
-[data-streaming="1"] .ab-msg__content { white-space: pre-wrap; }
+/* Streamed deltas are raw text until the server's rendering replaces the bubble; a reply the
+   stream left partial (chat.ts settle()) keeps them as they are, without the caret. */
+[data-streaming="1"] .ab-msg__content,
+[data-partial="1"] .ab-msg__content { white-space: pre-wrap; }
 [data-streaming="1"] .ab-msg__content::after {
     content: "";
     display: inline-block;

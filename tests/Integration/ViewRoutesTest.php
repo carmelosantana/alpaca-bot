@@ -171,7 +171,8 @@ final class ViewRoutesTest extends TestCase
         $this->assertTrue(wp_script_is('alpaca-bot-htmx', 'enqueued'));
         $this->assertTrue(wp_script_is('alpaca-bot-chat', 'enqueued'));
         $this->assertTrue(wp_style_is('alpaca-bot', 'enqueued'));
-        $this->assertSame(['alpaca-bot-htmx', 'wp-api-fetch', 'heartbeat'], wp_scripts()->registered['alpaca-bot-chat']->deps);
+        // heartbeat is for the nonce refresh (nonce.ts); api-fetch is not here, the bundle uses bare fetch().
+        $this->assertSame(['alpaca-bot-htmx', 'heartbeat'], wp_scripts()->registered['alpaca-bot-chat']->deps);
         $this->assertStringContainsString('var alpacaBot = ', (string) wp_scripts()->get_data('alpaca-bot-chat', 'data'));
         // rest_url() under the site's plain permalinks: ?rest_route=, the form the client must use.
         $this->assertStringContainsString('"rest":"' . rest_url('alpaca-bot/v1') . '"', (string) wp_scripts()->get_data('alpaca-bot-chat', 'data'));

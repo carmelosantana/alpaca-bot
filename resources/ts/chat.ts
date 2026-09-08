@@ -182,10 +182,16 @@ function boot(cfg: Settings, form: HTMLFormElement): void {
     }
     settle(bubble, answered);
   }
-  /** A stream that ended without `done`: keep what arrived, drop an empty bubble. */
+  /** A stream that ended without `done`: keep what arrived as a partial reply, drop an empty bubble. */
   function settle(bubble: HTMLElement, answered: boolean): void {
-    if (answered) delete bubble.dataset.streaming;
+    if (answered) partial(bubble);
     else bubble.remove();
+  }
+  /** Leaves the streamed text as it is for good: still pre-wrapped (data-partial), without the caret (data-streaming) and no longer announced (aria-live). */
+  function partial(bubble: HTMLElement): void {
+    delete bubble.dataset.streaming;
+    bubble.dataset.partial = '1';
+    $('.ab-msg__content', bubble)?.removeAttribute('aria-live');
   }
   /** Swaps the streamed text for the server's rendering of the finished reply and reloads the history. */
   async function finish(d: Json, bubble: HTMLElement): Promise<void> {
@@ -200,7 +206,7 @@ function boot(cfg: Settings, form: HTMLFormElement): void {
         bubble.replaceWith(rendered);
         decorate(rendered, t('copyCode'));
       } else {
-        delete bubble.dataset.streaming;
+        partial(bubble);
       }
     });
     window.htmx?.trigger(document.body, 'ab:refresh');
@@ -329,7 +335,7 @@ function boot(cfg: Settings, form: HTMLFormElement): void {
   });
   window.addEventListener('online', connectivity);
   window.addEventListener('offline', connectivity);
-  watchNonce((nonce) => { cfg.nonce = nonce; field('_wpnonce').value = nonce; });
+  watchNonce((nonce) => { cfg.nonce = nonce; });
 
   decorate(document, t('copyCode'));
   connectivity();

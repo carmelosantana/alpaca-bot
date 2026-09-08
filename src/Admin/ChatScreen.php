@@ -35,7 +35,6 @@ final class ChatScreen
             $this->catalog,
             $conversation,
             $history,
-            wp_create_nonce('wp_rest'),
             self::queryInt('post'),
             null,
             $this->prefs->modelFor($userId, $this->catalog, $this->store),

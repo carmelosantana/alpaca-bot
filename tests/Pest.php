@@ -423,5 +423,5 @@ function chatShell(?AlpacaBot\Chat\Conversation $conversation, array $history, ?
     Functions\when('plugins_url')->alias(fn(string $p) => '/plugins/alpaca-bot/' . $p);
     Functions\when('admin_url')->alias(fn(string $p) => '/wp-admin/' . $p);
     $store = new Store(['models.default' => 'llama3.2', 'chat.history_limit' => 15]);
-    return new AlpacaBot\View\Chat\Shell($store, new ModelCatalog(new Factory($store)), $conversation, $history, 'n', $postId, $sprite);
+    return new AlpacaBot\View\Chat\Shell($store, new ModelCatalog(new Factory($store)), $conversation, $history, $postId, $sprite);
 }

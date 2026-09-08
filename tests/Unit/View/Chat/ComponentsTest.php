@@ -68,9 +68,10 @@ it('message list shows the welcome block when empty', function (): void {
 
 it('composer carries hidden fields, spellcheck, and no hx attributes', function (): void {
     Functions\when('get_option')->justReturn(['chat.spellcheck' => false, 'chat.placeholder' => 'Ask']);
-    $html = (new Composer(new Store(), 'n', 0, 'llama3.2', 12))->render();
+    $html = (new Composer(new Store(), 0, 'llama3.2', 12))->render();
     expect($html)->toContain('id="ab-form"')->toContain('spellcheck="false"')->toContain('placeholder="Ask"')->toContain('name="conversation_id" value="0"')->toContain('name="context[post_id]" value="12"')->toContain('data-action="send"')->not->toContain('hx-')
-        ->and($html)->toContain('<input type="hidden" name="_wpnonce" value="n">');
+        // The nonce rides as the X-WP-Nonce header from the localised settings; a hidden field would be a second copy nothing reads.
+        ->and($html)->not->toContain('_wpnonce');
 });
 
 it('receipt formats tokens and seconds', function (): void {
@@ -130,7 +131,8 @@ it('shell composes the page: sprite once, header, status, message list, composer
     expect($html)->toStartWith('<div class="wrap ab-wrap">')
         ->and(substr_count($html, '<symbol id="lucide-copy">'))->toBe(1)
         ->and($html)->toContain('<h1 class="wp-heading-inline">Alpaca Bot</h1>')
-        ->toContain('<div id="ab-chat" data-conversation="5" data-rest="/wp-json/alpaca-bot/v1" data-history-limit="15">')
+        // The conversation id is the one figure chat.ts reads from the markup; the REST root is localised, not an attribute.
+        ->toContain('<div id="ab-chat" data-conversation="5">')->not->toContain('data-rest')->not->toContain('data-history-limit')
         ->toContain('id="ab-status"')->toContain('id="ab-messages"')->toContain('ab-msg--assistant')->toContain('id="ab-form"')
         ->toContain('name="conversation_id" value="5"')->toContain('name="context[post_id]" value="12"')->toContain('name="model" value="llama3.2"')
         ->toContain('<option value="5" data-id="5" selected')->toContain('src="/plugins/alpaca-bot/assets/img/icon-80.png"');
@@ -196,7 +198,7 @@ it('passes every URL-valued attribute through esc_url', function (): void {
         ->and((new MessageBubble(new Message('assistant', 'hi'), new Markdown(), 'C', '/u.png', '/a.png'))->render())->toContain('src="URL(/a.png)"')
         ->and((new MessageList([], new Markdown(), new Store(), 'C', '/u.png', '/a.png'))->render())->toContain('src="URL(/a.png)"')
         ->and((new Header('T', new ModelSelect([], 'a', true), new HistorySelect([], 0)))->render())->toContain('href="URL(/wp-admin/admin.php?page=alpaca-bot)"')
-        ->and(chatShell(null, [], sys_get_temp_dir() . '/ab-missing-' . getmypid() . '.svg')->render())->toContain('data-rest="URL(/wp-json/alpaca-bot/v1)"');
+        ->and(chatShell(null, [], sys_get_temp_dir() . '/ab-missing-' . getmypid() . '.svg')->render())->toContain('href="URL(/wp-admin/admin.php?page=alpaca-bot)"')->toContain('src="URL(/plugins/alpaca-bot/assets/img/icon-80.png)"');
 });
 
 // ---------------------------------------------------------------- Task 5: a user turn's images
