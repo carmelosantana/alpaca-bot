@@ -157,6 +157,40 @@ function conversationChatPost(int $id = 42, string $author = '3', string $type =
     return (object) ['ID' => $id, 'post_author' => $author, 'post_title' => 'T', 'post_type' => $type, 'post_date_gmt' => $date];
 }
 
+/**
+ * ConversationStoreTest and pipelineWith(): the database as ConversationStore::storageBudget()
+ * reads it. Installs a `$wpdb` stand-in whose get_var() answers `$raw` to `SELECT
+ * @@max_allowed_packet` (wpdb is a class Brain Monkey cannot stub, and the real one is not loaded
+ * here), records every query in `->queries`, and stubs maybe_serialize() as serialize(), which is
+ * what core's does for an array. The store caches the figure for the request in a private
+ * static, and Pest runs the suite in one process, so the cache is reset here the way Pest.php
+ * resets Plugin::$instance; a test that wants a different figure calls this again.
+ *
+ * The default packet is MySQL's documented default, 16 MiB; a budget test passes something
+ * smaller so a transcript of a few hundred bytes is over it.
+ */
+function conversationStoreDb(mixed $raw = '16777216'): object
+{
+    $db = new class ($raw) {
+        /** @var list<string> */
+        public array $queries = [];
+
+        public function __construct(private mixed $raw) {}
+
+        public function get_var(string $query): mixed
+        {
+            $this->queries[] = $query;
+            return $this->raw;
+        }
+    };
+    $GLOBALS['wpdb'] = $db;
+    Functions\when('maybe_serialize')->alias(static fn(mixed $v): mixed => is_array($v) || is_object($v) ? serialize($v) : $v);
+    if (property_exists(ConversationStore::class, 'maxAllowedPacket')) {
+        (new ReflectionProperty(ConversationStore::class, 'maxAllowedPacket'))->setValue(null, null);
+    }
+    return $db;
+}
+
 /** ConversationStoreTest: `$n` space-separated words. */
 function conversationWords(int $n, string $prefix = 'w'): string
 {
@@ -275,6 +309,8 @@ function pipelineWith(mixed $provider, array $settings = [], array $contexts = [
     // to Assets::maxImageBytes(), 6242304 decoded bytes here. A test about the cap itself stubs
     // this again with its own figure (Brain Monkey takes the later when()).
     Functions\when('wp_convert_hr_to_bytes')->justReturn(8 * 1024 * 1024);
+    // ConversationStore::save() fits the transcript to the packet limit before writing; the stock 16 MiB here.
+    conversationStoreDb();
     Functions\when('get_post')->alias(static fn(int $id): ?object => $id === (int) $h->post->ID ? $h->post : null);
     Functions\when('wp_insert_post')->alias(static function (array $post) use ($h): int {
         $h->writes[] = ['wp_insert_post', $post['post_type'], $post];

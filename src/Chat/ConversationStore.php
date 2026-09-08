@@ -30,6 +30,32 @@ final class ConversationStore
     /** 0.4 flagged generate-mode transcripts with this meta; 1.0 reads it, never writes it. */
     private const META_LEGACY_GENERATE = 'chat_mode_generate';
 
+    /**
+     * Held back from `max_allowed_packet` for everything in the UPDATE that is not the meta
+     * value: the statement text, the other columns, and the escaping wpdb applies on the way
+     * (a quote or a backslash in a message doubles; base64 has neither, text may). The packet
+     * limit is on the whole query, so a value that is exactly the limit still fails. 1 MiB is
+     * far more than any of that costs, and the price of holding it back is 1 MiB of the
+     * transcript (6% of a stock packet) that a run of maximum-size images would have filled.
+     *
+     * @since 0.5.0
+     */
+    private const PACKET_MARGIN = 1024 * 1024;
+
+    /**
+     * MySQL's and MariaDB's own documented default for `max_allowed_packet`, 16 MiB: what
+     * storageBudget() assumes when the server does not say (an empty or unparseable answer,
+     * which a hardened `wpdb` that refuses the query would also produce). A server set lower
+     * than its default and not answering is the one case this guesses wrong, and it guesses
+     * in the direction of the old behaviour, the write failing.
+     *
+     * @since 0.5.0
+     */
+    private const PACKET_DEFAULT = 16777216;
+
+    /** The server's `max_allowed_packet` once read this request; null until then (see maxAllowedPacket()). */
+    private static ?int $maxAllowedPacket = null;
+
     public function __construct(private Store $store) {}
 
     public function registerPostType(): void
@@ -97,13 +123,24 @@ final class ConversationStore
      *
      * Also a no-op when the post is not a conversation owned by the conversation's user:
      * Conversation is plain data anyone can construct, so its id is not trusted on its own.
+     *
+     * The whole transcript is one meta value, so one row and one packet, and the invariant
+     * here is absolute: what is written always fits storageBudget(). Two images at the site's
+     * allowance are already past a stock 16 MiB packet, and past it the UPDATE fails, the
+     * false from update_post_meta() went unchecked, and the transcript silently stopped
+     * persisting from that turn on. So before the write the transcript is fitted (fit()):
+     * image payloads go first, from the oldest turn that still has any, each turn keeping a
+     * count of what it lost under `meta['images_evicted']`; whole messages go only once
+     * every image is gone, oldest first. Text is never dropped while an image remains. The
+     * fitting is applied to the Conversation the caller passed, so the transcript in memory
+     * and the one stored agree, and a later save() starts from what was kept.
      */
     public function save(Conversation $c): void
     {
         if ($c->id === 0 || $this->owned($c->id, $c->userId) === null) {
             return;
         }
-        update_post_meta($c->id, self::META_MESSAGES, array_map(static fn(Message $m): array => $m->toArray(), $c->messages));
+        update_post_meta($c->id, self::META_MESSAGES, $this->fit($c));
         $first = $c->messages[0] ?? null;
         $last = $c->last();
         if ($first === null || $last === null) {
@@ -118,6 +155,86 @@ final class ConversationStore
             'post_title' => $c->title,
             'post_excerpt' => wp_trim_words(sanitize_text_field($last->content), 30, '…'),
         ]);
+    }
+
+    /**
+     * The bytes the serialised transcript may occupy in one meta write: the server's
+     * `max_allowed_packet` less PACKET_MARGIN, never below zero. The figure is the live one
+     * (maxAllowedPacket()), so a site that raised its packet gets the room it paid for and a
+     * site that lowered it is still safe; `$maxAllowedPacket` is a parameter so a test can pass
+     * a figure, and production passes nothing. A packet no larger than the margin gives 0,
+     * which fit() answers by storing an empty transcript: a server that small cannot take a
+     * transcript, and an empty one is the only value that fits.
+     *
+     * @internal Public only so the tests can call it; not part of the plugin's API.
+     * @since 0.5.0
+     */
+    public static function storageBudget(?int $maxAllowedPacket = null): int
+    {
+        return max(0, ($maxAllowedPacket ?? self::maxAllowedPacket()) - self::PACKET_MARGIN);
+    }
+
+    /**
+     * The server's `max_allowed_packet`, read once per request and kept in a static: one round
+     * trip, not one per save. Core does not expose it (wpdb reads no server variables), so it is
+     * `SELECT @@max_allowed_packet`, a session-visible system variable any connection may read.
+     * An answer that is empty or not a positive integer is PACKET_DEFAULT (it says why that
+     * figure). The static is process-wide, which under PHP-FPM is the request and under WP-CLI
+     * the command; the value is a server setting that changes with a restart, so neither
+     * outlives it in a way that matters.
+     */
+    private static function maxAllowedPacket(): int
+    {
+        if (self::$maxAllowedPacket === null) {
+            global $wpdb;
+            $raw = $wpdb->get_var('SELECT @@max_allowed_packet');
+            self::$maxAllowedPacket = is_scalar($raw) && (int) $raw > 0 ? (int) $raw : self::PACKET_DEFAULT;
+        }
+        return self::$maxAllowedPacket;
+    }
+
+    /**
+     * The transcript as the rows save() stores, fitted to storageBudget() by mutating `$c`
+     * (save() says the order and why). The size is measured as the database sees it:
+     * update_post_meta() runs the value through maybe_serialize(), so that is what is measured,
+     * on the exact rows about to be written, after every eviction. Measuring the whole
+     * transcript again each round costs a serialisation per eviction, and each eviction takes
+     * megabytes off, so the rounds are few; the alternative, arithmetic on the parts, would
+     * have to reproduce serialize()'s framing to be trusted.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function fit(Conversation $c): array
+    {
+        $budget = self::storageBudget();
+        $rows = self::rows($c->messages);
+        while (strlen(maybe_serialize($rows)) > $budget && $c->messages !== []) {
+            $oldestWithImages = null;
+            foreach ($c->messages as $i => $m) {
+                if ($m->images !== []) {
+                    $oldestWithImages = $i;
+                    break;
+                }
+            }
+            if ($oldestWithImages !== null) {
+                $m = $c->messages[$oldestWithImages];
+                $m->meta['images_evicted'] = (int) ($m->meta['images_evicted'] ?? 0) + count($m->images);
+                $m->images = [];
+            } else {
+                array_shift($c->messages);
+            }
+            $rows = self::rows($c->messages);
+        }
+        return $rows;
+    }
+
+    /**
+     * @param Message[] $messages
+     * @return list<array<string, mixed>>
+     */
+    private static function rows(array $messages): array
+    {
+        return array_values(array_map(static fn(Message $m): array => $m->toArray(), $messages));
     }
 
     /**

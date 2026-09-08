@@ -22,6 +22,7 @@ beforeEach(function (): void {
         $words = explode(' ', $text);
         return count($words) > $num ? implode(' ', array_slice($words, 0, $num)) . ($more ?? '…') : $text;
     });
+    conversationStoreDb();
 });
 
 // ---------------------------------------------------------------- Message
@@ -189,6 +190,129 @@ it('refuses to save a conversation that names an id but no owner, without a look
     $c = new Conversation(42, 0, 'T');
     $c->append(new Message('user', 'x'));
     (new ConversationStore(new Store()))->save($c);
+});
+
+// ------------------------------------------- storageBudget() and the fit save() applies
+
+// The 1 MiB margin is for the rest of the UPDATE the meta value rides in; the fallback is
+// MySQL's documented default packet.
+it('derives the storage budget from max_allowed_packet less the margin, never below zero', function (): void {
+    expect(ConversationStore::storageBudget(16777216))->toBe(16777216 - 1048576)
+        ->and(ConversationStore::storageBudget(1048576 + 1))->toBe(1)
+        ->and(ConversationStore::storageBudget(1048576))->toBe(0)
+        ->and(ConversationStore::storageBudget(1))->toBe(0);
+});
+
+it('reads max_allowed_packet once per request and falls back to the documented default when the answer is empty or unparseable', function (): void {
+    $db = conversationStoreDb('33554432');
+    expect(ConversationStore::storageBudget())->toBe(33554432 - 1048576)
+        ->and(ConversationStore::storageBudget())->toBe(33554432 - 1048576)
+        ->and($db->queries)->toBe(['SELECT @@max_allowed_packet']);
+    foreach (['', null, false, 'abc', '0', '-1'] as $raw) {
+        conversationStoreDb($raw);
+        expect(ConversationStore::storageBudget())->toBe(16777216 - 1048576, var_export($raw, true));
+    }
+});
+
+/** A PNG data URL carrying `$n` decoded bytes (4 base64 characters per 3 bytes). */
+function conversationImage(int $n, string $fill = 'A'): string
+{
+    return 'data:image/png;base64,' . str_repeat($fill, intdiv($n, 3) * 4);
+}
+
+/** The rows save() stores for `$messages`, and their size as the database sees them. */
+function conversationRows(array $messages): array
+{
+    return array_map(static fn(Message $m): array => $m->toArray(), $messages);
+}
+
+/** save() over a post the conversation's user owns, with the one meta write captured; the budget is `$budget` bytes. */
+function conversationSaveWithin(int $budget, Conversation $c): mixed
+{
+    conversationStoreDb((string) (1048576 + $budget));
+    Functions\when('get_post')->justReturn(conversationChatPost());
+    Functions\when('wp_update_post')->justReturn(42);
+    $written = null;
+    Functions\expect('update_post_meta')->once()->withArgs(function (int $id, string $k, array $v) use (&$written): bool {
+        $written = $v;
+        return $id === 42 && $k === ConversationStore::META_MESSAGES;
+    })->andReturn(true);
+    (new ConversationStore(new Store()))->save($c);
+    return $written;
+}
+
+/** The four-turn transcript the fit tests share: the oldest and the newest user turns carry images. */
+function conversationWithImages(): Conversation
+{
+    $c = new Conversation(42, 3, 'T');
+    $c->append(new Message('user', 'first', 'm', null, 1, [conversationImage(300, 'A')], ['duration_ms' => 5]));
+    $c->append(new Message('assistant', 'one', 'm', null, 2));
+    $c->append(new Message('user', 'third', 'm', null, 3, [conversationImage(300, 'B'), conversationImage(300, 'C')]));
+    $c->append(new Message('assistant', 'two', 'm', null, 4));
+    return $c;
+}
+
+it('writes a transcript that fits the budget unchanged', function (): void {
+    $c = conversationWithImages();
+    $rows = conversationRows($c->messages);
+    $written = conversationSaveWithin(strlen(serialize($rows)), $c);
+    expect($written)->toEqual($rows)
+        ->and($c->messages[0]->images)->toHaveCount(1)
+        ->and($c->messages[0]->meta)->toBe(['duration_ms' => 5])
+        ->and($c->messages[2]->images)->toHaveCount(2);
+});
+
+it('evicts the oldest turn\'s images first, records the count on that turn, and leaves the newest turn\'s images intact', function (): void {
+    $c = conversationWithImages();
+    $budget = strlen(serialize(conversationRows($c->messages))) - 1;
+    $written = conversationSaveWithin($budget, $c);
+    // The in-memory conversation is what was stored: the oldest turn lost its one image and says so, in its meta beside what was there.
+    expect($c->messages)->toHaveCount(4)
+        ->and($c->messages[0]->images)->toBe([])
+        ->and($c->messages[0]->meta)->toBe(['duration_ms' => 5, 'images_evicted' => 1])
+        ->and($c->messages[0]->content)->toBe('first')
+        ->and($c->messages[2]->images)->toBe([conversationImage(300, 'B'), conversationImage(300, 'C')])
+        ->and($written)->toEqual(conversationRows($c->messages))
+        ->and(strlen(maybe_serialize($written)))->toBeLessThanOrEqual($budget)
+        // The marker survives the storage shape: meta goes out as an object and comes back as an array.
+        ->and(Message::fromArray($written[0])->meta['images_evicted'])->toBe(1);
+});
+
+it('adds an eviction to a count an earlier save recorded', function (): void {
+    $c = new Conversation(42, 3, 'T');
+    $c->append(new Message('user', 'again', 'm', null, 1, [conversationImage(300), conversationImage(300)], ['images_evicted' => 2]));
+    $c->append(new Message('assistant', 'reply', 'm', null, 2));
+    $budget = strlen(serialize(conversationRows($c->messages))) - 1;
+    conversationSaveWithin($budget, $c);
+    expect($c->messages[0]->images)->toBe([])->and($c->messages[0]->meta)->toBe(['images_evicted' => 4]);
+});
+
+it('drops the oldest whole messages only once every image is gone, and the newest survives with its marker', function (): void {
+    $c = conversationWithImages();
+    // Room for exactly the two newest turns, the user turn stripped of its images and marked.
+    $kept = [
+        new Message('user', 'third', 'm', null, 3, [], ['images_evicted' => 2]),
+        new Message('assistant', 'two', 'm', null, 4),
+    ];
+    $budget = strlen(serialize(conversationRows($kept)));
+    $written = conversationSaveWithin($budget, $c);
+    expect($c->messages)->toEqual($kept)
+        ->and($written)->toEqual(conversationRows($kept))
+        ->and(strlen(maybe_serialize($written)))->toBeLessThanOrEqual($budget);
+});
+
+it('drops oldest whole messages from a transcript over budget on text alone, and stores what is left', function (): void {
+    $c = new Conversation(42, 3, 'T');
+    foreach (['one', 'two', 'three', 'four'] as $i => $word) {
+        $c->append(new Message($i % 2 === 0 ? 'user' : 'assistant', str_repeat($word . ' ', 40), 'm', null, $i + 1));
+    }
+    $kept = array_slice($c->messages, 2);
+    $budget = strlen(serialize(conversationRows($kept)));
+    $written = conversationSaveWithin($budget, $c);
+    expect($c->messages)->toEqual($kept)
+        ->and($written)->toEqual(conversationRows($kept))
+        ->and($written[0]['content'])->toStartWith('three ')
+        ->and(strlen(maybe_serialize($written)))->toBeLessThanOrEqual($budget);
 });
 
 // ------------------------------------------------------------------ load()
