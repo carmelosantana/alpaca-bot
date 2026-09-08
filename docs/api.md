@@ -231,7 +231,8 @@ build a UI on top of this route:
   ```
 
 An empty turn (no `message`, no `images`) is a 400 in the route's own words; the pipeline's
-refusals (a model the catalog does not list, an image that is not a data URL, a
+refusals (a model the catalog does not list, an image that is not a base64 PNG, JPEG, GIF or
+WebP data URL, images whose decoded bytes together pass the site's allowance, a
 `conversation_id` that is not yours) are 400 too, with the pipeline's message:
 
 ```

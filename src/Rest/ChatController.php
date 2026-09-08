@@ -58,7 +58,7 @@ final class ChatController extends Controller
     public function create(\WP_REST_Request $request): \WP_REST_Response|\WP_Error
     {
         $message = trim((string) $request->get_param('message'));
-        // Only strings go through; the pipeline refuses anything that is not a data URL.
+        // Only strings go through; the pipeline refuses anything that is not a base64 image data URL, and a set past the site's allowance.
         $images = array_values(array_filter((array) $request->get_param('images'), 'is_string'));
         // An images-only turn is a turn, as it is for the pipeline.
         if ($message === '' && $images === []) {
