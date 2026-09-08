@@ -14,7 +14,12 @@ use AlpacaBot\Provider\Factory;
 use AlpacaBot\Provider\ModelCatalog;
 use AlpacaBot\Rest\Controller;
 use AlpacaBot\Settings\Store;
+use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Agent\AbstractAgent;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Contract\ProviderInterface;
+use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Contract\ToolkitInterface;
+use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Tool\Parameter\StringParameter;
+use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Tool\Tool;
+use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Tool\ToolResult;
 use Brain\Monkey;
 use Brain\Monkey\Actions;
 use Brain\Monkey\Filters;
@@ -280,11 +285,15 @@ function currentScreenPost(int $id, string $title, string $content, string $type
  *
  * @param array<string, mixed> $settings seeded into the shared Store
  * @param \AlpacaBot\Context\Context[] $contexts what the one registered source returns
- * @param list<string>|null $catalog model ids the cached catalog lists; null leaves the catalog transient expired,
- *   so the catalog is discovered from `$provider` (its models() is called) and the provider filter fires twice
+ * @param list<string|array<string, mixed>>|null $catalog what the cached catalog lists: a model id (a model with no
+ *   capability flags, as the transient stores one discovered from a bare `/v1/models`), or a whole Model::toArray()
+ *   row for a test that needs a flag (`['id' => 'llama3.2', 'tools' => true]` is a tool-capable model); null leaves
+ *   the catalog transient expired, so the catalog is discovered from `$provider` (its models() is called) and the
+ *   provider filter fires twice
  * @param \AlpacaBot\Chat\UserPrefs|null $prefs the per-user preferences the pipeline consults; null is the CLI's case (none)
+ * @param \AlpacaBot\Toolkit\Registry|null $toolkits the toolkits a turn may use; null is a pipeline that never runs tools
  */
-function pipelineWith(mixed $provider, array $settings = [], array $contexts = [], ?array $catalog = ['llama3.2'], ?AlpacaBot\Chat\UserPrefs $prefs = null): object
+function pipelineWith(mixed $provider, array $settings = [], array $contexts = [], ?array $catalog = ['llama3.2'], ?AlpacaBot\Chat\UserPrefs $prefs = null, ?AlpacaBot\Toolkit\Registry $toolkits = null): object
 {
     $h = new class {
         public Pipeline $pipeline;
@@ -302,7 +311,7 @@ function pipelineWith(mixed $provider, array $settings = [], array $contexts = [
     };
     $h->post = conversationChatPost();
     if ($catalog !== null) {
-        $h->transients[ModelCatalog::TRANSIENT] = array_map(static fn(string $id): array => ['id' => $id, 'label' => $id], $catalog);
+        $h->transients[ModelCatalog::TRANSIENT] = array_map(static fn(string|array $m): array => is_string($m) ? ['id' => $m, 'label' => $m] : $m + ['label' => (string) $m['id']], $catalog);
     }
     Functions\when('current_time')->justReturn(1_725_000_000);
     Functions\when('wp_generate_uuid4')->justReturn('uuid');
@@ -358,6 +367,7 @@ function pipelineWith(mixed $provider, array $settings = [], array $contexts = [
         new CapPolicy($h->store, $h->meter),
         new Collector([collectorSource('test', $contexts)]),
         $prefs,
+        $toolkits,
     );
     return $h;
 }
@@ -414,6 +424,84 @@ function pipelineProvider(array $chunks, ?array &$call = null): ProviderInterfac
         }
     });
     return $provider;
+}
+
+/**
+ * PipelineToolsTest: a provider mock for an agent run, which streams once per iteration. Each
+ * entry of `$turns` is the chunk list one stream() call yields, in call order (a Throwable
+ * entry is thrown from that call), and every call's arguments are appended to `$calls` as
+ * `['messages' => ..., 'tools' => ..., 'options' => ...]`. A call past the last turn fails the
+ * test: the agent looped once more than the test allowed for.
+ *
+ * @param list<list<\AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Provider\Response|\Throwable>> $turns
+ * @param list<array{messages: array<mixed>, tools: array<mixed>, options: array<string, mixed>}>|null $calls
+ */
+function agentProvider(array $turns, ?array &$calls = null): ProviderInterface
+{
+    $calls = [];
+    $provider = Mockery::mock(ProviderInterface::class);
+    $provider->shouldReceive('stream')->times(count($turns))->andReturnUsing(static function (array $messages, array $tools = [], array $options = []) use ($turns, &$calls): \Generator {
+        $turn = $turns[count($calls)] ?? [];
+        $calls[] = ['messages' => $messages, 'tools' => $tools, 'options' => $options];
+        foreach ($turn as $chunk) {
+            if ($chunk instanceof \Throwable) {
+                throw $chunk;
+            }
+            yield $chunk;
+        }
+    });
+    return $provider;
+}
+
+/**
+ * PipelineToolsTest and AssistantTest: a toolkit of one tool that answers `echo:` plus its
+ * `text` argument through `$callback` (default: a success result), with the given guidelines.
+ *
+ * @param (callable(array<string, mixed>): \AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Tool\ToolResult)|null $callback
+ */
+function echoToolkit(string $name, string $guidelines = 'Use it.', ?callable $callback = null): ToolkitInterface
+{
+    $callback ??= static fn(array $a): ToolResult => ToolResult::success('echo:' . $a['text']);
+    return new class ($name, $guidelines, $callback) implements ToolkitInterface {
+        public function __construct(private string $name, private string $guidelines, private mixed $callback) {}
+
+        public function tools(): array
+        {
+            return [new Tool($this->name, 'echoes its text', [new StringParameter('text', 'the text')], $this->callback)];
+        }
+
+        public function guidelines(): string
+        {
+            return $this->guidelines;
+        }
+    };
+}
+
+/**
+ * PipelineToolsTest: a registry that enables exactly the given toolkits, keyed by id, over its
+ * own Store (the setting names the ids; the `alpaca_bot/toolkits` filter is Brain Monkey's
+ * pass-through unless a test expects it).
+ *
+ * @param array<string, ToolkitInterface> $toolkits
+ */
+function registryWith(array $toolkits): AlpacaBot\Toolkit\Registry
+{
+    $registry = new AlpacaBot\Toolkit\Registry(new Store(['toolkits.enabled' => array_keys($toolkits)]));
+    foreach ($toolkits as $id => $toolkit) {
+        $registry->register($id, $toolkit);
+    }
+    return $registry;
+}
+
+/** AgentStreamObserverTest: an agent that only exists to notify(): instructions() is abstract and the provider is never called. */
+function agentSubject(): AbstractAgent
+{
+    return new class (Mockery::mock(ProviderInterface::class)) extends AbstractAgent {
+        public function instructions(): string
+        {
+            return '';
+        }
+    };
 }
 
 /**
