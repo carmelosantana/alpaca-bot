@@ -86,6 +86,32 @@ final class Fields
             case 'array':
                 // A map has no single control; SettingsPage renders `models.overrides` as a table.
                 return '';
+            case 'checkbox-list':
+                // One box per option under the same `[]` name, and ahead of them a hidden ''
+                // under that name: a checkbox posts only when checked, so with every box clear
+                // the field would be absent from the POST, Schema::sanitize() would keep what
+                // is stored, and the last tool could never be switched off. The sentinel is the
+                // boolean's hidden 0 for a list; Schema::coerce() drops it as an unknown id.
+                // The stored value is checked against as a list; anything else checks nothing.
+                $chosen = is_array($value) ? $value : [];
+                $boxes = '';
+                foreach ($f['options'] ?? [] as $v => $label) {
+                    $boxes .= sprintf(
+                        '<label><input type="checkbox" id="%s" name="%s[]" value="%s"%s> %s</label><br>',
+                        esc_attr(self::id($key) . '-' . (string) $v),
+                        $name,
+                        esc_attr((string) $v),
+                        checked(in_array((string) $v, array_map('strval', array_filter($chosen, 'is_scalar')), true), true, false),
+                        esc_html((string) $label),
+                    );
+                }
+                return sprintf(
+                    '<input type="hidden" name="%s[]" value=""><fieldset><legend class="screen-reader-text"><span>%s</span></legend>%s</fieldset>%s',
+                    $name,
+                    esc_html((string) $f['label']),
+                    $boxes,
+                    $desc,
+                );
             default:
                 if (in_array($key, self::TEXTAREAS, true)) {
                     return sprintf('<textarea id="%s" name="%s" rows="5" class="large-text code">%s</textarea>%s', $id, $name, esc_textarea(self::scalar($value)), $desc);
@@ -109,7 +135,9 @@ final class Fields
      * option from what is posted, and a field it does not hear about goes back to its default
      * (the old first-save bug). Booleans post as 0/1, the way the visible checkbox does; a map
      * (`models.overrides`) posts one input per leaf, `[key][model][field]`, and anything that is
-     * not a scalar at that depth is dropped rather than printed as "Array".
+     * not a scalar at that depth is dropped rather than printed as "Array"; a list
+     * (`toolkits.enabled`) posts one input per item under `[key][]`, the way the checked boxes
+     * would, and an empty list posts nothing, which keeps the stored [] just the same.
      */
     public static function hidden(string $key, mixed $value): string
     {
@@ -117,6 +145,10 @@ final class Fields
         if (is_array($value)) {
             $out = '';
             foreach ($value as $k => $v) {
+                if (is_scalar($v) && array_is_list($value)) {
+                    $out .= self::hiddenInput(self::name($key) . '[]', self::scalar($v));
+                    continue;
+                }
                 if (!is_array($v)) {
                     continue;
                 }

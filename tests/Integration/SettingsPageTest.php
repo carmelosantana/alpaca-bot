@@ -323,6 +323,9 @@ final class SettingsPageTest extends TestCase
             $value = html_entity_decode((string) $value, ENT_QUOTES);
             if (count($path) === 3) {
                 $posted[$path[0]][$path[1]][$path[2]] = $value;
+            } elseif (count($path) === 2 && $path[1] === '') {
+                // `[key][]`: PHP appends, so a checkbox list posts as a list.
+                $posted[$path[0]][] = $value;
             } else {
                 $posted[$path[0]] = $value;
             }

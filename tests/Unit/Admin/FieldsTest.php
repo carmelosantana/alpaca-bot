@@ -38,6 +38,31 @@ it('posts 0 for an unchecked checkbox through a hidden input placed before it', 
 
 // The stored key must never reach the page HTML: the password control shows the mask, which
 // Schema::sanitize() reads as "keep what is stored" when it comes back untouched.
+// A list is one checkbox per option and, ahead of them, a hidden '' under the same `[]` name.
+// A checkbox posts only when checked, so with nothing checked the field would be absent from
+// the POST and Schema::sanitize() would keep what is stored: the admin could never switch the
+// last tool off. The sentinel is the boolean's hidden 0 for a list; Schema::coerce() drops it
+// as one more unknown id.
+it('renders a checkbox-list as one box per option, checked from the stored list, behind a hidden empty sentinel', function (): void {
+    $f = ['type' => 'checkbox-list', 'label' => 'Tools', 'default' => ['a', 'b'], 'options' => ['a' => 'A', 'b' => 'B', 'c' => 'C'], 'description' => 'd'];
+    $html = Fields::render('toolkits.enabled', $f, ['a', 'c']);
+    expect($html)->toMatch('/^<input type="hidden" name="alpaca_bot_settings\[toolkits\.enabled\]\[\]" value="">/')
+        ->toContain('<input type="checkbox" id="ab-toolkits-enabled-a" name="alpaca_bot_settings[toolkits.enabled][]" value="a" checked="checked"> A')
+        ->toContain('<input type="checkbox" id="ab-toolkits-enabled-b" name="alpaca_bot_settings[toolkits.enabled][]" value="b"> B')
+        ->toContain('value="c" checked="checked"> C')
+        ->toContain('<p class="description">d</p>');
+    // A stored value that is not a list checks nothing rather than guessing.
+    expect(Fields::render('toolkits.enabled', $f, 'a'))->not->toContain('checked');
+});
+
+// The carry-over for a list is one hidden input per item under the `[]` name, the way the
+// browser would post the checked boxes, so a save from another tab keeps the list as it is.
+// An empty list posts nothing, and absent keeps the stored [], which is the same thing.
+it('carries a list as one hidden input per item, and nothing for an empty list', function (): void {
+    expect(Fields::hidden('toolkits.enabled', ['a', 'b']))->toBe('<input type="hidden" name="alpaca_bot_settings[toolkits.enabled][]" value="a"><input type="hidden" name="alpaca_bot_settings[toolkits.enabled][]" value="b">');
+    expect(Fields::hidden('toolkits.enabled', []))->toBe('');
+});
+
 it('renders the mask, never the stored value, for a secret and nothing when none is stored', function (): void {
     $f = Schema::fields()['provider.api_key'];
     $html = Fields::render('provider.api_key', $f, 'sk-real-key');

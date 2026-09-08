@@ -70,7 +70,7 @@ final class SettingsPage
         foreach (Schema::fields() as $key => $f) {
             // A checkbox carries its own label (its row title is blank, and a label_for there
             // would be an empty second label); a table has no single control to point a label at.
-            $args = in_array($f['type'], ['array', 'boolean'], true) ? [] : ['label_for' => Fields::id($key)];
+            $args = in_array($f['type'], ['array', 'boolean', 'checkbox-list'], true) ? [] : ['label_for' => Fields::id($key)];
             add_settings_field('alpaca_bot_' . $key, $f['type'] === 'boolean' ? '' : $f['label'], function () use ($key, $f): void {
                 echo $key === 'models.overrides' ? $this->renderOverrides() : Fields::render($key, $f, $this->store->get($key)); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- Fields escapes every attribute and text node.
             }, self::page($f['section']), 'alpaca_bot_' . $f['section'], $args);

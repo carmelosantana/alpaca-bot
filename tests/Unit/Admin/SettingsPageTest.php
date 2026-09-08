@@ -77,7 +77,9 @@ it('adds a section per schema section on its own page and a field per schema fie
         ->and($fields['alpaca_bot_models.temperature'][2]['label_for'])->toBe('ab-models-temperature')
         // The overrides table has no single control to label, and a checkbox carries its own label.
         ->and($fields['alpaca_bot_models.overrides'][2])->not->toHaveKey('label_for')
-        ->and($fields['alpaca_bot_chat.spellcheck'][2])->not->toHaveKey('label_for');
+        ->and($fields['alpaca_bot_chat.spellcheck'][2])->not->toHaveKey('label_for')
+        // A checkbox-list has a box per option and no single control for a label to point at.
+        ->and($fields['alpaca_bot_toolkits.enabled'][2])->not->toHaveKey('label_for');
 });
 
 // The table's model ids come from the provider's JSON and its values from the option: both are
