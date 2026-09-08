@@ -14,10 +14,16 @@ use AlpacaBot\View\Markdown;
  * Markdown, so nothing is re-escaped here); a user turn is the user's own text, escaped, with
  * its line breaks kept. A streaming bubble is the same article with no content yet: chat.ts
  * appends deltas into `.ab-msg__content`, which is a polite live region for that duration, and
- * replaces the whole article with a rendered one on `done`.
+ * replaces the whole article with a rendered one on `done`. A user turn's attached images are
+ * shown above its text: `esc_url()` strips a `data:` URL (it is not in wp_allowed_protocols),
+ * so each is held to a base64 image data URL by pattern and attribute-escaped; anything else
+ * is not rendered.
  */
 final class MessageBubble extends Component
 {
+    /** A base64 image data URL and nothing else: the mime is an allowlist and the payload is base64's alphabet. */
+    private const DATA_IMAGE = '#^data:image/(?:png|jpe?g|gif|webp);base64,[A-Za-z0-9+/]+=*$#';
+
     public function __construct(private Message $m, private Markdown $md, private string $userName, private string $userAvatar, private string $assistantAvatar, private bool $streaming = false) {}
 
     public function render(): string
@@ -33,8 +39,20 @@ final class MessageBubble extends Component
         $inner = $this->tag('img', ['class' => 'ab-msg__avatar', 'src' => $this->u($assistant ? $this->assistantAvatar : $this->userAvatar), 'alt' => ''])
             . $this->tag('div', ['class' => 'ab-msg__body'],
                 $this->tag('header', ['class' => 'ab-msg__meta'], $this->tag('span', ['class' => 'ab-msg__name'], $this->e($name)) . $this->tag('span', ['class' => 'ab-msg__actions'], $actions))
+                . ($assistant ? '' : $this->images())
                 . $this->tag('div', ['class' => 'ab-msg__content', 'aria-live' => $this->streaming ? 'polite' : null], $content)
                 . $receipt);
         return $this->tag('article', ['class' => 'ab-msg ab-msg--' . ($assistant ? 'assistant' : 'user'), 'data-role' => $this->m->role, 'data-streaming' => $this->streaming ? '1' : null], $inner);
+    }
+
+    private function images(): string
+    {
+        $imgs = '';
+        foreach ($this->m->images as $src) {
+            if (preg_match(self::DATA_IMAGE, $src) === 1) {
+                $imgs .= $this->tag('img', ['class' => 'ab-msg__image', 'src' => $src, 'alt' => $this->t('Attached image')]);
+            }
+        }
+        return $imgs === '' ? '' : $this->tag('div', ['class' => 'ab-msg__images'], $imgs);
     }
 }

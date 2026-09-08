@@ -485,7 +485,7 @@ header. An error is still core's JSON error shape.
 | `GET /view/models` | The model select (`#ab-model`) on your effective model | `refresh` (boolean): ask the provider again, as `/models` |
 | `POST /view/default-model` | An inline admin notice; stores `model` as your default (Kanboard #565) | `model` (string, required). 403 while `chat.user_can_change_model` is off, whatever the select says |
 | `GET /view/bubble` | An empty bubble for the screen to stream into | `role` (`user`\|`assistant`, default `assistant`), `streaming` (boolean: a polite live region) |
-| `POST /view/bubble` | A finished bubble, an assistant's content rendered as markdown | `role` (required), `content`, `model`, `usage` (`{prompt_tokens, completion_tokens}` or null), `duration_ms` |
+| `POST /view/bubble` | A finished bubble, an assistant's content rendered as markdown; a user turn with its images is the optimistic bubble the screen shows while the turn runs | `role` (required), `content`, `model`, `usage` (`{prompt_tokens, completion_tokens}` or null), `duration_ms`, `images` (array of `data:` URLs; a user turn only) |
 
 Your effective model is the one you last chose in the select (stored as user meta
 `alpaca_bot_default_model`) while the site lets users choose and the provider still lists it,

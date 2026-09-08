@@ -96,8 +96,11 @@ final class Plugin
         $menu = new Admin\Menu($settingsPage, [$chatScreen, 'render']);
         add_action('admin_menu', [$menu, 'register']);
         // Assets::enqueue() gates on the hook suffix itself, so this listens on every admin
-        // screen and enqueues on one.
-        add_action('admin_enqueue_scripts', [new Admin\Assets(), 'enqueue']);
+        // screen and enqueues on one. The heartbeat answer runs on admin-ajax, where no
+        // enqueue hook fires, so it is hooked here.
+        $assets = new Admin\Assets();
+        add_action('admin_enqueue_scripts', [$assets, 'enqueue']);
+        add_filter('heartbeat_received', [$assets, 'heartbeat'], 10, 2);
         // WP-CLI is not a dependency: the command is only registered when WP-CLI is the
         // process running us, and the class itself never references WP_CLI until then.
         if (defined('WP_CLI') && constant('WP_CLI')) {

@@ -79,6 +79,7 @@ it('declares the five view routes for editors, with the model list rate limited 
         ->and($byMethod['POST /view/default-model']['args']['model']['required'])->toBeTrue()
         ->and($byMethod['GET /view/bubble']['args']['role']['enum'])->toBe(['user', 'assistant'])
         ->and($byMethod['POST /view/bubble']['args']['role']['enum'])->toBe(['user', 'assistant'])
+        ->and($byMethod['POST /view/bubble']['args']['images'])->toBe(['type' => 'array', 'items' => ['type' => 'string'], 'default' => []])
         // One capability filter key per fragment, the {id} segment removed as for /conversations.
         ->and(array_map(ViewController::routeKey(...), array_column($routes, 'path')))->toBe(['view/messages', 'view/history', 'view/models', 'view/default-model', 'view/bubble', 'view/bubble']);
     foreach ($byMethod as $key => $route) {
@@ -174,6 +175,12 @@ it('renders an empty streaming bubble on GET and a finished, markdown-rendered b
     Functions\when('esc_html')->alias(fn(string $s) => htmlspecialchars($s));
     $html = $c->bubble(restRequest('POST', '/x', ['role' => 'user', 'content' => '<b>x</b>', 'usage' => ['prompt_tokens' => 5, 'completion_tokens' => 7]]))->get_data();
     expect($html)->toContain('ab-msg--user')->toContain('&lt;b&gt;x&lt;/b&gt;')->not->toContain('<b>x</b>')->not->toContain('ab-receipt');
+
+    // A user turn carries its attached images, so the optimistic bubble shows what was sent.
+    Functions\when('esc_attr')->alias(fn(string $s) => htmlspecialchars($s, ENT_QUOTES));
+    $png = 'data:image/png;base64,iVBORw0KGgo=';
+    $html = $c->bubble(restRequest('POST', '/x', ['role' => 'user', 'content' => 'look', 'images' => [$png, 42, 'https://example.com/x.png']]))->get_data();
+    expect($html)->toContain('<img class="ab-msg__image" src="' . $png . '"')->not->toContain('example.com');
 
     // A role that is not a turn is refused (the schema refuses it first over HTTP).
     expect($c->bubble(restRequest('POST', '/x', ['role' => 'system', 'content' => 'x'])))->toBeInstanceOf(WP_Error::class);
