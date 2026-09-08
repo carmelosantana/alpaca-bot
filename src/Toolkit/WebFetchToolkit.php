@@ -31,6 +31,22 @@ use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Tool\ToolResult;
  * own message, not a WP_Error about a blocked URL, and so that nothing is built for a URL that
  * was never going anywhere.
  *
+ * What neither check covers, on any core version: a name whose answer changes between the
+ * check and the connection. wp_http_validate_url() resolves the host, this class resolves it
+ * again, and the transport resolves it once more when it connects; each is a separate lookup,
+ * and a name under an attacker's control with a short TTL can answer the checks with a public
+ * address and the connection with 127.0.0.1 or the metadata address (DNS rebinding). What that
+ * buys the attacker is a GET from the web server's host to whatever that host can reach, with
+ * the response text handed to the model: an internal dashboard, or on a cloud instance the
+ * metadata service and, under IMDSv1, the instance's credentials, which is everything the
+ * address table exists to refuse. Closing it means resolving once and connecting to that
+ * address (a transport that pins the resolved IP, CURLOPT_RESOLVE through `http_api_curl`, and
+ * an answer for the fsockopen transport), which is a compatibility risk across transports and
+ * a piece of work of its own, so it is not done here. An operator who needs it closed closes
+ * it where it holds for every plugin at once: an egress policy at the network, so the web
+ * server's host cannot open a connection to the metadata address or the private ranges
+ * whatever name it resolved.
+ *
  * Three limits that are not negotiable from the model's side: the `toolkits.user_agent`
  * setting on every request, so a site owner can name the bot to the servers it visits (a
  * blank setting falls back to the schema's default rather than sending an empty header);
