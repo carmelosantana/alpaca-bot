@@ -85,7 +85,9 @@ it('ships the real image cap, the raw size whose base64 body fits under post_max
     });
     (new Assets())->enqueue(Assets::HOOK);
     expect($localised['maxImageBytes'])->toBeInt()->toBe(Assets::maxImageBytes((string) ini_get('post_max_size')))
-        ->and($localised['i18n']['imageTooLarge'])->toContain('{size}')->toContain('{max}');
+        ->and($localised['i18n']['imageTooLarge'])->toContain('{size}')->toContain('{max}')
+        // The total's message beside the single image's: image.ts's ImagesTooLarge carries the same two figures.
+        ->and($localised['i18n']['imagesTooLarge'])->toContain('{size}')->toContain('{max}')->not->toBe($localised['i18n']['imageTooLarge']);
 });
 
 it('versions the build outputs by the plugin version outside WP_DEBUG, and under it by mtime only for a file that is there', function (): void {

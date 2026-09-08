@@ -58,6 +58,10 @@ final class Assets
                 // image.ts fills {size} with the image's size and {max} with maxImageBytes, both formatted.
                 /* translators: {size} and {max} are filled in by the browser with figures such as "4 MB". */
                 'imageTooLarge' => __('That image is {size}; this site takes an image up to {max}. Pick a smaller one.', 'alpaca-bot'),
+                // The same two figures for the turn's images together: image.ts fills {size} with their total. The
+                // allowance is a per-message total on the server too (Pipeline::images()), in the same words.
+                /* translators: {size} and {max} are filled in by the browser with figures such as "7 MB". */
+                'imagesTooLarge' => __('Those images total {size}; this site takes up to {max} per message. Attach fewer or smaller images.', 'alpaca-bot'),
                 'thinking' => __('Thinking…', 'alpaca-bot'),
             ],
             'offline' => __('You are offline. Messages will send once the connection is back.', 'alpaca-bot'),

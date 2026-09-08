@@ -10,7 +10,7 @@
 import { decorate } from './highlight';
 import { readSse } from './stream';
 import { watchNonce } from './nonce';
-import { ImageTooLarge, fetchDataUrl, formatBytes, imageLimit } from './image';
+import { ImageTooLarge, ImagesTooLarge, fetchDataUrl, formatBytes, imageLimit } from './image';
 import { $, $$, asId, el, fromHtml, icon, notice } from './dom';
 
 // wp_localize_script() ships every scalar as a string, so the byte figure arrives as one; imageLimit() reads it.
@@ -236,13 +236,23 @@ function boot(cfg: Settings, form: HTMLFormElement): void {
     });
     frame.open();
   }
-  /** An image past the cap is refused with a message that names its size and the site's limit, not a bare failure. The limit is the site's own where the payload carries one (Assets::maxImageBytes()), else image.ts's constant. */
+  /**
+   * An image past the cap is refused with a message that names its size and the site's limit,
+   * not a bare failure. The limit is the site's own where the payload carries one
+   * (Assets::maxImageBytes()), else image.ts's constant. The server holds the turn's images to
+   * that figure as a total (Pipeline::images()), so the picked image is checked beside the ones
+   * already on the turn: the composer holds one image today and a new pick replaces it, so that
+   * list is empty here, but the check is written for the list so a multi-image composer cannot
+   * assemble a turn the server then refuses. The total's refusal has its own message.
+   */
   async function attach(url: string): Promise<void> {
     const max = imageLimit(cfg.maxImageBytes);
+    const attached: string[] = [];
     try {
-      setImage(await fetchDataUrl(url, max));
+      setImage(await fetchDataUrl(url, max, attached));
     } catch (e) {
-      notice('error', e instanceof ImageTooLarge ? t('imageTooLarge').replace('{size}', formatBytes(e.size)).replace('{max}', formatBytes(e.max, 'down')) : t('failed'));
+      const sized = (key: string, err: ImageTooLarge): string => t(key).replace('{size}', formatBytes(err.size)).replace('{max}', formatBytes(err.max, 'down'));
+      notice('error', e instanceof ImagesTooLarge ? sized('imagesTooLarge', e) : e instanceof ImageTooLarge ? sized('imageTooLarge', e) : t('failed'));
     }
   }
   async function copy(button: HTMLElement, text: string): Promise<void> {
