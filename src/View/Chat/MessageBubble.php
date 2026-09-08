@@ -1,0 +1,40 @@
+<?php
+
+declare(strict_types=1);
+
+namespace AlpacaBot\View\Chat;
+
+use AlpacaBot\Chat\Message;
+use AlpacaBot\View\Component;
+use AlpacaBot\View\Icon;
+use AlpacaBot\View\Markdown;
+
+/**
+ * One turn of the transcript. An assistant turn is markdown (already stripped and allowlisted by
+ * Markdown, so nothing is re-escaped here); a user turn is the user's own text, escaped, with
+ * its line breaks kept. A streaming bubble is the same article with no content yet: chat.ts
+ * appends deltas into `.ab-msg__content`, which is a polite live region for that duration, and
+ * replaces the whole article with a rendered one on `done`.
+ */
+final class MessageBubble extends Component
+{
+    public function __construct(private Message $m, private Markdown $md, private string $userName, private string $userAvatar, private string $assistantAvatar, private bool $streaming = false) {}
+
+    public function render(): string
+    {
+        $assistant = $this->m->role === 'assistant';
+        $name = $assistant ? ($this->m->model !== '' ? $this->m->model : $this->t('Assistant')) : $this->userName;
+        $content = $this->streaming ? '' : ($assistant ? $this->md->toHtml($this->m->content) : nl2br($this->e($this->m->content), false));
+        $actions = $this->tag('button', ['type' => 'button', 'class' => 'ab-msg__action', 'data-action' => 'copy', 'aria-label' => $this->t('Copy message')], Icon::svg('copy'));
+        if (!$assistant) {
+            $actions .= $this->tag('button', ['type' => 'button', 'class' => 'ab-msg__action', 'data-action' => 'edit', 'aria-label' => $this->t('Edit and resend')], Icon::svg('square-pen'));
+        }
+        $receipt = $assistant && $this->m->usage !== null ? (new Receipt(['model' => $this->m->model, 'total_tokens' => ($this->m->usage['prompt_tokens'] ?? 0) + ($this->m->usage['completion_tokens'] ?? 0), 'duration_ms' => (int) ($this->m->meta['duration_ms'] ?? 0)]))->render() : '';
+        $inner = $this->tag('img', ['class' => 'ab-msg__avatar', 'src' => $assistant ? $this->assistantAvatar : $this->userAvatar, 'alt' => ''])
+            . $this->tag('div', ['class' => 'ab-msg__body'],
+                $this->tag('header', ['class' => 'ab-msg__meta'], $this->tag('span', ['class' => 'ab-msg__name'], $this->e($name)) . $this->tag('span', ['class' => 'ab-msg__actions'], $actions))
+                . $this->tag('div', ['class' => 'ab-msg__content', 'aria-live' => $this->streaming ? 'polite' : null], $content)
+                . $receipt);
+        return $this->tag('article', ['class' => 'ab-msg ab-msg--' . ($assistant ? 'assistant' : 'user'), 'data-role' => $this->m->role, 'data-streaming' => $this->streaming ? '1' : null], $inner);
+    }
+}

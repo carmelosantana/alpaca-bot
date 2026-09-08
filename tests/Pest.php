@@ -406,3 +406,20 @@ function cliUsers(array $existing = [3], int $current = 0): void
     Functions\when('get_userdata')->alias(static fn(int $id): object|false => in_array($id, $existing, true) ? (object) ['ID' => $id] : false);
     Functions\when('get_current_user_id')->justReturn($current);
 }
+
+/**
+ * View\Chat\ComponentsTest: a Shell over a one-model catalog (served from the transient), the
+ * given conversation and history, user 3 "Carmelo", and the given sprite path.
+ *
+ * @param list<array{id: int, title: string, created: int}> $history
+ */
+function chatShell(?AlpacaBot\Chat\Conversation $conversation, array $history, ?string $sprite, int $postId = 0): AlpacaBot\View\Chat\Shell
+{
+    Functions\when('get_transient')->justReturn([['id' => 'llama3.2', 'label' => 'llama3.2']]);
+    Functions\when('wp_get_current_user')->justReturn((object) ['display_name' => 'Carmelo', 'ID' => 3]);
+    Functions\when('get_avatar_url')->justReturn('/u.png');
+    Functions\when('plugins_url')->alias(fn(string $p) => '/plugins/alpaca-bot/' . $p);
+    Functions\when('admin_url')->alias(fn(string $p) => '/wp-admin/' . $p);
+    $store = new Store(['models.default' => 'llama3.2', 'chat.history_limit' => 15]);
+    return new AlpacaBot\View\Chat\Shell($store, new ModelCatalog(new Factory($store)), $conversation, $history, 'n', $postId, $sprite);
+}
