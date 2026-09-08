@@ -803,6 +803,17 @@ it('refuses ephemeral together with a conversation id, before the provider is ca
         ->and($h->writes)->toBe([]);
 });
 
+// The cap is the named hazard for this option: a turn that keeps no conversation still spends
+// tokens, and the receipt it writes is what the meter counts, so an ephemeral path around
+// assertAllowed() would be a way around the monthly cap.
+it('refuses an ephemeral turn under the cap like any other, before the provider is built', function (): void {
+    $h = pipelineWith(null, ['governance.user_monthly_tokens' => 10]);
+    $h->transients['alpaca_bot_usage_3_2024-08'] = ['tokens' => 12, 'requests' => 1];
+    Actions\expectDone('alpaca_bot/chat/started')->never();
+    expect(fn() => $h->pipeline->complete(3, 'Long text', ['ephemeral' => true, 'system' => 'Summarize.']))->toThrow(CapExceeded::class)
+        ->and($h->writes)->toBe([]);
+});
+
 it('leaves nothing behind when an ephemeral turn fails at the provider', function (): void {
     $h = pipelineWith(pipelineProvider([new \RuntimeException('connection refused')]));
     Actions\expectDone('alpaca_bot/chat/failed')->once();
