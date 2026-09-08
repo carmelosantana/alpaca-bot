@@ -5,6 +5,11 @@
  * tokenised, never before: a pattern sees the raw code, the output only ever holds escaped
  * text. An unknown language is escaped and nothing else.
  */
+/**
+ * A token class and its pattern source. Non-capturing groups only (`(?:…)`): highlight() wraps
+ * each source in one capturing group and reads the class off the index of the group that
+ * matched, so a capturing group inside a source would shift every class after it.
+ */
 type Pattern = [cls: string, source: string];
 
 const CMT_SLASH = String.raw`\/\/[^\n]*|\/\*[\s\S]*?\*\/`;

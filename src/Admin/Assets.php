@@ -52,6 +52,8 @@ final class Assets
                 'sessionExpired' => __('Your session has expired. Reload the page to keep chatting.', 'alpaca-bot'),
                 'imageTitle' => __('Attach an image', 'alpaca-bot'),
                 'imageButton' => __('Use this image', 'alpaca-bot'),
+                // The figure is MAX_IMAGE_BYTES in resources/ts/image.ts.
+                'imageTooLarge' => __('That image is too large to send. Pick one under 4 MB.', 'alpaca-bot'),
                 'thinking' => __('Thinking…', 'alpaca-bot'),
             ],
             'offline' => __('You are offline. Messages will send once the connection is back.', 'alpaca-bot'),
@@ -75,7 +77,11 @@ final class Assets
         return $response;
     }
 
-    /** The version string for a build output; `$debug` is WP_DEBUG unless a caller (a test) says otherwise. */
+    /**
+     * The version string for a build output; `$debug` is WP_DEBUG unless a caller (a test) says otherwise.
+     *
+     * @internal Public only so the tests can call it; not part of the plugin's API.
+     */
     public static function version(string $relative, ?bool $debug = null): string
     {
         if (!($debug ?? (defined('WP_DEBUG') && WP_DEBUG))) {

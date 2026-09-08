@@ -206,10 +206,12 @@ it('renders a user turn\'s attached image from its data URL and drops anything t
     // base64 image data URL and attribute-escaped instead; anything else is not rendered.
     Functions\when('esc_attr')->alias(fn(string $s) => htmlspecialchars($s, ENT_QUOTES));
     $png = 'data:image/png;base64,iVBORw0KGgo=';
-    $html = (new MessageBubble(new Message('user', 'look', '', null, 0, [$png, 'javascript:alert(1)', 'data:text/html;base64,PHNjcmlwdD4=', 'https://example.com/x.png', 'data:image/png;base64,abc" onerror="x', '']), new Markdown(), 'C', '/u.png', '/a.png'))->render();
+    // The trailing-newline case: `$` alone would match before a final "\n" (PCRE without D), so the
+    // pattern ends in \z and a value with any whitespace at all is dropped, as its docblock says.
+    $html = (new MessageBubble(new Message('user', 'look', '', null, 0, [$png, 'javascript:alert(1)', 'data:text/html;base64,PHNjcmlwdD4=', 'https://example.com/x.png', 'data:image/png;base64,abc" onerror="x', '', "data:image/png;base64,QUJD\n"]), new Markdown(), 'C', '/u.png', '/a.png'))->render();
     expect($html)->toContain('<div class="ab-msg__images"><img class="ab-msg__image" src="' . $png . '" alt="Attached image"></div>')
         ->and(substr_count($html, '<img class="ab-msg__image"'))->toBe(1)
-        ->and($html)->not->toContain('javascript:')->not->toContain('text/html')->not->toContain('example.com')->not->toContain('onerror');
+        ->and($html)->not->toContain('javascript:')->not->toContain('text/html')->not->toContain('example.com')->not->toContain('onerror')->not->toContain('QUJD');
     // No images, or an assistant turn: no image block at all.
     expect((new MessageBubble(new Message('user', 'hi'), new Markdown(), 'C', '/u.png', '/a.png'))->render())->not->toContain('ab-msg__images')
         ->and((new MessageBubble(new Message('assistant', 'hi', 'm', null, 0, [$png]), new Markdown(), 'C', '/u.png', '/a.png'))->render())->not->toContain('ab-msg__images');

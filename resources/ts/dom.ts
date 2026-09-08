@@ -21,6 +21,12 @@ export function icon(name: string): SVGSVGElement {
   return svg;
 }
 
+/** An id off a field, a dataset or a frame: a non-negative integer, or null for anything else (a missing attribute, "", "NaN"). */
+export function asId(value: unknown): number | null {
+  const n = typeof value === 'number' ? value : typeof value === 'string' && value.trim() !== '' ? Number(value) : NaN;
+  return Number.isInteger(n) && n >= 0 ? n : null;
+}
+
 /** Turns a chunk of trusted server HTML (a /view/* fragment) into its first element. */
 export function fromHtml(html: string): HTMLElement | null {
   const tpl = document.createElement('template');

@@ -21,8 +21,8 @@ use AlpacaBot\View\Markdown;
  */
 final class MessageBubble extends Component
 {
-    /** A base64 image data URL and nothing else: the mime is an allowlist and the payload is base64's alphabet. */
-    private const DATA_IMAGE = '#^data:image/(?:png|jpe?g|gif|webp);base64,[A-Za-z0-9+/]+=*$#';
+    /** A base64 image data URL and nothing else: the mime is an allowlist, the payload is base64's alphabet, and `\z` (not `$`, which admits a final newline) holds it to the very end. */
+    private const DATA_IMAGE = '#^data:image/(?:png|jpe?g|gif|webp);base64,[A-Za-z0-9+/]+=*\z#';
 
     public function __construct(private Message $m, private Markdown $md, private string $userName, private string $userAvatar, private string $assistantAvatar, private bool $streaming = false) {}
 

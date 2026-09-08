@@ -27,13 +27,18 @@ export async function* readSse(res: Response): AsyncGenerator<{ event: string; d
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let carry = '';
-  for (;;) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    const parsed = parseFrames(decoder.decode(value, { stream: true }), carry);
-    carry = parsed.carry;
-    for (const frame of parsed.frames) yield { event: frame.event, data: JSON.parse(frame.data) };
+  try {
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      const parsed = parseFrames(decoder.decode(value, { stream: true }), carry);
+      carry = parsed.carry;
+      for (const frame of parsed.frames) yield { event: frame.event, data: JSON.parse(frame.data) };
+    }
+    // A last frame the server closed on without its blank line.
+    for (const frame of parseFrames('\n\n', carry).frames) yield { event: frame.event, data: JSON.parse(frame.data) };
+  } finally {
+    // The consumer stops at `done`; a server that keeps the connection open past it would otherwise hold the body forever.
+    reader.cancel().catch(() => {});
   }
-  // A last frame the server closed on without its blank line.
-  for (const frame of parseFrames('\n\n', carry).frames) yield { event: frame.event, data: JSON.parse(frame.data) };
 }

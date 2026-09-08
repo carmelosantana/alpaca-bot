@@ -10,7 +10,8 @@
 import { decorate } from './highlight';
 import { readSse } from './stream';
 import { watchNonce } from './nonce';
-import { $, $$, el, fromHtml, icon, notice } from './dom';
+import { ImageTooLarge, fetchDataUrl } from './image';
+import { $, $$, asId, el, fromHtml, icon, notice } from './dom';
 
 interface Settings { rest: string; nonce: string; i18n: Record<string, string>; offline: string }
 interface Attachment { url: string; sizes?: Record<string, { url: string }> }
@@ -74,7 +75,10 @@ function boot(cfg: Settings, form: HTMLFormElement): void {
   // ---- transcript -----------------------------------------------------------------------
 
   const messages = (): HTMLElement => $('#ab-messages') ?? document.body;
-  function setConversation(id: number): void {
+  /** Records the conversation the transcript shows; a frame or a list without a usable id leaves it as it was, so the field never holds "NaN". */
+  function setConversation(value: unknown): void {
+    const id = asId(value);
+    if (id === null) return;
     field('conversation_id').value = String(id);
     for (const node of $$('#ab-chat, #ab-messages')) node.dataset.conversation = String(id);
   }
@@ -117,7 +121,7 @@ function boot(cfg: Settings, form: HTMLFormElement): void {
       user = fromHtml(await userRes.text());
       if (user) append(user);
       const ticketRes = await request('POST', api('/chat'), {
-        message: text, conversation_id: Number(field('conversation_id').value), model: field('model').value, images, context: { post_id: Number(field('context[post_id]').value) }, stream: true,
+        message: text, conversation_id: asId(field('conversation_id').value) ?? 0, model: field('model').value, images, context: { post_id: asId(field('context[post_id]').value) ?? 0 }, stream: true,
       });
       if (!ticketRes.ok) { user?.remove(); restore(); return refused(ticketRes.status, await restError(ticketRes)); }
       const ticket = await ticketRes.json() as { stream_url: string };
@@ -146,7 +150,7 @@ function boot(cfg: Settings, form: HTMLFormElement): void {
       for await (const { event, data } of readSse(res)) {
         const d = data as Json;
         if (event === 'start') {
-          setConversation(Number(d.conversation_id));
+          setConversation(d.conversation_id);
         } else if (event === 'delta') {
           withScroll(() => {
             if (typeof d.reasoning === 'string' && d.reasoning !== '') {
@@ -186,7 +190,7 @@ function boot(cfg: Settings, form: HTMLFormElement): void {
   async function finish(d: Json, bubble: HTMLElement): Promise<void> {
     const m = (d.message ?? {}) as Json;
     const receipt = (d.receipt ?? {}) as Json;
-    setConversation(Number(d.conversation_id));
+    setConversation(d.conversation_id);
     const res = await request('POST', api('/view/bubble'), { role: 'assistant', content: m.content ?? '', model: m.model ?? '', usage: m.usage ?? null, duration_ms: receipt.duration_ms ?? 0 });
     const rendered = res.ok ? fromHtml(await res.text()) : null;
     if (!res.ok) refused(res.status, await restError(res));
@@ -221,18 +225,17 @@ function boot(cfg: Settings, form: HTMLFormElement): void {
     const frame = media({ title: t('imageTitle'), button: { text: t('imageButton') }, multiple: false, library: { type: 'image' } });
     frame.on('select', () => {
       const a = frame.state().get('selection').first().toJSON();
-      void toDataUrl(a.sizes?.large?.url ?? a.url).then(setImage).catch(() => notice('error', t('failed')));
+      void attach(a.sizes?.large?.url ?? a.url);
     });
     frame.open();
   }
-  async function toDataUrl(url: string): Promise<string> {
-    const blob = await (await fetch(url, { credentials: 'same-origin' })).blob();
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(String(reader.result));
-      reader.onerror = () => reject(reader.error);
-      reader.readAsDataURL(blob);
-    });
+  /** An image past the cap (image.ts) is refused with a message that says so, not a bare failure. */
+  async function attach(url: string): Promise<void> {
+    try {
+      setImage(await fetchDataUrl(url));
+    } catch (e) {
+      notice('error', e instanceof ImageTooLarge ? t('imageTooLarge') : t('failed'));
+    }
   }
   async function copy(button: HTMLElement, text: string): Promise<void> {
     if (!(await writeClipboard(text))) {
@@ -263,7 +266,8 @@ function boot(cfg: Settings, form: HTMLFormElement): void {
   }
   function connectivity(): void {
     if (navigator.onLine) {
-      if (offlineShown) notice('info', '');
+      // The offline notice took the status line; hand it back to the session-expired notice if that is what it displaced.
+      if (offlineShown) notice(expired ? 'error' : 'info', expired ? t('sessionExpired') : '');
       offlineShown = false;
       if (!busy && !expired) sendButton.disabled = false;
     } else {
@@ -314,7 +318,7 @@ function boot(cfg: Settings, form: HTMLFormElement): void {
   });
   document.body.addEventListener('htmx:afterSwap', () => {
     const list = $('#ab-messages');
-    if (list) setConversation(Number(list.dataset.conversation ?? 0));
+    if (list) setConversation(list.dataset.conversation);
     decorate(document, t('copyCode'));
   });
   document.body.addEventListener('htmx:responseError', (e) => {
