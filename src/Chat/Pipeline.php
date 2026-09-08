@@ -74,9 +74,10 @@ use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Message\UserMessage;
  * says how), and the stored reply carries `meta['tool_calls']`, one `{name, arguments,
  * result_excerpt, ok}` per call. The usage metered is the whole run: Output::$usage is the sum
  * over every provider call the agent made, so a turn that took three calls is billed three
- * calls' tokens against the cap. An ephemeral turn runs plainly, tools or no tools: its one
- * caller is a tool wanting a text condensed, and an agent inside a tool inside an agent would
- * be a recursion with no bound but each level's iteration budget.
+ * calls' tokens against the cap; a turn the consumer abandons is billed the calls it had
+ * completed by then (the provider decorator's running tally). An ephemeral turn runs plainly,
+ * tools or no tools: its one caller is a tool wanting a text condensed, and an agent inside a
+ * tool inside an agent would be a recursion with no bound but each level's iteration budget.
  */
 final class Pipeline
 {
@@ -194,15 +195,27 @@ final class Pipeline
                 $provider = $this->factory->make($model);
                 if ($toolkits !== []) {
                     $observer = new AgentStreamObserver();
-                    $turn = $this->agentTurn(new BoundOptionsProvider($provider, $providerOptions), $toolkits, $messages, $observer);
+                    $bound = new BoundOptionsProvider($provider, $providerOptions);
+                    $turn = $this->agentTurn($bound, $toolkits, $messages, $observer);
                     foreach ($turn as $delta) {
                         $content .= $delta->text;
                         $reasoning .= $delta->reasoning;
+                        // The run's usage so far, read before each yield: a consumer that does not
+                        // come back from this one leaves settle() to bill the last reading, which
+                        // covers every call the provider had answered by then. The agent's own
+                        // total is in an Output an abandoned run never returns.
+                        $tally = $bound->usage();
+                        $prompt = $tally->promptTokens;
+                        $completion = $tally->completionTokens;
                         yield $delta;
                     }
+                    // Once the run has ended, Output::$usage is the authority: the agent's sum over
+                    // every call it made.
                     $usage = $turn->getReturn()->usage;
-                    $prompt = $usage === null ? 0 : $usage->promptTokens;
-                    $completion = $usage === null ? 0 : $usage->completionTokens;
+                    if ($usage !== null) {
+                        $prompt = $usage->promptTokens;
+                        $completion = $usage->completionTokens;
+                    }
                 } else {
                     // The vendored stream() marks text and reasoning deltas with finishReason Stop
                     // too, so Stop says nothing about the end of the stream: the generator is
@@ -302,7 +315,10 @@ final class Pipeline
      * is nothing to do: the normal path or the catch owns the outcome. When it did not, the
      * generator was destroyed while suspended at a yield, which means the consumer walked away
      * mid-stream: store what the user already saw, marked partial, bill the time and whatever
-     * usage had arrived (usually none: it comes last), and say so on `chat/failed`.
+     * usage had arrived, and say so on `chat/failed`. On a plain turn that is usually none (the
+     * usage comes last); on a tool turn it is every provider call the run had completed, read
+     * off Provider\BoundOptionsProvider::usage() before each yield, since the agent's own total
+     * is in an Output the abandoned run never returns.
      *
      * The branch lives here rather than in the finally itself because static analysis does not
      * model generator destruction and reads the flag as always true at that point.

@@ -235,6 +235,35 @@ it('stores the partial reply with the calls made so far, and lets the fiber go t
         ->and(array_map(static fn(array $w): string => $w[0], $h->writes))->toBe(['wp_insert_post', 'update_post_meta', 'wp_update_post', 'wp_insert_post']);
 });
 
+it('bills an abandoned tool turn for the calls the run had already made, from the usage that had arrived', function (): void {
+    $provider = agentProvider([
+        // The first call's usage rides on its last chunk, the tool call; the agent sums it into
+        // the Output the consumer never sees.
+        [new Response('first', ProviderFinishReason::Stop), new Response('', ProviderFinishReason::ToolUse, [new ToolCall('c1', 'echo_tool', ['text' => 'ping'])], usage: new Usage(900, 40, 940))],
+        [new Response('second', ProviderFinishReason::Stop), new Response('never seen', ProviderFinishReason::Stop, usage: new Usage(950, 60, 1010))],
+    ]);
+    $h = pipelineWith($provider, [], [], TOOL_MODEL, null, registryWith(['echo' => echoToolkit('echo_tool')]));
+    $failed = null;
+    Actions\expectDone('alpaca_bot/chat/failed')->once()->whenHappen(function (\Throwable $e, Conversation $c) use (&$failed): void {
+        $failed = $c;
+    });
+
+    $gen = $h->pipeline->send(3, 'ping');
+    $gen->current();
+    $gen->next();
+    expect($gen->current()->text)->toBe("\n\nsecond");
+    unset($gen);
+
+    // The second call's usage never arrived (its chunk is after the point of abandonment) and
+    // is not billed; the first call's is, on the partial reply and on the chat_log row the
+    // monthly cap reads. Before this the row said 0.
+    expect($failed->messages[1]->usage)->toBe(['prompt_tokens' => 900, 'completion_tokens' => 40])
+        ->and($h->writes[3][1])->toBe('chat_log')
+        ->and($h->writes[3][2]['meta_input']['prompt_tokens'])->toBe(900)
+        ->and($h->writes[3][2]['meta_input']['completion_tokens'])->toBe(40)
+        ->and($h->writes[3][2]['meta_input']['total_tokens'])->toBe(940);
+});
+
 it('runs the plain path, tools and records aside, when no toolkit is enabled, when the model cannot call tools, and on an ephemeral turn', function (): void {
     $plain = static fn(): array => [new Response('ok', ProviderFinishReason::Stop, usage: new Usage(1, 1, 2))];
     $kit = ['echo' => echoToolkit('echo_tool')];

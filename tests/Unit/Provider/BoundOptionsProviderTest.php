@@ -8,6 +8,7 @@ use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Contract\ProviderInterface;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Enum\ProviderFinishReason;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Message\UserMessage;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Provider\Response;
+use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Provider\Usage;
 
 // AbstractAgent::run() calls stream($messages, $tools) with no options argument, so a provider
 // handed to the agent bare would run every tool turn on the provider's defaults while a plain
@@ -42,6 +43,41 @@ it('merges the bound options into chat(), stream() and structured(), with the ca
         // The caller's temperature wins over the bound one; the rest is filled in.
         ->and($seen['stream'])->toBe([$messages, [], ['temperature' => 0.9, 'num_ctx' => 4096, 'keep_alive' => '5m']])
         ->and($seen['structured'])->toBe([$messages, '{}', ['format' => 'json', 'temperature' => 0.2, 'num_ctx' => 4096, 'keep_alive' => '5m']]);
+});
+
+// The agent loop reports usage only in the Output it returns at the end of the run; a consumer
+// that leaves mid-run never sees that Output, and the pipeline would bill nothing for calls the
+// provider had already answered. Every call the agent makes goes through this decorator, so the
+// tally lives here: what has been reported so far, readable at any moment.
+it('tallies the usage every call reports as it arrives: max per field within one stream, summed across calls, and readable mid-stream', function (): void {
+    $inner = Mockery::mock(ProviderInterface::class);
+    $inner->shouldReceive('stream')->twice()->andReturnUsing(function (): \Generator {
+        yield new Response('a', ProviderFinishReason::Stop);
+        // Split across two chunks, as a provider that reports input and output separately does.
+        yield new Response('', ProviderFinishReason::Stop, usage: new Usage(900, 0, 900));
+        yield new Response('', ProviderFinishReason::Stop, usage: new Usage(900, 40, 940));
+    });
+    $inner->shouldReceive('chat')->once()->andReturn(new Response('ok', ProviderFinishReason::Stop, usage: new Usage(10, 5, 15)));
+    $bound = new BoundOptionsProvider($inner, []);
+
+    expect($bound->usage()->totalTokens)->toBe(0);
+    $stream = $bound->stream([]);
+    $stream->current();
+    expect($bound->usage()->promptTokens)->toBe(0);
+    $stream->next();
+    expect([$bound->usage()->promptTokens, $bound->usage()->completionTokens])->toBe([900, 0]);
+    $stream->next();
+    expect([$bound->usage()->promptTokens, $bound->usage()->completionTokens, $bound->usage()->totalTokens])->toBe([900, 40, 940]);
+    $stream->next();
+
+    // A second stream, abandoned after its first usage chunk, adds what it had reported to the
+    // first stream's figures; so does chat().
+    $second = $bound->stream([]);
+    $second->current();
+    $second->next();
+    unset($second);
+    $bound->chat([]);
+    expect([$bound->usage()->promptTokens, $bound->usage()->completionTokens, $bound->usage()->totalTokens])->toBe([1810, 45, 1855]);
 });
 
 it('delegates models(), isAvailable() and getModel(), and withModel() rebinds the same options over the inner provider\'s new model', function (): void {
