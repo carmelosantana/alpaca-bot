@@ -354,6 +354,29 @@ it('bills an abandoned tool turn for the calls the run had already made, from th
         ->and($h->writes[3][2]['meta_input']['total_tokens'])->toBe(940);
 });
 
+it('stores a reasoning-only answer once, as the reply, when the Assistant takes the reasoning as the answer', function (): void {
+    // Three streams, all reasoning and no text: the Assistant nudges twice, then takes the
+    // reasoning as the answer (Output content = the trimmed reasoning). The consumer saw the
+    // thoughts stream and the answer yielded after the run; the stored reply must not carry
+    // the same text under content and under meta['reasoning'], or a reloaded transcript shows
+    // it in the thinking area and again as the reply.
+    $think = static fn(): array => [new Response('', ProviderFinishReason::Stop, reasoning: ' the thought ', usage: new Usage(1, 1, 2))];
+    $provider = agentProvider([$think(), $think(), $think()]);
+    $h = pipelineWith($provider, [], [], TOOL_MODEL, null, registryWith(['echo' => echoToolkit('echo_tool')]));
+
+    $gen = $h->pipeline->send(3, 'think');
+    $deltas = [];
+    foreach ($gen as $d) {
+        $deltas[] = [$d->text, $d->reasoning];
+    }
+    $r = $gen->getReturn();
+
+    expect($deltas)->toBe([['', ' the thought '], ['', ' the thought '], ['', ' the thought '], ['the thought', '']])
+        ->and($r->reply->content)->toBe('the thought')
+        ->and($r->reply->meta)->toBe(['duration_ms' => $r->receipt['duration_ms']])
+        ->and($r->receipt['total_tokens'])->toBe(6);
+});
+
 it('runs the plain path, tools and records aside, when no toolkit is enabled, when the model cannot call tools, and on an ephemeral turn', function (): void {
     $plain = static fn(): array => [new Response('ok', ProviderFinishReason::Stop, usage: new Usage(1, 1, 2))];
     $kit = ['echo' => echoToolkit('echo_tool')];

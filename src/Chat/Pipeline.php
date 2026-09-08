@@ -223,6 +223,13 @@ final class Pipeline
                         $prompt = $output->usage->promptTokens;
                         $completion = $output->usage->completionTokens;
                     }
+                    if ($output->content !== '' && $output->content === trim($output->reasoning)) {
+                        // The Assistant took the reasoning as the answer (a thinking model that
+                        // wrote no text, after two nudges): the same words are the reply, and
+                        // storing them under `reasoning` too would show them twice on reload.
+                        // The nudged attempts' thoughts go with it; the user saw them stream.
+                        $reasoning = '';
+                    }
                     $failure = self::failure($output, $observer);
                     if ($failure !== null) {
                         // The agent swallowed the provider's throw; raising it here puts it on the
