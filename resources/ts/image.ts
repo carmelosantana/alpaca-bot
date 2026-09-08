@@ -40,13 +40,19 @@ export async function toDataUrl(blob: Blob, max = MAX_IMAGE_BYTES): Promise<stri
   return `data:${blob.type};base64,${btoa(bin)}`;
 }
 
-/** A byte count as the media uploader prints one: binary units, at most one decimal, so "4 MB" and "1.5 MB". */
-export function formatBytes(bytes: number): string {
+/**
+ * A byte count as the media uploader prints one: binary units, at most one decimal, so "4 MB"
+ * and "1.5 MB". 'nearest' is for a size; 'down' is for a ceiling, which must never print above
+ * its real value: the cap a stock 8M yields is 5.95 MiB, and an image refused just over it also
+ * rounds to "6 MB", so printed to nearest the message would say "6 MB" is over "6 MB".
+ */
+export function formatBytes(bytes: number, mode: 'nearest' | 'down' = 'nearest'): string {
   const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  const fix = mode === 'down' ? Math.floor : Math.round;
   let n = Math.max(0, bytes);
   let i = 0;
   while (n >= 1024 && i < units.length - 1) { n /= 1024; i++; }
-  const figure = i === 0 ? String(Math.round(n)) : (Math.round(n * 10) / 10).toString();
+  const figure = i === 0 ? String(fix(n)) : (fix(n * 10) / 10).toString();
   return `${figure} ${units[i]}`;
 }
 

@@ -81,9 +81,17 @@ final class Assets
     }
 
     /**
-     * The part of a POST /chat body that is not the image: the message text, the ids, the model,
-     * the data URL's own prefix and the JSON around them all. 64 KiB is far more than any of that
-     * comes to, and cheap against the figures it is taken from (0.8% of a stock 8M).
+     * The budget for the part of a POST /chat body that is not the image: the ids, the model,
+     * the data URL's own prefix, the JSON around them all, and the message text. The fixed
+     * fields come to well under a kibibyte, so for them 64 KiB is generous. The message text
+     * has no cap (the composer sets no maxlength and the /chat schema no maxLength, on purpose:
+     * pasting a long document into a prompt is a real thing to do), so for it the allowance is
+     * a ceiling, and one it meets only when a maximum-size image is attached: the cap consumes
+     * the whole remainder, every raw image byte spends 4/3 of one, and there is no slack
+     * elsewhere to absorb the overrun. A message past ~64 KB (some ten thousand words of ASCII)
+     * beside an image at the cap lands in exactly the bare failure the guard exists to prevent.
+     * That corner is the trade taken: the budget is 0.8% of a stock 8M, and a bound on the
+     * field would cost a real capability to make it go away.
      */
     public const IMAGE_BODY_ALLOWANCE = 64 * 1024;
 
@@ -91,10 +99,9 @@ final class Assets
      * The largest image the chat bundle sends, in bytes. The image is not an upload: it travels
      * base64-encoded inside the JSON body of POST /chat, so the only PHP limit it meets is
      * post_max_size. upload_max_filesize and wp_max_upload_size() govern multipart uploads and
-     * have no say here; the picker offers the media library, whose every image already passed
-     * them. A body past post_max_size is dropped before WordPress sees it and the only answer
-     * is a bare failure, which is what image.ts's guard exists to prevent: the guard is only as
-     * good as its figure, and this is the site's own rather than a guess at it.
+     * have no say here. A body past post_max_size is dropped before WordPress sees it and the
+     * only answer is a bare failure, which is what image.ts's guard exists to prevent: the guard
+     * is only as good as its figure, and this is the site's own rather than a guess at it.
      *
      * The figure is the raw image size, which is what image.ts compares and the message prints,
      * so it is post_max_size less the allowance for the rest of the body, scaled by 3/4 for the
@@ -106,7 +113,10 @@ final class Assets
      * figure" and keeps its constant (imageLimit() says why the two are let coincide). A
      * post_max_size the allowance alone exhausts is a site nothing posts to, and answers 0 too
      * rather than a negative. The ini value is a parameter so a test can pass one; a caller
-     * passes nothing.
+     * passes nothing. The division comes before the multiplication so the arithmetic stays in
+     * int on a 32-bit build: wp_convert_hr_to_bytes() clamps at PHP_INT_MAX, a product past it
+     * is a float, and a float into intdiv() is a TypeError under strict_types. The order costs
+     * at most 2 bytes of cap.
      *
      * A web-server body limit (nginx's client_max_body_size) is invisible to PHP and is not
      * counted; that failure mode stays as it was.
@@ -119,7 +129,7 @@ final class Assets
         if ($postMax <= 0) {
             return 0;
         }
-        return max(0, intdiv(($postMax - self::IMAGE_BODY_ALLOWANCE) * 3, 4));
+        return max(0, intdiv($postMax - self::IMAGE_BODY_ALLOWANCE, 4) * 3);
     }
 
     /**

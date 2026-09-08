@@ -236,7 +236,7 @@ function boot(cfg: Settings, form: HTMLFormElement): void {
     try {
       setImage(await fetchDataUrl(url, max));
     } catch (e) {
-      notice('error', e instanceof ImageTooLarge ? t('imageTooLarge').replace('{size}', formatBytes(e.size)).replace('{max}', formatBytes(e.max)) : t('failed'));
+      notice('error', e instanceof ImageTooLarge ? t('imageTooLarge').replace('{size}', formatBytes(e.size)).replace('{max}', formatBytes(e.max, 'down')) : t('failed'));
     }
   }
   async function copy(button: HTMLElement, text: string): Promise<void> {

@@ -34,6 +34,16 @@ test('formatBytes reads as the media uploader does: binary units, one decimal at
   assert.equal(formatBytes(2 * 1024 ** 3), '2 GB');
 });
 
+test("formatBytes 'down' truncates, so a stated ceiling is never above the real one (the 8M cap is 5.95 MiB: 'nearest' says 6, 'down' says 5.9)", () => {
+  assert.equal(formatBytes(6242304), '6 MB');
+  assert.equal(formatBytes(6242304, 'down'), '5.9 MB');
+  assert.equal(formatBytes(4 * 1024 * 1024, 'down'), '4 MB');
+  assert.equal(formatBytes(1023, 'down'), '1023 B');
+  // An image refused just over the cap rounds to the same "6 MB" the cap would; with 'down' on the cap the two figures differ.
+  assert.equal(formatBytes(6300000), '6 MB');
+  assert.notEqual(formatBytes(6300000), formatBytes(6242304, 'down'));
+});
+
 test('imageLimit reads the figure wp_localize_script ships (a string), and falls back to the constant for anything that is not a positive number', () => {
   assert.equal(imageLimit('2097152'), 2097152);
   assert.equal(imageLimit(1024), 1024);
