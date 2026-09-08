@@ -1,0 +1,17 @@
+{
+  "name": "alpaca-bot",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "watch": "node build.mjs --watch",
+    "typecheck": "tsc --noEmit",
+    "check": "pnpm typecheck && pnpm build"
+  },
+  "devDependencies": {
+    "esbuild": "~0.28.2",
+    "htmx.org": "~2.0.10",
+    "lucide-static": "~1.41.0",
+    "typescript": "~5.9.3"
+  }
+}

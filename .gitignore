@@ -8,3 +8,7 @@ node_modules/
 tools/strauss/vendor/
 .phpunit.cache/
 tools/integration/vendor/
+assets/js/*.js
+assets/js/*.map
+assets/css/*.css
+assets/img/icons.svg
