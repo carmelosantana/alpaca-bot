@@ -282,12 +282,11 @@ shape `POST /chat` returns:
 
 ```
 $ curl -s -u "admin:$PW" "$B/conversations/163"
-{"id":163,"title":"Reply with exactly three words","created":1788736220,"mode":"chat","messages":[{"role":"user","content":"Reply with exactly three words.","model":"qwen3-vl:2b","usage":null,"created":1788736220,"images":[],"meta":[]},{"role":"assistant","content":"Boring is right.","model":"qwen3-vl:2b","usage":{"prompt_tokens":16,"completion_tokens":3776},"created":1788736235,"images":[],"meta":{"reasoning":"Hmm, the user asked me to reply with exactly three words. …"}}]}
+{"id":163,"title":"Reply with exactly three words","created":1788736220,"mode":"chat","messages":[{"role":"user","content":"Reply with exactly three words.","model":"qwen3-vl:2b","usage":null,"created":1788736220,"images":[],"meta":{}},{"role":"assistant","content":"Boring is right.","model":"qwen3-vl:2b","usage":{"prompt_tokens":16,"completion_tokens":3776},"created":1788736235,"images":[],"meta":{"reasoning":"Hmm, the user asked me to reply with exactly three words. …"}}]}
 ```
 
-Note that a message with no metadata serialises `meta` as `[]` (PHP's empty array) while one
-with metadata is an object; a typed client should accept both. A reply cut short by a client
-that disconnected mid-stream is stored with `meta.partial: true`.
+`meta` is always an object, `{}` when there is none. A reply cut short by a client that
+disconnected mid-stream is stored with `meta.partial: true`.
 
 A conversation that is not yours reads as missing, so its existence is not leaked:
 

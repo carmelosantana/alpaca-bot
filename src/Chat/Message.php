@@ -44,11 +44,16 @@ final class Message
             is_array($a['usage'] ?? null) ? $a['usage'] : null,
             (int) ($a['created'] ?? 0),
             is_array($a['images'] ?? null) ? array_values($a['images']) : [],
-            is_array($a['meta'] ?? null) ? $a['meta'] : [],
+            self::meta($a['meta'] ?? null),
         );
     }
 
-    /** @return array<string, mixed> */
+    /**
+     * The wire and storage shape. `meta` goes out as an object so an empty one serialises as
+     * `{}`, the same JSON type as a populated one; fromArray() reads that object back.
+     *
+     * @return array<string, mixed>
+     */
     public function toArray(): array
     {
         return [
@@ -58,8 +63,21 @@ final class Message
             'usage' => $this->usage,
             'created' => $this->created,
             'images' => $this->images,
-            'meta' => $this->meta,
+            'meta' => (object) $this->meta,
         ];
+    }
+
+    /**
+     * `meta` as stored: the object toArray() now writes, the array it wrote before, or nothing.
+     *
+     * @return array<string, mixed>
+     */
+    private static function meta(mixed $meta): array
+    {
+        if (is_object($meta)) {
+            $meta = get_object_vars($meta);
+        }
+        return is_array($meta) ? $meta : [];
     }
 
     /**

@@ -298,7 +298,7 @@ it('stops after the frame the client did not read: no done frame, the listener r
         },
     );
     expect(array_map(static fn(string $f): string => strtok($f, "\n"), $frames))->toBe(['event: start', 'event: delta'])
-        ->and($h->meta[42]['ab_messages'][1])->toMatchArray(['role' => 'assistant', 'content' => 'a', 'meta' => ['partial' => true]]);
+        ->and($h->meta[42]['ab_messages'][1])->toMatchArray(['role' => 'assistant', 'content' => 'a', 'meta' => (object) ['partial' => true]]);
 });
 
 it('writes one error frame, in the JSON route\'s error shape, when the pipeline refuses the turn', function (): void {

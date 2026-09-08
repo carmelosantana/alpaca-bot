@@ -57,14 +57,14 @@ it('shows a conversation with its transcript, and 404s one that is not the user\
         : '');
     $res = $this->controller->show(restRequest('GET', '/alpaca-bot/v1/conversations/7', ['id' => '7']));
     expect($res)->toBeInstanceOf(WP_REST_Response::class)
-        ->and($res->get_data())->toBe([
+        ->and($res->get_data())->toEqual([
             'id' => 7,
             'title' => 'T',
             'created' => 1704067200,
             'mode' => 'chat',
             'messages' => [
-                ['role' => 'user', 'content' => 'Hi', 'model' => 'm', 'usage' => null, 'created' => 1, 'images' => [], 'meta' => []],
-                ['role' => 'assistant', 'content' => 'Yo', 'model' => 'm', 'usage' => ['prompt_tokens' => 1, 'completion_tokens' => 1], 'created' => 2, 'images' => [], 'meta' => []],
+                ['role' => 'user', 'content' => 'Hi', 'model' => 'm', 'usage' => null, 'created' => 1, 'images' => [], 'meta' => (object) []],
+                ['role' => 'assistant', 'content' => 'Yo', 'model' => 'm', 'usage' => ['prompt_tokens' => 1, 'completion_tokens' => 1], 'created' => 2, 'images' => [], 'meta' => (object) []],
             ],
         ]);
     foreach (['8', '9'] as $id) {

@@ -49,7 +49,7 @@ it('maps every integer 0.4 role to user, including 0, and keeps the Ollama times
 it('round-trips the 1.0 shape through toArray and fromArray', function (): void {
     $m = new Message('assistant', 'hi', 'llama3.2', ['prompt_tokens' => 1, 'completion_tokens' => 2], 1_700_000_000, ['data:image/png;base64,x'], ['finish' => 'stop']);
     $a = $m->toArray();
-    expect($a)->toBe(['role' => 'assistant', 'content' => 'hi', 'model' => 'llama3.2', 'usage' => ['prompt_tokens' => 1, 'completion_tokens' => 2], 'created' => 1_700_000_000, 'images' => ['data:image/png;base64,x'], 'meta' => ['finish' => 'stop']]);
+    expect($a)->toEqual(['role' => 'assistant', 'content' => 'hi', 'model' => 'llama3.2', 'usage' => ['prompt_tokens' => 1, 'completion_tokens' => 2], 'created' => 1_700_000_000, 'images' => ['data:image/png;base64,x'], 'meta' => (object) ['finish' => 'stop']]);
     expect(Message::fromArray($a))->toEqual($m);
     expect(Message::fromArray([]))->toEqual(new Message('user', ''));
 });

@@ -352,7 +352,7 @@ it('persists the partial reply, records a receipt, and fires chat/failed when th
         ->and($receipt['log_id'])->toBe(9)
         ->and(array_map(static fn(array $w): string => $w[0], $h->writes))->toBe(['wp_insert_post', 'update_post_meta', 'wp_update_post', 'wp_insert_post']);
     expect($h->writes[1][2][1]['content'])->toBe('par')
-        ->and($h->writes[1][2][1]['meta'])->toBe(['partial' => true])
+        ->and($h->writes[1][2][1]['meta'])->toEqual((object) ['partial' => true])
         ->and($h->writes[3][2]['meta_input']['total_tokens'])->toBe(0);
 });
 
