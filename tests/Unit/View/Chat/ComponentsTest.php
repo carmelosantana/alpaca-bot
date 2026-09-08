@@ -238,7 +238,9 @@ it('renders a placeholder for the images the store evicted, escaped, and nothing
         ->toContain('<div class="ab-msg__images"><span class="ab-msg__evicted">E(1 attached image is no longer stored.)</span></div>')
         ->not->toContain('<img class="ab-msg__image"');
     // Unevicted, or a marker that says nothing was evicted, or one that is not a count: as before.
-    foreach ([[], ['images_evicted' => 0], ['images_evicted' => -1], ['images_evicted' => 'x'], ['duration_ms' => 3]] as $meta) {
+    // '2', true and 1.9 are the cases that pin the guard: is_int() refuses them where a cast
+    // would read each as a count of one or two and render a marker for a value no save() wrote.
+    foreach ([[], ['images_evicted' => 0], ['images_evicted' => -1], ['images_evicted' => 'x'], ['images_evicted' => '2'], ['images_evicted' => true], ['images_evicted' => 1.9], ['duration_ms' => 3]] as $meta) {
         expect($bubble($stored([$png], $meta)))->not->toContain('ab-msg__evicted')->toContain('<img class="ab-msg__image"');
         expect($bubble($stored([], $meta)))->not->toContain('ab-msg__images');
     }
