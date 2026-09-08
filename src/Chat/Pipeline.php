@@ -68,16 +68,23 @@ use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Message\UserMessage;
  * A tool turn: when the registry enables a toolkit for the user and the catalogue says the
  * model can call tools, the reply is produced by the Assistant agent (the vendored tool loop)
  * instead of one provider stream, and the branch is exactly that: everything else on the way
- * in and out (the caps, the hooks, the receipt, what is stored, what an abandoned or failed
- * turn leaves behind) is the same code. The model gets the same generation options a plain
- * turn sends (Provider\BoundOptionsProvider), the text streams as it is produced (agentTurn()
- * says how), and the stored reply carries `meta['tool_calls']`, one `{name, arguments,
- * result_excerpt, ok}` per call. The usage metered is the whole run: Output::$usage is the sum
- * over every provider call the agent made, so a turn that took three calls is billed three
- * calls' tokens against the cap; a turn the consumer abandons is billed the calls it had
- * completed by then (the provider decorator's running tally). An ephemeral turn runs plainly,
- * tools or no tools: its one caller is a tool wanting a text condensed, and an agent inside a
- * tool inside an agent would be a recursion with no bound but each level's iteration budget.
+ * in and out (the caps, the hooks, the receipt, what is stored, what an abandoned turn leaves
+ * behind) is the same code. The model gets the same generation options a plain turn sends
+ * (Provider\BoundOptionsProvider), the text streams as it is produced (agentTurn() says how),
+ * and the stored reply carries `meta['tool_calls']`, one `{name, arguments, result_excerpt,
+ * ok}` per call. One departure from the plain path's "a failed turn persists nothing": a
+ * provider failure after a tool has already run keeps the turn, stored as an abandoned one is
+ * (the partial reply with its `tool_calls`, a receipt for the calls made), and then fails it
+ * the same way (`chat/failed`, `Provider error: ...`). Every tool call is recorded on the
+ * transcript (the spec's rule), and a draft the run created is in the user's posts whether
+ * or not the reply finished; the record is how they learn of it. A failure before any tool
+ * ran persists nothing, as a plain one does. The usage metered is the whole run:
+ * Output::$usage is the sum over every provider call the agent made, so a turn that took
+ * three calls is billed three calls' tokens against the cap; a turn the consumer abandons is
+ * billed the calls it had completed by then (the provider decorator's running tally). An
+ * ephemeral turn runs plainly, tools or no tools: its one caller is a tool wanting a text
+ * condensed, and an agent inside a tool inside an agent would be a recursion with no bound
+ * but each level's iteration budget.
  */
 final class Pipeline
 {
@@ -211,10 +218,21 @@ final class Pipeline
                     }
                     // Once the run has ended, Output::$usage is the authority: the agent's sum over
                     // every call it made.
-                    $usage = $turn->getReturn()->usage;
-                    if ($usage !== null) {
-                        $prompt = $usage->promptTokens;
-                        $completion = $usage->completionTokens;
+                    $output = $turn->getReturn();
+                    if ($output->usage !== null) {
+                        $prompt = $output->usage->promptTokens;
+                        $completion = $output->usage->completionTokens;
+                    }
+                    $failure = self::failure($output, $observer);
+                    if ($failure !== null) {
+                        // The agent swallowed the provider's throw; raising it here puts it on the
+                        // path a plain provider failure takes (the catch below). When tools had
+                        // already run, the turn is not discarded first: a draft the run created is
+                        // in the user's posts, and the transcript is where they learn of it.
+                        if ($observer->toolCalls() !== []) {
+                            $this->storePartial($ephemeral, $userId, $conversation, $model, $content, $reasoning, $prompt, $completion, self::elapsedMs($started), $observer->toolCalls());
+                        }
+                        throw new \RuntimeException($failure);
                     }
                 } else {
                     // The vendored stream() marks text and reasoning deltas with finishReason Stop
@@ -338,7 +356,27 @@ final class Pipeline
         if ($streamEnded) {
             return;
         }
-        $durationMs = self::elapsedMs($started);
+        $this->storePartial($ephemeral, $userId, $conversation, $model, $content, $reasoning, $prompt, $completion, self::elapsedMs($started), $toolCalls);
+        do_action(
+            'alpaca_bot/chat/failed',
+            new \RuntimeException('The stream was abandoned by the consumer before the reply finished.'),
+            $conversation,
+        );
+    }
+
+    /**
+     * What a turn that did not finish leaves behind: the reply as far as it got, appended and
+     * saved (meta `partial: true`), and a receipt for the time and usage. Two callers: settle(),
+     * for the consumer that walked away, and the tool branch of send(), for a run whose provider
+     * failed after a tool had already run. Neither fires `chat/failed` here; each does so in its
+     * own way afterwards, with the conversation already carrying this reply, so a listener sees
+     * what was stored. An ephemeral turn has no post to store on and stores nothing; the receipt
+     * is recorded either way.
+     *
+     * @param list<array{name: string, arguments: array<string, mixed>, result_excerpt: string, ok: bool}> $toolCalls
+     */
+    private function storePartial(bool $ephemeral, int $userId, Conversation $conversation, string $model, string $content, string $reasoning, int $prompt, int $completion, int $durationMs, array $toolCalls): void
+    {
         $conversation->append(new Message(
             'assistant',
             $content,
@@ -354,11 +392,21 @@ final class Pipeline
             $this->conversations->save($conversation);
         }
         $this->meter->record($userId, $model, $prompt, $completion, $durationMs, $conversation->id);
-        do_action(
-            'alpaca_bot/chat/failed',
-            new \RuntimeException('The stream was abandoned by the consumer before the reply finished.'),
-            $conversation,
-        );
+    }
+
+    /**
+     * The message a run failed on, or null when it did not fail. The agent reports a failure as
+     * an Error finish and announces it (`agent.error`, which the observer keeps): the provider
+     * threw, or the run was cancelled. It reports one other thing as an Error finish without
+     * announcing anything: a tool that ended the run by throwing TerminationException, whose
+     * message the agent records as that tool's (successful) result and returns as the content.
+     * Nothing failed there; a tool asked to stop, and the turn finishes on its word (agentTurn()
+     * yields it). Reading the two apart by the announcement is what keeps a toolkit's own
+     * "stop" from reaching the user as `Provider error: ...`.
+     */
+    private static function failure(Output $output, AgentStreamObserver $observer): ?string
+    {
+        return $output->finishReason === AgentFinishReason::Error ? $observer->error() : null;
     }
 
     /**
@@ -416,16 +464,17 @@ final class Pipeline
      * which is why PipelineToolsTest pins the release with no gc_collect_cycles().
      *
      * What the agent cannot stream is yielded here after the run: an answer given through its
-     * `done` tool, reasoning surfaced as the answer when a thinking model wrote no text, and a
-     * translated line for a run that ended on its iteration budget or on silence. An Error
-     * finish (the provider threw; the agent swallows that and says so in the Output) is raised
-     * again as the RuntimeException send() expects, carrying the provider's own message, so a
-     * failed tool turn fires `chat/failed` and persists nothing, as a failed plain turn does.
+     * `done` tool, reasoning surfaced as the answer when a thinking model wrote no text, a
+     * translated line for a run that ended on its iteration budget or on silence, and the
+     * message of a tool that ended the run (TerminationException; failure() says how that is
+     * told from a failure). A failure (the provider threw; the agent swallows that and says so
+     * in the Output) is not raised here: the Output is returned with it, and send() decides
+     * what the turn leaves behind before raising it, since that depends on whether a tool had
+     * already run.
      *
      * @param array<string, ToolkitInterface> $toolkits
      * @param MessageInterface[] $messages as buildMessages() built them: the system message, if any, then the turns, the one being sent last
      * @return \Generator<int, Delta, mixed, Output>
-     * @throws \RuntimeException when the run ended on a provider failure
      */
     private function agentTurn(ProviderInterface $provider, array $toolkits, array $messages, AgentStreamObserver $observer): \Generator
     {
@@ -465,7 +514,9 @@ final class Pipeline
             throw new \LogicException('The agent run returned no Output.');
         }
         $tail = match ($output->finishReason) {
-            AgentFinishReason::Error => throw new \RuntimeException($observer->error() ?? $output->content),
+            // An announced failure is send()'s to raise (failure()); the unannounced kind is a
+            // tool's termination, and its message is the run's last word.
+            AgentFinishReason::Error => self::failure($output, $observer) === null ? $output->content : '',
             AgentFinishReason::Stop, AgentFinishReason::Done => $output->content !== '' && !str_ends_with($streamed, $output->content) ? $output->content : '',
             AgentFinishReason::MaxIterations, AgentFinishReason::BudgetExhausted => __('The assistant ran out of tool steps before it finished.', 'alpaca-bot'),
             AgentFinishReason::EmptyResponse => __('The model gave no answer.', 'alpaca-bot'),

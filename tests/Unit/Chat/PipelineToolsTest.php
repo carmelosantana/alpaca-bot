@@ -8,7 +8,10 @@ use AlpacaBot\Chat\Delta;
 use AlpacaBot\Chat\Message;
 use AlpacaBot\Chat\Result;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Contract\ProviderInterface;
+use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Contract\ToolInterface;
+use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Contract\ToolkitInterface;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Enum\ProviderFinishReason;
+use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Exception\TerminationException;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Message\AssistantMessage;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Message\SystemMessage;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Message\ToolResultMessage;
@@ -162,13 +165,9 @@ it('ends a run that reaches its iteration budget with a translated line, keeping
         ->and($r->receipt['total_tokens'])->toBe(12);
 });
 
-it('fails the turn as a provider error, once, when the provider fails mid-run, persisting nothing', function (): void {
-    $toolkit = echoToolkit('echo_tool');
-    $provider = agentProvider([
-        [new Response('', ProviderFinishReason::ToolUse, [new ToolCall('c1', 'echo_tool', ['text' => 'ping'])], usage: new Usage(3, 1, 4))],
-        [new \RuntimeException('connection refused')],
-    ]);
-    $h = pipelineWith($provider, [], [], TOOL_MODEL, null, registryWith(['echo' => $toolkit]));
+it('fails the turn as a provider error, once, persisting nothing, when the provider fails before any tool ran', function (): void {
+    $provider = agentProvider([[new Response('Let me', ProviderFinishReason::Stop), new \RuntimeException('connection refused')]]);
+    $h = pipelineWith($provider, [], [], TOOL_MODEL, null, registryWith(['echo' => echoToolkit('echo_tool')]));
     $failed = null;
     Actions\expectDone('alpaca_bot/chat/failed')->once()->whenHappen(function (\Throwable $e, Conversation $c) use (&$failed): void {
         $failed = $e;
@@ -179,8 +178,99 @@ it('fails the turn as a provider error, once, when the provider fails mid-run, p
     expect($failed)->toBeInstanceOf(\RuntimeException::class)
         ->and($failed->getMessage())->toBe('connection refused')
         // The agent swallows the throw and reports it as an Error finish; the pipeline turns
-        // that back into the failure a plain turn raises, with the message once, not twice.
+        // that back into the failure a plain turn raises, with the message once, not twice,
+        // and, nothing having run, leaves what a failed plain turn leaves: no transcript, and
+        // the post made for this turn taken back.
         ->and(array_map(static fn(array $w): array => [$w[0], $w[1]], $h->writes))->toBe([['wp_insert_post', 'chat_history'], ['wp_delete_post', 42]]);
+});
+
+it('keeps the turn when the provider fails after a tool ran: the partial reply is stored with the calls made, the run billed, the failure raised', function (): void {
+    $toolkit = echoToolkit('draft_post', 'Use it.', static fn(array $a): ToolResult => ToolResult::success('{"id": 225}'));
+    $provider = agentProvider([
+        [new Response('Drafting.', ProviderFinishReason::Stop), new Response('', ProviderFinishReason::ToolUse, [new ToolCall('c1', 'draft_post', ['text' => 'Hello'])], usage: new Usage(3, 1, 4))],
+        [new \RuntimeException('connection refused')],
+    ]);
+    $h = pipelineWith($provider, [], [], TOOL_MODEL, null, registryWith(['draft' => $toolkit]));
+    $failed = null;
+    Actions\expectDone('alpaca_bot/chat/failed')->once()->whenHappen(function (\Throwable $e, Conversation $c) use (&$failed): void {
+        $failed = [$e, $c];
+    });
+    Actions\expectDone('alpaca_bot/chat/completed')->never();
+
+    // The user is still told the turn failed, the same way, ...
+    expect(fn() => $h->pipeline->complete(3, 'draft it'))->toThrow(\RuntimeException::class, 'Provider error: connection refused');
+    expect($failed[0]->getMessage())->toBe('connection refused');
+
+    // ... but a draft exists in their Posts list, and the transcript is how they learn of it:
+    // the reply is stored as the abandoned path stores one, partial, with what streamed and
+    // the record of the call; the receipt bills the call that completed; the post stays.
+    $record = ['name' => 'draft_post', 'arguments' => ['text' => 'Hello'], 'result_excerpt' => '{"id": 225}', 'ok' => true];
+    expect($failed[1]->messages[1]->content)->toBe('Drafting.')
+        ->and($failed[1]->messages[1]->meta['partial'])->toBeTrue()
+        ->and($failed[1]->messages[1]->meta['tool_calls'])->toBe([$record])
+        ->and($failed[1]->messages[1]->usage)->toBe(['prompt_tokens' => 3, 'completion_tokens' => 1])
+        ->and(array_map(static fn(array $w): string => $w[0], $h->writes))->toBe(['wp_insert_post', 'update_post_meta', 'wp_update_post', 'wp_insert_post'])
+        ->and($h->writes[1][2][1]['meta']->tool_calls)->toBe([$record])
+        ->and($h->writes[3][2]['meta_input']['total_tokens'])->toBe(4);
+});
+
+it('finishes the turn on a tool\'s own word when a toolkit ends the run with a TerminationException, not as a provider error', function (): void {
+    // The vendored Tool class catches everything its callback throws, so a termination can
+    // only come from a toolkit that implements ToolInterface itself: a third-party toolkit
+    // registered through `alpaca_bot/toolkits`, which is the reachable case.
+    $tool = new class implements ToolInterface {
+        public function name(): string
+        {
+            return 'stop_here';
+        }
+
+        public function description(): string
+        {
+            return 'ends the run';
+        }
+
+        public function parameters(): array
+        {
+            return [];
+        }
+
+        public function execute(array $input): ToolResult
+        {
+            throw new TerminationException('Stopped: ' . $input['text']);
+        }
+
+        public function toFunctionSchema(): array
+        {
+            return ['type' => 'function', 'function' => ['name' => 'stop_here', 'description' => 'ends the run', 'parameters' => ['type' => 'object', 'properties' => new \stdClass()]]];
+        }
+    };
+    $toolkit = new class ($tool) implements ToolkitInterface {
+        public function __construct(private ToolInterface $tool) {}
+
+        public function tools(): array
+        {
+            return [$this->tool];
+        }
+
+        public function guidelines(): string
+        {
+            return 'Use it.';
+        }
+    };
+    $provider = agentProvider([
+        [new Response('One moment.', ProviderFinishReason::Stop), new Response('', ProviderFinishReason::ToolUse, [new ToolCall('c1', 'stop_here', ['text' => 'enough'])], usage: new Usage(2, 1, 3))],
+    ]);
+    $h = pipelineWith($provider, [], [], TOOL_MODEL, null, registryWith(['stop' => $toolkit]));
+    Actions\expectDone('alpaca_bot/chat/failed')->never();
+    Actions\expectDone('alpaca_bot/chat/completed')->once();
+
+    $r = $h->pipeline->complete(3, 'go');
+
+    // The library reports a termination as an Error finish with no error announced: nothing
+    // failed, a tool asked the run to stop, and its message is the run's last word.
+    expect($r->reply->content)->toBe("One moment.\n\nStopped: enough")
+        ->and($r->reply->meta['tool_calls'])->toBe([['name' => 'stop_here', 'arguments' => ['text' => 'enough'], 'result_excerpt' => 'Stopped: enough', 'ok' => true]])
+        ->and($r->receipt['total_tokens'])->toBe(3);
 });
 
 it('stores the partial reply with the calls made so far, and lets the fiber go the moment the consumer abandons the run, closing the provider stream', function (): void {
