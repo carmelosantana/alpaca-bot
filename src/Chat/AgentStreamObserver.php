@@ -17,8 +17,9 @@ use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Tool\ToolResult;
  * with one argument, leaving the event name and payload on the agent (lastEvent(),
  * lastEventData()); both live on AbstractAgent, not on SplSubject, so anything else is ignored.
  * Events read: `agent.text_delta` and `agent.reasoning` (a string each) become Deltas;
- * `agent.tool_call` (a ToolCall) opens a record, `agent.tool_result` (a ToolResult) closes
- * it; `agent.error` (a string) is kept as error(). `agent.tool_error` is not read: the agent
+ * `agent.iteration` (an int) marks where a paragraph break goes (separated()); `agent.tool_call`
+ * (a ToolCall) opens a record, `agent.tool_result` (a ToolResult) closes it; `agent.error` (a
+ * string) is kept as error(). `agent.tool_error` is not read: the agent
  * follows it with a ToolResult of status Error for the same call, so the record is closed by
  * the result and reading both would count the failure twice.
  *
@@ -54,8 +55,21 @@ final class AgentStreamObserver implements \SplObserver
     /** @var \SplQueue<Delta> */
     private \SplQueue $deltas;
 
-    /** @var \Fiber<mixed, mixed, mixed, mixed>|null */
-    private ?\Fiber $fiber = null;
+    /**
+     * Held weakly: the fiber's callback reaches the agent, the agent holds this observer, and a
+     * strong reference back to the fiber would close a cycle that only the cycle collector
+     * breaks. A consumer that abandons the generator must release the fiber at once (the
+     * generator's locals are dropped, and the fiber unwinds), not when the collector next runs.
+     *
+     * @var \WeakReference<\Fiber<mixed, mixed, mixed, mixed>>|null
+     */
+    private ?\WeakReference $fiber = null;
+
+    /** The text streamed so far, for the paragraph break between iterations. */
+    private string $streamedText = '';
+
+    /** Set at the start of every iteration after the first, spent by that iteration's first text delta. */
+    private bool $breakPending = false;
 
     /** @var list<array{id: string, name: string, arguments: array<string, mixed>}> calls announced and not yet answered, oldest first */
     private array $pending = [];
@@ -77,7 +91,7 @@ final class AgentStreamObserver implements \SplObserver
      */
     public function streamThrough(\Fiber $fiber): void
     {
-        $this->fiber = $fiber;
+        $this->fiber = \WeakReference::create($fiber);
     }
 
     public function update(\SplSubject $subject): void
@@ -87,8 +101,17 @@ final class AgentStreamObserver implements \SplObserver
         }
         $data = $subject->lastEventData();
         switch ($subject->lastEvent()) {
+            case 'agent.iteration':
+                $this->breakPending = $this->breakPending || (is_int($data) && $data > 1);
+                break;
             case 'agent.text_delta':
-                $this->push(new Delta(is_string($data) ? $data : ''));
+                $text = is_string($data) ? $data : '';
+                if ($this->breakPending && $text !== '') {
+                    $text = self::separated($this->streamedText, $text);
+                    $this->breakPending = false;
+                }
+                $this->streamedText .= $text;
+                $this->push(new Delta($text));
                 break;
             case 'agent.reasoning':
                 $this->push(new Delta('', is_string($data) ? $data : ''));
@@ -145,10 +168,23 @@ final class AgentStreamObserver implements \SplObserver
         return $this->error;
     }
 
+    /**
+     * `$text` as the continuation of `$streamed` when the two came from different model
+     * messages: a paragraph break between them unless `$streamed` is empty or already ends a
+     * line. The agent's iterations are separate assistant messages in its conversation ("Let
+     * me check." with a tool call, then the answer), and the stored reply is one message, so
+     * the join is where the boundary is kept; without it the two run together mid-word.
+     */
+    public static function separated(string $streamed, string $text): string
+    {
+        return $streamed === '' || str_ends_with($streamed, "\n") ? $text : "\n\n" . $text;
+    }
+
     private function push(Delta $delta): void
     {
         $this->deltas->enqueue($delta);
-        if ($this->fiber !== null && \Fiber::getCurrent() === $this->fiber) {
+        $fiber = $this->fiber?->get();
+        if ($fiber !== null && \Fiber::getCurrent() === $fiber) {
             \Fiber::suspend();
         }
     }

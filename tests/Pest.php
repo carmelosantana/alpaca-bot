@@ -292,8 +292,9 @@ function currentScreenPost(int $id, string $title, string $content, string $type
  *   provider filter fires twice
  * @param \AlpacaBot\Chat\UserPrefs|null $prefs the per-user preferences the pipeline consults; null is the CLI's case (none)
  * @param \AlpacaBot\Toolkit\Registry|null $toolkits the toolkits a turn may use; null is a pipeline that never runs tools
+ * @param int $turns how many turns the test sends: the provider is built, and its filter applied, once per turn
  */
-function pipelineWith(mixed $provider, array $settings = [], array $contexts = [], ?array $catalog = ['llama3.2'], ?AlpacaBot\Chat\UserPrefs $prefs = null, ?AlpacaBot\Toolkit\Registry $toolkits = null): object
+function pipelineWith(mixed $provider, array $settings = [], array $contexts = [], ?array $catalog = ['llama3.2'], ?AlpacaBot\Chat\UserPrefs $prefs = null, ?AlpacaBot\Toolkit\Registry $toolkits = null, int $turns = 1): object
 {
     $h = new class {
         public Pipeline $pipeline;
@@ -349,7 +350,7 @@ function pipelineWith(mixed $provider, array $settings = [], array $contexts = [
     if ($provider === null) {
         Filters\expectApplied('alpaca_bot/provider')->never();
     } else {
-        Filters\expectApplied('alpaca_bot/provider')->times($catalog === null ? 2 : 1)->andReturnUsing(static function (object $built, string $model) use ($h, $provider): mixed {
+        Filters\expectApplied('alpaca_bot/provider')->times($turns + ($catalog === null ? 1 : 0))->andReturnUsing(static function (object $built, string $model) use ($h, $provider): mixed {
             $h->model = $model;
             return $provider;
         });

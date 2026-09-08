@@ -7,12 +7,19 @@ namespace AlpacaBot\Chat;
 use AlpacaBot\Admin\Assets;
 use AlpacaBot\Context\Collector;
 use AlpacaBot\Context\Context;
+use AlpacaBot\Provider\BoundOptionsProvider;
 use AlpacaBot\Provider\Factory;
 use AlpacaBot\Provider\Model;
 use AlpacaBot\Provider\ModelCatalog;
 use AlpacaBot\Settings\Store;
+use AlpacaBot\Toolkit\Registry;
+use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Agent\Output;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Contract\MessageInterface;
+use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Contract\ProviderInterface;
+use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Contract\ToolkitInterface;
+use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Enum\AgentFinishReason;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Message\AssistantMessage;
+use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Message\Conversation as AgentConversation;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Message\SystemMessage;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Message\UserMessage;
 
@@ -57,6 +64,19 @@ use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Message\UserMessage;
  * off: that setting is the user's choice about their history, and it still updates a
  * conversation that already has a post; ephemeral is the caller's statement that this turn is
  * not part of anyone's history at all, whatever the setting says.
+ *
+ * A tool turn: when the registry enables a toolkit for the user and the catalogue says the
+ * model can call tools, the reply is produced by the Assistant agent (the vendored tool loop)
+ * instead of one provider stream, and the branch is exactly that: everything else on the way
+ * in and out (the caps, the hooks, the receipt, what is stored, what an abandoned or failed
+ * turn leaves behind) is the same code. The model gets the same generation options a plain
+ * turn sends (Provider\BoundOptionsProvider), the text streams as it is produced (agentTurn()
+ * says how), and the stored reply carries `meta['tool_calls']`, one `{name, arguments,
+ * result_excerpt, ok}` per call. The usage metered is the whole run: Output::$usage is the sum
+ * over every provider call the agent made, so a turn that took three calls is billed three
+ * calls' tokens against the cap. An ephemeral turn runs plainly, tools or no tools: its one
+ * caller is a tool wanting a text condensed, and an agent inside a tool inside an agent would
+ * be a recursion with no bound but each level's iteration budget.
  */
 final class Pipeline
 {
@@ -69,6 +89,7 @@ final class Pipeline
         private CapPolicy $caps,
         private Collector $collector,
         private ?UserPrefs $prefs = null,
+        private ?Registry $toolkits = null,
     ) {}
 
     /**
@@ -156,6 +177,8 @@ final class Pipeline
                 'num_ctx' => (int) $generation['num_ctx'],
                 'keep_alive' => (string) $generation['keep_alive'],
             ];
+            $toolkits = $ephemeral ? [] : $this->toolkitsFor($userId, $model);
+            $observer = null;
 
             do_action('alpaca_bot/chat/started', $conversation, $model);
             $started = microtime(true);
@@ -168,21 +191,36 @@ final class Pipeline
             // consumer stopped iterating, and PHP runs the finally on destruction.
             $streamEnded = false;
             try {
-                // The vendored stream() marks text and reasoning deltas with finishReason Stop too,
-                // so Stop says nothing about the end of the stream: the generator is drained to
-                // exhaustion. Usage rides on the final stop chunk or on a usage-only chunk after it
-                // (both with empty content); whichever chunk carries it, it is taken from there.
-                foreach ($this->factory->make($model)->stream($messages, [], $providerOptions) as $chunk) {
-                    if ($chunk->usage !== null) {
-                        $prompt = max($prompt, $chunk->usage->promptTokens);
-                        $completion = max($completion, $chunk->usage->completionTokens);
+                $provider = $this->factory->make($model);
+                if ($toolkits !== []) {
+                    $observer = new AgentStreamObserver();
+                    $turn = $this->agentTurn(new BoundOptionsProvider($provider, $providerOptions), $toolkits, $messages, $observer);
+                    foreach ($turn as $delta) {
+                        $content .= $delta->text;
+                        $reasoning .= $delta->reasoning;
+                        yield $delta;
                     }
-                    if ($chunk->content === '' && $chunk->reasoning === '') {
-                        continue;
+                    $usage = $turn->getReturn()->usage;
+                    $prompt = $usage === null ? 0 : $usage->promptTokens;
+                    $completion = $usage === null ? 0 : $usage->completionTokens;
+                } else {
+                    // The vendored stream() marks text and reasoning deltas with finishReason Stop
+                    // too, so Stop says nothing about the end of the stream: the generator is
+                    // drained to exhaustion. Usage rides on the final stop chunk or on a usage-only
+                    // chunk after it (both with empty content); whichever chunk carries it, it is
+                    // taken from there.
+                    foreach ($provider->stream($messages, [], $providerOptions) as $chunk) {
+                        if ($chunk->usage !== null) {
+                            $prompt = max($prompt, $chunk->usage->promptTokens);
+                            $completion = max($completion, $chunk->usage->completionTokens);
+                        }
+                        if ($chunk->content === '' && $chunk->reasoning === '') {
+                            continue;
+                        }
+                        $content .= $chunk->content;
+                        $reasoning .= $chunk->reasoning;
+                        yield new Delta($chunk->content, $chunk->reasoning);
                     }
-                    $content .= $chunk->content;
-                    $reasoning .= $chunk->reasoning;
-                    yield new Delta($chunk->content, $chunk->reasoning);
                 }
                 $streamEnded = true;
             } catch (\Throwable $e) {
@@ -198,7 +236,7 @@ final class Pipeline
                     throw new \RuntimeException('Provider error: ' . $e->getMessage(), 0, $e);
                 }
             } finally {
-                $this->settle($streamEnded, $ephemeral, $userId, $conversation, $model, $content, $reasoning, $prompt, $completion, $started);
+                $this->settle($streamEnded, $ephemeral, $userId, $conversation, $model, $content, $reasoning, $prompt, $completion, $started, $observer?->toolCalls() ?? []);
             }
         } catch (\Throwable $e) {
             // After chat/failed (the inner catch), so a listener saw the conversation and had
@@ -220,7 +258,7 @@ final class Pipeline
             ['prompt_tokens' => $prompt, 'completion_tokens' => $completion],
             0,
             [],
-            ['duration_ms' => $durationMs] + ($reasoning !== '' ? ['reasoning' => $reasoning] : []),
+            ['duration_ms' => $durationMs] + ($reasoning !== '' ? ['reasoning' => $reasoning] : []) + self::toolCallsMeta($observer?->toolCalls() ?? []),
         );
         $filtered = apply_filters('alpaca_bot/message/after_receive', $reply, $conversation);
         if ($filtered instanceof Message) {
@@ -272,8 +310,14 @@ final class Pipeline
      * An ephemeral turn stores no partial reply either (there is no post to store it on), but
      * the receipt and `chat/failed` are the same: the time was spent whether or not anyone
      * keeps the transcript.
+     *
+     * A tool turn's partial reply carries the calls made before the consumer left
+     * (`meta['tool_calls']`): a draft the run created exists whether or not the reply was
+     * finished, and the record is how the transcript says so.
+     *
+     * @param list<array{name: string, arguments: array<string, mixed>, result_excerpt: string, ok: bool}> $toolCalls
      */
-    private function settle(bool $streamEnded, bool $ephemeral, int $userId, Conversation $conversation, string $model, string $content, string $reasoning, int $prompt, int $completion, float $started): void
+    private function settle(bool $streamEnded, bool $ephemeral, int $userId, Conversation $conversation, string $model, string $content, string $reasoning, int $prompt, int $completion, float $started, array $toolCalls = []): void
     {
         if ($streamEnded) {
             return;
@@ -288,7 +332,7 @@ final class Pipeline
             [],
             // duration_ms as the finished path stores it: the usage is non-null, so a reloaded
             // transcript shows a receipt for this turn too, and that receipt reads the seconds.
-            ['partial' => true, 'duration_ms' => $durationMs] + ($reasoning !== '' ? ['reasoning' => $reasoning] : []),
+            ['partial' => true, 'duration_ms' => $durationMs] + ($reasoning !== '' ? ['reasoning' => $reasoning] : []) + self::toolCallsMeta($toolCalls),
         ));
         if (!$ephemeral) {
             $this->conversations->save($conversation);
@@ -299,6 +343,128 @@ final class Pipeline
             new \RuntimeException('The stream was abandoned by the consumer before the reply finished.'),
             $conversation,
         );
+    }
+
+    /**
+     * The toolkits this turn runs with: what the registry enables for the user, provided the
+     * catalogue lists the model as able to call tools; none when either says no. The capability
+     * gate is on the catalogue's word (Provider\Model::$tools: the name heuristic raised by what
+     * `/api/show` reported), not the provider's: sending tools to a model that cannot take them
+     * is a provider error on every turn, and a model the catalogue does not list at all (an
+     * unreachable provider reads as an empty catalogue) is not given tools, so its turn fails
+     * or succeeds the way a plain turn would in the same outage. The registry is asked on every
+     * turn, never at boot, so a setting saved this request applies to the next turn.
+     *
+     * @return array<string, ToolkitInterface>
+     */
+    private function toolkitsFor(int $userId, string $model): array
+    {
+        $toolkits = $this->toolkits?->enabled($userId) ?? [];
+        if ($toolkits === []) {
+            return [];
+        }
+        $listed = $this->catalog->find($model);
+        return $listed !== null && $listed->tools ? $toolkits : [];
+    }
+
+    /**
+     * One tool turn: the Assistant run over the enabled toolkits, its text and reasoning
+     * yielded as Deltas while it runs, the Output returned when it is done.
+     *
+     * The agent's loop (AbstractAgent::run()) is a plain method that reports through an
+     * observer callback, and this method is a generator: a generator cannot yield from inside a
+     * callback, so the run happens inside a Fiber and the observer (AgentStreamObserver) is the
+     * bridge. Each delta the agent announces is queued there and suspends the fiber; control
+     * comes back here, the queue is drained and yielded, and the fiber is resumed to produce the
+     * next. The order is what matters: drain after every return from start()/resume() and
+     * before the next resume(). Draining only once the fiber has terminated would deliver the
+     * whole reply after the last tool ran, which is the non-streaming reply the design rejects;
+     * resuming before draining would run the next iteration, tool calls included, while the
+     * text the user should already be reading sits in the queue, so a tool's side effect (a
+     * draft created) would land before the sentence announcing it was shown. The drain after
+     * termination is for deltas announced with no suspension (a delta raised outside the
+     * fiber), so nothing queued is ever dropped.
+     *
+     * Rejected: reimplementing the loop as a generator in this plugin (a copy of the vendored
+     * loop, drifting from its tool pairing repair, its batching and its empty-reply handling as
+     * the library moves), and running the agent to completion before yielding (no streaming).
+     * The fiber's cost is one stack per tool turn, and one rule: a consumer that abandons the
+     * generator while the fiber is suspended must release it. It does, deterministically: the
+     * fiber is a local here, the observer holds it weakly, so destroying the generator drops
+     * the last reference and PHP unwinds the fiber, running the run's finally blocks and
+     * closing the provider's stream. settle() has already stored the partial reply by then.
+     *
+     * What the agent cannot stream is yielded here after the run: an answer given through its
+     * `done` tool, reasoning surfaced as the answer when a thinking model wrote no text, and a
+     * translated line for a run that ended on its iteration budget or on silence. An Error
+     * finish (the provider threw; the agent swallows that and says so in the Output) is raised
+     * again as the RuntimeException send() expects, carrying the provider's own message, so a
+     * failed tool turn fires `chat/failed` and persists nothing, as a failed plain turn does.
+     *
+     * @param array<string, ToolkitInterface> $toolkits
+     * @param MessageInterface[] $messages as buildMessages() built them: the system message, if any, then the turns, the one being sent last
+     * @return \Generator<int, Delta, mixed, Output>
+     * @throws \RuntimeException when the run ended on a provider failure
+     */
+    private function agentTurn(ProviderInterface $provider, array $toolkits, array $messages, AgentStreamObserver $observer): \Generator
+    {
+        $system = '';
+        if (($messages[0] ?? null) instanceof SystemMessage) {
+            $system = $messages[0]->content();
+            array_shift($messages);
+        }
+        $input = array_pop($messages) ?? new UserMessage('');
+        $history = new AgentConversation();
+        foreach ($messages as $message) {
+            $history->add($message);
+        }
+        $agent = new Assistant($provider, $system);
+        foreach ($toolkits as $toolkit) {
+            $agent->addToolkit($toolkit);
+        }
+        $agent->attach($observer);
+
+        /** @var \Fiber<mixed, mixed, mixed, mixed> $fiber */
+        $fiber = new \Fiber(static fn(): Output => $agent->run($input, $history));
+        $observer->streamThrough($fiber);
+        $streamed = '';
+        $fiber->start();
+        while (true) {
+            foreach ($observer->drain() as $delta) {
+                $streamed .= $delta->text;
+                yield $delta;
+            }
+            if ($fiber->isTerminated()) {
+                break;
+            }
+            $fiber->resume();
+        }
+        $output = $fiber->getReturn();
+        if (!$output instanceof Output) {
+            throw new \LogicException('The agent run returned no Output.');
+        }
+        $tail = match ($output->finishReason) {
+            AgentFinishReason::Error => throw new \RuntimeException($observer->error() ?? $output->content),
+            AgentFinishReason::Stop, AgentFinishReason::Done => $output->content !== '' && !str_ends_with($streamed, $output->content) ? $output->content : '',
+            AgentFinishReason::MaxIterations, AgentFinishReason::BudgetExhausted => __('The assistant ran out of tool steps before it finished.', 'alpaca-bot'),
+            AgentFinishReason::EmptyResponse => __('The model gave no answer.', 'alpaca-bot'),
+        };
+        if ($tail !== '') {
+            yield new Delta(AgentStreamObserver::separated($streamed, $tail));
+        }
+        return $output;
+    }
+
+    /**
+     * `tool_calls` for a reply's meta: present only when a call was made, so a plain turn's
+     * meta is exactly what it was before tools existed.
+     *
+     * @param list<array{name: string, arguments: array<string, mixed>, result_excerpt: string, ok: bool}> $toolCalls
+     * @return array{tool_calls?: list<array{name: string, arguments: array<string, mixed>, result_excerpt: string, ok: bool}>}
+     */
+    private static function toolCallsMeta(array $toolCalls): array
+    {
+        return $toolCalls === [] ? [] : ['tool_calls' => $toolCalls];
     }
 
     /**
