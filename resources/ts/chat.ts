@@ -198,7 +198,9 @@ function boot(cfg: Settings, form: HTMLFormElement): void {
     const m = (d.message ?? {}) as Json;
     const receipt = (d.receipt ?? {}) as Json;
     setConversation(d.conversation_id);
-    const res = await request('POST', api('/view/bubble'), { role: 'assistant', content: m.content ?? '', model: m.model ?? '', usage: m.usage ?? null, duration_ms: receipt.duration_ms ?? 0 });
+    const meta = (m.meta ?? {}) as Json;
+    // The receipt's tool badge counts the calls the reply recorded (message.meta.tool_calls).
+    const res = await request('POST', api('/view/bubble'), { role: 'assistant', content: m.content ?? '', model: m.model ?? '', usage: m.usage ?? null, duration_ms: receipt.duration_ms ?? 0, tool_calls: Array.isArray(meta.tool_calls) ? meta.tool_calls : [] });
     const rendered = res.ok ? fromHtml(await res.text()) : null;
     if (!res.ok) refused(res.status, await restError(res));
     withScroll(() => {

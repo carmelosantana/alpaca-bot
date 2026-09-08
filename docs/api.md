@@ -302,7 +302,11 @@ $ curl -s -u "admin:$PW" "$B/conversations/163"
 
 `meta` is always an object, `{}` when there is none. A completed assistant reply carries
 `meta.duration_ms` (the samples above predate it). A reply cut short by a client that
-disconnected mid-stream is stored with `meta.partial: true`.
+disconnected mid-stream is stored with `meta.partial: true`. A reply that ran tools (a toolkit
+is enabled and the model can call tools) carries `meta.tool_calls`, one `{name, arguments,
+result_excerpt, ok}` per call in the order their results came back: the arguments as the
+model sent them with each string held to 1,000 characters, the first 200 characters of the
+result, and whether the tool succeeded. A turn that ran no tool has no `tool_calls` key.
 
 A conversation that is not yours reads as missing, so its existence is not leaked:
 
@@ -499,7 +503,7 @@ header. An error is still core's JSON error shape.
 | `GET /view/models` | The model select (`#ab-model`) on your effective model | `refresh` (boolean): ask the provider again, as `/models` |
 | `POST /view/default-model` | An inline admin notice; stores `model` as your default (Kanboard #565) | `model` (string, required). 403 while `chat.user_can_change_model` is off, whatever the select says |
 | `GET /view/bubble` | An empty bubble for the screen to stream into | `role` (`user`\|`assistant`, default `assistant`), `streaming` (boolean: a polite live region) |
-| `POST /view/bubble` | A finished bubble, an assistant's content rendered as markdown; a user turn with its images is the optimistic bubble the screen shows while the turn runs | `role` (required), `content`, `model`, `usage` (`{prompt_tokens, completion_tokens}` or null), `duration_ms`, `images` (array of `data:` URLs; a user turn only) |
+| `POST /view/bubble` | A finished bubble, an assistant's content rendered as markdown; a user turn with its images is the optimistic bubble the screen shows while the turn runs | `role` (required), `content`, `model`, `usage` (`{prompt_tokens, completion_tokens}` or null), `duration_ms`, `images` (array of `data:` URLs; a user turn only), `tool_calls` (the reply's `meta.tool_calls`; the receipt ends `· 2 tools`) |
 
 Your effective model is the one you last chose in the select (stored as user meta
 `alpaca_bot_default_model`) while the site lets users choose and the provider still lists it,

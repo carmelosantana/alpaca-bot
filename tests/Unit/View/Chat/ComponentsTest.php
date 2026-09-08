@@ -78,6 +78,19 @@ it('receipt formats tokens and seconds', function (): void {
     expect((new Receipt(['model' => 'm', 'total_tokens' => 1234, 'duration_ms' => 2345]))->render())->toContain('m')->toContain('1234 tokens')->toContain('2.3 s');
 });
 
+it('receipt ends with a tool badge when the turn ran tools, singular and plural, and shows none for a turn that ran none', function (): void {
+    expect((new Receipt(['model' => 'm', 'total_tokens' => 12, 'duration_ms' => 1200, 'tool_calls' => 1]))->render())->toBe('<footer class="ab-receipt">m · 12 tokens · 1.2 s · 1 tool</footer>')
+        ->and((new Receipt(['model' => 'm', 'tool_calls' => 2]))->render())->toBe('<footer class="ab-receipt">m · 2 tools</footer>')
+        ->and((new Receipt(['model' => 'm', 'tool_calls' => 0]))->render())->toBe('<footer class="ab-receipt">m</footer>');
+});
+
+it('renders the tool badge on a stored reply from the calls recorded on its meta', function (): void {
+    $call = ['name' => 'web_fetch', 'arguments' => ['url' => 'https://example.test/'], 'result_excerpt' => 'Example', 'ok' => true];
+    $stored = (new Message('assistant', 'Fetched.', 'llama3.2', ['prompt_tokens' => 5, 'completion_tokens' => 7], 0, [], ['duration_ms' => 1234, 'tool_calls' => [$call, $call]]))->toArray();
+    $html = (new MessageBubble(Message::fromArray($stored), new Markdown(), 'Carmelo', '/u.png', '/a.png'))->render();
+    expect($html)->toContain('<footer class="ab-receipt">llama3.2 · 12 tokens · 1.2 s · 2 tools</footer>');
+});
+
 // ---------------------------------------------------------------- beyond the brief's seven
 
 it('user bubble names the user, carries no receipt, and every icon button is labelled', function (): void {

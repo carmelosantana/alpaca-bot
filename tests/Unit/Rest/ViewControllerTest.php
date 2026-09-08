@@ -80,6 +80,7 @@ it('declares the five view routes for editors, with the model list rate limited 
         ->and($byMethod['GET /view/bubble']['args']['role']['enum'])->toBe(['user', 'assistant'])
         ->and($byMethod['POST /view/bubble']['args']['role']['enum'])->toBe(['user', 'assistant'])
         ->and($byMethod['POST /view/bubble']['args']['images'])->toBe(['type' => 'array', 'items' => ['type' => 'string'], 'default' => []])
+        ->and($byMethod['POST /view/bubble']['args']['tool_calls'])->toBe(['type' => 'array', 'items' => ['type' => 'object'], 'default' => []])
         // One capability filter key per fragment, the {id} segment removed as for /conversations.
         ->and(array_map(ViewController::routeKey(...), array_column($routes, 'path')))->toBe(['view/messages', 'view/history', 'view/models', 'view/default-model', 'view/bubble', 'view/bubble']);
     foreach ($byMethod as $key => $route) {
@@ -182,6 +183,12 @@ it('renders an empty streaming bubble on GET and a finished, markdown-rendered b
     $res = $c->bubble(restRequest('POST', '/x', ['role' => 'assistant', 'content' => 'Hello **you**', 'model' => 'llama3.2', 'usage' => ['prompt_tokens' => 5, 'completion_tokens' => 7], 'duration_ms' => 1234]));
     expect($res->headers['X-Alpaca-Bot-View'])->toBe('1')
         ->and($res->get_data())->toContain('<strong>you</strong>')->toContain('<footer class="ab-receipt">llama3.2 · 12 tokens · 1.2 s</footer>')->not->toContain('data-streaming');
+
+    // The tool calls the done frame carried ride on the bubble's receipt as a count; an entry
+    // that is not a record is not counted.
+    $call = ['name' => 'web_fetch', 'arguments' => ['url' => 'https://example.test/'], 'result_excerpt' => 'Example', 'ok' => true];
+    $html = $c->bubble(restRequest('POST', '/x', ['role' => 'assistant', 'content' => 'Fetched.', 'model' => 'llama3.2', 'usage' => ['prompt_tokens' => 5, 'completion_tokens' => 7], 'duration_ms' => 1234, 'tool_calls' => [$call, 'junk', $call]]))->get_data();
+    expect($html)->toContain('<footer class="ab-receipt">llama3.2 · 12 tokens · 1.2 s · 2 tools</footer>');
 
     // A user turn is the user's own text, escaped, and carries no receipt whatever was posted.
     Functions\when('esc_html')->alias(fn(string $s) => htmlspecialchars($s));

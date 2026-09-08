@@ -33,10 +33,11 @@ use AlpacaBot\View\Markdown;
  *   answers a Notice for #ab-status. Refused (403) while `chat.user_can_change_model` is off:
  *   the select is disabled then, but a disabled select is markup, and the route is the guard.
  * - `GET /view/bubble?role=&streaming=`: an empty bubble for chat.ts to stream deltas into;
- *   `POST /view/bubble {role, content, model, usage, duration_ms, images}`: a finished bubble,
- *   the assistant's content rendered as markdown, which chat.ts swaps in for the streamed
- *   text; a user turn with its `images` (data URLs) is the optimistic bubble chat.ts shows
- *   while the turn runs.
+ *   `POST /view/bubble {role, content, model, usage, duration_ms, images, tool_calls}`: a
+ *   finished bubble, the assistant's content rendered as markdown, which chat.ts swaps in for
+ *   the streamed text, its receipt counting the `tool_calls` the done frame carried; a user
+ *   turn with its `images` (data URLs) is the optimistic bubble chat.ts shows while the turn
+ *   runs.
  *
  * Core renders a callback's return as JSON, so a callback answers a WP_REST_Response whose data
  * is the HTML string and whose `X-Alpaca-Bot-View: 1` header marks it; serve(), on
@@ -74,6 +75,7 @@ final class ViewController extends Controller
                 'usage' => ['type' => ['object', 'null'], 'default' => null, 'properties' => ['prompt_tokens' => ['type' => 'integer'], 'completion_tokens' => ['type' => 'integer']]],
                 'duration_ms' => ['type' => 'integer', 'default' => 0, 'minimum' => 0],
                 'images' => ['type' => 'array', 'items' => ['type' => 'string'], 'default' => []],
+                'tool_calls' => ['type' => 'array', 'items' => ['type' => 'object'], 'default' => []],
             ]],
         ];
     }
@@ -165,7 +167,9 @@ final class ViewController extends Controller
      * (the schema refuses anything else first; this is for a caller that did not come through
      * core's validation), the content is the bubble's to escape or render, and the receipt
      * reads usage and duration_ms exactly as it does off a stored reply. `images` are passed as
-     * strings; MessageBubble decides which are data URLs it will render.
+     * strings; MessageBubble decides which are data URLs it will render. `tool_calls` are the
+     * records the reply's meta carries (Pipeline: `{name, arguments, result_excerpt, ok}`),
+     * kept as posted, records only: the receipt counts them, and nothing here reads inside one.
      */
     public function bubble(\WP_REST_Request $request): \WP_REST_Response|\WP_Error
     {
@@ -181,7 +185,7 @@ final class ViewController extends Controller
             is_array($usage) ? ['prompt_tokens' => (int) ($usage['prompt_tokens'] ?? 0), 'completion_tokens' => (int) ($usage['completion_tokens'] ?? 0)] : null,
             0,
             array_values(array_filter((array) $request->get_param('images'), 'is_string')),
-            ['duration_ms' => max(0, (int) $request->get_param('duration_ms'))],
+            ['duration_ms' => max(0, (int) $request->get_param('duration_ms')), 'tool_calls' => array_values(array_filter((array) $request->get_param('tool_calls'), 'is_array'))],
         );
         return $this->renderBubble($message, false);
     }

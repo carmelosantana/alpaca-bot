@@ -128,6 +128,12 @@ final class ViewRoutesTest extends TestCase
         $this->assertStringNotContainsString('<script', $html);
         $this->assertStringContainsString('fake-model · 5 tokens · 1.5 s', $html);
 
+        // A tool turn's receipt ends with the badge, through core's own _n().
+        $call = ['name' => 'web_fetch', 'arguments' => ['url' => 'https://example.test/'], 'result_excerpt' => 'Example', 'ok' => true];
+        $res = $this->rest('POST', '/view/bubble', ['role' => 'assistant', 'content' => 'Fetched.', 'model' => 'fake-model', 'usage' => ['prompt_tokens' => 3, 'completion_tokens' => 2], 'duration_ms' => 1500, 'tool_calls' => [$call]]);
+        $this->assertSame(200, $res->get_status(), print_r($res->get_data(), true));
+        $this->assertStringContainsString('fake-model · 5 tokens · 1.5 s · 1 tool</footer>', $res->get_data());
+
         $res = $this->rest('POST', '/view/bubble', ['role' => 'system', 'content' => 'x']);
         $this->assertSame(400, $res->get_status());
         $this->assertSame('rest_invalid_param', $res->get_data()['code']);

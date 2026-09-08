@@ -37,7 +37,12 @@ final class MessageBubble extends Component
         if (!$assistant) {
             $actions .= $this->tag('button', ['type' => 'button', 'class' => 'ab-msg__action', 'data-action' => 'edit', 'aria-label' => $this->t('Edit and resend')], Icon::svg('square-pen'));
         }
-        $receipt = $assistant && $this->m->usage !== null ? (new Receipt(['model' => $this->m->model, 'total_tokens' => ($this->m->usage['prompt_tokens'] ?? 0) + ($this->m->usage['completion_tokens'] ?? 0), 'duration_ms' => (int) ($this->m->meta['duration_ms'] ?? 0)]))->render() : '';
+        $receipt = $assistant && $this->m->usage !== null ? (new Receipt([
+            'model' => $this->m->model,
+            'total_tokens' => ($this->m->usage['prompt_tokens'] ?? 0) + ($this->m->usage['completion_tokens'] ?? 0),
+            'duration_ms' => (int) ($this->m->meta['duration_ms'] ?? 0),
+            'tool_calls' => is_array($this->m->meta['tool_calls'] ?? null) ? count($this->m->meta['tool_calls']) : 0,
+        ]))->render() : '';
         $inner = $this->tag('img', ['class' => 'ab-msg__avatar', 'src' => $this->u($assistant ? $this->assistantAvatar : $this->userAvatar), 'alt' => ''])
             . $this->tag('div', ['class' => 'ab-msg__body'],
                 $this->tag('header', ['class' => 'ab-msg__meta'], $this->tag('span', ['class' => 'ab-msg__name'], $this->e($name)) . $this->tag('span', ['class' => 'ab-msg__actions'], $actions))
