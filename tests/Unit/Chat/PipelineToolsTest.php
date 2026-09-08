@@ -71,11 +71,12 @@ it('runs the agent loop when a toolkit is enabled and the model supports tools: 
     }
     $r = $gen->getReturn();
 
-    // Streamed in order, and the first iteration's text was out before the tool ran. The
-    // second iteration's text is set off from the first by a paragraph break, since the model
-    // sent them as two messages.
-    expect(array_map(static fn(Delta $d): array => [$d->text, $d->reasoning], $seen))->toBe([['', 'thinking'], ['Let me check', ''], ["\n\npong ", ''], ['received', '']])
-        ->and($ranWith)->toBe([['', 'thinking'], ['Let me check', '']]);
+    // Streamed in order, and the first iteration's text was out before the tool ran, followed
+    // by the empty delta that precedes every tool call (the heartbeat a streaming transport
+    // writes before the side effect). The second iteration's text is set off from the first by
+    // a paragraph break, since the model sent them as two messages.
+    expect(array_map(static fn(Delta $d): array => [$d->text, $d->reasoning], $seen))->toBe([['', 'thinking'], ['Let me check', ''], ['', ''], ["\n\npong ", ''], ['received', '']])
+        ->and($ranWith)->toBe([['', 'thinking'], ['Let me check', ''], ['', '']]);
 
     $record = ['name' => 'echo_tool', 'arguments' => ['text' => 'ping'], 'result_excerpt' => 'echo:ping', 'ok' => true];
     expect($r->reply->content)->toBe("Let me check\n\npong received")
@@ -308,6 +309,8 @@ it('stores the partial reply with the calls made so far, and lets the fiber go t
     $gen = $h->pipeline->send(3, 'ping');
     expect($gen->current()->text)->toBe('first');
     $gen->next();
+    expect($gen->current()->text)->toBe('');  // the heartbeat before the tool runs
+    $gen->next();
     expect($gen->current()->text)->toBe("\n\nsecond")->and($weak)->not->toBeNull()->and($weak->get())->not->toBeNull()->and($closed)->toBeFalse();
     unset($gen);
 
@@ -340,6 +343,7 @@ it('bills an abandoned tool turn for the calls the run had already made, from th
 
     $gen = $h->pipeline->send(3, 'ping');
     $gen->current();
+    $gen->next();  // the heartbeat before the tool runs
     $gen->next();
     expect($gen->current()->text)->toBe("\n\nsecond");
     unset($gen);
@@ -352,6 +356,48 @@ it('bills an abandoned tool turn for the calls the run had already made, from th
         ->and($h->writes[3][2]['meta_input']['prompt_tokens'])->toBe(900)
         ->and($h->writes[3][2]['meta_input']['completion_tokens'])->toBe(40)
         ->and($h->writes[3][2]['meta_input']['total_tokens'])->toBe(940);
+});
+
+// The stream route's process keeps running when the client goes (Rest\Sse: ignore_user_abort)
+// and learns of the disconnect only from a write that fails, which StreamController asks after
+// every frame. An iteration that calls a tool with no text before it (routine: a model's first
+// move is often the call alone) gives the transport nothing to write, so nothing tells it the
+// user has gone before the tool's side effect lands, and a chain of such iterations runs to
+// the budget with the tab closed. The pipeline yields an empty delta before each tool runs: a
+// frame to write, and so a moment to notice the disconnect and drop the run, before the effect.
+it('yields an empty delta before each tool runs, so a consumer that leaves then stops the tool from running at all', function (): void {
+    $ran = 0;
+    $toolkit = echoToolkit('draft_post', 'Use it.', static function (array $a) use (&$ran): ToolResult {
+        $ran++;
+        return ToolResult::success('{"id": 225}');
+    });
+    // Two silent iterations: a call and nothing else, twice. The consumer leaves at the
+    // second call's heartbeat, so the provider is asked exactly twice and no answer is needed.
+    $provider = agentProvider([
+        [new Response('', ProviderFinishReason::ToolUse, [new ToolCall('c1', 'draft_post', ['text' => 'One'])])],
+        [new Response('', ProviderFinishReason::ToolUse, [new ToolCall('c2', 'draft_post', ['text' => 'Two'])])],
+    ]);
+    $h = pipelineWith($provider, [], [], TOOL_MODEL, null, registryWith(['draft' => $toolkit]));
+    $failed = null;
+    Actions\expectDone('alpaca_bot/chat/failed')->once()->whenHappen(function (\Throwable $e, Conversation $c) use (&$failed): void {
+        $failed = $c;
+    });
+
+    $gen = $h->pipeline->send(3, 'draft two');
+    // The first thing out is the heartbeat for the first call, and the tool has not run yet.
+    expect([$gen->current()->text, $gen->current()->reasoning])->toBe(['', ''])->and($ran)->toBe(0);
+    $gen->next();
+    // After it, the first tool ran and the second call's heartbeat is out; the second has not.
+    expect([$gen->current()->text, $gen->current()->reasoning])->toBe(['', ''])->and($ran)->toBe(1);
+    unset($gen);
+
+    // Leaving at that moment is what a transport does on a failed write: the second tool
+    // never runs, and the record says its call was made and not answered.
+    expect($ran)->toBe(1)
+        ->and($failed->messages[1]->meta['tool_calls'])->toBe([
+            ['name' => 'draft_post', 'arguments' => ['text' => 'One'], 'result_excerpt' => '{"id": 225}', 'ok' => true],
+            ['name' => 'draft_post', 'arguments' => ['text' => 'Two'], 'result_excerpt' => '', 'ok' => false],
+        ]);
 });
 
 it('stores a reasoning-only answer once, as the reply, when the Assistant takes the reasoning as the answer', function (): void {

@@ -18,10 +18,20 @@ use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Tool\ToolResult;
  * lastEventData()); both live on AbstractAgent, not on SplSubject, so anything else is ignored.
  * Events read: `agent.text_delta` and `agent.reasoning` (a string each) become Deltas;
  * `agent.iteration` (an int) marks where a paragraph break goes (separated()); `agent.tool_call`
- * (a ToolCall) opens a record, `agent.tool_result` (a ToolResult) closes it; `agent.error` (a
- * string) is kept as error(). `agent.tool_error` is not read: the agent
- * follows it with a ToolResult of status Error for the same call, so the record is closed by
- * the result and reading both would count the failure twice.
+ * (a ToolCall) opens a record and queues an empty Delta, the heartbeat (below);
+ * `agent.tool_result` (a ToolResult) closes the record; `agent.error` (a string) is kept as
+ * error(). `agent.tool_error` is not read: the agent follows it with a ToolResult of status
+ * Error for the same call, so the record is closed by the result and reading both would count
+ * the failure twice.
+ *
+ * The heartbeat is for the consumer that has gone. The stream route keeps its process running
+ * when the client disconnects (Rest\Sse) and learns of it only from a write that fails, which
+ * it tries after every delta. An iteration that calls a tool with no text before it gives it
+ * nothing to write, so the tool's side effect (a draft) would land with the tab closed, and a
+ * chain of such iterations would run to the budget that way. An empty delta before each call
+ * is a frame to write and so a moment to notice; a consumer that drops the generator then
+ * unwinds the fiber before the tool runs, and the record lists that call as made and not
+ * answered. Every consumer sees the empty delta; each already ignores an empty one.
  *
  * Deltas are queued, not delivered. Pipeline::send() is a generator and the agent's loop is
  * not: it calls back into update() from deep inside run(), and a generator cannot yield from
@@ -134,6 +144,10 @@ final class AgentStreamObserver implements \SplObserver
             case 'agent.tool_call':
                 if ($data instanceof ToolCall) {
                     $this->pending[] = ['id' => $data->id, 'name' => $data->name, 'arguments' => self::boundedArguments($data->arguments)];
+                    // The heartbeat: an empty delta, so the pipeline yields (and a streaming
+                    // transport writes) something before the tool runs. The event fires before
+                    // any tool of the iteration executes, which is the moment that matters.
+                    $this->push(new Delta(''));
                 }
                 break;
             case 'agent.tool_result':

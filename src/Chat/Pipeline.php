@@ -454,7 +454,10 @@ final class Pipeline
      * text the user should already be reading sits in the queue, so a tool's side effect (a
      * draft created) would land before the sentence announcing it was shown. The drain after
      * termination is for deltas announced with no suspension (a delta raised outside the
-     * fiber), so nothing queued is ever dropped.
+     * fiber), so nothing queued is ever dropped. One of the deltas is empty: the observer
+     * queues one before every tool call, so a consumer is handed control (and a streaming
+     * transport has a frame to write, and so a chance to learn its client has gone) before
+     * the tool runs, not only after the next text arrives.
      *
      * Rejected: reimplementing the loop as a generator in this plugin (a copy of the vendored
      * loop, drifting from its tool pairing repair, its batching and its empty-reply handling as

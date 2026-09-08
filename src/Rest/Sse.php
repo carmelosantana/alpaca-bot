@@ -52,6 +52,11 @@ final class Sse
      * leaving the pipeline's generator to be destroyed at shutdown. StreamController checks
      * connection_aborted() after each frame instead and returns in an orderly way, so the
      * pipeline stores the partial reply as part of the request rather than as its teardown.
+     * Between frames the process cannot know: on a plain turn that is the wait for the next
+     * token; on a tool turn it would have been a whole tool's side effect, so the pipeline
+     * yields an empty delta before every tool runs (Chat\AgentStreamObserver's heartbeat), a
+     * frame whose write is the check, and a disconnected client's run is dropped before the
+     * tool, not after. The window that remains is one provider call.
      * The time limit is lifted because a slow model can outlast max_execution_time, which on
      * Linux counts only this process's CPU time but is not guaranteed to.
      */

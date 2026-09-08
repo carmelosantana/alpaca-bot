@@ -143,7 +143,11 @@ it('suspends the fiber it streams through on every delta, and only that fiber', 
     $fiber->start();
     expect($fiber->isSuspended())->toBeTrue()->and(array_map(static fn(Delta $d): string => $d->text, $observer->drain()))->toBe(['a']);
     $fiber->resume();
-    // The tool call event queued nothing and so suspended nothing: the fiber ran on to 'b'.
+    // The tool call queued the heartbeat, an empty delta, and suspended on it: the pipeline
+    // gets control (and a streaming transport a frame to write) before the tool runs.
+    $beat = $observer->drain();
+    expect($fiber->isSuspended())->toBeTrue()->and($beat)->toHaveCount(1)->and([$beat[0]->text, $beat[0]->reasoning])->toBe(['', '']);
+    $fiber->resume();
     expect($fiber->isSuspended())->toBeTrue()->and(array_map(static fn(Delta $d): string => $d->text, $observer->drain()))->toBe(['b']);
     $fiber->resume();
     expect($fiber->isTerminated())->toBeTrue()->and($fiber->getReturn())->toBe('done')->and($observer->drain())->toBe([]);
