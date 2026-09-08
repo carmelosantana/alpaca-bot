@@ -331,6 +331,42 @@ it('drops oldest whole messages from a transcript over budget on text alone, and
         ->and(conversationWire($written))->toBeLessThanOrEqual($budget);
 });
 
+// Evicting a turn's images costs a marker (28 serialised bytes for a turn's first), so an image
+// entry shorter than that makes the rows bigger, not smaller. Nothing ImageData admits is that
+// short (its 23-byte minimum still saves 9), but 0.4 stored media paths under `images`. Such an
+// image is passed over: the loop never takes a step that grows the rows, and the turn goes whole
+// when its turn comes rather than losing its image to a marker that cost more than it saved.
+it('does not evict an image whose eviction would not make room, and drops the oldest turn whole instead', function (): void {
+    $c = new Conversation(42, 3, 'T');
+    $c->append(new Message('user', 'first', 'm', null, 1, ['/a.png']));
+    $c->append(new Message('user', 'second', 'm', null, 2, ['/b.png']));
+    $budget = conversationWire(conversationRows($c->messages)) - 1;
+    $written = conversationSaveWithin($budget, $c);
+    // The oldest turn goes whole; the newest keeps its image and carries no marker.
+    expect($c->messages)->toHaveCount(1)
+        ->and($c->messages[0]->content)->toBe('second')
+        ->and($c->messages[0]->images)->toBe(['/b.png'])
+        ->and($c->messages[0]->meta)->toBe([])
+        ->and($written)->toEqual(conversationRows($c->messages))
+        ->and(conversationWire($written))->toBeLessThanOrEqual($budget);
+});
+
+it('passes over a turn whose image is too small to make room and evicts from the next turn that has one, keeping every turn', function (): void {
+    $c = new Conversation(42, 3, 'T');
+    $c->append(new Message('user', 'first', 'm', null, 1, ['/a.png']));
+    $c->append(new Message('assistant', 'one', 'm', null, 2));
+    $c->append(new Message('user', 'third', 'm', null, 3, [conversationImage(300)]));
+    $budget = conversationWire(conversationRows($c->messages)) - 1;
+    $written = conversationSaveWithin($budget, $c);
+    expect($c->messages)->toHaveCount(3)
+        ->and($c->messages[0]->images)->toBe(['/a.png'])
+        ->and($c->messages[0]->meta)->toBe([])
+        ->and($c->messages[2]->images)->toBe([])
+        ->and($c->messages[2]->meta)->toBe(['images_evicted' => 1])
+        ->and($written)->toEqual(conversationRows($c->messages))
+        ->and(conversationWire($written))->toBeLessThanOrEqual($budget);
+});
+
 // max_allowed_packet bounds the query the database receives, and wpdb escapes the value on the
 // way: every quote, backslash, NUL, newline, carriage return and ^Z is two bytes on the wire.
 // That cost is a share of the text, not a constant, so a fixed margin cannot cover it; the store

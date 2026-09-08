@@ -27,7 +27,7 @@ final class ConversationStore
      */
     private const META_LEGACY = 'messages';
 
-    /** 0.4 flagged generate-mode transcripts with this meta; 1.0 reads it, never writes it. */
+    /** 0.4 flagged generate-mode transcripts with this meta; 0.5 reads it, never writes it. */
     private const META_LEGACY_GENERATE = 'chat_mode_generate';
 
     /**
@@ -140,9 +140,11 @@ final class ConversationStore
      * that turn on. So before the write the transcript is fitted (fit()):
      * image payloads go first, from the oldest turn that still has any, each turn keeping a
      * count of what it lost under `meta['images_evicted']`; whole messages go only once
-     * every image is gone, oldest first. Text is never dropped while an image remains. The
-     * fitting is applied to the Conversation the caller passed, so the transcript in memory
-     * and the one stored agree, and a later save() starts from what was kept.
+     * every image is gone, oldest first. Text is never dropped while an image whose eviction
+     * would make room remains (fit() says what an eviction that would not make room is, and
+     * why it is passed over). The fitting is applied to the Conversation the caller passed, so
+     * the transcript in memory and the one stored agree, and a later save() starts from what
+     * was kept.
      */
     public function save(Conversation $c): void
     {
@@ -213,6 +215,18 @@ final class ConversationStore
      * the rounds are few; the alternative, arithmetic on the parts, would have to reproduce
      * serialize()'s framing to be trusted.
      *
+     * An eviction is only taken when it makes room. Recording it costs a marker, 28 serialised
+     * bytes for a turn's first, so an image entry shorter than that would leave the rows
+     * bigger, not smaller, and the round would have cost the transcript an image and bought it
+     * nothing. Nothing ImageData admits is that short (its 23-byte minimum still saves 9), but
+     * 0.4 stored media paths under `images` and a filter may leave anything there. So each
+     * candidate turn is measured on its own row before and after (serialize() of the list is
+     * the rows' serialisations end to end, so a row's difference is the transcript's), the
+     * first turn whose eviction shrinks it is taken, one that would not is put back and passed
+     * over, and only when no turn's eviction makes room does the oldest message go whole, its
+     * small image with it. That never loses more than evicting regardless would: a step that
+     * grows the rows leaves every later step still to take.
+     *
      * @return list<array<string, mixed>>
      */
     private function fit(Conversation $c): array
@@ -220,18 +234,22 @@ final class ConversationStore
         $budget = self::storageBudget();
         $rows = self::rows($c->messages);
         while (self::packetBytes(maybe_serialize($rows)) > $budget && $c->messages !== []) {
-            $oldestWithImages = null;
-            foreach ($c->messages as $i => $m) {
-                if ($m->images !== []) {
-                    $oldestWithImages = $i;
-                    break;
+            $evicted = false;
+            foreach ($c->messages as $m) {
+                if ($m->images === []) {
+                    continue;
                 }
-            }
-            if ($oldestWithImages !== null) {
-                $m = $c->messages[$oldestWithImages];
+                [$images, $meta] = [$m->images, $m->meta];
+                $before = self::packetBytes(maybe_serialize($m->toArray()));
                 $m->meta['images_evicted'] = (int) ($m->meta['images_evicted'] ?? 0) + count($m->images);
                 $m->images = [];
-            } else {
+                if (self::packetBytes(maybe_serialize($m->toArray())) < $before) {
+                    $evicted = true;
+                    break;
+                }
+                [$m->images, $m->meta] = [$images, $meta];
+            }
+            if (!$evicted) {
                 array_shift($c->messages);
             }
             $rows = self::rows($c->messages);
