@@ -6,6 +6,7 @@ namespace AlpacaBot\Tests\Integration;
 
 use AlpacaBot\Admin\SettingsPage;
 use AlpacaBot\Plugin;
+use AlpacaBot\Settings\Schema;
 use AlpacaBot\Settings\Store;
 use AlpacaBot\Toolkit\DraftPostToolkit;
 use AlpacaBot\Toolkit\Registry;
@@ -55,9 +56,13 @@ final class ToolkitsTest extends TestCase
 
         // options.php's path: the registered sanitize callback over what the form posts with no
         // box checked. Every other field carried as the page posts it (defaults, here).
-        update_option('alpaca_bot_settings', ['toolkits.enabled' => ['']] + \AlpacaBot\Settings\Schema::defaults());
+        update_option('alpaca_bot_settings', ['toolkits.enabled' => ['']] + Schema::defaults());
         $this->assertSame([], get_option('alpaca_bot_settings')['toolkits.enabled']);
-        $this->assertSame([], Plugin::instance()->get(Registry::class)->enabled(get_current_user_id()));
+        // A registry over a Store that reads the row (the container's memoises what set_up
+        // wrote; TestCase says why a direct update_option() is not seen by it).
+        $registry = new Registry(new Store());
+        $registry->register('web_fetch', new WebFetchToolkit(new Store()));
+        $this->assertSame([], $registry->enabled(get_current_user_id()));
     }
 
     public function test_draft_post_creates_a_draft_owned_by_the_acting_user_and_never_publishes(): void
