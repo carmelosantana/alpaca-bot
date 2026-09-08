@@ -29,9 +29,18 @@ beforeEach(function (): void {
 });
 
 it('renders an assistant bubble with markdown, copy button, and receipt', function (): void {
-    $m = new Message('assistant', "Hello **you**", 'llama3.2', ['prompt_tokens' => 5, 'completion_tokens' => 7], 0, [], ['duration_ms' => 1200]);
-    $html = (new MessageBubble($m, new Markdown(), 'Carmelo', '/u.png', '/a.png'))->render();
-    expect($html)->toContain('class="ab-msg ab-msg--assistant"')->toContain('<strong>you</strong>')->toContain('data-action="copy"')->toContain('12 tokens')->toContain('aria-label=');
+    // The reply as Pipeline::send() builds it (usage from the provider, meta holding the turn's
+    // duration and any reasoning), read back through the storage shape: this is a reloaded
+    // transcript, and its receipt must show the seconds a live turn showed.
+    $stored = (new Message('assistant', "Hello **you**", 'llama3.2', ['prompt_tokens' => 5, 'completion_tokens' => 7], 0, [], ['duration_ms' => 1234, 'reasoning' => 'hmm']))->toArray();
+    $html = (new MessageBubble(Message::fromArray($stored), new Markdown(), 'Carmelo', '/u.png', '/a.png'))->render();
+    expect($html)->toContain('class="ab-msg ab-msg--assistant"')->toContain('<strong>you</strong>')->toContain('data-action="copy"')->toContain('aria-label=')
+        ->toContain('<footer class="ab-receipt">llama3.2 · 12 tokens · 1.2 s</footer>')->not->toContain('hmm');
+});
+
+it('renders an assistant bubble without a receipt when the provider reported no usage', function (): void {
+    $html = (new MessageBubble(new Message('assistant', 'a', 'llama3.2'), new Markdown(), 'C', '/u.png', '/a.png'))->render();
+    expect($html)->toContain('ab-msg--assistant')->not->toContain('ab-receipt');
 });
 
 it('renders a user bubble escaped with edit action', function (): void {
@@ -42,8 +51,8 @@ it('renders a user bubble escaped with edit action', function (): void {
 });
 
 it('renders a streaming placeholder', function (): void {
-    $html = (new MessageBubble(new Message('assistant', ''), new Markdown(), 'C', '/u.png', '/a.png', true))->render();
-    expect($html)->toContain('data-streaming="1"')->toContain('aria-live="polite"');
+    $html = (new MessageBubble(new Message('assistant', 'ignored while streaming'), new Markdown(), 'C', '/u.png', '/a.png', true))->render();
+    expect($html)->toContain('data-streaming="1"')->toContain('<div class="ab-msg__content" aria-live="polite"></div>')->not->toContain('ignored while streaming');
 });
 
 it('model select disables when users cannot change and marks selection', function (): void {
@@ -60,7 +69,8 @@ it('message list shows the welcome block when empty', function (): void {
 it('composer carries hidden fields, spellcheck, and no hx attributes', function (): void {
     Functions\when('get_option')->justReturn(['chat.spellcheck' => false, 'chat.placeholder' => 'Ask']);
     $html = (new Composer(new Store(), 'n', 0, 'llama3.2', 12))->render();
-    expect($html)->toContain('id="ab-form"')->toContain('spellcheck="false"')->toContain('placeholder="Ask"')->toContain('name="conversation_id" value="0"')->toContain('name="context[post_id]" value="12"')->toContain('data-action="send"')->not->toContain('hx-');
+    expect($html)->toContain('id="ab-form"')->toContain('spellcheck="false"')->toContain('placeholder="Ask"')->toContain('name="conversation_id" value="0"')->toContain('name="context[post_id]" value="12"')->toContain('data-action="send"')->not->toContain('hx-')
+        ->and($html)->toContain('<input type="hidden" name="_wpnonce" value="n">');
 });
 
 it('receipt formats tokens and seconds', function (): void {
@@ -139,4 +149,52 @@ it('shell renders without the sprite, warning-free, when the assets are not buil
         restore_error_handler();
     }
     expect($html)->not->toContain('<symbol')->toContain('data-conversation="0"')->toContain('ab-welcome')->toContain('<option value="0" data-id="0" selected');
+});
+
+// ---------------------------------------------------------------- review fixes
+
+it('history select lists the open conversation even when the capped history left it out', function (): void {
+    // chat.history_limit caps $history; an older conversation opened by id is not in it. Without
+    // its own option the browser would select "New chat" while the transcript shows conversation 3.
+    $html = (new HistorySelect([['id' => 5, 'title' => 'First', 'created' => 1], ['id' => 6, 'title' => 'Second', 'created' => 2]], 3, 'Older one'))->render();
+    expect($html)->toContain('<option value="3" data-id="3" selected>Older one</option>')
+        ->and(substr_count($html, ' selected'))->toBe(1)
+        ->and(strpos($html, 'data-id="0"'))->toBeLessThan((int) strpos($html, 'data-id="3"'))
+        ->and(strpos($html, 'data-id="3"'))->toBeLessThan((int) strpos($html, 'data-id="6"'));
+    // Present in the list: no duplicate option is added.
+    $html = (new HistorySelect([['id' => 5, 'title' => 'First', 'created' => 1]], 5, 'First'))->render();
+    expect(substr_count($html, 'data-id="5"'))->toBe(1)->and(substr_count($html, ' selected'))->toBe(1);
+});
+
+it('shell selects the open conversation in the history when the list does not carry it', function (): void {
+    $html = chatShell(new Conversation(3, 3, 'Older one', [new Message('user', 'q')]), [['id' => 5, 'title' => 'T', 'created' => 1]], sys_get_temp_dir() . '/ab-missing-' . getmypid() . '.svg')->render();
+    expect($html)->toContain('<option value="3" data-id="3" selected>Older one</option>')->toContain('data-conversation="3"')->toContain('name="conversation_id" value="3"');
+});
+
+it('model select escapes a hostile model id and label', function (): void {
+    Functions\when('esc_attr')->alias(fn(string $s) => htmlspecialchars($s, ENT_QUOTES));
+    Functions\when('esc_html')->alias(fn(string $s) => htmlspecialchars($s, ENT_QUOTES));
+    $html = (new ModelSelect([new Model('a" onfocus="alert(1)', '<b>bold</b>')], 'a" onfocus="alert(1)', true))->render();
+    expect($html)->toContain('<option value="a&quot; onfocus=&quot;alert(1)" selected>&lt;b&gt;bold&lt;/b&gt;</option>')
+        ->not->toContain('onfocus="alert')->not->toContain('<b>');
+});
+
+it('history select escapes a hostile conversation title', function (): void {
+    Functions\when('esc_attr')->alias(fn(string $s) => htmlspecialchars($s, ENT_QUOTES));
+    Functions\when('esc_html')->alias(fn(string $s) => htmlspecialchars($s, ENT_QUOTES));
+    $html = (new HistorySelect([['id' => 6, 'title' => '</option><script>x()</script>"', 'created' => 2]], 9, '"><img src=x onerror=y>'))->render();
+    expect($html)->toContain('<option value="6" data-id="6">&lt;/option&gt;&lt;script&gt;x()&lt;/script&gt;&quot;</option>')
+        ->toContain('<option value="9" data-id="9" selected>&quot;&gt;&lt;img src=x onerror=y&gt;</option>')
+        ->not->toContain('<script>')->not->toContain('<img');
+});
+
+it('passes every URL-valued attribute through esc_url', function (): void {
+    Functions\when('esc_url')->alias(fn(string $u) => 'URL(' . $u . ')');
+    Functions\when('admin_url')->alias(fn(string $p) => '/wp-admin/' . $p);
+    Functions\when('get_option')->justReturn(['chat.welcome' => 'Hey']);
+    expect((new MessageBubble(new Message('user', 'hi'), new Markdown(), 'C', '/u.png', '/a.png'))->render())->toContain('src="URL(/u.png)"')
+        ->and((new MessageBubble(new Message('assistant', 'hi'), new Markdown(), 'C', '/u.png', '/a.png'))->render())->toContain('src="URL(/a.png)"')
+        ->and((new MessageList([], new Markdown(), new Store(), 'C', '/u.png', '/a.png'))->render())->toContain('src="URL(/a.png)"')
+        ->and((new Header('T', new ModelSelect([], 'a', true), new HistorySelect([], 0)))->render())->toContain('href="URL(/wp-admin/admin.php?page=alpaca-bot)"')
+        ->and(chatShell(null, [], sys_get_temp_dir() . '/ab-missing-' . getmypid() . '.svg')->render())->toContain('data-rest="URL(/wp-json/alpaca-bot/v1)"');
 });

@@ -12,9 +12,10 @@ use AlpacaBot\View\Hx;
  * The model dropdown in the header. Changing it posts the choice to /view/default-model, which
  * stores it as the user's default (Kanboard #565) and answers with a Notice for #ab-status.
  * When the site does not let users change the model the select is disabled, and a disabled
- * select fires no change event, so the request attributes it still carries are inert; the
- * route enforces the setting on its own. The select is named `model`, so htmx sends its value
- * with the post.
+ * select fires no change event, so the request attributes it still carries are inert. That is
+ * not a guard: the /view/default-model route (Task 4 of the 0.5 view plan) must refuse the
+ * post itself when chat.user_can_change_model is off. The select is named `model`, so htmx
+ * sends its value with the post.
  */
 final class ModelSelect extends Component
 {

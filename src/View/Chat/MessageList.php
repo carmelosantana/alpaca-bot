@@ -30,7 +30,7 @@ final class MessageList extends Component
         }
         if ($inner === '') {
             $inner = $this->tag('div', ['class' => 'ab-welcome'],
-                $this->tag('img', ['class' => 'ab-welcome__avatar', 'src' => $this->assistantAvatar, 'alt' => ''])
+                $this->tag('img', ['class' => 'ab-welcome__avatar', 'src' => $this->u($this->assistantAvatar), 'alt' => ''])
                 . $this->tag('p', ['class' => 'ab-welcome__text'], $this->e((string) $this->store->get('chat.welcome'))));
         }
         return $this->tag('div', ['id' => 'ab-messages', 'class' => 'ab-messages', 'data-conversation' => (string) $this->conversationId], $inner);

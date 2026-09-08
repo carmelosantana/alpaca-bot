@@ -19,15 +19,26 @@ use AlpacaBot\View\Hx;
  * carries the conversation id as `data-id`: chat.ts listens for `htmx:configRequest` on the
  * select and rewrites `evt.detail.path`, swapping the trailing 0 for the selected option's
  * `data-id`. Nothing else about the request changes.
+ *
+ * `$history` is capped by chat.history_limit, so the open conversation may not be in it (an
+ * older one opened by id). It gets its own option then, right after "New chat": with no option
+ * selected the browser would show "New chat" while the transcript and the composer's hidden
+ * conversation_id both say otherwise.
  */
 final class HistorySelect extends Component
 {
-    /** @param list<array{id: int, title: string, created: int}> $history newest first, as ConversationStore::listFor() returns them */
-    public function __construct(private array $history, private int $current) {}
+    /**
+     * @param list<array{id: int, title: string, created: int}> $history newest first, as ConversationStore::listFor() returns them
+     * @param string $currentTitle the open conversation's title, used only when $history does not list it
+     */
+    public function __construct(private array $history, private int $current, private string $currentTitle = '') {}
 
     public function render(): string
     {
         $opts = $this->option(0, $this->t('New chat'));
+        if ($this->current !== 0 && !in_array($this->current, array_map(static fn(array $row): int => (int) $row['id'], $this->history), true)) {
+            $opts .= $this->option($this->current, $this->currentTitle);
+        }
         foreach ($this->history as $row) {
             $opts .= $this->option((int) $row['id'], (string) $row['title']);
         }

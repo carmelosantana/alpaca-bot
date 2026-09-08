@@ -20,7 +20,7 @@ final class Header extends Component
     {
         return $this->tag('div', ['class' => 'ab-header'],
             $this->tag('h1', ['class' => 'wp-heading-inline'], $this->e($this->title))
-            . $this->tag('a', ['href' => admin_url('admin.php?page=' . Menu::SLUG), 'class' => 'page-title-action'], $this->e($this->t('New chat')))
+            . $this->tag('a', ['href' => $this->u(admin_url('admin.php?page=' . Menu::SLUG)), 'class' => 'page-title-action'], $this->e($this->t('New chat')))
             . $this->tag('div', ['class' => 'ab-header__controls'], $this->models->render() . $this->history->render())
             . $this->tag('hr', ['class' => 'wp-header-end']));
     }

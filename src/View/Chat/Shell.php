@@ -15,6 +15,8 @@ use AlpacaBot\View\Markdown;
  * Icon::svg() reference on the page resolves), the header, #ab-chat holding the status region
  * and the transcript, and the composer. #ab-chat's data attributes are what chat.ts reads at
  * boot: the open conversation, the REST root, and how many conversations the history lists.
+ * There is no stream URL here: it is per turn, and arrives with the ticket in the POST /chat
+ * response (chat.ts reads it from there, never from the markup).
  *
  * The sprite is a build output (pnpm build) and gitignored, so a checkout without it must
  * still render: the icons are missing then, and nothing else is.
@@ -31,6 +33,7 @@ final class Shell extends Component
     public function render(): string
     {
         $id = $this->conversation === null ? 0 : $this->conversation->id;
+        $title = $this->conversation === null ? '' : $this->conversation->title;
         $messages = $this->conversation === null ? [] : $this->conversation->messages;
         $model = $this->catalog->defaultId($this->store);
         $user = wp_get_current_user();
@@ -43,10 +46,10 @@ final class Shell extends Component
         $header = new Header(
             $this->t('Alpaca Bot'),
             new ModelSelect($this->catalog->all(), $model, (bool) $this->store->get('chat.user_can_change_model')),
-            new HistorySelect($this->history, $id),
+            new HistorySelect($this->history, $id, $title),
         );
         $list = new MessageList($messages, new Markdown(), $this->store, $user->display_name, is_string($userAvatar) ? $userAvatar : '', $assistantAvatar, $id);
-        $chat = $this->tag('div', ['id' => 'ab-chat', 'data-conversation' => (string) $id, 'data-rest' => rest_url('alpaca-bot/v1'), 'data-history-limit' => (string) (int) $this->store->get('chat.history_limit')],
+        $chat = $this->tag('div', ['id' => 'ab-chat', 'data-conversation' => (string) $id, 'data-rest' => $this->u(rest_url('alpaca-bot/v1')), 'data-history-limit' => (string) (int) $this->store->get('chat.history_limit')],
             $this->tag('div', ['id' => 'ab-status', 'class' => 'ab-status', 'role' => 'status', 'aria-live' => 'polite'], '') . $list->render());
         $composer = new Composer($this->store, $this->nonce, $id, $model, $this->postId);
 
