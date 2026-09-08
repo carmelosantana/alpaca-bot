@@ -101,6 +101,8 @@ final class Plugin
         $assets = new Admin\Assets();
         add_action('admin_enqueue_scripts', [$assets, 'enqueue']);
         add_filter('heartbeat_received', [$assets, 'heartbeat'], 10, 2);
+        // The help tabs of the chat screen and the settings page; HelpTabs gates on the screen id.
+        add_action('current_screen', [new Admin\HelpTabs(), 'add']);
         // WP-CLI is not a dependency: the command is only registered when WP-CLI is the
         // process running us, and the class itself never references WP_CLI until then.
         if (defined('WP_CLI') && constant('WP_CLI')) {
