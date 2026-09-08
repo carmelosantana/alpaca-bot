@@ -8,10 +8,11 @@
  */
 
 .ab-wrap {
-    --ab-accent: var(--wp-admin-theme-color);
-    --ab-accent-dark: var(--wp-admin-theme-color-darker-10);
-    --ab-accent-rgb: var(--wp-admin-theme-color--rgb);
-    --ab-focus-width: var(--wp-admin-border-width-focus);
+    /* The fallbacks are core's Default scheme; without one a missing variable would blank the send button. */
+    --ab-accent: var(--wp-admin-theme-color, #2271b1);
+    --ab-accent-dark: var(--wp-admin-theme-color-darker-10, #135e96);
+    --ab-accent-rgb: var(--wp-admin-theme-color--rgb, 34, 113, 177);
+    --ab-focus-width: var(--wp-admin-border-width-focus, 2px);
     --ab-surface: #f0f0f1;
     --ab-panel: #fff;
     --ab-text: #1d2327;
@@ -74,7 +75,8 @@
     margin: 0 auto 20px;
 }
 .ab-msg__avatar { width: 36px; height: 36px; border-radius: 50%; }
-.ab-msg__body { min-width: 0; }
+/* Wrap anywhere on the whole body, so a long model id in the name or receipt cannot widen the column. */
+.ab-msg__body { min-width: 0; overflow-wrap: anywhere; }
 .ab-msg__meta {
     display: flex;
     align-items: center;
@@ -98,7 +100,7 @@
 .ab-receipt { margin-top: 4px; color: var(--ab-muted); font-size: 12px; }
 
 /* ---- message content: the markdown allowlist, the highlighter, the stream ----------- */
-.ab-msg__content { font-size: 14px; line-height: 1.5; overflow-wrap: anywhere; }
+.ab-msg__content { font-size: 14px; line-height: 1.5; }
 .ab-msg__content > :first-child { margin-top: 0; }
 .ab-msg__content > :last-child { margin-bottom: 0; }
 .ab-msg__content p, .ab-msg__content ul, .ab-msg__content ol, .ab-msg__content blockquote, .ab-msg__content pre, .ab-msg__content table {
@@ -230,7 +232,7 @@ pre > .ab-code__copy:focus-visible { outline-color: var(--ab-code-text); }
 .ab-btn[hidden] { display: none; }
 .ab-msg__action { width: 28px; height: 28px; font-size: 14px; }
 .ab-btn--icon:hover, .ab-msg__action:hover { color: var(--ab-accent); background: rgba(var(--ab-accent-rgb), 0.1); }
-.ab-btn:focus-visible, .ab-msg__action:focus-visible {
+.ab-btn:focus-visible, .ab-msg__action:focus-visible, .ab-msg__reasoning summary:focus-visible {
     outline: var(--ab-focus-width) solid var(--ab-accent);
     outline-offset: 2px;
 }
@@ -242,7 +244,7 @@ pre > .ab-code__copy:focus-visible { outline-color: var(--ab-code-text); }
 .ab-btn--send:disabled { background: var(--ab-border); color: var(--ab-panel); cursor: not-allowed; }
 
 /* Tooltips: the aria-label of an icon-only button, on hover, for sighted mouse users. */
-.ab-btn--icon[aria-label]:hover::after {
+.ab-btn--icon[aria-label]:hover::after, .ab-btn--send[aria-label]:hover::after, .ab-msg__action[aria-label]:hover::after {
     content: attr(aria-label);
     position: absolute;
     bottom: calc(100% + 6px);
@@ -258,6 +260,10 @@ pre > .ab-code__copy:focus-visible { outline-color: var(--ab-code-text); }
     white-space: nowrap;
     pointer-events: none;
 }
+
+/* A turn's actions sit at the top of its bubble, and the first bubble at the scroller's edge, so the
+   tooltip goes below the button, as 0.4's hint--bottom did. */
+.ab-msg__action[aria-label]:hover::after { top: calc(100% + 6px); bottom: auto; }
 
 /* Inside a scrolling <pre> a tooltip above the button would be clipped; put it to the left. */
 pre > .ab-code__copy[aria-label]:hover::after {
