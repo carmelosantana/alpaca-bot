@@ -37,10 +37,13 @@ use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Tool\ToolResult;
  * same id twice, still gets one record per call). `ok` is Success; Error and Timeout are not.
  * Every record is stored on the assistant turn for the life of the conversation and counts
  * against the transcript's packet budget (ConversationStore::save()), so what is stored is
- * bounded: the result to RESULT_CHARS and each string argument to ARGUMENT_CHARS, in
- * characters, with an ellipsis where a cut was made. The full result was for the model and is
- * gone with the run; the arguments are what ran, and the longer bound keeps a URL or a title
- * whole while a drafted post's body, already in wp_posts, is not stored a second time.
+ * bounded: the result to RESULT_CHARS, each string argument to ARGUMENT_CHARS, and the
+ * arguments record as a whole to ARGUMENTS_CHARS over its keys and values at every depth, all
+ * in characters, with an ellipsis where a cut was made (boundedArguments()). A record is
+ * therefore never larger than ARGUMENTS_CHARS plus its marks, whatever the model put in the
+ * call. The full result was for the model and is gone with the run; the arguments are what
+ * ran, and the per-string bound keeps a URL or a title whole while a drafted post's body,
+ * already in wp_posts, is not stored a second time.
  *
  * @since 0.5.0
  */
@@ -51,6 +54,13 @@ final class AgentStreamObserver implements \SplObserver
 
     /** The most of one string argument kept on the record, in characters. */
     public const ARGUMENT_CHARS = 1000;
+
+    /**
+     * The most of a whole arguments record kept, in characters over its keys and values: room
+     * for four full-length strings, which no shipped tool's call comes near (draft_post's title,
+     * body and type are one and a bit), against a transcript budget in the megabytes.
+     */
+    public const ARGUMENTS_CHARS = 4000;
 
     /** @var \SplQueue<Delta> */
     private \SplQueue $deltas;
@@ -233,22 +243,53 @@ final class AgentStreamObserver implements \SplObserver
     }
 
     /**
-     * The arguments with every string, at any depth, held to ARGUMENT_CHARS; anything else as is.
+     * The arguments as the record keeps them: every string held to ARGUMENT_CHARS, and the
+     * record as a whole to ARGUMENTS_CHARS. The whole-record bound is the one that matters for
+     * storage; a bound on each string alone leaves a tool taking a long list of short strings,
+     * or a model inventing keys, storing as much as it sent.
      *
      * @param array<string, mixed> $arguments
      * @return array<string, mixed>
      */
     private static function boundedArguments(array $arguments): array
     {
-        foreach ($arguments as $key => $value) {
-            if (is_string($value)) {
-                $arguments[$key] = self::bounded($value, self::ARGUMENT_CHARS);
-            } elseif (is_array($value)) {
-                /** @var array<string, mixed> $value */
-                $arguments[$key] = self::boundedArguments($value);
+        $budget = self::ARGUMENTS_CHARS;
+        /** @var array<string, mixed> */
+        return self::boundedRecord($arguments, $budget);
+    }
+
+    /**
+     * One level of the record against the budget it shares with every other level. Each key
+     * and each scalar value spends its characters; a string is cut to what remains of the
+     * budget (and never past ARGUMENT_CHARS); an array recurses on the same budget. Once the
+     * budget is spent, the entries that follow at that level are dropped and an ellipsis entry
+     * stands in their place, so the cut is visible where it was made, as it is for a string.
+     * Entries are kept in the order sent, so the leading arguments (a title, a URL) survive a
+     * cut made by a large trailing one.
+     *
+     * @param array<mixed> $record
+     * @return array<mixed>
+     */
+    private static function boundedRecord(array $record, int &$budget): array
+    {
+        $out = [];
+        foreach ($record as $key => $value) {
+            if ($budget <= 0) {
+                $out[is_int($key) ? $key : '…'] = '…';
+                break;
             }
+            $budget -= mb_strlen((string) $key);
+            if (is_string($value)) {
+                $value = self::bounded($value, max(0, min(self::ARGUMENT_CHARS, $budget)));
+                $budget -= mb_strlen($value);
+            } elseif (is_array($value)) {
+                $value = self::boundedRecord($value, $budget);
+            } else {
+                $budget -= mb_strlen((string) json_encode($value));
+            }
+            $out[$key] = $value;
         }
-        return $arguments;
+        return $out;
     }
 
     private static function bounded(string $text, int $chars): string

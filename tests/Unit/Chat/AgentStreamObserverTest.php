@@ -59,6 +59,48 @@ it('records each tool call with its result, matched by call id, bounded excerpts
         ->and($calls[2])->toBe(['name' => 'draft_post', 'arguments' => ['title' => 'T'], 'result_excerpt' => 'slow', 'ok' => false]);
 });
 
+// Every record is stored on the assistant turn for the life of the conversation, against the
+// packet budget ConversationStore::save() fits the transcript to. A bound on each string does
+// not bound the record: a tool taking a large list of short strings, or a model inventing keys,
+// would store as much as it sent. The record as a whole has a ceiling, counted in characters
+// over its keys and values at every depth, and the cut is marked the way a cut string is.
+it('holds the whole arguments record to ARGUMENTS_CHARS, at any depth, marking the cut, and leaves an ordinary record alone', function (): void {
+    $agent = agentSubject();
+    $observer = new AgentStreamObserver();
+    $agent->attach($observer);
+    $many = [];
+    for ($i = 0; $i < 200; $i++) {
+        $many['key' . $i] = str_repeat('v', 90);
+    }
+    $agent->notify('agent.tool_call', new ToolCall('c1', 'bulk', ['first' => 'kept', 'items' => $many, 'after' => 'dropped']));
+    $agent->notify('agent.tool_result', ToolResult::success('ok')->withCallId('c1'));
+    $agent->notify('agent.tool_call', new ToolCall('c2', 'draft_post', ['title' => 'Hello Alpaca', 'content' => str_repeat('p', 500), 'post_type' => 'post', 'tags' => ['a', 'b']]));
+    $agent->notify('agent.tool_result', ToolResult::success('ok')->withCallId('c2'));
+
+    [$bulk, $draft] = $observer->toolCalls();
+    $size = static function (mixed $value) use (&$size): int {
+        if (is_array($value)) {
+            $n = 0;
+            foreach ($value as $k => $v) {
+                $n += mb_strlen((string) $k) + $size($v);
+            }
+            return $n;
+        }
+        return mb_strlen(is_string($value) ? $value : json_encode($value));
+    };
+    // 200 x 90 characters went in; what is stored is held to the ceiling (plus the marks),
+    // keeps the entries in order up to it, and says where it stopped at each level it cut.
+    expect($size($bulk['arguments']))->toBeLessThanOrEqual(AgentStreamObserver::ARGUMENTS_CHARS + 10)
+        ->and($bulk['arguments']['first'])->toBe('kept')
+        ->and(array_key_first($bulk['arguments']['items']))->toBe('key0')
+        ->and(array_key_last($bulk['arguments']['items']))->toBe('…')
+        ->and(count($bulk['arguments']['items']))->toBeLessThan(200)
+        ->and($bulk['arguments'])->not->toHaveKey('after')
+        ->and(array_key_last($bulk['arguments']))->toBe('…')
+        // A record within the ceiling is stored exactly as the model sent it.
+        ->and($draft['arguments'])->toBe(['title' => 'Hello Alpaca', 'content' => str_repeat('p', 500), 'post_type' => 'post', 'tags' => ['a', 'b']]);
+});
+
 it('pairs a result carrying no id with the oldest unanswered call, and reports a call never answered as not ok', function (): void {
     $agent = agentSubject();
     $observer = new AgentStreamObserver();
