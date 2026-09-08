@@ -164,7 +164,9 @@ function conversationChatPost(int $id = 42, string $author = '3', string $type =
  * here), records every query in `->queries`, and stubs maybe_serialize() as serialize(), which is
  * what core's does for an array. The store caches the figure for the request in a private
  * static, and Pest runs the suite in one process, so the cache is reset here the way Pest.php
- * resets Plugin::$instance; a test that wants a different figure calls this again.
+ * resets Plugin::$instance; a test that wants a different figure calls this again. The reset
+ * names the property outright: guarded by property_exists() it would go quiet the day the
+ * property is renamed, and the first figure read would then leak into every later test.
  *
  * The default packet is MySQL's documented default, 16 MiB; a budget test passes something
  * smaller so a transcript of a few hundred bytes is over it.
@@ -185,9 +187,7 @@ function conversationStoreDb(mixed $raw = '16777216'): object
     };
     $GLOBALS['wpdb'] = $db;
     Functions\when('maybe_serialize')->alias(static fn(mixed $v): mixed => is_array($v) || is_object($v) ? serialize($v) : $v);
-    if (property_exists(ConversationStore::class, 'maxAllowedPacket')) {
-        (new ReflectionProperty(ConversationStore::class, 'maxAllowedPacket'))->setValue(null, null);
-    }
+    (new ReflectionProperty(ConversationStore::class, 'maxAllowedPacket'))->setValue(null, null);
     return $db;
 }
 
