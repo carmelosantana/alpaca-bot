@@ -58,8 +58,13 @@ final class AgentStreamObserver implements \SplObserver
     /**
      * Held weakly: the fiber's callback reaches the agent, the agent holds this observer, and a
      * strong reference back to the fiber would close a cycle that only the cycle collector
-     * breaks. A consumer that abandons the generator must release the fiber at once (the
-     * generator's locals are dropped, and the fiber unwinds), not when the collector next runs.
+     * breaks. The weak reference is one half of what makes a consumer's abandonment release
+     * the fiber at once; the other half is push(), which keeps no local of the fiber alive in
+     * the fiber's own frames across its suspension. With both, the pipeline's local is the only
+     * strong reference, and dropping the generator unwinds the fiber in that same destruction;
+     * with either missing, the fiber (and the agent, its conversation and the provider's open
+     * stream) lives until the collector next runs. PipelineToolsTest pins the release without
+     * gc_collect_cycles().
      *
      * @var \WeakReference<\Fiber<mixed, mixed, mixed, mixed>>|null
      */
@@ -180,13 +185,27 @@ final class AgentStreamObserver implements \SplObserver
         return $streamed === '' || str_ends_with($streamed, "\n") ? $text : "\n\n" . $text;
     }
 
+    /**
+     * Queues the delta and, inside the streamed fiber, suspends. The identity check is a call of
+     * its own so that no local holding the fiber is alive in this frame across the suspension:
+     * a suspended fiber keeps its frames, and a strong reference to itself in one of them is a
+     * cycle (the fiber holds its stack, the stack holds the fiber) that only the cycle collector
+     * breaks. With the check's frame gone before suspend() runs, the pipeline's own local is the
+     * last strong reference, and dropping the generator unwinds the fiber then and there.
+     */
     private function push(Delta $delta): void
     {
         $this->deltas->enqueue($delta);
-        $fiber = $this->fiber?->get();
-        if ($fiber !== null && \Fiber::getCurrent() === $fiber) {
+        if ($this->insideStreamedFiber()) {
             \Fiber::suspend();
         }
+    }
+
+    /** Whether the running fiber is the one streamThrough() named; false outside any fiber. */
+    private function insideStreamedFiber(): bool
+    {
+        $fiber = $this->fiber?->get();
+        return $fiber !== null && \Fiber::getCurrent() === $fiber;
     }
 
     private function answer(ToolResult $result): void

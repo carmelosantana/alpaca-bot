@@ -389,10 +389,15 @@ final class Pipeline
      * loop, drifting from its tool pairing repair, its batching and its empty-reply handling as
      * the library moves), and running the agent to completion before yielding (no streaming).
      * The fiber's cost is one stack per tool turn, and one rule: a consumer that abandons the
-     * generator while the fiber is suspended must release it. It does, deterministically: the
-     * fiber is a local here, the observer holds it weakly, so destroying the generator drops
-     * the last reference and PHP unwinds the fiber, running the run's finally blocks and
-     * closing the provider's stream. settle() has already stored the partial reply by then.
+     * generator while the fiber is suspended must release it. It does, in the generator's own
+     * destruction, on two conditions that both hold: the fiber is a local here and the observer
+     * holds it weakly, and nothing inside the fiber holds itself across a suspension
+     * (AgentStreamObserver::push() decides whether to suspend in a frame that is gone before
+     * suspend() runs). Then destroying the generator drops the last strong reference, and PHP
+     * unwinds the fiber: the run's finally blocks run and the provider's stream is closed,
+     * after settle() has stored the partial reply. A strong reference anywhere on the cycle
+     * (fiber -> agent -> observer -> fiber) would defer all of that to the cycle collector,
+     * which is why PipelineToolsTest pins the release with no gc_collect_cycles().
      *
      * What the agent cannot stream is yielded here after the run: an answer given through its
      * `done` tool, reasoning surfaced as the answer when a thinking model wrote no text, and a

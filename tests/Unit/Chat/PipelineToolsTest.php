@@ -7,6 +7,7 @@ use AlpacaBot\Chat\Conversation;
 use AlpacaBot\Chat\Delta;
 use AlpacaBot\Chat\Message;
 use AlpacaBot\Chat\Result;
+use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Contract\ProviderInterface;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Enum\ProviderFinishReason;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Message\AssistantMessage;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Message\SystemMessage;
@@ -182,17 +183,31 @@ it('fails the turn as a provider error, once, when the provider fails mid-run, p
         ->and(array_map(static fn(array $w): array => [$w[0], $w[1]], $h->writes))->toBe([['wp_insert_post', 'chat_history'], ['wp_delete_post', 42]]);
 });
 
-it('stores the partial reply with the calls made so far, and lets the fiber go, when the consumer abandons the run', function (): void {
+it('stores the partial reply with the calls made so far, and lets the fiber go the moment the consumer abandons the run, closing the provider stream', function (): void {
     $weak = null;
     $toolkit = echoToolkit('echo_tool', 'Use it.', static function (array $a) use (&$weak): ToolResult {
         // The tool runs inside the pipeline's fiber: hold it weakly, to see it released.
         $weak = \WeakReference::create(\Fiber::getCurrent());
         return ToolResult::success('echo:' . $a['text']);
     });
-    $provider = agentProvider([
-        [new Response('first', ProviderFinishReason::Stop), new Response('', ProviderFinishReason::ToolUse, [new ToolCall('c1', 'echo_tool', ['text' => 'ping'])])],
-        [new Response('second', ProviderFinishReason::Stop), new Response('never seen', ProviderFinishReason::Stop)],
-    ]);
+    // The second stream is left open when the consumer leaves: its finally runs only when the
+    // fiber it is suspended in is unwound, which is the release this test is about.
+    $closed = false;
+    $streams = 0;
+    $provider = Mockery::mock(ProviderInterface::class);
+    $provider->shouldReceive('stream')->twice()->andReturnUsing(static function () use (&$streams, &$closed): \Generator {
+        if (++$streams === 1) {
+            yield new Response('first', ProviderFinishReason::Stop);
+            yield new Response('', ProviderFinishReason::ToolUse, [new ToolCall('c1', 'echo_tool', ['text' => 'ping'])]);
+            return;
+        }
+        try {
+            yield new Response('second', ProviderFinishReason::Stop);
+            yield new Response('never seen', ProviderFinishReason::Stop);
+        } finally {
+            $closed = true;
+        }
+    });
     $h = pipelineWith($provider, [], [], TOOL_MODEL, null, registryWith(['echo' => $toolkit]));
     $failed = null;
     Actions\expectDone('alpaca_bot/chat/failed')->once()->whenHappen(function (\Throwable $e, Conversation $c) use (&$failed): void {
@@ -203,16 +218,20 @@ it('stores the partial reply with the calls made so far, and lets the fiber go, 
     $gen = $h->pipeline->send(3, 'ping');
     expect($gen->current()->text)->toBe('first');
     $gen->next();
-    expect($gen->current()->text)->toBe("\n\nsecond")->and($weak)->not->toBeNull()->and($weak->get())->not->toBeNull();
+    expect($gen->current()->text)->toBe("\n\nsecond")->and($weak)->not->toBeNull()->and($weak->get())->not->toBeNull()->and($closed)->toBeFalse();
     unset($gen);
-    gc_collect_cycles();
 
-    expect($failed[0]->getMessage())->toContain('abandoned')
+    // No gc_collect_cycles() here, on purpose: the claim is that dropping the generator drops
+    // the last reference to the fiber, so PHP unwinds it in that same destruction. A strong
+    // reference anywhere on the cycle (the observer, the agent, a local alive in the fiber's
+    // own frames across its suspension) would leave the fiber to the cycle collector, and this
+    // assertion would see it alive and its stream still open.
+    expect($weak->get())->toBeNull()
+        ->and($closed)->toBeTrue()
+        ->and($failed[0]->getMessage())->toContain('abandoned')
         ->and($failed[1]->messages[1]->content)->toBe("first\n\nsecond")
         ->and($failed[1]->messages[1]->meta['partial'])->toBeTrue()
         ->and($failed[1]->messages[1]->meta['tool_calls'])->toBe([['name' => 'echo_tool', 'arguments' => ['text' => 'ping'], 'result_excerpt' => 'echo:ping', 'ok' => true]])
-        // The suspended fiber went with the generator: destroying it unwound the run.
-        ->and($weak->get())->toBeNull()
         ->and(array_map(static fn(array $w): string => $w[0], $h->writes))->toBe(['wp_insert_post', 'update_post_meta', 'wp_update_post', 'wp_insert_post']);
 });
 
