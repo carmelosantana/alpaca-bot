@@ -568,7 +568,7 @@ route the same object is the `error` frame's data.
 | 400 | `alpaca_bot_bad_request` | An empty turn; a model the catalog does not list; an image that is not a `data:` URL; a `conversation_id` that is not yours; a settings PUT naming no schema key | |
 | 400 | `rest_invalid_param`, `rest_missing_callback_param` | Core's schema validation: `limit` out of 0-200, `user` not `me`/`all`, `refresh` not a boolean, a stream GET with no `token` | `params`, `details` |
 | 401 | `rest_forbidden` | Not authenticated (no cookie+nonce, no Application Password) | |
-| 402 | `alpaca_bot_cap_exceeded` | The monthly token cap is spent (`governance.user_monthly_tokens` or `governance.site_monthly_tokens`) | `scope` (`user`/`site`), `limit`, `used` |
+| 402 | `alpaca_bot_cap_exceeded` | The monthly token cap is spent (`governance.user_monthly_tokens` or `governance.site_monthly_tokens`) | `scope` (`user`/`site`); `limit` and `used` only when `scope` is `user` |
 | 403 | `rest_forbidden` | Authenticated but lacking the capability; a stream token that is not yours, spent, or expired | |
 | 404 | `alpaca_bot_not_found` | A conversation that does not exist or is not yours | |
 | 404 | `rest_no_route` | Core: no such route for that method (e.g. `POST` on the stream route) | |
@@ -581,6 +581,14 @@ The 402, with the per-user cap set to 1 token for the run:
 ```
 $ curl -s -u "admin:$PW" -H 'Content-Type: application/json' -d '{"message":"hi"}' "$B/chat"
 {"code":"alpaca_bot_cap_exceeded","message":"Your monthly token cap has been reached (9957 of 1 tokens).","data":{"status":402,"scope":"user","limit":1,"used":9957}}
+```
+
+When it is the site's cap, the message and the data both stop at saying so: the site's cap and
+its month-to-date total are what `GET /usage` withholds from anyone but an administrator, and
+anyone who may chat can reach this error. Per `ErrorsTest`:
+
+```
+{"code":"alpaca_bot_cap_exceeded","message":"The site's monthly token cap has been reached.","data":{"status":402,"scope":"site"}}
 ```
 
 The 429, produced by looping `GET /models` (see section 6 for the loop):

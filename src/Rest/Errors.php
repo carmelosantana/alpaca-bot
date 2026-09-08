@@ -44,15 +44,19 @@ final class Errors
      * 402 Payment Required is the nearest status for "your monthly allowance is spent": not a
      * permission problem (403) and not the client's fault (4xx otherwise), and distinct enough
      * that a client can show the cap rather than a generic error. The message is CapExceeded's
-     * own, which already keeps the site-wide figures out of a user-facing reply.
+     * own, which keeps the site-wide figures out of a user-facing reply, and the data follows
+     * it: `limit` and `used` ride along for the user's own cap only. The site's cap and its
+     * month-to-date total are what `GET /usage` withholds from a non-administrator, and anyone
+     * who may chat can reach this error by chatting once past the cap. `scope` is always there,
+     * so a client can say whose cap it was.
      */
     public static function capExceeded(CapExceeded $e): \WP_Error
     {
-        return new \WP_Error(
-            'alpaca_bot_cap_exceeded',
-            $e->getMessage(),
-            ['status' => 402, 'scope' => $e->scope, 'limit' => $e->limit, 'used' => $e->used],
-        );
+        $data = ['status' => 402, 'scope' => $e->scope];
+        if ($e->scope === 'user') {
+            $data += ['limit' => $e->limit, 'used' => $e->used];
+        }
+        return new \WP_Error('alpaca_bot_cap_exceeded', $e->getMessage(), $data);
     }
 
     /**

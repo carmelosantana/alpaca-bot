@@ -34,16 +34,19 @@ it('tooMany is alpaca_bot_rate_limited, 429, carrying retry_after in the data', 
         ->and($e->get_error_data())->toBe(['status' => 429, 'retry_after' => 17]);
 });
 
-it('capExceeded is alpaca_bot_cap_exceeded, 402, with the scope, limit and used figures and the exception\'s own message', function (): void {
+it('capExceeded is alpaca_bot_cap_exceeded, 402, with the scope, the exception\'s own message, and the figures only for the user\'s own cap', function (): void {
     $e = Errors::capExceeded(new CapExceeded('user', 1_000, 1_200));
     expect($e->get_error_code())->toBe('alpaca_bot_cap_exceeded')
         ->and($e->get_error_message())->toBe('Your monthly token cap has been reached (1200 of 1000 tokens).')
         ->and($e->get_error_data())->toBe(['status' => 402, 'scope' => 'user', 'limit' => 1_000, 'used' => 1_200]);
 
-    // The site-scope message quotes no figures (the site's spend is not the requester's to see); the data still carries them.
+    // The site-scope message quotes no figures (the site's spend is not the requester's to see),
+    // and neither does the data: the site's cap and month-to-date total are what GET /usage
+    // withholds from a non-administrator, and any editor can reach this error by chatting past
+    // the cap once. The scope stays, so a client can say whose cap it was.
     $site = Errors::capExceeded(new CapExceeded('site', 50_000, 50_001));
     expect($site->get_error_message())->toBe('The site\'s monthly token cap has been reached.')
-        ->and($site->get_error_data())->toBe(['status' => 402, 'scope' => 'site', 'limit' => 50_000, 'used' => 50_001]);
+        ->and($site->get_error_data())->toBe(['status' => 402, 'scope' => 'site']);
 });
 
 it('notFound is alpaca_bot_not_found, 404, naming the kind of thing', function (): void {
