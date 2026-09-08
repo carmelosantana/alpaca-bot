@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace AlpacaBot\View\Chat;
 
+use AlpacaBot\Chat\ImageData;
 use AlpacaBot\Chat\Message;
 use AlpacaBot\View\Component;
 use AlpacaBot\View\Icon;
@@ -16,14 +17,11 @@ use AlpacaBot\View\Markdown;
  * appends deltas into `.ab-msg__content`, which is a polite live region for that duration, and
  * replaces the whole article with a rendered one on `done`. A user turn's attached images are
  * shown above its text: `esc_url()` strips a `data:` URL (it is not in wp_allowed_protocols),
- * so each is held to a base64 image data URL by pattern and attribute-escaped; anything else
- * is not rendered.
+ * so each is held to a base64 image data URL by pattern (ImageData::PATTERN, the same contract
+ * Pipeline::images() admits at intake) and attribute-escaped; anything else is not rendered.
  */
 final class MessageBubble extends Component
 {
-    /** A base64 image data URL and nothing else: the mime is an allowlist, the payload is base64's alphabet, and `\z` (not `$`, which admits a final newline) holds it to the very end. */
-    private const DATA_IMAGE = '#^data:image/(?:png|jpe?g|gif|webp);base64,[A-Za-z0-9+/]+=*\z#';
-
     public function __construct(private Message $m, private Markdown $md, private string $userName, private string $userAvatar, private string $assistantAvatar, private bool $streaming = false) {}
 
     public function render(): string
@@ -49,7 +47,7 @@ final class MessageBubble extends Component
     {
         $imgs = '';
         foreach ($this->m->images as $src) {
-            if (preg_match(self::DATA_IMAGE, $src) === 1) {
+            if (ImageData::isValid($src)) {
                 $imgs .= $this->tag('img', ['class' => 'ab-msg__image', 'src' => $src, 'alt' => $this->t('Attached image')]);
             }
         }
