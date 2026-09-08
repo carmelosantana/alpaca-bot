@@ -91,13 +91,16 @@ export function imageLimit(raw: unknown): number {
  * The decoded size of a base64 data URL's payload, from its length alone: four characters
  * carry three bytes and each '=' of padding stands for one byte fewer. This is the arithmetic
  * ImageData::decodedBytes() runs server-side, so the two sides count an attached image the same
- * way. 0 for anything that is not a base64 data URL.
+ * way. 0 for anything that is not a base64 data URL, and that includes one padded with more
+ * than the two '=' base64 ever writes: each '=' is subtracted, so a run of them would count a
+ * payload down to nothing. The clamp on the count is the same guard a second time, so the
+ * subtraction stays a byte count even if the pattern is loosened.
  */
 export function decodedBytes(dataUrl: string): number {
-  const m = /^data:[^,;]+;base64,([A-Za-z0-9+/]+=*)$/.exec(dataUrl);
+  const m = /^data:[^,;]+;base64,([A-Za-z0-9+/]+={0,2})$/.exec(dataUrl);
   if (!m) return 0;
   const payload = m[1];
-  const padding = payload.length - payload.replace(/=+$/, '').length;
+  const padding = Math.min(2, payload.length - payload.replace(/=+$/, '').length);
   return Math.max(0, Math.floor(payload.length / 4) * 3 - padding);
 }
 

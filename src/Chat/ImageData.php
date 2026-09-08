@@ -21,10 +21,14 @@ final class ImageData
 {
     /**
      * A base64 image data URL and nothing else: the mime is an allowlist (SVG is an image mime
-     * that can carry script, and is not on it), the payload is base64's alphabet with optional
-     * `=` padding, and `\z` (not `$`, which admits a final newline) holds it to the very end.
+     * that can carry script, and is not on it), the payload is base64's alphabet with at most
+     * two `=` of padding, and `\z` (not `$`, which admits a final newline) holds it to the very
+     * end. Two is base64's own ceiling (one byte short of a multiple of three pads with two, two
+     * short with one), and the bound is load-bearing: decodedBytes() subtracts each `=`, so the
+     * unbounded `=*` this pattern once ended in let a payload padded with thousands of them
+     * count for less than it carried, down to 0, and slip under the intake total cap.
      */
-    public const PATTERN = '#^data:image/(?:png|jpe?g|gif|webp);base64,[A-Za-z0-9+/]+=*\z#';
+    public const PATTERN = '#^data:image/(?:png|jpe?g|gif|webp);base64,[A-Za-z0-9+/]+={0,2}\z#';
 
     public static function isValid(string $url): bool
     {
@@ -38,6 +42,10 @@ final class ImageData
      * the currency Admin\Assets::maxImageBytes() and image.ts's `Blob.size` check speak, so a
      * total summed from here compares against the cap without conversion. 0 for anything that
      * is not a valid image data URL.
+     *
+     * The padding is clamped to two even though PATTERN already refuses more: the subtraction
+     * is only correct for the padding base64 writes, and if the pattern is ever loosened again
+     * this stays a count of bytes rather than a figure a crafted payload can drive to 0.
      */
     public static function decodedBytes(string $url): int
     {
@@ -45,7 +53,7 @@ final class ImageData
             return 0;
         }
         $payload = substr($url, (int) strpos($url, ',') + 1);
-        $padding = strlen($payload) - strlen(rtrim($payload, '='));
+        $padding = min(2, strlen($payload) - strlen(rtrim($payload, '=')));
         return max(0, intdiv(strlen($payload), 4) * 3 - $padding);
     }
 }

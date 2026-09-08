@@ -60,6 +60,13 @@ test('decodedBytes reads a data URL\'s payload size from its base64 length, as I
   for (const bad of ['', 'data:image/png,%89PNG', 'https://example.com/x.png']) assert.equal(decodedBytes(bad), 0, bad);
 });
 
+test('decodedBytes refuses more than two characters of padding, as ImageData does, so a run of them cannot count a payload down to nothing', () => {
+  assert.equal(decodedBytes('data:image/png;base64,' + 'A'.repeat(4000) + '='.repeat(3000)), 0);
+  assert.equal(decodedBytes('data:image/png;base64,QUJD' + '='.repeat(1000)), 0);
+  assert.equal(decodedBytes('data:image/png;base64,AAAA==='), 0);
+  assert.equal(decodedBytes('data:image/png;base64,AA=='), 1);
+});
+
 test('checkTotal accepts a running total at the cap and refuses one byte over, naming the total and the cap', () => {
   const cap = 300;
   const atCapLessOne = 'data:image/png;base64,' + 'A'.repeat(4 * 100 - 4) + 'AAA=';

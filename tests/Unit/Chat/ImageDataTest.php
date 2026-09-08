@@ -51,6 +51,19 @@ it('measures the decoded payload from the base64 length, for 0, 1 and 2 characte
         ->and(ImageData::decodedBytes('data:image/jpeg;base64,' . str_repeat('A', 4 * 1024 * 1024 - 2) . '=='))->toBe(3 * 1024 * 1024 - 2);
 });
 
+// Base64 pads with at most two '=': a run of them is not something any encoder wrote, and
+// because decodedBytes() subtracts each one, admitting the run let a crafted payload count for
+// less than it carries, down to 0, and slip under the intake total cap with its real bytes.
+it('rejects more than two characters of padding, so a run of them cannot under-report the payload', function (): void {
+    $crafted = 'data:image/png;base64,' . str_repeat('A', 4000) . str_repeat('=', 3000);
+    expect(ImageData::isValid($crafted))->toBeFalse()
+        ->and(ImageData::decodedBytes($crafted))->toBe(0)
+        ->and(ImageData::isValid('data:image/png;base64,QUJD' . str_repeat('=', 1000)))->toBeFalse()
+        ->and(ImageData::isValid('data:image/png;base64,AAAA==='))->toBeFalse()
+        // Two is still fine: that is what a payload one byte short of a multiple of three ends in.
+        ->and(ImageData::isValid('data:image/png;base64,AA=='))->toBeTrue();
+});
+
 it('measures an invalid URL as 0 bytes', function (): void {
     expect(ImageData::decodedBytes(''))->toBe(0)
         ->and(ImageData::decodedBytes('data:text/html;base64,PHNjcmlwdD4='))->toBe(0)

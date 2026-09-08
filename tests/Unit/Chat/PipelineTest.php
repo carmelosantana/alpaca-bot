@@ -678,6 +678,8 @@ it('refuses every image form that is not a base64 image data URL, saying what is
         'data:image/png,%89PNG',
         "data:image/png;base64,QUJD\n",
         'https://example.com/x.png',
+        // Padded past what base64 ever writes: it would count for 2250 bytes while carrying 3000.
+        'data:image/png;base64,' . str_repeat('A', 4000) . str_repeat('=', 3000),
     ] as $bad) {
         expect(fn() => $h->pipeline->complete(3, 'What is this?', ['images' => ['data:image/png;base64,AAAA', $bad]]))
             ->toThrow(\InvalidArgumentException::class, 'Images must be base64 PNG, JPEG, GIF, or WebP data URLs.');
