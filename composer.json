@@ -11,7 +11,7 @@
     ],
     "require": {
         "php": "^8.4",
-        "carmelosantana/php-agents": "^0.15.2",
+        "carmelosantana/php-agents": "~0.15.2",
         "league/commonmark": "^2.10"
     },
     "require-dev": {

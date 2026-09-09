@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "67e85d6d0ecc2e5a0bab374e1c9cbf3a",
+    "content-hash": "5e27ebc55de869b87900c124d773cfc5",
     "packages": [
         {
             "name": "carmelosantana/php-agents",
