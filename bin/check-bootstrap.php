@@ -17,6 +17,8 @@ define('ABSPATH', '/');
 
 /** @var list<array{0: string, 1: int}> */
 $GLOBALS['alpaca_bot_check_actions'] = [];
+/** @var list<array{0: string, 1: callable}> */
+$GLOBALS['alpaca_bot_check_deactivations'] = [];
 function plugin_dir_path(string $file): string
 {
     return dirname($file) . '/';
@@ -28,6 +30,10 @@ function plugin_dir_url(string $file): string
 function add_action(string $hook, callable $callback, int $priority = 10): void
 {
     $GLOBALS['alpaca_bot_check_actions'][] = [$hook, $priority];
+}
+function register_deactivation_hook(string $file, callable $callback): void
+{
+    $GLOBALS['alpaca_bot_check_deactivations'][] = [$file, $callback];
 }
 function esc_html__(string $text, string $domain = 'default'): string
 {
@@ -48,6 +54,7 @@ $checks = [
     'Composer\Autoload\ClassLoader (vendor/) is NOT loaded' => !class_exists('Composer\Autoload\ClassLoader', false),
     'unprefixed trigger_deprecation() is NOT defined' => !function_exists('trigger_deprecation'),
     'Plugin::boot() hooked plugins_loaded at 9' => in_array(['plugins_loaded', 9], $GLOBALS['alpaca_bot_check_actions'], true),
+    'Plugin::deactivate() registered as this file\'s deactivation hook' => in_array([dirname(__DIR__) . '/alpaca-bot.php', [\AlpacaBot\Plugin::class, 'deactivate']], $GLOBALS['alpaca_bot_check_deactivations'], true),
 ];
 
 $failed = 0;
