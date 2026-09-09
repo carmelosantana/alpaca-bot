@@ -299,7 +299,7 @@ final class AgentStreamObserver implements \SplObserver
             } elseif (is_array($value)) {
                 $value = self::boundedRecord($value, $budget);
             } else {
-                $budget -= mb_strlen((string) json_encode($value));
+                $budget -= mb_strlen((string) wp_json_encode($value));
             }
             $out[$key] = $value;
         }

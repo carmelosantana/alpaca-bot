@@ -1,0 +1,20 @@
+# The formatting phpcs.xml.dist defers to: PSR-12 for PHP rather than WP core's house style,
+# which is why the ruleset excludes the WordPress whitespace and brace sniffs.
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 4
+
+[*.{js,ts,mjs,json,yml,yaml,css}]
+indent_size = 2
+
+[*.md]
+trim_trailing_whitespace = false
+
+[Makefile]
+indent_style = tab

@@ -29,6 +29,6 @@ final class ModelSelect extends Component
             $opts .= sprintf('<option value="%s"%s>%s%s</option>', $this->a($m->id), selected($this->selected, $m->id, false), $this->e($m->label), $m->vision ? ' 👁' : '');
         }
         $hx = Hx::attrs(['post' => '/default-model', 'trigger' => 'change', 'target' => '#ab-status', 'swap' => 'innerHTML', 'headers' => Hx::formHeaders()]);
-        return sprintf('<label class="screen-reader-text" for="ab-model">%s</label><select id="ab-model" name="model" class="ab-select"%s%s>%s</select>', $this->e($this->t('Model')), $this->canChange ? '' : ' disabled', $hx, $opts);
+        return sprintf('<label class="screen-reader-text" for="ab-model">%s</label><select id="ab-model" name="model" class="ab-select"%s%s>%s</select>', $this->e(__('Model', 'alpaca-bot')), $this->canChange ? '' : ' disabled', $hx, $opts);
     }
 }

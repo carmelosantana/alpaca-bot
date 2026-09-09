@@ -40,12 +40,13 @@ final class ChatScreen
             $this->prefs->modelFor($userId, $this->catalog, $this->store),
         );
         // The shell's output is escaped where it is built (Component::tag(), Markdown's kses).
-        echo $shell->render();
+        echo $shell->render(); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- Component output, escaped where it is built (Component::tag() escapes every attribute, e() every text node, Markdown runs wp_kses).
     }
 
     /** A query value as a non-negative integer; anything that is not a scalar (an array) is 0. Read only, so no nonce. */
     private static function queryInt(string $key): int
     {
+        // phpcs:ignore WordPress.Security.NonceVerification.Recommended, WordPress.Security.ValidatedSanitizedInput.MissingUnslash, WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- Read only: this selects which of the caller's own conversations to display and changes nothing, so it needs no nonce. The (int) cast on the next line is the sanitisation and also makes unslashing moot, since no backslash survives it; load() then scopes the id to $userId.
         $value = $_GET[$key] ?? null;
         return is_scalar($value) ? max(0, (int) $value) : 0;
     }

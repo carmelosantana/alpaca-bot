@@ -181,11 +181,11 @@ final class WebFetchToolkit implements ToolkitInterface
      */
     private function hostIsPublic(string $url): bool
     {
-        $host = strtolower(trim((string) parse_url($url, PHP_URL_HOST), '.'));
+        $host = strtolower(trim((string) wp_parse_url($url, PHP_URL_HOST), '.'));
         if ($host === '') {
             return false;
         }
-        if ($host === strtolower((string) parse_url(home_url(), PHP_URL_HOST))) {
+        if ($host === strtolower((string) wp_parse_url(home_url(), PHP_URL_HOST))) {
             return true;
         }
         $literal = trim($host, '[]');
@@ -197,6 +197,7 @@ final class WebFetchToolkit implements ToolkitInterface
             if (!SpecialPurposeAddress::isAddress($address)) {
                 return false;
             }
+            // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- Deliberately core's own filter, not a hook of ours: a site that has already told WordPress a private host is reachable should not have to say it again here.
             if (SpecialPurposeAddress::match($address) !== null && !apply_filters('http_request_host_is_external', false, $host, $url)) {
                 return false;
             }
@@ -233,6 +234,7 @@ final class WebFetchToolkit implements ToolkitInterface
     public static function resolve(string $host, ?\Closure $a = null, ?\Closure $aaaa = null): array
     {
         $a ??= static fn(string $host): array|false => gethostbynamel($host);
+        // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged -- dns_get_record() emits a PHP warning as well as returning false when a lookup fails. The false is checked below and refuses the fetch; the warning would only leak resolver detail into the response of an SSRF guard.
         $aaaa ??= static fn(string $host): array|false => @dns_get_record($host, DNS_AAAA);
         $v4 = $a($host);
         $v6 = $aaaa($host);
@@ -320,6 +322,7 @@ final class WebFetchToolkit implements ToolkitInterface
     {
         $html = self::withoutContentless($html);
         $html = self::pcre(preg_replace('#</(p|div|h[1-6]|li|tr|blockquote|pre|section|article|header|footer|title)\s*>|<br\s*/?>#i', "\n\n", $html));
+        // phpcs:ignore WordPress.WP.AlternativeFunctions.strip_tags_strip_tags -- withoutContentless() above already removes script, style, noscript and template with their contents, tracking nesting properly, which is stronger than the single non-greedy regex wp_strip_all_tags() would add. All that is wanted here is tag removal that leaves the \n\n block boundaries the line above inserted.
         $text = html_entity_decode(strip_tags($html), ENT_QUOTES | ENT_HTML5, 'UTF-8');
         $lines = [];
         foreach (explode("\n", str_replace(["\r\n", "\r"], "\n", $text)) as $line) {

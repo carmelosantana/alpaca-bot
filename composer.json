@@ -16,11 +16,14 @@
     },
     "require-dev": {
         "brain/monkey": "^2.7",
+        "dealerdirect/phpcodesniffer-composer-installer": "^1.0",
         "mockery/mockery": "^1.6",
         "pestphp/pest": "^5.1",
         "php-stubs/wordpress-stubs": "^7.1",
+        "phpcompatibility/phpcompatibility-wp": "^2.1",
         "phpstan/phpstan": "^2.2",
-        "szepeviktor/phpstan-wordpress": "^2.0"
+        "szepeviktor/phpstan-wordpress": "^2.0",
+        "wp-coding-standards/wpcs": "^3.1"
     },
     "autoload": {
         "psr-4": {
@@ -36,7 +39,8 @@
         "optimize-autoloader": true,
         "sort-packages": true,
         "allow-plugins": {
-            "pestphp/pest-plugin": true
+            "pestphp/pest-plugin": true,
+            "dealerdirect/phpcodesniffer-composer-installer": true
         }
     },
     "extra": {
@@ -69,8 +73,11 @@
         "test": "pest --colors=always",
         "test:integration": "bash bin/test-integration.sh",
         "analyse": "phpstan analyse --memory-limit=1G",
+        "lint": "phpcs",
+        "lint:fix": "phpcbf",
         "docs:hooks": "@php bin/hooks-doc.php",
         "check": [
+            "@lint",
             "@analyse",
             "@test"
         ]

@@ -42,7 +42,7 @@ final class Shell extends Component
         $who = Participants::current($this->store);
 
         $header = new Header(
-            $this->t('Alpaca Bot'),
+            __('Alpaca Bot', 'alpaca-bot'),
             new ModelSelect($this->catalog->all(), $model, (bool) $this->store->get('chat.user_can_change_model')),
             new HistorySelect($this->history, $id, $title),
         );
@@ -60,6 +60,7 @@ final class Shell extends Component
         if (!is_readable($path)) {
             return '';
         }
+        // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents -- Reads the plugin's own bundled sprite off local disk behind is_readable(), never a URL; wp_remote_get() is for remote fetches and WP_Filesystem is for user-writable paths, which this is not.
         $svg = file_get_contents($path);
         return $svg === false ? '' : $svg;
     }

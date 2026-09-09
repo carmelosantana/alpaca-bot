@@ -89,10 +89,11 @@ final class ConversationsController extends Controller
         do {
             $rows = $this->conversations->listFor($userId, self::BATCH);
             $before = $deleted;
+            $fetched = count($rows);
             foreach ($rows as $row) {
                 $deleted += $this->conversations->delete($row['id'], $userId) ? 1 : 0;
             }
-        } while (count($rows) === self::BATCH && $deleted > $before);
+        } while ($fetched === self::BATCH && $deleted > $before);
         return new \WP_REST_Response(['deleted' => $deleted]);
     }
 }

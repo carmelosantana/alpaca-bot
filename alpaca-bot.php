@@ -48,14 +48,14 @@ spl_autoload_register(static function (string $class): void {
 
 // Third-party code, prefixed under AlpacaBot\Vendor\ by strauss (composer install builds it on
 // a dev checkout; the release zip ships it). This is the only autoloader file the runtime loads.
-$prefixed = ALPACA_BOT_DIR . 'vendor-prefixed/autoload.php';
-if (!is_readable($prefixed)) {
+$alpaca_bot_prefixed = ALPACA_BOT_DIR . 'vendor-prefixed/autoload.php';
+if (!is_readable($alpaca_bot_prefixed)) {
     add_action('admin_notices', static function (): void {
         echo '<div class="notice notice-error"><p>' . esc_html__('Alpaca Bot: vendor-prefixed/ is missing. Run composer install (dev checkout) or reinstall the release zip.', 'alpaca-bot') . '</p></div>';
     });
     return;
 }
-require_once $prefixed;
+require_once $alpaca_bot_prefixed;
 
 \AlpacaBot\Plugin::boot();
 register_deactivation_hook(__FILE__, [\AlpacaBot\Plugin::class, 'deactivate']);

@@ -31,11 +31,11 @@ final class MessageBubble extends Component
     public function render(): string
     {
         $assistant = $this->m->role === 'assistant';
-        $name = $assistant ? ($this->m->model !== '' ? $this->m->model : $this->t('Assistant')) : $this->userName;
+        $name = $assistant ? ($this->m->model !== '' ? $this->m->model : __('Assistant', 'alpaca-bot')) : $this->userName;
         $content = $this->streaming ? '' : ($assistant ? $this->md->toHtml($this->m->content) : nl2br($this->e($this->m->content), false));
-        $actions = $this->tag('button', ['type' => 'button', 'class' => 'ab-msg__action', 'data-action' => 'copy', 'aria-label' => $this->t('Copy message')], Icon::svg('copy'));
+        $actions = $this->tag('button', ['type' => 'button', 'class' => 'ab-msg__action', 'data-action' => 'copy', 'aria-label' => __('Copy message', 'alpaca-bot')], Icon::svg('copy'));
         if (!$assistant) {
-            $actions .= $this->tag('button', ['type' => 'button', 'class' => 'ab-msg__action', 'data-action' => 'edit', 'aria-label' => $this->t('Edit and resend')], Icon::svg('square-pen'));
+            $actions .= $this->tag('button', ['type' => 'button', 'class' => 'ab-msg__action', 'data-action' => 'edit', 'aria-label' => __('Edit and resend', 'alpaca-bot')], Icon::svg('square-pen'));
         }
         $receipt = $assistant && $this->m->usage !== null ? (new Receipt([
             'model' => $this->m->model,
@@ -57,7 +57,7 @@ final class MessageBubble extends Component
         $imgs = '';
         foreach ($this->m->images as $src) {
             if (ImageData::isValid($src)) {
-                $imgs .= $this->tag('img', ['class' => 'ab-msg__image', 'src' => $src, 'alt' => $this->t('Attached image')]);
+                $imgs .= $this->tag('img', ['class' => 'ab-msg__image', 'src' => $src, 'alt' => __('Attached image', 'alpaca-bot')]);
             }
         }
         // The marker is read as stored (an int, or whatever a filter left there): only a count above zero says anything.

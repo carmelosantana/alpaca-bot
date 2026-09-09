@@ -150,7 +150,7 @@ final class StreamController extends Controller
         }
         ($this->prepareOutput)();
         $this->stream($ticket, static function (string $frame): void {
-            echo $frame;
+            echo $frame; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- Not HTML: the body is text/event-stream and Sse::frame() builds every frame with wp_json_encode(), which is the escaping this wire format takes. HTML escaping here would corrupt the JSON the client parses.
             flush();
         });
         return true;

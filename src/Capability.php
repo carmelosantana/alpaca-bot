@@ -33,6 +33,7 @@ final class Capability
     public static function filtered(string $hook, string $default, mixed ...$args): string
     {
         /** @var mixed $filtered */
+        // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.DynamicHooknameFound -- $hook is this helper's argument; every caller passes an alpaca_bot/... literal, which the sniff cannot see through the indirection.
         $filtered = apply_filters($hook, $default, ...$args);
         return is_string($filtered) && $filtered !== '' && !is_numeric($filtered) ? $filtered : $default;
     }

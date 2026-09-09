@@ -62,6 +62,7 @@ final class Sse
      */
     public static function prepareOutput(): void
     {
+        // phpcs:disable WordPress.PHP.NoSilencedErrors.Discouraged, WordPress.PHP.IniSet.Risky, WordPress.PHP.DiscouragedPHPFunctions.runtime_configuration_apache_setenv -- Turning off buffering and compression for the life of this one request is what makes progressive streaming possible at all; there is no WordPress API for it. Each call is silenced because a host that disables the setting, or runs PHP as something other than an Apache module, makes it emit a warning that would be written into the event stream and corrupt the first frame. Every one is advisory: a failure only means the client sees the reply in larger pieces.
         if (function_exists('apache_setenv')) {
             @apache_setenv('no-gzip', '1');
         }
@@ -75,6 +76,7 @@ final class Sse
                 break;
             }
         }
+        // phpcs:enable WordPress.PHP.NoSilencedErrors.Discouraged, WordPress.PHP.IniSet.Risky, WordPress.PHP.DiscouragedPHPFunctions.runtime_configuration_apache_setenv
         ignore_user_abort(true);
         set_time_limit(0);
     }

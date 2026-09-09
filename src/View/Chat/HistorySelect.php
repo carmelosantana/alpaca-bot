@@ -40,7 +40,7 @@ final class HistorySelect extends Component
 
     public function render(): string
     {
-        $opts = $this->option(0, $this->t('New chat'));
+        $opts = $this->option(0, __('New chat', 'alpaca-bot'));
         if ($this->current !== 0 && !in_array($this->current, array_map(static fn(array $row): int => (int) $row['id'], $this->history), true)) {
             $opts .= $this->option($this->current, $this->currentTitle);
         }
@@ -55,14 +55,14 @@ final class HistorySelect extends Component
         return sprintf(
             '<div id="ab-history" class="ab-history"%s><label class="screen-reader-text" for="ab-history-select">%s</label>%s</div>',
             Hx::attrs(['get' => '/history', 'trigger' => 'ab:refresh from:body', 'target' => 'this', 'swap' => 'outerHTML', 'include' => '#ab-form [name=conversation_id]', 'headers' => Hx::formHeaders()]),
-            $this->e($this->t('History')),
+            $this->e(__('History', 'alpaca-bot')),
             $select,
         );
     }
 
     private function option(int $id, string $title): string
     {
-        $title = $title !== '' ? $title : $this->t('Untitled');
+        $title = $title !== '' ? $title : __('Untitled', 'alpaca-bot');
         return sprintf('<option value="%1$d" data-id="%1$d"%2$s>%3$s</option>', $id, $id === $this->current ? ' selected' : '', $this->e($title));
     }
 }

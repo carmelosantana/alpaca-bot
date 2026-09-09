@@ -208,6 +208,7 @@ final class ConversationStore
     {
         if (self::$maxAllowedPacket === null) {
             global $wpdb;
+            // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- Reads a session system variable, not a table: there is no core API for it, no user input in the statement, and the value is already memoised in the static above for the life of the process, so an object-cache round trip would cost more than the read.
             $raw = $wpdb->get_var('SELECT @@max_allowed_packet');
             self::$maxAllowedPacket = is_scalar($raw) && (int) $raw > 0 ? (int) $raw : self::PACKET_DEFAULT;
         }

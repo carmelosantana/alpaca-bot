@@ -103,6 +103,7 @@ final class Errors
     {
         $detail = $e->getMessage();
         if (defined('WP_DEBUG') && WP_DEBUG) {
+            // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log -- Deliberate diagnostic, gated on WP_DEBUG exactly as core's own logging is; the provider's raw error is withheld from the response body and this is the only place an administrator can read it.
             error_log('[alpaca-bot] ' . $detail);
         }
         $data = ['status' => 502];

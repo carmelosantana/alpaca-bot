@@ -36,6 +36,9 @@ uses()->beforeEach(function (): void {
     // Rest\Sse frames are wp_json_encode()d, which is json_encode() plus a non-UTF-8 fallback
     // no test needs; the plain function stands in.
     Functions\when('wp_json_encode')->alias('json_encode');
+    // wp_parse_url() is parse_url() plus a shim for PHP < 5.4.7, which this plugin's 8.4
+    // floor is far past; the plain function is the same thing on every version we run on.
+    Functions\when('wp_parse_url')->alias('parse_url');
     // Every write that WordPress unslashes is wrapped in wp_slash(). The real thing stands in,
     // not a pass-through: a test that asserts on what a write was handed should see the value
     // the site's database would (wpSlashLikeCore() does what core's does).

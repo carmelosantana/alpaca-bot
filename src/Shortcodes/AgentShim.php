@@ -122,11 +122,13 @@ final class AgentShim
             return;
         }
         $this->warned = true;
+        // phpcs:disable WordPress.Security.EscapeOutput.OutputNotEscaped -- Every part of this notice is a literal: a translated string and two hard-coded shortcode examples, with no caller data. esc_html() would render the quotes in prompt="…" as &quot; in the developer notice.
         _doing_it_wrong('alpacabot_agent', sprintf(
             /* translators: 1: [alpacabot_agent], 2: the replacement shortcode */
             __('The %1$s shortcode is deprecated since 0.5.0 and goes away in a later 0.x release. It still fetches its URL and, for summarize, asks the model. Put the text to work on in the prompt of %2$s instead, or open the URL in the chat screen, where the web_fetch and summarize tools read it for you.', 'alpaca-bot'),
             '[alpacabot_agent]',
             '[alpacabot prompt="Summarize the following: …"]',
         ), '0.5.0');
+        // phpcs:enable WordPress.Security.EscapeOutput.OutputNotEscaped
     }
 }

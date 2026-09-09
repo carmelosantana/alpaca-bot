@@ -117,6 +117,7 @@ final class Pipeline
     public function complete(int $userId, string $text, array $options = []): Result
     {
         $gen = $this->send($userId, $text, $options);
+        // phpcs:ignore Generic.CodeAnalysis.EmptyStatement.DetectedForeach -- Draining the generator is the whole point: send() does its work as it is iterated, and the Result is only available from getReturn() once it has run to completion.
         foreach ($gen as $_) {
         }
         return $gen->getReturn();
@@ -709,6 +710,7 @@ final class Pipeline
      */
     private static function markup(string $content): array
     {
+        // phpcs:ignore Universal.Operators.DisallowShortTernary.Found -- The idiomatic guard for preg_split()'s false return; ?: reads better here than repeating the whole call in a full ternary.
         $segments = preg_split('~</?tool_call>~', $content, -1, PREG_SPLIT_OFFSET_CAPTURE) ?: [];
         $last = count($segments) - 1;
         $calls = [];
@@ -758,6 +760,7 @@ final class Pipeline
     private static function fakedPieces(string $text, int $offset): array
     {
         $found = [];
+        // phpcs:ignore Universal.Operators.DisallowShortTernary.Found -- The idiomatic guard for preg_split()'s false return; ?: reads better here than repeating the whole call in a full ternary.
         foreach (preg_split('~\R[ \t]*\R~', $text, -1, PREG_SPLIT_OFFSET_CAPTURE) ?: [] as [$piece, $at]) {
             $inside = self::unfenced(trim($piece));
             if ($inside !== null) {
@@ -803,7 +806,7 @@ final class Pipeline
             // One run: a call and the markers around it touch, byte to byte.
             $end = $i + 1;
             while ($end < $count && $found[$end][0] === $found[$end - 1][1]) {
-                $end++;
+                ++$end;
             }
             if (preg_match('~(?:\A|\R)[^\S\r\n]*\z~', substr($content, 0, $found[$i][0])) !== 1
                 || preg_match('~\A[^\S\r\n]*(?:\R|\z)~', substr($content, $found[$end - 1][1])) !== 1
@@ -996,6 +999,7 @@ final class Pipeline
         $tail = match ($output->finishReason) {
             // A failure is send()'s to raise (failure(), which reads a termination apart from
             // one); a termination is not a failure, and its message is the run's last word.
+            // phpcs:ignore PHPCompatibility.Operators.RemovedTernaryAssociativity.Found -- False positive: these are two separate match arms, each with one ternary, not a nested one. PHP 8 refuses to compile genuinely unparenthesised nested ternaries, and this file parses and runs on 8.4.
             AgentFinishReason::Error => self::failure($output, $observer) === null ? $output->content : '',
             AgentFinishReason::Stop, AgentFinishReason::Done => $output->content !== '' && !str_ends_with($streamed, $output->content) ? $output->content : '',
             AgentFinishReason::MaxIterations, AgentFinishReason::BudgetExhausted => __('The assistant ran out of tool steps before it finished.', 'alpaca-bot'),

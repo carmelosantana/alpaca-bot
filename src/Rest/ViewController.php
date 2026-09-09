@@ -206,7 +206,7 @@ final class ViewController extends Controller
         $server->send_header('Content-Type', 'text/html; charset=utf-8');
         if ($request->get_method() !== 'HEAD') {
             // Component output: escaped where it was built (Component::tag(), Markdown's kses).
-            echo $html;
+            echo $html; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- Component output, escaped where it is built (Component::tag(), Markdown's wp_kses); escaping it again here would double-encode the markup.
         }
         return true;
     }

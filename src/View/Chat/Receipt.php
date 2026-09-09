@@ -27,12 +27,12 @@ final class Receipt extends Component
         $tokens = (int) ($this->receipt['total_tokens'] ?? 0);
         if ($tokens > 0) {
             /* translators: %s: a token count */
-            $parts[] = $this->e(sprintf($this->t('%s tokens'), number_format_i18n($tokens)));
+            $parts[] = $this->e(sprintf(__('%s tokens', 'alpaca-bot'), number_format_i18n($tokens)));
         }
         $ms = (int) ($this->receipt['duration_ms'] ?? 0);
         if ($ms > 0) {
             /* translators: %s: seconds to one decimal */
-            $parts[] = $this->e(sprintf($this->t('%s s'), number_format_i18n(round($ms / 1000, 1), 1)));
+            $parts[] = $this->e(sprintf(__('%s s', 'alpaca-bot'), number_format_i18n(round($ms / 1000, 1), 1)));
         }
         $tools = (int) ($this->receipt['tool_calls'] ?? 0);
         if ($tools > 0) {

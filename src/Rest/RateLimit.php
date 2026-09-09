@@ -95,6 +95,7 @@ final class RateLimit
      */
     private static function client(): string
     {
+        // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.MissingUnslash -- wp_magic_quotes() slashes $_GET, $_POST and $_COOKIE, never REMOTE_ADDR, so there is nothing to unslash; FILTER_VALIDATE_IP is the sanitisation and rejects anything that is not a bare address.
         $ip = filter_var($_SERVER['REMOTE_ADDR'] ?? '', FILTER_VALIDATE_IP);
         return is_string($ip) ? wp_hash($ip) : 'unknown';
     }

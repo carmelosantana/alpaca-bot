@@ -63,6 +63,7 @@ final class ChatCommand
         ?callable $fail = null,
     ) {
         $this->write = $write ?? static function (string $s): void {
+            // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fwrite -- Writes to the CLI process's standard output stream, not to a file; WP_Filesystem has no equivalent and is not loaded under WP-CLI anyway.
             fwrite(STDOUT, $s);
         };
         $this->fail = $fail ?? static function (string $message): void {
@@ -281,7 +282,7 @@ final class ChatCommand
             }
             $this->store->set($key, $value);
         }
-        $this->emit(json_encode($this->store->get($key), self::JSON) . "\n");
+        $this->emit(wp_json_encode($this->store->get($key), self::JSON) . "\n");
     }
 
     /**
@@ -374,7 +375,7 @@ final class ChatCommand
     /** @param array<string, mixed> $data */
     private function json(array $data): void
     {
-        $this->emit(json_encode($data, self::JSON | JSON_PRETTY_PRINT) . "\n");
+        $this->emit(wp_json_encode($data, self::JSON | JSON_PRETTY_PRINT) . "\n");
     }
 
     private function emit(string $s): void

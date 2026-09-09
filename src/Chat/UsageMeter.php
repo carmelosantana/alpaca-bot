@@ -305,7 +305,7 @@ final class UsageMeter
                     $skip[] = (int) $row->ID;
                     continue;
                 }
-                $deleted++;
+                ++$deleted;
             }
             if (count($rows) < self::CLEANUP_BATCH) {
                 break;

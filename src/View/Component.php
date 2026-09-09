@@ -25,7 +25,6 @@ abstract class Component
     protected function e(string $s): string { return esc_html($s); }
     protected function a(string $s): string { return esc_attr($s); }
     protected function u(string $s): string { return esc_url($s); }
-    protected function t(string $s): string { return __($s, 'alpaca-bot'); }
 
     /**
      * An element with attribute-escaped values. A null value drops the attribute, so a

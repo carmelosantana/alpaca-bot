@@ -13,3 +13,6 @@ assets/js/*.map
 assets/css/*.css
 assets/img/icons.svg
 _org/
+
+# Local PHPCS override; phpcs.xml.dist is the committed ruleset.
+phpcs.xml
