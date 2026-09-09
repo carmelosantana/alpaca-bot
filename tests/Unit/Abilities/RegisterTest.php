@@ -7,6 +7,9 @@ use AlpacaBot\Chat\ConversationStore;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Enum\ProviderFinishReason;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Provider\Response;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Provider\Usage;
+use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Tool\Parameter\StringParameter;
+use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Tool\Tool;
+use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Contract\ToolkitInterface;
 use Brain\Monkey\Filters;
 use Brain\Monkey\Functions;
 
@@ -130,6 +133,7 @@ it('chat: allowed for a user who can edit_posts, refused for one who cannot, and
 
 it('chat: runs one stored turn as the acting user, continuing the conversation and with the model asked for, and answers the reply, the conversation id and the receipt', function (): void {
     $h = abilitiesFakeReply('Hello there.', $call);
+    abilitiesCaps(['edit_posts']);
     $execute = abilitiesRegister($h)->definitions()['alpaca-bot/chat']['execute_callback'];
     $out = $execute(['message' => 'hi', 'conversation_id' => 42, 'model' => 'llama3.2']);
     expect($out)->toBe(['conversation_id' => 42, 'reply' => 'Hello there.', 'receipt' => $out['receipt']])
@@ -144,6 +148,8 @@ it('chat: runs one stored turn as the acting user, continuing the conversation a
 
 it('chat: what the pipeline refuses becomes the same WP_Error the REST route answers, and nothing runs', function (): void {
     $h = pipelineWith(null);
+    // Both users may chat; what refuses them is the pipeline.
+    Functions\when('user_can')->justReturn(true);
     $execute = abilitiesRegister($h)->definitions()['alpaca-bot/chat']['execute_callback'];
     // Conversation 42 belongs to user 3; user 9 may not continue it.
     $out = (abilitiesRegister($h, userId: 9)->definitions()['alpaca-bot/chat']['execute_callback'])(['message' => 'hi', 'conversation_id' => 42]);
@@ -173,6 +179,7 @@ it('summarize: needs edit_posts and the summarize toolkit switched on, and says 
 
 it('summarize: runs the summarize toolkit itself, as one ephemeral turn billed to the acting user, and answers the summary', function (): void {
     $h = abilitiesFakeReply('A summary.', $call);
+    abilitiesCaps(['edit_posts']);
     $out = (abilitiesRegister($h)->definitions()['alpaca-bot/summarize']['execute_callback'])(['text' => 'Long text here.', 'length' => 'short']);
     expect($out)->toBe(['summary' => 'A summary.'])
         // The toolkit's own prompt: the length words it maps, not the site's chat prompt.
@@ -187,6 +194,7 @@ it('summarize: runs the summarize toolkit itself, as one ephemeral turn billed t
 it('summarize: a turn refused by the pipeline keeps its code, and a toolkit switched off between the check and the run still refuses', function (): void {
     // Cap spent (user 3 has used 50 of 10 this month): the 402 the REST route answers, not a flattened tool error.
     $h = pipelineWith(null, ['governance.user_monthly_tokens' => 10]);
+    abilitiesCaps(['edit_posts']);
     $h->transients['alpaca_bot_usage_3_2024-08'] = ['tokens' => 50, 'requests' => 1];
     $out = (abilitiesRegister($h)->definitions()['alpaca-bot/summarize']['execute_callback'])(['text' => 'x']);
     expect($out)->toBeInstanceOf(WP_Error::class)
@@ -212,9 +220,10 @@ it('draft-post: a post needs edit_posts, a page needs edit_pages, and the draft_
     expect($off)->toBeInstanceOf(WP_Error::class)->and($off->get_error_code())->toBe('alpaca_bot_toolkit_disabled');
 });
 
-it('draft-post: runs the draft_post toolkit itself and answers the id and the edit link; its refusal is a WP_Error', function (): void {
+it('draft-post: runs the draft_post toolkit itself and answers the id and the edit link; a page the user may not edit is refused before it', function (): void {
     $h = pipelineWith(null);
     abilitiesCaps(['edit_posts']);
+    Functions\when('is_user_logged_in')->justReturn(true);
     Functions\when('wp_kses_post')->returnArg();
     Functions\when('get_edit_post_link')->alias(static fn(int $id): string => "/wp-admin/post.php?post={$id}&action=edit");
     Functions\when('is_wp_error')->alias(static fn(mixed $v): bool => $v instanceof WP_Error);
@@ -226,11 +235,125 @@ it('draft-post: runs the draft_post toolkit itself and answers the id and the ed
     $execute = abilitiesRegister($h)->definitions()['alpaca-bot/draft-post']['execute_callback'];
     expect($execute(['title' => 'From MCP', 'content' => '<p>Body</p>']))->toBe(['id' => 77, 'edit_url' => '/wp-admin/post.php?post=77&action=edit'])
         ->and($inserted)->toMatchArray(['post_type' => 'post', 'post_status' => 'draft', 'post_author' => 3, 'post_title' => 'From MCP']);
-    // The toolkit's own refusal (a page for a user without edit_pages) comes back as an error, and nothing was inserted.
+    // A page for a user without edit_pages: the execute callback's own capability check, from
+    // the same map the toolkit enforces, refuses before the toolkit runs, and nothing was inserted.
     $inserted = null;
     $out = $execute(['title' => 'p', 'content' => 'c', 'post_type' => 'page']);
     expect($out)->toBeInstanceOf(WP_Error::class)
-        ->and($out->get_error_code())->toBe('alpaca_bot_tool_error')
-        ->and($out->get_error_data()['status'])->toBe(400)
+        ->and($out->get_error_code())->toBe('rest_forbidden')
+        ->and($out->get_error_data()['status'])->toBe(403)
         ->and($inserted)->toBeNull();
+});
+
+/** The rate limiter's counter, kept in the harness's transients so a hit is seen by the next. */
+function abilitiesCountHits(object $h): void
+{
+    Functions\when('set_transient')->alias(static function (string $key, mixed $value) use ($h): bool {
+        $h->transients[$key] = $value;
+        return true;
+    });
+}
+
+it('chat and summarize: limited with POST /chat, in its chat bucket, thirty a minute per user; the thirty-first is 429 with retry_after and nothing runs', function (): void {
+    $h = abilitiesFakeReply('Hello.');
+    abilitiesCaps(['edit_posts']);
+    abilitiesCountHits($h);
+    // The same key RateLimit writes for the REST route: twenty-nine hits already this minute, from whichever surface.
+    $key = 'alpaca_bot_rl_chat_3_' . gmdate('YmdHi', 1_725_000_000);
+    $h->transients[$key] = 29;
+    Filters\expectApplied('alpaca_bot/rate_limit')->times(2)->with(30, 3, 'chat')->andReturnFirstArg();
+    $defs = abilitiesRegister($h)->definitions();
+    $out = ($defs['alpaca-bot/chat']['execute_callback'])(['message' => 'hi']);
+    expect($out)->toBeArray()->and($out['reply'])->toBe('Hello.')->and($h->transients[$key])->toBe(30);
+    $writes = count($h->writes);
+    $out = ($defs['alpaca-bot/summarize']['execute_callback'])(['text' => 'x']);
+    expect($out)->toBeInstanceOf(WP_Error::class)
+        ->and($out->get_error_code())->toBe('alpaca_bot_rate_limited')
+        ->and($out->get_error_data()['status'])->toBe(429)
+        ->and($out->get_error_data()['retry_after'])->toBeGreaterThan(0)
+        // Counted even when refused, as the REST route counts it: a client past the limit does not refill its bucket.
+        ->and($h->transients[$key])->toBe(31)
+        ->and(count($h->writes))->toBe($writes);
+});
+
+it('the alpaca_bot/rate_limit filter moves the abilities\' limit as it moves the REST routes\': at one a minute the second turn is refused', function (): void {
+    $h = abilitiesFakeReply('Hello.');
+    abilitiesCaps(['edit_posts']);
+    abilitiesCountHits($h);
+    Filters\expectApplied('alpaca_bot/rate_limit')->times(2)->with(30, 3, 'chat')->andReturn(1);
+    $execute = abilitiesRegister($h)->definitions()['alpaca-bot/chat']['execute_callback'];
+    expect($execute(['message' => 'hi']))->toBeArray();
+    $out = $execute(['message' => 'again']);
+    expect($out)->toBeInstanceOf(WP_Error::class)->and($out->get_error_code())->toBe('alpaca_bot_rate_limited');
+});
+
+it('the execute callbacks refuse a caller without the capability on their own, so an adapter that skips check_permissions gets the same answer and nothing runs', function (): void {
+    $h = pipelineWith(null);
+    abilitiesCaps(['read']);
+    Functions\when('is_user_logged_in')->justReturn(true);
+    $defs = abilitiesRegister($h)->definitions();
+    foreach (['alpaca-bot/chat' => ['message' => 'hi'], 'alpaca-bot/summarize' => ['text' => 'x'], 'alpaca-bot/draft-post' => ['title' => 't', 'content' => 'c']] as $id => $input) {
+        $out = ($defs[$id]['execute_callback'])($input);
+        expect($out)->toBeInstanceOf(WP_Error::class, $id)
+            ->and($out->get_error_code())->toBe('rest_forbidden', $id)
+            ->and($out->get_error_data()['status'])->toBe(403, $id);
+    }
+    // A page for a user who may edit posts but not pages: the post type's own capability, asked again here, before the toolkit is.
+    abilitiesCaps(['edit_posts']);
+    $out = ($defs['alpaca-bot/draft-post']['execute_callback'])(['title' => 't', 'content' => 'c', 'post_type' => 'page']);
+    expect($out)->toBeInstanceOf(WP_Error::class)
+        ->and($out->get_error_code())->toBe('rest_forbidden')
+        ->and($h->writes)->toBe([]);
+});
+
+it('nobody: an acting user of 0 is refused by the guard itself, whatever user_can() would say about id 0, on every permission and execute callback', function (): void {
+    $h = pipelineWith(null);
+    // A capability map that says yes to anyone, id 0 included: only the guard can refuse here.
+    Functions\when('user_can')->justReturn(true);
+    Functions\when('is_user_logged_in')->justReturn(false);
+    $defs = abilitiesRegister($h, userId: 0)->definitions();
+    foreach (['alpaca-bot/chat' => ['message' => 'hi'], 'alpaca-bot/summarize' => ['text' => 'x'], 'alpaca-bot/draft-post' => ['title' => 't', 'content' => 'c']] as $id => $input) {
+        expect(($defs[$id]['permission_callback'])($input))->toBeFalse($id);
+        $out = ($defs[$id]['execute_callback'])($input);
+        expect($out)->toBeInstanceOf(WP_Error::class, $id)
+            ->and($out->get_error_code())->toBe('rest_forbidden', $id)
+            ->and($out->get_error_data()['status'])->toBe(401, $id);
+    }
+    expect($h->writes)->toBe([]);
+});
+
+it('summarize and draft-post run whatever alpaca_bot/toolkits put under the id, so a site that swaps a toolkit swaps it for the model and the ability alike', function (): void {
+    $h = pipelineWith(null);
+    abilitiesCaps(['edit_posts']);
+    abilitiesCountHits($h);
+    $swapped = new class implements ToolkitInterface {
+        /** @var list<array{0: string, 1: array<string, mixed>}> */
+        public array $calls = [];
+
+        public function tools(): array
+        {
+            return [
+                new Tool('summarize', 'A summary from elsewhere.', [new StringParameter('text', 'The text.')], function (array $args): string {
+                    $this->calls[] = ['summarize', $args];
+                    return 'Swapped summary.';
+                }),
+                new Tool('draft_post', 'A draft from elsewhere.', [new StringParameter('title', 'The title.'), new StringParameter('content', 'The body.')], function (array $args): string {
+                    $this->calls[] = ['draft_post', $args];
+                    return (string) json_encode(['id' => 5, 'edit_url' => '/edit/5']);
+                }),
+            ];
+        }
+
+        public function guidelines(): string
+        {
+            return '';
+        }
+    };
+    Filters\expectApplied('alpaca_bot/toolkits')->with(Mockery::type('array'), 3)->andReturn(['summarize' => $swapped, 'draft_post' => $swapped]);
+    $defs = abilitiesRegister($h)->definitions();
+    expect(($defs['alpaca-bot/summarize']['execute_callback'])(['text' => 'Long.', 'length' => 'short']))->toBe(['summary' => 'Swapped summary.'])
+        ->and(($defs['alpaca-bot/draft-post']['execute_callback'])(['title' => 't', 'content' => 'c']))->toBe(['id' => 5, 'edit_url' => '/edit/5'])
+        ->and($swapped->calls)->toBe([['summarize', ['text' => 'Long.', 'length' => 'short']], ['draft_post', ['title' => 't', 'content' => 'c']]])
+        // The plugin's own toolkits never ran: no turn, no insert.
+        ->and($h->writes)->toBe([]);
 });

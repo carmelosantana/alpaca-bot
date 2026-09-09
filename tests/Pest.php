@@ -637,5 +637,5 @@ function abilitiesRegister(object $h, array $enabled = ['summarize', 'draft_post
     $registry->register('summarize', $summarize);
     $draft = new AlpacaBot\Toolkit\DraftPostToolkit($user);
     $registry->register('draft_post', $draft);
-    return new AlpacaBot\Abilities\Register($h->pipeline, $registry, $summarize, $draft, $user, $exists);
+    return new AlpacaBot\Abilities\Register($h->pipeline, $registry, $user, $exists);
 }

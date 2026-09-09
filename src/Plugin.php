@@ -86,9 +86,10 @@ final class Plugin
         $this->set(Toolkit\Registry::class, $registry);
         // The abilities, on core's two hooks and no other (Abilities\Register says why there is
         // no init fallback), the category's hook first because core fires it first and refuses
-        // an ability whose category it does not know. The same toolkit instances the registry
-        // holds, and the same user closure, so an ability and a chat turn act as one user.
-        $abilities = new Abilities\Register($this->get(Chat\Pipeline::class), $registry, $summarize, $draftPost, get_current_user_id(...));
+        // an ability whose category it does not know. The toolkits come from the registry when
+        // a callback runs, and the same user closure, so an ability and a chat turn act as one
+        // user over the same toolkits.
+        $abilities = new Abilities\Register($this->get(Chat\Pipeline::class), $registry, get_current_user_id(...));
         $this->set(Abilities\Register::class, $abilities);
         add_action('wp_abilities_api_categories_init', [$abilities, 'registerCategory']);
         add_action('wp_abilities_api_init', [$abilities, 'register']);

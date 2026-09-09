@@ -6,19 +6,19 @@ namespace AlpacaBot\Abilities;
 
 use AlpacaBot\Chat\Pipeline;
 use AlpacaBot\Rest\Errors;
+use AlpacaBot\Rest\RateLimit;
 use AlpacaBot\Toolkit\DraftPostToolkit;
 use AlpacaBot\Toolkit\Registry;
 use AlpacaBot\Toolkit\SummarizeToolkit;
-use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Contract\ToolInterface;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Contract\ToolkitInterface;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Enum\ToolResultStatus;
 
 /**
  * The bot as WordPress Abilities: `alpaca-bot/chat`, `alpaca-bot/summarize` and
  * `alpaca-bot/draft-post`, for the MCP Adapter, the WP AI Client and core's `wp-abilities/v1`
- * routes to call. Each is a thin door onto work that already exists (the Pipeline, the two
- * toolkits the registry holds), so a fix behind the door fixes every surface at once; nothing
- * here decides what a turn or a draft is.
+ * routes to call. Each is a thin door onto work that already exists (the Pipeline, and the
+ * summarize and draft_post toolkits as the registry hands them out), so a fix behind the door
+ * fixes every surface at once; nothing here decides what a turn or a draft is.
  *
  * Registration is on core's own hooks and nowhere else. `wp_register_ability()` refuses, with
  * `_doing_it_wrong()`, any call made outside `wp_abilities_api_init`, and the same goes for
@@ -46,12 +46,34 @@ use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Enum\ToolResultStatus;
  * DraftPostToolkit::TYPES, which is what the editor asks before showing a New button. The
  * capabilities are not filterable here: core's `wp_ability_permission_result` filter exists
  * for exactly that, with the ability name and the input in hand, and a second seam would be
- * one more place a `__return_true` could open a surface that costs money.
+ * one more place a `__return_true` could open a surface that costs money. Every execute
+ * callback asks the capability (and the toolkit switch, below) again itself, before it runs
+ * anything: core's execute() always runs check_permissions first and exposes no way round it,
+ * but a third-party adapter, or a site's own `ability_class`, may hand the callback a call the
+ * permission callback never saw, and a callback that is only safe when something else checked
+ * first is not defensible on its own. A refusal there is the WP_Error the REST routes' own
+ * permission callback answers (Errors::forbidden(): `rest_forbidden`, 403 or 401).
+ *
+ * The rate limit. Chat and summarize spend tokens, and so does `POST /alpaca-bot/v1/chat`,
+ * which is limited by Rest\RateLimit at thirty a minute per user. The abilities reach the
+ * pipeline through core's run route and every MCP client without that route's wrapper, so
+ * the two execute callbacks record the same hit themselves: the same limiter, the same `chat`
+ * bucket (one person on two surfaces is one person, as Rest\Controller says of two routes) and
+ * the same `alpaca_bot/rate_limit` filter, so a site that moves the limit moves it for both
+ * at once. The hit is recorded after the capability and the switch, as the REST wrapper counts
+ * only requests that were allowed, and before the run; the refusal is Errors::tooMany(), 429
+ * with `retry_after` in its data, the one place a client of an ability can read it (there is
+ * no response header to carry Retry-After on this path). Without this the monthly caps were
+ * the only brake, and both default to 0, unlimited. Draft-post spends nothing and is not
+ * limited, as the REST routes that write a post are not.
  *
  * The Tools setting. An ability whose toolkit is switched off (`toolkits.enabled`) stays
  * registered and refuses in its permission callback, with a WP_Error that says which switch,
  * evaluated on every call through Registry::enabled() for the calling user so the
- * `alpaca_bot/toolkits` filter counts too. Unregistering was rejected: registration happens
+ * `alpaca_bot/toolkits` filter counts too. And what enabled() hands back under the id is what
+ * runs, not an instance held here: a site that swaps `summarize` or `draft_post` through the
+ * filter swaps it for the model and the ability alike, and never has the two answer with
+ * different implementations. Unregistering was rejected: registration happens
  * once, on a hook that fires before any particular caller is known, so it would freeze one
  * moment's setting and one user's filter answer for the whole process (a test run, a
  * long-lived worker), and a client would see a 404 it cannot tell from a typo. The cost of
@@ -63,12 +85,14 @@ use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Enum\ToolResultStatus;
  * Refusals keep their codes. A pipeline throw is mapped by Rest\Errors::fromPipeline() to the
  * WP_Error the `/alpaca-bot/v1/chat` route answers (402 for a spent cap, 400 for the caller's
  * mistake, 502 for the provider), so one turn told two ways refuses the same way. That is why
- * summarize calls SummarizeToolkit::summarize() itself rather than the model-facing
- * Tool::execute(): the Tool wrapper turns every throw into a text error, which would flatten
- * a 402 into a 400 and put the provider's own message, which quotes its URL and which
- * Errors::provider() deliberately withholds from a non-administrator, in front of anyone who
- * can edit posts. Draft-post has no throw to preserve and runs through its Tool as the model
- * does; its text refusal is `alpaca_bot_tool_error`, 400.
+ * summarize calls SummarizeToolkit::summarize() itself, when the toolkit under the id is the
+ * plugin's own, rather than the model-facing Tool::execute(): the Tool wrapper turns every
+ * throw into a text error, which would flatten a 402 into a 400 and put the provider's own
+ * message, which quotes its URL and which Errors::provider() deliberately withholds from a
+ * non-administrator, in front of anyone who can edit posts. A toolkit a site swapped in has no
+ * throw of ours to preserve and runs through its `summarize` tool as the model runs it.
+ * Draft-post has no throw to preserve either and always runs through its `draft_post` tool;
+ * a tool's text refusal is `alpaca_bot_tool_error`, 400.
  *
  * Input. Every schema says `additionalProperties: false`, so a key that is not named is a 400
  * from core before any callback runs, and no key a client sends can reach the pipeline as an
@@ -101,8 +125,6 @@ final class Register
     public function __construct(
         private Pipeline $pipeline,
         private Registry $registry,
-        private SummarizeToolkit $summarize,
-        private DraftPostToolkit $draft,
         private \Closure $userId,
         ?callable $exists = null,
     ) {
@@ -229,11 +251,11 @@ final class Register
         ];
     }
 
-    /** Whether the acting user, if there is one, holds `$capability`. */
+    /** Whether the acting user, if there is one, holds `$capability`; '' (no capability named) is never held. */
     private function can(string $capability): bool
     {
         $userId = ($this->userId)();
-        return $userId > 0 && user_can($userId, $capability);
+        return $capability !== '' && $userId > 0 && user_can($userId, $capability);
     }
 
     /**
@@ -244,15 +266,36 @@ final class Register
      */
     private function canDraft(array $input): bool|\WP_Error
     {
-        $capability = DraftPostToolkit::TYPES[(string) ($input['post_type'] ?? 'post')] ?? null;
-        return $capability !== null && $this->can($capability) ? $this->gate('draft_post') : false;
+        return $this->can(self::draftCapability($input)) ? $this->gate('draft_post') : false;
+    }
+
+    /**
+     * The capability the requested post type asks for, from the map DraftPostToolkit enforces
+     * itself; '' for a type it does not know, which can() never grants.
+     *
+     * @param array<string, mixed> $input
+     */
+    private static function draftCapability(array $input): string
+    {
+        return DraftPostToolkit::TYPES[(string) ($input['post_type'] ?? 'post')] ?? '';
     }
 
     /** True while the toolkit `$id` is switched on for the acting user; else the refusal that names the switch. */
     private function gate(string $id): true|\WP_Error
     {
-        if (array_key_exists($id, $this->registry->enabled(($this->userId)()))) {
-            return true;
+        $toolkit = $this->toolkit($id);
+        return $toolkit instanceof \WP_Error ? $toolkit : true;
+    }
+
+    /**
+     * The toolkit under `$id` for the acting user, as Registry::enabled() hands it out (the
+     * setting, then the `alpaca_bot/toolkits` filter), or the refusal that names the switch.
+     */
+    private function toolkit(string $id): ToolkitInterface|\WP_Error
+    {
+        $toolkit = $this->registry->enabled(($this->userId)())[$id] ?? null;
+        if ($toolkit !== null) {
+            return $toolkit;
         }
         return new \WP_Error(
             'alpaca_bot_toolkit_disabled',
@@ -260,6 +303,16 @@ final class Register
             sprintf(__('The %s tool is switched off on this site. An administrator can enable it under Alpaca Bot > Settings > Tools.', 'alpaca-bot'), $id),
             ['status' => 403],
         );
+    }
+
+    /**
+     * One hit on the limiter the REST routes share, for the acting user, in their `chat`
+     * bucket; the 429 when the minute is spent.
+     */
+    private function limit(): true|\WP_Error
+    {
+        $hit = (new RateLimit())->hit(($this->userId)(), 'chat');
+        return $hit['allowed'] ? true : Errors::tooMany($hit['retry_after']);
     }
 
     /**
@@ -271,6 +324,13 @@ final class Register
      */
     private function chat(array $input): array|\WP_Error
     {
+        if (!$this->can('edit_posts')) {
+            return Errors::forbidden();
+        }
+        $limit = $this->limit();
+        if ($limit instanceof \WP_Error) {
+            return $limit;
+        }
         try {
             $result = $this->pipeline->complete(($this->userId)(), (string) ($input['message'] ?? ''), [
                 'conversation_id' => max(0, (int) ($input['conversation_id'] ?? 0)),
@@ -284,65 +344,95 @@ final class Register
 
     /**
      * The summarize toolkit's own turn, called directly so a throw keeps its type (the class
-     * docblock). The gate is asked again here: the setting can change between the permission
-     * check and the run, and a client that calls execute_callback without check_permissions
-     * (core's execute() always does; a third-party adapter may not) must still meet it.
+     * docblock), or a swapped-in toolkit's `summarize` tool as the model runs it. The
+     * capability and the switch are asked again here: the setting can change between the
+     * permission check and the run, and a client that calls execute_callback without
+     * check_permissions must still meet both.
      *
      * @param array<string, mixed> $input
      * @return array{summary: string}|\WP_Error
      */
     private function summarize(array $input): array|\WP_Error
     {
-        $gate = $this->gate('summarize');
-        if ($gate instanceof \WP_Error) {
-            return $gate;
+        if (!$this->can('edit_posts')) {
+            return Errors::forbidden();
         }
-        try {
-            $result = $this->summarize->summarize((string) ($input['text'] ?? ''), (string) ($input['length'] ?? 'medium'));
-        } catch (\Throwable $e) {
-            return Errors::fromPipeline($e);
+        $toolkit = $this->toolkit('summarize');
+        if ($toolkit instanceof \WP_Error) {
+            return $toolkit;
         }
-        return ['summary' => $result->content];
+        $limit = $this->limit();
+        if ($limit instanceof \WP_Error) {
+            return $limit;
+        }
+        $text = (string) ($input['text'] ?? '');
+        if ($toolkit instanceof SummarizeToolkit) {
+            try {
+                $result = $toolkit->summarize($text, (string) ($input['length'] ?? 'medium'));
+            } catch (\Throwable $e) {
+                return Errors::fromPipeline($e);
+            }
+            return ['summary' => $result->content];
+        }
+        $args = ['text' => $text];
+        if (isset($input['length'])) {
+            $args['length'] = (string) $input['length'];
+        }
+        $summary = self::run($toolkit, 'summarize', $args);
+        return $summary instanceof \WP_Error ? $summary : ['summary' => $summary];
     }
 
     /**
      * The draft_post tool as the model runs it, its JSON answer reduced to the two keys the
-     * output schema promises.
+     * output schema promises. The post type's capability and the switch are asked again here,
+     * as summarize() says.
      *
      * @param array<string, mixed> $input
      * @return array{id: int, edit_url: string}|\WP_Error
      */
     private function draft(array $input): array|\WP_Error
     {
-        $gate = $this->gate('draft_post');
-        if ($gate instanceof \WP_Error) {
-            return $gate;
+        if (!$this->can(self::draftCapability($input))) {
+            return Errors::forbidden();
         }
-        $tool = self::tool($this->draft, 'draft_post');
-        if ($tool === null) {
-            return new \WP_Error('alpaca_bot_tool_error', __('The draft_post tool is not available.', 'alpaca-bot'), ['status' => 500]);
+        $toolkit = $this->toolkit('draft_post');
+        if ($toolkit instanceof \WP_Error) {
+            return $toolkit;
         }
         $args = ['title' => (string) ($input['title'] ?? ''), 'content' => (string) ($input['content'] ?? '')];
         if (isset($input['post_type'])) {
             $args['post_type'] = (string) $input['post_type'];
         }
-        $result = $tool->execute($args);
-        if ($result->status !== ToolResultStatus::Success) {
-            return new \WP_Error('alpaca_bot_tool_error', $result->content, ['status' => 400]);
+        $content = self::run($toolkit, 'draft_post', $args);
+        if ($content instanceof \WP_Error) {
+            return $content;
         }
-        $data = json_decode($result->content, true);
+        $data = json_decode($content, true);
         $data = is_array($data) ? $data : [];
         return ['id' => (int) ($data['id'] ?? 0), 'edit_url' => (string) ($data['edit_url'] ?? '')];
     }
 
-    /** The tool named `$name` in `$toolkit`, by name rather than position so a toolkit that grows a second tool keeps working. */
-    private static function tool(ToolkitInterface $toolkit, string $name): ?ToolInterface
+    /**
+     * The tool named `$name` in `$toolkit` run with `$args`, as the model runs it: its content
+     * on success, else its text refusal as `alpaca_bot_tool_error` (400), or a 500 when the
+     * toolkit has no such tool. By name rather than position, so a toolkit that grows a second
+     * tool keeps working.
+     *
+     * @param array<string, mixed> $args
+     */
+    private static function run(ToolkitInterface $toolkit, string $name, array $args): string|\WP_Error
     {
         foreach ($toolkit->tools() as $tool) {
-            if ($tool->name() === $name) {
-                return $tool;
+            if ($tool->name() !== $name) {
+                continue;
             }
+            $result = $tool->execute($args);
+            if ($result->status !== ToolResultStatus::Success) {
+                return new \WP_Error('alpaca_bot_tool_error', $result->content, ['status' => 400]);
+            }
+            return $result->content;
         }
-        return null;
+        /* translators: %s: the tool's id, e.g. draft_post */
+        return new \WP_Error('alpaca_bot_tool_error', sprintf(__('The %s tool is not available.', 'alpaca-bot'), $name), ['status' => 500]);
     }
 }

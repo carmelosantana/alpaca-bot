@@ -214,4 +214,26 @@ final class AbilitiesTest extends TestCase
         wp_set_current_user(0);
         $this->assertSame(401, $this->abilities('GET', '/abilities', ['namespace' => 'alpaca-bot'])->get_status());
     }
+
+    public function test_chat_and_summarize_share_the_rest_routes_rate_limit_and_its_filter(): void
+    {
+        $admin = $this->asAdmin();
+        $this->fakeProvider();
+        add_filter('alpaca_bot/rate_limit', static fn(): int => 1);
+        $response = $this->abilities('POST', '/abilities/alpaca-bot/summarize/run', ['text' => 'A long text.']);
+        $this->assertSame(200, $response->get_status(), (string) wp_json_encode($response->get_data()));
+        $response = $this->abilities('POST', '/abilities/alpaca-bot/chat/run', ['message' => 'hi']);
+        $this->assertSame(429, $response->get_status(), (string) wp_json_encode($response->get_data()));
+        $this->assertSame('alpaca_bot_rate_limited', $response->get_data()['code']);
+        $this->assertGreaterThan(0, $response->get_data()['data']['retry_after']);
+        // One bucket for the person, not one per surface: the plugin's own route is spent by the ability's hit.
+        $response = $this->rest('POST', '/chat', ['message' => 'hi']);
+        $this->assertSame(429, $response->get_status(), (string) wp_json_encode($response->get_data()));
+        // Direct execution refuses the same way, and only the one summary was billed.
+        $out = wp_get_ability('alpaca-bot/chat')->execute(['message' => 'hi']);
+        $this->assertWPError($out);
+        $this->assertSame('alpaca_bot_rate_limited', $out->get_error_code());
+        $this->assertCount(1, $this->posts(UsageMeter::POST_TYPE, $admin));
+        $this->assertSame([], $this->posts(ConversationStore::POST_TYPE, $admin));
+    }
 }
