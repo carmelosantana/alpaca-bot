@@ -65,7 +65,6 @@
 
 # Developer-facing entry points (readme.txt is the user-facing one and ships)
 /bin
-/examples
 /README.md
 
 # ---------------------------------------------------------------------------
@@ -79,6 +78,17 @@ Test
 
 # Package documentation (carmelosantana/php-agents ships a docs/ tree)
 docs
+
+# Example apps shipped by vendored packages. carmelosantana/php-agents ships
+# examples/cli-chat.php and examples/web-summarizer/index.php: standalone entry points with no
+# ABSPATH guard that `require dirname(__DIR__, N) . '/vendor/autoload.php'` — a path this zip
+# deliberately omits — so reaching one over the web produces only a fatal that leaks the server
+# path, and Plugin Check reads both as direct file access. Unanchored rather than naming
+# /vendor-prefixed/carmelosantana/php-agents/examples: every vendored examples/ tree is dead
+# weight, this keeps the next strauss run from quietly shipping another package's, and unlike
+# `resources` there is no runtime directory it can eat — the only `example*` path anywhere under
+# vendor-prefixed/ is that one, in any case.
+examples
 
 # IDE helper stubs shipped by league/commonmark and nette/utils
 .phpstorm.meta.php

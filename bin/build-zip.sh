@@ -7,12 +7,21 @@
 # front-end build produces assets/js and assets/css — which are gitignored, so a zip cut without
 # this step would ship no JS and no CSS at all. .distignore drops everything else.
 #
-# bin/build-vendor.sh leaves vendor/ as a --no-dev install; dev dependencies are restored at the
-# end so `composer check` still runs in the working tree afterwards.
+# bin/build-vendor.sh leaves vendor/ as a --no-dev install, so the restore is an EXIT trap armed
+# before it runs: dev dependencies come back on every path — success, a failed pnpm build, a
+# failed content assertion, an interrupt — and `composer check` still runs in the working tree
+# afterwards. A plain statement at the end would only hold on the happy path.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 bash bin/version-check.sh
+
+# Armed before the --no-dev install, not after it: every step from here to the last assertion
+# below (pnpm install, pnpm build, rm -rf, rsync, zip, the contents check) can fail under
+# `set -e`, and each one would otherwise strand the tree on a --no-dev vendor/. The EXIT trap
+# does not change the script's exit status, so a real failure still surfaces as itself.
+trap 'composer install --no-interaction >/dev/null || echo "WARNING: dev dependency restore failed; run composer install"' EXIT
+
 bash bin/build-vendor.sh
 pnpm install --frozen-lockfile
 pnpm build
@@ -27,8 +36,6 @@ rsync -a --exclude-from=.distignore --exclude dist ./ dist/alpaca-bot/
 export SOURCE_DATE_EPOCH="${SOURCE_DATE_EPOCH:-$(git log -1 --format=%ct 2>/dev/null || echo 0)}"
 find dist/alpaca-bot -exec touch -h -d "@$SOURCE_DATE_EPOCH" {} +
 (cd dist && find alpaca-bot -print | LC_ALL=C sort | zip -qX alpaca-bot.zip -@)
-
-composer install --no-interaction >/dev/null   # restore dev deps
 
 # The zip is the artifact everything downstream tests, so assert its contents rather than
 # eyeballing them: every runtime path present, nothing from the dev toolchain.
@@ -63,7 +70,11 @@ for pattern in \
 do
   if grep -qE -- "$pattern" <<<"$list"; then
     echo "UNEXPECTED entries matching $pattern:"
-    grep -E -- "$pattern" <<<"$list" | head
+    # Herestring again, and for the same reason: `grep ... | head` dies 141 on SIGPIPE once more
+    # than ten entries match, and because this is a plain command in an `if` body rather than a
+    # condition, `pipefail` plus `set -e` would abort the script here — skipping fail=1, the
+    # FAILED message and exit 1, inside the one branch whose whole job is to print a diagnostic.
+    head <<<"$(grep -E -- "$pattern" <<<"$list")"
     fail=1
   fi
 done
