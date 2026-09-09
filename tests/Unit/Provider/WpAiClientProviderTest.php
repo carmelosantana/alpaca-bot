@@ -28,7 +28,7 @@ use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Tool\ToolResult;
  * the real core.
  *
  * @param list<array{content?: string, reasoning?: string, tool_calls?: list<array{id: string, name: string, arguments: array<string, mixed>}>, finish_reason?: string, prompt_tokens?: int, completion_tokens?: int, total_tokens?: int}> $replies what generate() answers, in order
- * @param list<array{id: string, name: string, provider: string, provider_name: string, tools: bool, vision: bool}> $models
+ * @param list<array{id: string, name: string, provider: string, tools: bool, vision: bool}> $models
  */
 function fakeWpAiClient(bool $available = true, array $replies = [], array $models = [], ?\Throwable $failure = null): Client
 {
@@ -241,14 +241,14 @@ it('structured() asks for a JSON reply against the schema and returns the Respon
 
 it('models() returns ModelDefinitions under the core provider\'s id with the tool and vision flags the client reports, and isAvailable() is the client plus at least one model', function (): void {
     $client = fakeWpAiClient(models: [
-        ['id' => 'qwen3:8b', 'name' => 'qwen3:8b', 'provider' => 'ollama', 'provider_name' => 'Ollama', 'tools' => true, 'vision' => false],
-        ['id' => 'llava:7b', 'name' => 'llava:7b', 'provider' => 'ollama', 'provider_name' => 'Ollama', 'tools' => false, 'vision' => true],
+        ['id' => 'qwen3:8b', 'name' => 'qwen3:8b', 'provider' => 'ollama', 'tools' => true, 'vision' => false],
+        ['id' => 'llava:7b', 'name' => 'llava:7b', 'provider' => 'ollama', 'tools' => false, 'vision' => true],
     ]);
     $models = (new WpAiClientProvider('m', $client))->models();
     expect($models)->toHaveCount(2)
         ->and($models[0])->toBeInstanceOf(ModelDefinition::class)
         ->and($models[0]->id)->toBe('qwen3:8b')
-        ->and($models[0]->name)->toBe('qwen3:8b (Ollama)')
+        ->and($models[0]->name)->toBe('qwen3:8b')
         ->and($models[0]->provider)->toBe('ollama')
         ->and($models[0]->supportsToolCalls())->toBeTrue()
         ->and($models[0]->supportsVision())->toBeFalse()
@@ -260,7 +260,7 @@ it('models() returns ModelDefinitions under the core provider\'s id with the too
 });
 
 it('models() and isAvailable() read as empty and false when the client is unavailable or throws, never as a fatal', function (): void {
-    $broken = fakeWpAiClient(models: [['id' => 'x', 'name' => 'x', 'provider' => 'p', 'provider_name' => 'P', 'tools' => false, 'vision' => false]]);
+    $broken = fakeWpAiClient(models: [['id' => 'x', 'name' => 'x', 'provider' => 'p', 'tools' => false, 'vision' => false]]);
     $broken = new class ($broken) implements Client {
         public function __construct(private Client $inner) {}
 

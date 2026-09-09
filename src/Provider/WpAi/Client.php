@@ -18,7 +18,7 @@ namespace AlpacaBot\Provider\WpAi;
  * by the integration suite. The cost is the array shapes below, typed once and imported by
  * both sides.
  *
- * @phpstan-type WpAiModel array{id: string, name: string, provider: string, provider_name: string, tools: bool, vision: bool}
+ * @phpstan-type WpAiModel array{id: string, name: string, provider: string, tools: bool, vision: bool}
  * @phpstan-type WpAiMessage array{role: string, parts: list<array<string, mixed>>}
  * @phpstan-type WpAiTool array{name: string, description: string, parameters?: array<string, mixed>}
  * @phpstan-type WpAiRequest array{model: string, messages: list<WpAiMessage>, system?: string, temperature?: float, max_tokens?: int, tools?: list<WpAiTool>, json?: array<string, mixed>|true}

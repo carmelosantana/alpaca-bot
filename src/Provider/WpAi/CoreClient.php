@@ -89,7 +89,6 @@ final class CoreClient implements Client
                 'id' => $model->getId(),
                 'name' => $model->getName(),
                 'provider' => $provider->getId(),
-                'provider_name' => $provider->getName(),
                 'tools' => self::supportsOption($model, ModelConfig::KEY_FUNCTION_DECLARATIONS),
                 'vision' => self::acceptsImages($model),
             ];

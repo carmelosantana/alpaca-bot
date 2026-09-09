@@ -11,6 +11,15 @@ use AlpacaBot\Provider\WpAi\CoreClient;
 use AlpacaBot\Provider\WpAiClientProvider;
 use AlpacaBot\Settings\Schema;
 use AlpacaBot\Settings\Store;
+use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Enum\ProviderFinishReason;
+use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Message\AssistantMessage;
+use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Message\SystemMessage;
+use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Message\ToolResultMessage;
+use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Message\UserMessage;
+use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Tool\Parameter\StringParameter;
+use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Tool\Tool;
+use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Tool\ToolCall;
+use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Tool\ToolResult;
 use WordPress\AiClient\AiClient;
 use WordPress\AiClient\Messages\DTO\Message;
 use WordPress\AiClient\Messages\DTO\MessagePart;
@@ -68,8 +77,8 @@ final class WpAiClientTest extends TestCase
         $models = (new CoreClient())->models();
         $ours = array_values(array_filter($models, static fn(array $m): bool => $m['provider'] === 'alpaca-fake'));
         $this->assertSame([
-            ['id' => 'fake-text', 'name' => 'Fake text', 'provider' => 'alpaca-fake', 'provider_name' => 'Alpaca fake', 'tools' => true, 'vision' => true],
-            ['id' => 'fake-plain', 'name' => 'Fake plain', 'provider' => 'alpaca-fake', 'provider_name' => 'Alpaca fake', 'tools' => false, 'vision' => false],
+            ['id' => 'fake-text', 'name' => 'Fake text', 'provider' => 'alpaca-fake', 'tools' => true, 'vision' => true],
+            ['id' => 'fake-plain', 'name' => 'Fake plain', 'provider' => 'alpaca-fake', 'tools' => false, 'vision' => false],
         ], $ours);
         // The image-only model is not a chat model and is not listed.
         $this->assertNotContains('fake-image', array_column($models, 'id'));
@@ -126,6 +135,86 @@ final class WpAiClientTest extends TestCase
         $this->assertSame(['q'], $config->getFunctionDeclarations()[0]->getParameters()['required']);
     }
 
+    /**
+     * The adapter's own output, not a hand-written copy of it, through the real client into
+     * core's own constructors: every shape the agent loop sends back (a model turn carrying a
+     * function call, a user turn carrying the function response, an inline and a remote image on
+     * a user turn) is built by WpAiClientProvider::request() and refused or accepted by core's
+     * `Message::fromArray()`, so a mapping literal the adapter and its unit test both get wrong
+     * fails here against core rather than against a mirror of itself. What core reads and so what
+     * this test can catch: the role (an enum), which of `text|file|functionCall|functionResponse`
+     * a part sets, `fileType` being present, `url` or `base64Data`, and `response` on a function
+     * response. Core does not read a part's `type` value or a file's `fileType` value, so those
+     * two literals are pinned by the unit suite alone and cannot fail here.
+     */
+    public function test_the_adapter_s_own_transcript_is_what_core_builds_its_messages_from(): void
+    {
+        FakeCoreTextModel::$reply = static fn(): array => [
+            new MessagePart('Looking that up too.'),
+            new MessagePart(new FunctionCall('call-2', 'lookup', ['q' => 'llamas'])),
+        ];
+        $tool = new Tool('lookup', 'Look something up.', [new StringParameter('q', 'The query.')], static fn(array $in): ToolResult => ToolResult::success('x'));
+        $provider = new WpAiClientProvider('fake-text', new CoreClient());
+
+        $response = $provider->chat([
+            new SystemMessage('Be brief.'),
+            new UserMessage([
+                ['type' => 'text', 'text' => 'What is this?'],
+                ['type' => 'image_url', 'image_url' => ['url' => 'data:image/png;base64,iVBORw0KGgo=']],
+                ['type' => 'image_url', 'image_url' => ['url' => 'https://example.com/a.jpg']],
+            ]),
+            new AssistantMessage('', [new ToolCall('call-1', 'lookup', ['q' => 'alpacas'])]),
+            new ToolResultMessage(ToolResult::json(['answer' => 42])->withCallId('call-1')),
+            new AssistantMessage('42.'),
+            new UserMessage('And llamas?'),
+        ], [$tool], ['temperature' => 0.3]);
+
+        // What core built from the adapter's arrays, read back through core's own getters.
+        $this->assertCount(1, FakeCoreTextModel::$prompts);
+        $prompt = FakeCoreTextModel::$prompts[0];
+        $this->assertContainsOnlyInstancesOf(Message::class, $prompt);
+        $this->assertSame(['user', 'model', 'user', 'model', 'user'], array_map(static fn(Message $m): string => $m->getRole()->value, $prompt));
+
+        [$text, $inline, $remote] = $prompt[0]->getParts();
+        $this->assertSame('What is this?', $text->getText());
+        $this->assertSame('file', $inline->getType()->value);
+        $this->assertSame('inline', (string) $inline->getFile()?->getFileType());
+        $this->assertSame('image/png', $inline->getFile()?->getMimeType());
+        $this->assertSame('iVBORw0KGgo=', $inline->getFile()?->getBase64Data());
+        $this->assertSame('remote', (string) $remote->getFile()?->getFileType());
+        $this->assertSame('https://example.com/a.jpg', $remote->getFile()?->getUrl());
+
+        $call = $prompt[1]->getParts()[0];
+        $this->assertSame('function_call', $call->getType()->value);
+        $this->assertSame('call-1', $call->getFunctionCall()?->getId());
+        $this->assertSame('lookup', $call->getFunctionCall()?->getName());
+        $this->assertSame(['q' => 'alpacas'], $call->getFunctionCall()?->getArgs());
+
+        $result = $prompt[2]->getParts()[0];
+        $this->assertSame('function_response', $result->getType()->value);
+        $this->assertSame('call-1', $result->getFunctionResponse()?->getId());
+        $this->assertSame('lookup', $result->getFunctionResponse()?->getName());
+        $this->assertSame(['answer' => 42], $result->getFunctionResponse()?->getResponse());
+
+        $this->assertSame('42.', $prompt[3]->getParts()[0]->getText());
+        $this->assertSame('And llamas?', $prompt[4]->getParts()[0]->getText());
+
+        $config = FakeCoreTextModel::$configs[0];
+        $this->assertSame('Be brief.', $config->getSystemInstruction());
+        $this->assertSame(0.3, $config->getTemperature());
+        $this->assertSame(['lookup'], array_map(static fn($d): string => $d->getName(), $config->getFunctionDeclarations()));
+
+        // And core's reply, through the client, back as php-agents' Response.
+        $this->assertSame('Looking that up too.', $response->content);
+        $this->assertSame(ProviderFinishReason::ToolUse, $response->finishReason);
+        $this->assertCount(1, $response->toolCalls);
+        $this->assertSame('call-2', $response->toolCalls[0]->id);
+        $this->assertSame('lookup', $response->toolCalls[0]->name);
+        $this->assertSame(['q' => 'llamas'], $response->toolCalls[0]->arguments);
+        $this->assertSame('fake-text', $response->model);
+        $this->assertSame(10, $response->usage?->totalTokens);
+    }
+
     public function test_generate_asks_for_json_when_told_to(): void
     {
         FakeCoreTextModel::$reply = static fn(): array => [new MessagePart('{"a":1}')];
@@ -168,7 +257,8 @@ final class WpAiClientTest extends TestCase
         $this->assertSame(200, $res->get_status(), print_r($res->get_data(), true));
         $data = $res->get_data();
         $this->assertSame('fake core reply', $data['message']['content']);
-        $this->assertSame('fake-text', $data['message']['model'] ?? $data['receipt']['model'] ?? 'fake-text');
+        $this->assertSame('fake-text', $data['message']['model']);
+        $this->assertSame('fake-text', $data['receipt']['model']);
         $this->assertSame(10, $data['receipt']['total_tokens']);
         // The turn reached the fake model through core, carrying the user's text and, since the
         // catalog lists the model as able to call tools, the enabled toolkits as declarations.
