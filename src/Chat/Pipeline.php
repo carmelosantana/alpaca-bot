@@ -292,8 +292,8 @@ final class Pipeline
                 $streamEnded = true;
                 // When a tool had already run, the turn is not discarded: a draft the run created
                 // is in the user's posts, and the transcript is where they learn of it. Here, on
-                // the one path every failure of a tool turn takes, rather than at the announced
-                // failure above alone: a Throwable that escapes the fiber instead (the
+                // the one path every failure of a tool turn takes, rather than at the failure
+                // raised above alone: a Throwable that escapes the fiber instead (the
                 // LogicException after it, a toolkit added through `alpaca_bot/toolkits` that
                 // throws outside the agent's own catch regions, a consumer throwing into the
                 // generator) lands here with the same draft made and the same duty to record it.
@@ -494,45 +494,67 @@ final class Pipeline
      * stop, and the turn finishes on its word (agentTurn() yields it). Telling the two apart is
      * what keeps a toolkit's own "stop" from reaching the user as `Provider error: ...`.
      *
-     * The termination is identified by what it leaves behind, not by what it did not say.
-     * AbstractAgent::executeToolCalls() records the terminating tool's message as that tool's
-     * *successful* result and the agent returns the same message as the content, so an Error
-     * finish carrying content that some ToolResult of status Success repeats verbatim is a
-     * termination and only a termination — no other Error site produces that pairing. Empty
-     * content is not enough to identify one (any empty successful result would match it), and a
-     * termination with an empty message has nothing to show the user regardless. The library's
-     * one other termination path, a TerminationException out of a batch executor, leaves no
-     * results at all and so reads here as a failure; it is unreachable from this plugin, which
-     * never gives the agent a tool executor and so gets the serial SynchronousToolExecutor, and
-     * a termination misread as a failure is the harmless direction of the two.
+     * An announcement settles it first, and on its own. Every `agent.error` the library notifies
+     * is followed immediately by the return it belongs to, so nothing can announce and then go
+     * on to terminate: a run that announced ended on the announcement, and a termination is
+     * therefore always unannounced. Reading the announcement first costs a real termination
+     * nothing, and closes a hole that reading it second leaves open — both announced Error sites
+     * build their Output with the results accumulated across the whole run, not the iteration
+     * that failed, so a provider failure carries whatever earlier tools returned. One of those
+     * repeating the library's own 'Provider error: ...' or 'Task was cancelled.' text verbatim
+     * would otherwise pass the termination test below, and the failure would be stored as a
+     * finished, billed reply — the direction this discriminator exists to close.
      *
-     * The direction matters more than the test. The library announces `agent.error` at two of
-     * its three Error sites (the cancellation token tripped, the provider threw) and at neither
-     * does anything else; reading failure as "an Error finish that announced" therefore rested on
+     * An unannounced Error is then identified by what it leaves behind, not by what it did not
+     * say. AbstractAgent::executeToolCalls() records the terminating tool's message as that
+     * tool's *successful* result and the agent returns the same message as the content, so an
+     * Error finish carrying content that some ToolResult of status Success repeats verbatim is
+     * a termination. The comparison accepts an empty message: a tool may throw
+     * TerminationException with none, and that stop is still a stop — a completed turn showing
+     * whatever streamed, not a failure with the reply marked partial. Accepting it gives nothing
+     * away: every failure shape it could be confused with announces, and so never reaches this
+     * loop at all.
+     *
+     * The library's one other termination path, a TerminationException out of a batch executor,
+     * leaves no *successful* result behind: `$executedResults` is never assigned there, and the
+     * pre-resolved entries phase 3 still appends (denied by policy, tool not found) are every one
+     * of them a ToolResult::error, so the loop finds no match and reads it as a failure. It is
+     * unreachable from this plugin, which never gives the agent a tool executor and so gets the
+     * serial SynchronousToolExecutor, and a termination misread as a failure is the harmless
+     * direction of the two.
+     *
+     * The direction matters more than the test. Of the library's three Error sites, two announce
+     * (the cancellation token tripped, the provider threw) and the third, the termination,
+     * announces nothing; reading failure as "an Error finish that announced" therefore rested on
      * the library never adding a fourth, unannounced one — and php-agents is a dependency, so a
-     * patch release decides that, not this file. Read that way, such a release would land a
-     * provider failure as a *finished* assistant reply carrying the library's own
-     * 'Provider error: ...' text, fire `alpaca_bot/chat/completed` and bill the user for it.
-     * Read this way, an unrecognised Error finish is a failure, which is the direction a wrong
-     * guess should fail in. (The pin is `~0.15.2` besides, so a minor release cannot arrive
-     * unreviewed.)
+     * patch release decides that, not this file. (`agent.error` does fire elsewhere in that file,
+     * but those two notifies return EmptyResponse and MaxIterations finishes, which never reach
+     * this branch.) Read the old way, such a release would land a provider failure as a
+     * *finished* assistant reply carrying the library's own 'Provider error: ...' text, fire
+     * `alpaca_bot/chat/completed` and bill the user for it. Read this way, an unrecognised Error
+     * finish is a failure, which is the direction a wrong guess should fail in. (The pin is
+     * `~0.15.2` besides, so a minor release cannot arrive unreviewed.)
      *
-     * The announcement still supplies the words when there was one: it is the specific message,
-     * and send() raises it. Without one there is nothing to quote — the content is the library's
-     * own prose, never announced and not the plugin's to present as an error — so the failure is
-     * reported in words of this plugin's own, which translate.
+     * The announcement supplies the words when it had any: it is the specific message, and
+     * send() raises it. Without one there is nothing to quote — the content is the library's own
+     * prose, never announced and not the plugin's to present as an error — so the failure is
+     * reported in words of this plugin's own, which translate. An announcement that is itself
+     * empty (the provider threw a Throwable whose getMessage() is '') is still an announcement
+     * and still a failure; it simply has no words to lend.
      */
     private static function failure(Output $output, AgentStreamObserver $observer): ?string
     {
         if ($output->finishReason !== AgentFinishReason::Error) {
             return null;
         }
-        foreach ($output->toolResults as $result) {
-            if ($result->status === ToolResultStatus::Success && $result->content !== '' && $result->content === $output->content) {
-                return null;
+        $announced = $observer->error();
+        if ($announced === null) {
+            foreach ($output->toolResults as $result) {
+                if ($result->status === ToolResultStatus::Success && $result->content === $output->content) {
+                    return null;
+                }
             }
         }
-        $announced = $observer->error();
         return $announced !== null && $announced !== ''
             ? $announced
             : __('The run ended in an error the assistant did not report.', 'alpaca-bot');

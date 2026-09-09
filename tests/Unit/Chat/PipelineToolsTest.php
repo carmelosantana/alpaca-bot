@@ -574,7 +574,35 @@ it('reads an Error finish that announced nothing and terminated nothing as a fai
 it('reads each of the library\'s announced Error finishes as a failure, in the announced words', function (): void {
     // The two sites that announce: the cancellation token tripped, and the provider threw.
     expect(pipelineFailure(new Output(content: 'Task was cancelled.', finishReason: AgentFinishReason::Error), observerHearing('Task cancelled')))->toBe('Task cancelled')
-        ->and(pipelineFailure(new Output(content: 'Provider error: 500 Internal Server Error', finishReason: AgentFinishReason::Error), observerHearing('500 Internal Server Error')))->toBe('500 Internal Server Error');
+        ->and(pipelineFailure(new Output(content: 'Provider error: 500 Internal Server Error', finishReason: AgentFinishReason::Error), observerHearing('500 Internal Server Error')))->toBe('500 Internal Server Error')
+        // The provider site announces a Throwable's getMessage(), which can be ''. Announced
+        // with no words is still announced, and still a failure — it just borrows this
+        // plugin's words, the same ones an unannounced failure gets.
+        ->and(pipelineFailure(new Output(content: 'Provider error: ', finishReason: AgentFinishReason::Error), observerHearing('')))->toBe(UNREPORTED_FAILURE);
+});
+
+it('reads an announced Error finish as the failure it is even when a tool result repeats its content, because the announcement is read first', function (): void {
+    // Both announced sites build their Output with `toolResults: $allToolResults` — every
+    // result the run accumulated, not this iteration's — so a provider failure carries whatever
+    // earlier tools returned. A tool that had echoed the library's own words back (a fetch tool
+    // quoting an upstream error, a memory tool replaying the last one) leaves a Success result
+    // equal to the content the failure site then builds. Asking "did it terminate?" before
+    // "was it announced?" reads that as a tool's own stop: a provider failure stored as a
+    // finished, billed reply, fired as `alpaca_bot/chat/completed`. The announcement is read
+    // first, so only an unannounced Error is ever asked whether it terminated.
+    $announcedProviderError = new Output(
+        content: 'Provider error: boom',
+        toolResults: [ToolResult::success('echo:ping'), ToolResult::success('Provider error: boom')],
+        finishReason: AgentFinishReason::Error,
+    );
+    $announcedCancellation = new Output(
+        content: 'Task was cancelled.',
+        toolResults: [ToolResult::success('Task was cancelled.')],
+        finishReason: AgentFinishReason::Error,
+    );
+
+    expect(pipelineFailure($announcedProviderError, observerHearing('boom')))->toBe('boom')
+        ->and(pipelineFailure($announcedCancellation, observerHearing('Task cancelled')))->toBe('Task cancelled');
 });
 
 it('reads an Error finish whose content is a successful tool result as the termination it is, not a failure', function (): void {
@@ -590,7 +618,7 @@ it('reads an Error finish whose content is a successful tool result as the termi
     expect(pipelineFailure($terminated, observerHearing(null)))->toBeNull();
 });
 
-it('reads a near miss as the failure it is: the same words as the content, but not from a tool that succeeded, and not empty', function (): void {
+it('reads a near miss as the failure it is: the same words as the content, but not from a tool that succeeded', function (): void {
     // A tool whose result content matches by coincidence but whose status is Error (or
     // Timeout) is not the termination path: that path records ToolResult::success().
     $failed = new Output(
@@ -598,18 +626,25 @@ it('reads a near miss as the failure it is: the same words as the content, but n
         toolResults: [ToolResult::error('Provider error: boom'), new ToolResult(ToolResultStatus::Timeout, 'Provider error: boom')],
         finishReason: AgentFinishReason::Error,
     );
-    // Empty content matches an empty successful result under a plain comparison. A termination
-    // whose message is empty has nothing to show the user anyway, so the comparison asks for
-    // content before it can identify one.
+
+    expect(pipelineFailure($failed, observerHearing(null)))->toBe(UNREPORTED_FAILURE)
+        ->and(pipelineFailure($failed, observerHearing('boom')))->toBe('boom');
+});
+
+it('reads a termination that had nothing to say as the termination it is: an empty stop is still a stop', function (): void {
+    // TerminationException extends RuntimeException, so a toolkit can throw one with no
+    // message. The library then records ToolResult::success('') and returns '' as the content:
+    // a run a tool ended, exactly like any other, and before tools this was a finished turn
+    // showing whatever had streamed. Refusing to match on empty content would make it a
+    // failure instead — the reply marked partial, `alpaca_bot/chat/failed` fired, and
+    // `Provider error: ...` in the user's bubble — for a stop nothing went wrong in.
     $empty = new Output(
         content: '',
         toolResults: [ToolResult::success('')],
         finishReason: AgentFinishReason::Error,
     );
 
-    expect(pipelineFailure($failed, observerHearing(null)))->toBe(UNREPORTED_FAILURE)
-        ->and(pipelineFailure($failed, observerHearing('boom')))->toBe('boom')
-        ->and(pipelineFailure($empty, observerHearing(null)))->toBe(UNREPORTED_FAILURE);
+    expect(pipelineFailure($empty, observerHearing(null)))->toBeNull();
 });
 
 it('leaves every finish that is not an Error alone', function (): void {
