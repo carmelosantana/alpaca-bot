@@ -156,7 +156,7 @@ final class StreamRoutesTest extends TestCase
 
     public function test_a_provider_failure_is_an_error_frame_that_names_the_gateway_to_administrators_only(): void
     {
-        $raw = 'Could not resolve host: ollama-gateway.internal for "http://ollama-gateway.internal:11434/v1/chat/completions".';
+        $raw = 'Could not resolve host: ollama-gateway.invalid for "http://ollama-gateway.invalid:11434/v1/chat/completions".';
         $this->fakeProvider(new \RuntimeException($raw));
         wp_set_current_user(self::factory()->user->create(['role' => 'editor']));
         [$token] = $this->ticket('hello?');

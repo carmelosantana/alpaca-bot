@@ -1,11 +1,17 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
     The WordPress integration suite: run through `composer test:integration`, which executes it
-    inside the harness site's cli container (bin/test-integration.sh) on tools/integration's
-    PHPUnit 9, the newest WordPress core's test library supports. That container runs as uid 33
-    and cannot write into the bind-mounted checkout, so PHPUnit's result cache lives under /tmp.
+    inside a container on tools/integration's PHPUnit 9, the newest WordPress core's test library
+    supports. bin/test-integration.sh picks the container: the harness site's cli service locally,
+    wp-env's tests-cli in CI. Both run as an unprivileged user and cannot write into the
+    bind-mounted checkout, so PHPUnit's result cache lives under /tmp.
+
+    failOnEmptyTestSuite: a run that discovers no tests is a failure, not a pass. CI runs this
+    inside a container whose working directory is derived from the checkout's own directory name
+    (bin/test-integration.sh explains why), and a suite that quietly finds nothing and exits 0 is
+    the one way that could go wrong without anyone noticing.
 -->
-<phpunit bootstrap="tests/Integration/bootstrap.php" colors="true" cacheResultFile="/tmp/alpaca-bot-integration/.phpunit.result.cache">
+<phpunit bootstrap="tests/Integration/bootstrap.php" colors="true" failOnEmptyTestSuite="true" cacheResultFile="/tmp/alpaca-bot-integration/.phpunit.result.cache">
     <testsuites>
         <testsuite name="Integration"><directory>tests/Integration</directory></testsuite>
     </testsuites>

@@ -13,9 +13,22 @@ require_once $plugin . '/tools/integration/vendor/autoload.php';
 
 // wp-phpunit exports its own location as WP_PHPUNIT__DIR from an autoloaded file and reads the
 // config path from WP_PHPUNIT__TESTS_CONFIG, in this process and in the install.php subprocess
-// its bootstrap spawns, which inherits the environment.
+// its bootstrap spawns, which inherits the environment. WP_TESTS_DIR comes first so a host that
+// ships core's test library itself is used instead: wp-env sets it to /wordpress-phpunit, the
+// copy that matches the core version that environment installed, which is the whole point of a
+// core-version matrix.
 $tests = getenv('WP_TESTS_DIR') ?: (getenv('WP_PHPUNIT__DIR') ?: $plugin . '/tools/integration/vendor/wp-phpunit/wp-phpunit');
 putenv('WP_PHPUNIT__TESTS_CONFIG=' . __DIR__ . '/wp-tests-config.php');
+// WP_PHPUNIT__TESTS_CONFIG is read by the wp-phpunit *package*'s own wp-tests-config.php shim,
+// which only exists in the composer copy. Core's own bootstrap -- which is what WP_TESTS_DIR
+// points at under wp-env -- looks instead for the WP_TESTS_CONFIG_FILE_PATH *constant* (not an
+// environment variable) and otherwise takes the wp-tests-config.php sitting beside itself:
+// wp-env's, which is not this suite's and would run it with WP_DEBUG off and uploads pointed at
+// the site. Defining it here makes the same config file win wherever the test library came from,
+// and core passes the path on to the install.php subprocess as an argument, so that agrees too.
+if (!defined('WP_TESTS_CONFIG_FILE_PATH')) {
+    define('WP_TESTS_CONFIG_FILE_PATH', __DIR__ . '/wp-tests-config.php');
+}
 
 require_once $tests . '/includes/functions.php';
 

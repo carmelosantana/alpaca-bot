@@ -17,11 +17,13 @@ use AlpacaBot\Plugin;
  * exists for, against the same database: the same rows through one bare update_post_meta(),
  * as save() wrote them before, return false and store nothing.
  *
- * The fixture adjusts itself to the site it runs on: image turns at the site's own allowance
- * (Assets::maxImageBytes()) are appended until the serialised rows cross the packet the server
- * reports, so the premise is measured, not assumed. On alpaca10 (post_max_size 8M, packet 16
- * MiB) that is three images: two at the allowance come to 16,646,144 base64 bytes, 128 KiB
- * short of the packet.
+ * The fixture adjusts itself to the site it runs on: image turns at imageBytes() -- the site's
+ * own allowance, held to half the packet, for the reason on that method -- are appended until
+ * the serialised rows cross the packet the server reports, so the premise is measured, not
+ * assumed. On alpaca10 (post_max_size 8M, packet 16 MiB) the allowance is the smaller of the two
+ * and that is three images: two at the allowance come to 16,646,144 base64 bytes, 128 KiB short
+ * of the packet. Under wp-env, where php.ini is far more generous, the half-packet bound takes
+ * over and it is two.
  *
  * The second pair is the same A/B for text: `max_allowed_packet` is measured on the statement
  * wpdb sends, and the driver doubles every quote, backslash, NUL, newline, carriage return and
@@ -44,19 +46,35 @@ final class ConversationStoreTest extends TestCase
      */
     private const BACKSLASHED = 'C:\Users\x, a regex \d+, a literal \n, LaTeX \frac{1}{2}, a doubled \\\\ pair';
 
+    /**
+     * The size of one fixture image: the site's own allowance, but never more than half the
+     * packet. The allowance is php.ini's (Assets::maxImageBytes() reads post_max_size and
+     * upload_max_filesize), and on a PHP configured generously -- wp-env's container reports
+     * 768M -- one image at the allowance is a gigabyte of base64 by itself. That is minutes of
+     * work and gigabytes of memory to build, and the server answers it by closing the connection
+     * ("MySQL server has gone away") instead of with the packet error this fixture exists to
+     * produce. Half the packet keeps the premise intact -- images that together cross it, oldest
+     * evicted first -- and puts the arithmetic back where the test's subject is, the database.
+     * On alpaca10, whose allowance is under that, nothing changes.
+     */
+    private static function imageBytes(int $packet): int
+    {
+        return min(Assets::maxImageBytes(), intdiv($packet, 2));
+    }
+
     /** A PNG data URL carrying `$bytes` decoded bytes (4 base64 characters per 3 bytes), `$fill` repeated so two are told apart. */
     private static function image(int $bytes, string $fill): string
     {
         return 'data:image/png;base64,' . str_repeat($fill, intdiv($bytes, 3) * 4);
     }
 
-    /** @return array{0: Conversation, 1: int, 2: int} the conversation, the packet, and the serialised size that crosses it */
+    /** @return array{0: Conversation, 1: int, 2: int} the conversation, the packet, and the bytes each image carries */
     private function transcriptPastThePacket(int $uid, ConversationStore $store): array
     {
         global $wpdb;
         $packet = (int) $wpdb->get_var('SELECT @@max_allowed_packet');
         $this->assertGreaterThan(0, $packet);
-        $cap = Assets::maxImageBytes();
+        $cap = self::imageBytes($packet);
         $this->assertGreaterThan(0, $cap, 'the site reports an image allowance');
         $c = $store->create($uid);
         $this->assertGreaterThan(0, $c->id);
@@ -70,15 +88,14 @@ final class ConversationStoreTest extends TestCase
             }
         }
         $this->assertGreaterThan($packet, $size, 'the fixture crosses max_allowed_packet on this database');
-        fwrite(STDERR, sprintf("\n[#2977] max_allowed_packet=%d image cap=%d images=%d serialised=%d\n", $packet, $cap, count($c->messages) / 2, $size));
-        return [$c, $packet, $size];
+        return [$c, $packet, $cap];
     }
 
     public function test_a_transcript_past_max_allowed_packet_is_stored_with_its_oldest_images_evicted_and_reads_back(): void
     {
         $uid = $this->asAdmin();
         $store = Plugin::instance()->get(ConversationStore::class);
-        [$c, $packet] = $this->transcriptPastThePacket($uid, $store);
+        [$c, $packet, $cap] = $this->transcriptPastThePacket($uid, $store);
         $images = count($c->messages) / 2;
 
         $store->save($c);
@@ -95,7 +112,7 @@ final class ConversationStoreTest extends TestCase
         $this->assertSame(1, ((array) $stored[0]['meta'])['images_evicted'] ?? null);
         $newest = $stored[2 * $images - 2];
         $this->assertCount(1, $newest['images']);
-        $this->assertSame(self::image(Assets::maxImageBytes(), chr(ord('A') + $images - 1)), $newest['images'][0]);
+        $this->assertSame(self::image($cap, chr(ord('A') + $images - 1)), $newest['images'][0]);
         // Everything evicted is accounted for, and what remains is a suffix of the turns.
         $evicted = 0;
         $kept = 0;
@@ -121,7 +138,6 @@ final class ConversationStoreTest extends TestCase
         $this->assertNotNull($loaded);
         $this->assertSame(1, $loaded->messages[0]->meta['images_evicted']);
         $this->assertCount(1, $loaded->messages[2 * $images - 2]->images);
-        fwrite(STDERR, sprintf("[#2977] after save(): storageBudget=%d stored=%d bytes, rows=%d, images kept=%d, evicted=%d\n", ConversationStore::storageBudget(), strlen(maybe_serialize($stored)), count($stored), $kept, $evicted));
     }
 
     /**
@@ -146,7 +162,6 @@ final class ConversationStoreTest extends TestCase
         }
         $this->assertLessThan(ConversationStore::storageBudget(), $raw, 'measured raw, the transcript fits the budget');
         $this->assertGreaterThan($packet, $wire, 'escaped as the driver escapes it, the transcript is past the packet');
-        fwrite(STDERR, sprintf("\n[#2977] max_allowed_packet=%d text turns=%d serialised=%d escaped=%d\n", $packet, count($c->messages), $raw, $wire));
         return [$c, $packet];
     }
 
@@ -183,7 +198,6 @@ final class ConversationStoreTest extends TestCase
         $wire = strlen($wpdb->remove_placeholder_escape($wpdb->_real_escape(maybe_serialize($stored))));
         $this->assertLessThanOrEqual(ConversationStore::storageBudget(), $wire);
         $this->assertLessThan($packet, $wire);
-        fwrite(STDERR, sprintf("[#2977] after save(): storageBudget=%d stored=%d rows, %d bytes serialised, %d on the wire\n", ConversationStore::storageBudget(), count($stored), strlen(maybe_serialize($stored)), $wire));
     }
 
     /** The before, for text: the same rows through a bare update_post_meta() fail at the server although they measure as fitting. */
@@ -199,7 +213,6 @@ final class ConversationStoreTest extends TestCase
         $result = update_post_meta($c->id, ConversationStore::META_MESSAGES, $rows);
         $error = $wpdb->last_error;
         $wpdb->suppress_errors(false);
-        fwrite(STDERR, sprintf("[#2977] pre-fix update_post_meta() of the text rows returned %s; wpdb last_error: %s\n", var_export($result, true), $error));
 
         $this->assertFalse($result);
         $this->assertStringContainsString('max_allowed_packet', $error);
@@ -228,7 +241,6 @@ final class ConversationStoreTest extends TestCase
         $result = update_post_meta($c->id, ConversationStore::META_MESSAGES, $rows);
         $error = $wpdb->last_error;
         $wpdb->suppress_errors(false);
-        fwrite(STDERR, sprintf("[#2977] pre-fix update_post_meta() returned %s; wpdb last_error: %s\n", var_export($result, true), $error));
 
         $this->assertFalse($result);
         $this->assertStringContainsString('max_allowed_packet', $error);

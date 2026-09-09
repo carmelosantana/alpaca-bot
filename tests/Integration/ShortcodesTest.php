@@ -138,15 +138,32 @@ final class ShortcodesTest extends TestCase
     {
         // Review I1: the provider's own text quotes its endpoint, and the page went to every
         // edit_posts viewer; Rest\Errors::provider() already says that text is the log's.
+        //
+        // The endpoint is under `.invalid`, the TLD RFC 6761 reserves for names that can never
+        // resolve, and the run's error_log goes to a file of this test's own. Both are about the
+        // reader: this exception is a fixture, and with WP_DEBUG on the plugin logs its text, so
+        // a plausible-looking hostname on STDERR reads as a real DNS failure inside otherwise
+        // green output. It is also the assertion -- the log is where Errors::provider() says the
+        // text belongs, so the test checks it landed there rather than only that it stayed out of
+        // the page (ChatRoutesTest and StreamRoutesTest do the same for their routes).
         $this->asAdmin();
-        $this->fakeProvider(new \RuntimeException('Could not resolve host: ollama.internal for "http://ollama.internal:11434/v1/chat/completions".'));
+        $raw = 'Could not resolve host: ollama-gateway.invalid for "http://ollama-gateway.invalid:11434/v1/chat/completions".';
+        $this->fakeProvider(new \RuntimeException($raw));
         $post = self::factory()->post->create(['post_content' => '[alpacabot prompt="x"]']);
         $this->go_to(get_permalink($post));
-        $html = do_shortcode('[alpacabot prompt="x"]');
+        $log = (string) tempnam(sys_get_temp_dir(), 'alpaca-bot-');
+        $was = ini_set('error_log', $log);
+        try {
+            $html = do_shortcode('[alpacabot prompt="x"]');
+        } finally {
+            ini_set('error_log', (string) $was);
+        }
         $this->assertStringContainsString('class="alpaca-bot-notice"', $html);
         $this->assertStringContainsString('The model provider could not complete the request.', $html);
-        $this->assertStringNotContainsString('ollama.internal', $html);
+        $this->assertStringNotContainsString('ollama-gateway', $html);
         $this->assertStringNotContainsString('11434', $html);
+        $this->assertStringContainsString($raw, (string) file_get_contents($log));
+        unlink($log);
         $this->assertSame(0, $this->shortcodeTransients());
     }
 

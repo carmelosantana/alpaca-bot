@@ -125,13 +125,14 @@ final class ToolkitsTest extends TestCase
     }
 
     /**
-     * What core's wp_http_validate_url() answers on the harness's WordPress: it resolves a
-     * hostname to decide, so a loopback name, a private address and a scheme the HTTP API does
-     * not speak are all refused before any request is built. This proves core, on this core
-     * version only: 7.1 refuses the link-local address here, 6.9 does not. The plugin's own
-     * check, which refuses these on every version, is pinned in tests/Unit/Toolkit/
-     * WebFetchToolkitTest.php with core's guard stubbed to accept everything, and its table in
-     * SpecialPurposeAddressTest.php; this test cannot tell the two apart and does not try to.
+     * What core's wp_http_validate_url() answers on whichever WordPress this suite is running
+     * against: it resolves a hostname to decide, so a loopback name, a private address and a
+     * scheme the HTTP API does not speak are all refused before any request is built. This proves
+     * core, on this core version only: 7.1 refuses the link-local address here, 6.9 does not. The
+     * plugin's own check, which refuses these on every version, is pinned in
+     * tests/Unit/Toolkit/WebFetchToolkitTest.php with core's guard stubbed to accept everything,
+     * and its table in SpecialPurposeAddressTest.php; this test cannot tell the two apart and
+     * does not try to.
      */
     public function test_web_fetch_refuses_private_loopback_and_malformed_urls_through_core(): void
     {
@@ -141,7 +142,16 @@ final class ToolkitsTest extends TestCase
             $requests++;
             return new \WP_Error('unexpected', 'no request was expected');
         });
+        // The site's own host is the one address core deliberately lets through (the next test
+        // turns on that exemption), so it cannot also be in a list of addresses core refuses.
+        // Which host that is depends on the environment -- alpaca10.wp.test under the harness,
+        // `localhost` under wp-env, whose site is http://localhost:8888 -- so it is taken out
+        // here rather than assumed absent.
+        $own = (string) wp_parse_url((string) home_url(), PHP_URL_HOST);
         foreach (['http://127.0.0.1/', 'http://localhost/', 'http://10.0.0.1/', 'http://192.168.1.1/', 'http://169.254.169.254/latest/meta-data/', 'ftp://example.com/', 'file:///etc/passwd', 'not a url', ''] as $url) {
+            if ($own !== '' && wp_parse_url($url, PHP_URL_HOST) === $own) {
+                continue;
+            }
             $res = $tool->execute(['url' => $url]);
             $this->assertSame(ToolResultStatus::Error, $res->status, $url);
         }

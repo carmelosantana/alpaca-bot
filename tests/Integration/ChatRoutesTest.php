@@ -131,7 +131,7 @@ final class ChatRoutesTest extends TestCase
     {
         // What the vendored client throws for a provider that is down or misconfigured, verbatim:
         // it names the gateway. An editor may chat, so an editor must not read it back.
-        $raw = 'Could not resolve host: ollama-gateway.internal for "http://ollama-gateway.internal:11434/v1/chat/completions".';
+        $raw = 'Could not resolve host: ollama-gateway.invalid for "http://ollama-gateway.invalid:11434/v1/chat/completions".';
         $this->fakeProvider(new \RuntimeException($raw));
         wp_set_current_user(self::factory()->user->create(['role' => 'editor']));
         $log = (string) tempnam(sys_get_temp_dir(), 'alpaca-bot-');
