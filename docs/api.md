@@ -302,11 +302,16 @@ $ curl -s -u "admin:$PW" "$B/conversations/163"
 
 `meta` is always an object, `{}` when there is none. A completed assistant reply carries
 `meta.duration_ms` (the samples above predate it). A reply cut short by a client that
-disconnected mid-stream is stored with `meta.partial: true`. A reply that ran tools (a toolkit
-is enabled and the model can call tools) carries `meta.tool_calls`, one `{name, arguments,
-result_excerpt, ok}` per call in the order their results came back: the arguments as the
-model sent them with each string held to 1,000 characters, the first 200 characters of the
-result, and whether the tool succeeded. A turn that ran no tool has no `tool_calls` key.
+disconnected mid-stream, or by a failure after a tool had already run, is stored with
+`meta.partial: true`. A reply that ran tools (a toolkit is enabled and the model can call
+tools) carries `meta.tool_calls`, one `{name, arguments, result_excerpt, ok}` per call in the
+order their results came back: the arguments as the model sent them with each string held to
+1,000 characters, the first 200 characters of the result, and whether the tool succeeded. A
+turn that ran no tool has no `tool_calls` key. A message whose images were
+dropped to keep the transcript within the database's packet limit carries
+`meta.images_evicted`, the count of images it lost; `images` is then shorter by that many,
+and the count grows if a later save evicts more. A message that lost none has no
+`images_evicted` key.
 
 A conversation that is not yours reads as missing, so its existence is not leaked:
 
