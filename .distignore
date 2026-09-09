@@ -8,10 +8,14 @@
 # bin/check-bootstrap.php is the guard that Composer's loader is never registered at runtime.
 
 # ---------------------------------------------------------------------------
-# Plugin-root paths. Anchored on purpose: an unanchored `resources` would also delete
-# vendor-prefixed/symfony/polyfill-php80/Resources on a case-insensitive filesystem, and an
-# unanchored `composer.json` would strip every vendored package's manifest. Anchoring keeps
-# this list about *this* repo's layout and leaves vendor-prefixed/ as strauss produced it.
+# Plugin-root paths. Anchored on purpose: an unanchored `composer.json` would strip every
+# vendored package's manifest (14 of them today), and an unanchored `resources` would take any
+# lowercase resources/ a later strauss run vendors. It would not touch the one vendored tree
+# that name is close to, vendor-prefixed/symfony/polyfill-php80/Resources — rsync matches each
+# path component as it reads it from disk, and that match is case-sensitive, so `resources` never
+# matches `Resources` (probed) — but a spelling is not something to leave the zip's contents
+# resting on. Anchoring keeps this list about *this* repo's layout and leaves vendor-prefixed/
+# as strauss produced it.
 # ---------------------------------------------------------------------------
 
 # VCS and repo metadata
@@ -95,8 +99,9 @@ docs
 # path, and Plugin Check reads both as direct file access. Unanchored rather than naming
 # /vendor-prefixed/carmelosantana/php-agents/examples: every vendored examples/ tree is dead
 # weight, this keeps the next strauss run from quietly shipping another package's, and unlike
-# `resources` there is no runtime directory it can eat — the only `example*` path anywhere under
-# vendor-prefixed/ is that one, in any case.
+# `resources` — a name packages do give runtime files — nothing a package needs at runtime is
+# called `examples`; the only `example*` path anywhere under vendor-prefixed/ is that one, in
+# any case.
 examples
 
 # IDE helper stubs shipped by league/commonmark and nette/utils
