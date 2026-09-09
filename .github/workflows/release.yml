@@ -1,0 +1,258 @@
+# The release, driven by a `v*` tag and nothing else. It is split into five jobs because they
+# need different privileges and because the last of them cannot be undone: the two gates run,
+# the artifact is built once, a GitHub release is published, and only then does wordpress.org
+# get an SVN commit.
+#
+# Third-party actions are pinned to full commit SHAs (tags are mutable), as in ci.yml and
+# plugin-check.yml. `permissions:` is declared on every job rather than once at the top, and the
+# publishing half is two jobs rather than one, so the job holding a writable token and the job
+# holding the SVN credentials are not the same job -- see each one.
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+# A floor, not a grant. Every job below declares its own `permissions:`, and a job-level block
+# replaces this wholesale, so the only thing this covers is a job added later that forgets to
+# declare one. An empty map is no scopes at all.
+permissions: {}
+
+# Three concurrency groups are in play and they must not collide.
+#
+# ci.yml (line 31) and plugin-check.yml (line 39) both declare
+# `group: ${{ github.workflow }}-${{ github.ref }}`, character for character. Under
+# `workflow_call` those expressions resolve in the *caller's* context, so when this file calls
+# them the group they compute is this run's: "Release-refs/tags/v0.5.0". Their
+# `cancel-in-progress` is `${{ github.event_name == 'pull_request' }}`, which on a tag push is
+# false, so a run that finds that group occupied queues rather than displacing what is there.
+#
+# If this workflow declared that same expression, its own run and the workflows it calls would
+# compute one identical group string. That much is substitution, and it is what was checked.
+# The rest is GitHub's documented queueing rule rather than anything measured here: a run holds
+# its group for as long as it is running, and with `cancel-in-progress` false a later claim on
+# the group waits instead of displacing it -- so the release would be waiting on jobs that were
+# waiting on it. Appending the event name keeps this run's group
+# ("Release-refs/tags/v0.5.0-push") textually distinct from the one the callees compute.
+#
+# The two callees do still share a group with each other, so `checks` and `plugin-check`
+# serialize rather than running side by side. plugin-check.yml's own note already accepts that
+# trade ("slower, never wrong"); on a release it costs wall-clock time and nothing else.
+#
+# `cancel-in-progress: false` here: a deleted and re-created tag starts a second run on the same
+# ref, and two SVN commits for one version racing each other is the thing this must not allow.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: false
+
+jobs:
+  # The whole CI gate, not a subset of it: ci.yml's `check`, `assets` and `integration`, the last
+  # on both WordPress legs. Calling the file rather than restating its steps is what
+  # `workflow_call` in its `on:` block is there for.
+  #
+  # ci.yml declares `permissions: contents: read` for itself; this restates that scope at the
+  # calling boundary, so the called jobs cannot end up with more than read however the caller's
+  # and the callee's blocks combine.
+  checks:
+    name: CI
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+
+  # Required rather than advisory, and that is a deliberate choice about a workflow that is red
+  # on this branch today. plugin-check.yml's own note records why it is red: readme.txt's frozen
+  # `Stable tag: 0.4.17`, `Tested up to`, `Requires at least` and `Requires PHP` are four ERROR
+  # rows. bin/version-check.sh, run in `build` below, covers exactly one of those four -- its
+  # line 19 compares `Stable tag` against the release version -- so this job is what covers the
+  # other three. It also fails on findings the version guard knows nothing about, in the
+  # security, performance and accessibility categories, which is the reason to make it a gate
+  # instead of reading it after the fact.
+  #
+  # The consequence to be aware of: until the readme header is rewritten for the release, no tag
+  # can get past this job. That is the intended order -- the header rewrite is part of deciding
+  # to release, not a follow-up to having released.
+  plugin-check:
+    name: Plugin Check
+    uses: ./.github/workflows/plugin-check.yml
+    permissions:
+      contents: read
+
+  # One build, feeding both publish jobs. Nothing here is handed a secret and nothing here needs
+  # one, which matters because this is the job that runs the repository's own build scripts and
+  # therefore the job that installs and executes composer and pnpm dependency code.
+  build:
+    name: Build the release zip
+    needs: [checks, plugin-check]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    # GitHub's default for a Linux `run:` is `bash -e {0}`, which does not set `pipefail`; the
+    # `bash` keyword is `bash --noprofile --norc -eo pipefail {0}`. Same reasoning as
+    # plugin-check.yml's `defaults` block.
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+
+      - uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # 2.37.2
+        with:
+          php-version: '8.4'
+          coverage: none
+          tools: composer:v2
+
+      # No version input: the action reads package.json's `packageManager`, so the pnpm running
+      # here is the exact one on the machine the lockfile was written on.
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+
+      # The tag is a version claim about the tree; this is where the claim is checked. The name
+      # arrives through the runner's own GITHUB_REF_NAME rather than a `${{ }}` interpolation, so
+      # the tag text is a shell variable and never becomes part of the script text. `#v` is the
+      # strip bin/version-check.sh expects: it compares its argument against alpaca-bot.php's
+      # `Version:`, package.json's `version` and Plugin::VERSION, and -- only for a version with
+      # no `-` in it -- readme.txt's `Stable tag`.
+      #
+      # Run against this branch as it stands, `bash bin/version-check.sh 0.5.0` exits 1 with four
+      # MISMATCH lines: the tree carries 0.5.0-dev in all three of the first group and readme.txt
+      # carries `Stable tag: 0.4.17`. That is correct behaviour, and it means cutting v0.5.0
+      # requires writing 0.5.0 into all four files first.
+      - name: The tag and the tree agree on the version
+        run: bash bin/version-check.sh "${GITHUB_REF_NAME#v}"
+
+      # The same script a developer runs locally, so a local dry run and a tagged release build
+      # the artifact through one code path. It does its own `composer install --no-dev` (whose
+      # post-install strauss run builds vendor-prefixed/) and its own `pnpm install
+      # --frozen-lockfile` and `pnpm build`, so there is nothing to install ahead of it; the four
+      # setup steps above only put php, composer, pnpm and node on the PATH it needs. It ends by
+      # asserting eleven runtime paths inside the zip and rejecting vendor/, node_modules/,
+      # tests/, bin/, tools/, resources/, dist/ and every dot-prefixed entry, so a build that
+      # produced the wrong tree fails here rather than being published.
+      - name: Build
+        run: bash bin/build-zip.sh
+
+      # Both publish jobs take this artifact, so the zip attached to the GitHub release and the
+      # tree committed to wordpress.org come out of one build of one checkout. The name is
+      # `release-zip` and not `assets`: ci.yml's `assets` job uploads an artifact under that name
+      # into this same run.
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-zip
+          path: dist/alpaca-bot.zip
+          retention-days: 7
+          if-no-files-found: error
+
+  # The reversible half of publishing, and the only job in this file with a writable token. It
+  # holds no other credential: the SVN secrets live in the job below, which in turn has no write
+  # access to this repository.
+  github-release:
+    name: GitHub release
+    needs: [build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-zip
+          path: dist
+
+      # This job checks nothing out. The only local path it is given is the glob in `files`; the
+      # tag name and the generated notes come from GitHub rather than from a working tree.
+      - uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
+        with:
+          files: dist/alpaca-bot.zip
+          # bin/version-check.sh treats a version containing `-` as a pre-release and leaves
+          # readme.txt's `Stable tag` alone for it (its line 19). This is the same rule at the
+          # publishing end: such a tag gets a GitHub pre-release, and the SVN job below is
+          # skipped for it by the matching condition. The 0.5 line is not planned to use one.
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          generate_release_notes: true
+          # Not the default. Without it, a `files` glob that matched nothing would still create
+          # the release -- an announced version with no download attached to it.
+          fail_on_unmatched_files: true
+
+  # The irreversible half: a version published to plugins.svn.wordpress.org cannot be withdrawn.
+  # It therefore runs last, behind the half that can be deleted, and `needs: [github-release]`
+  # gates it on that job having succeeded.
+  #
+  # Skipped for a pre-release, matching `prerelease` above and bin/version-check.sh's treatment
+  # of a version containing `-`. A job-level `if:` is not wrapped in an implicit `success()` the
+  # way a step's is, but it does not need to be: a job runs only when every entry in its `needs:`
+  # succeeded unless the condition says otherwise, and this one does not.
+  wordpress-org:
+    name: wordpress.org SVN deploy
+    needs: [github-release]
+    if: ${{ !contains(github.ref_name, '-') }}
+    runs-on: ubuntu-latest
+    # Read only. This is the job that sees SVN_USERNAME and SVN_PASSWORD; it has no business
+    # writing to this repository, so it cannot. Nothing here runs the repository's own build or
+    # install scripts either -- the plugin arrives already built, as an artifact -- so the only
+    # code the credentials are exposed to is the deploy action pinned below.
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: bash
+    steps:
+      # Checked out for one directory: .wordpress-org/, which the action's deploy.sh resolves
+      # against GITHUB_WORKSPACE and rsyncs into the SVN `assets/` directory (deploy.sh:179-183
+      # at the pinned SHA). The repository tracks five files there -- three banners and two
+      # icons -- and .distignore keeps that directory out of the plugin zip, which is why it has
+      # to come from the checkout rather than from the artifact.
+      #
+      # persist-credentials: false, as everywhere else in this repository's workflows, so no git
+      # credential is left sitting on a runner that also holds the SVN password.
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-zip
+          path: dist
+
+      # deploy.sh rsyncs BUILD_DIR into SVN trunk (deploy.sh:175), so it needs a directory, and
+      # the artifact is a file. Unpacking it here rather than carrying the directory as a second
+      # artifact means what reaches trunk is what is inside the zip attached to the release.
+      - name: Unpack the release zip
+        run: |
+          cd dist
+          unzip -q alpaca-bot.zip
+          test -s alpaca-bot/alpaca-bot.php
+          echo "dist/alpaca-bot holds $(find alpaca-bot -type f | wc -l) files"
+
+      # Read at the pin, not assumed: action.yml is a composite whose single step runs deploy.sh,
+      # and deploy.sh reads SLUG, VERSION, ASSETS_DIR, BUILD_DIR, SVN_USERNAME and SVN_PASSWORD
+      # from the environment -- only `generate-zip` and `dry-run` are `with:` inputs. VERSION is
+      # left unset on purpose: deploy.sh derives it from GITHUB_REF with a leading `v` stripped
+      # (deploy.sh:60-63), which is the same string bin/version-check.sh was handed in `build`.
+      #
+      # `dry-run` is inverted from the obvious spelling, and the inversion is the point. deploy.sh
+      # evaluates `if $INPUT_DRY_RUN` as a bare command (deploy.sh:49 and :219), so the value has
+      # to be the literal word `true` or `false`. With `vars.SVN_DRY_RUN == 'true'`, a repository
+      # where nobody had yet created that variable would evaluate to false and commit for real on
+      # the first tag. `!= 'false'` makes the unconfigured state the safe one: every deploy is a
+      # dry run until someone sets SVN_DRY_RUN to exactly `false`. bin/release-secrets-wizard.sh
+      # walks that setup.
+      #
+      # One property of deploy.sh worth knowing before the first live run: it passes the password
+      # to `svn commit` on the command line (deploy.sh:223). That is upstream's design, not
+      # something this file can configure away.
+      - name: Deploy to wordpress.org
+        uses: 10up/action-wordpress-plugin-deploy@54bd289b8525fd23a5c365ec369185f2966529c2 # 2.3.0
+        with:
+          generate-zip: false
+          dry-run: ${{ vars.SVN_DRY_RUN != 'false' }}
+        env:
+          SVN_USERNAME: ${{ secrets.SVN_USERNAME }}
+          SVN_PASSWORD: ${{ secrets.SVN_PASSWORD }}
+          SLUG: alpaca-bot
+          BUILD_DIR: dist/alpaca-bot
+          ASSETS_DIR: .wordpress-org
