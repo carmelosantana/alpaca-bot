@@ -3,14 +3,6 @@ includes:
 parameters:
     level: 6
     paths: [src, bin/hooks-doc.php]
-    # phpstan-wordpress reads the docblock above each apply_filters() call (the ones docs/hooks.md
-    # is generated from) and makes its first @param the filter's *certain* return type. The plugin
-    # treats a filter's return as untrusted on purpose (a listener returning the wrong thing is
-    # dropped, never allowed to fatal), so with PHPDoc types certain every one of those guards
-    # reads as dead code. False keeps the PHPDoc types for inference and only stops PHPStan calling
-    # a runtime check against a PHPDoc-typed value redundant, which is exactly the stance the code
-    # takes. It is a project-wide setting, not a per-site ignore; nothing else changed for it.
-    treatPhpDocTypesAsCertain: false
     scanFiles:
         - alpaca-bot.php
         # WP-CLI is not a dependency and php-stubs/wp-cli-stubs conflicts with wordpress-stubs ^7.1,

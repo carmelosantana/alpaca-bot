@@ -70,6 +70,7 @@ final class Registry
          * @since 0.5.0
          * @param array<string, ToolkitInterface> $toolkits the enabled built-ins, by id
          * @param int                             $userId   the user whose turn it is
+         * @var mixed $filtered what the filter returned, checked before it is trusted
          */
         $filtered = apply_filters('alpaca_bot/toolkits', $subset, $userId);
         $out = [];

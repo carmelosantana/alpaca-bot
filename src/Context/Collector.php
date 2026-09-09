@@ -41,6 +41,7 @@ final class Collector
          * @param ContextSourceInterface[] $sources the registered sources, in registration order
          * @param int                      $userId  the user whose turn it is
          * @param array<string, mixed>     $request the caller's `context` option: the REST `context` object as sent (the admin screen passes the post being edited), empty from the shortcodes and the abilities
+         * @var mixed $sources what the filter returned, checked before it is trusted
          */
         $sources = apply_filters('alpaca_bot/context/sources', $this->sources, $userId, $request);
         $out = [];
@@ -68,6 +69,7 @@ final class Collector
          * @param Context[]            $contexts what the sources collected, in source order
          * @param int                  $userId   the user whose turn it is
          * @param array<string, mixed> $request  the caller's `context` option, as `alpaca_bot/context/sources` saw it
+         * @var mixed $contexts what the filter returned, checked before it is trusted
          */
         $contexts = apply_filters('alpaca_bot/context', $out, $userId, $request);
         return array_values(array_filter(

@@ -352,6 +352,7 @@ final class Pipeline
          * @since 0.5.0
          * @param Message      $reply        the assistant turn: content, model, token usage, and meta (duration, reasoning, tool calls)
          * @param Conversation $conversation the conversation it will join
+         * @var mixed $filtered what the filter returned, checked before it is trusted
          */
         $filtered = apply_filters('alpaca_bot/message/after_receive', $reply, $conversation);
         if ($filtered instanceof Message) {

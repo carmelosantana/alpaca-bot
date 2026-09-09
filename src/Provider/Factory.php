@@ -87,6 +87,7 @@ final class Factory
          * @param ProviderInterface $provider the provider as built from settings
          * @param string            $model    the model id it was built for
          * @param Store             $store    the plugin settings
+         * @var mixed $filtered what the filter returned, checked before it is trusted
          */
         $filtered = apply_filters('alpaca_bot/provider', $provider, $model, $this->store);
         if (!$filtered instanceof ProviderInterface) {

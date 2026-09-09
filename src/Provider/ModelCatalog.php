@@ -45,6 +45,7 @@ final class ModelCatalog
          *
          * @since 0.5.0
          * @param Model[] $models the models the provider listed, cached for five minutes
+         * @var mixed $filtered what the filter returned, checked before it is trusted
          */
         $filtered = apply_filters('alpaca_bot/models', $this->discovered);
 

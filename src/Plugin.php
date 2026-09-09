@@ -218,6 +218,7 @@ final class Plugin
          *
          * @since 0.5.0
          * @param list<Rest\Controller> $controllers the plugin's controllers
+         * @var mixed $controllers what the filter returned, checked before it is trusted
          */
         $controllers = apply_filters('alpaca_bot/rest/controllers', [
             new Rest\ChatController($this->get(Chat\Pipeline::class)),

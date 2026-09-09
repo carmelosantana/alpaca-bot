@@ -165,6 +165,7 @@ final class Register
          *
          * @since 0.5.0
          * @param array<string, array<string, mixed>> $abilities ability id => the wp_register_ability() arguments
+         * @var mixed $filtered what the filter returned, checked before it is trusted
          */
         $filtered = apply_filters('alpaca_bot/abilities', $this->definitions());
         foreach (is_array($filtered) ? $filtered : [] as $id => $args) {
