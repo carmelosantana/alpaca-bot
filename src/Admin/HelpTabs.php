@@ -84,19 +84,22 @@ final class HelpTabs
                 esc_html__('A visitor, or a logged-in user who cannot edit posts, sees a notice instead of the answer. A site that wants visitors to see it returns true from the %s filter, and they then see the cached answer and nothing else: a visitor never triggers a generation, so a page nobody with the capability opens spends nothing.', 'alpaca-bot'),
                 '<code>alpaca_bot/shortcode/allow_guests</code>',
             ))
+            . self::p(esc_html__('The block editor and the REST API show the cached answer, or a notice when there is none: an answer is generated only when the page is viewed on the site, so listing posts over the API never spends anything.', 'alpaca-bot'))
+            . self::p('<strong>' . esc_html__('Anyone who can write a post can write a prompt.', 'alpaca-bot') . '</strong> ' . esc_html__('A Contributor can put a prompt, and a system prompt, in a draft; once it is published, the first user who can edit posts to view the page generates the answer, the tokens count against that viewer\'s monthly cap, and the answer is then on the page for everyone, without anyone having read it first. The answer\'s markdown is sanitised (no scripts, no raw HTML), but links and images the model writes reach the public page. Review a page after its answer appears, as you would any content.', 'alpaca-bot'))
             . self::p(sprintf(
                 /* translators: 1: model="…", 2: system="…", 3: temperature="…", 4: format="text" */
-                esc_html__('The other attributes: %1$s picks the model where users may change it, %2$s replaces the system prompt for this answer, %3$s the temperature, and %4$s shows the answer as plain text instead of rendering its markdown.', 'alpaca-bot'),
+                esc_html__('The other attributes: %1$s picks the model where users may change it (otherwise the site\'s default model answers), %2$s replaces the system prompt for this answer, %3$s the temperature, and %4$s shows the answer as plain text instead of rendering its markdown. Changing the site\'s default model or system prompt starts a new answer.', 'alpaca-bot'),
                 '<code>model="…"</code>',
                 '<code>system="…"</code>',
                 '<code>temperature="…"</code>',
                 '<code>format="text"</code>',
             ))
             . self::p(sprintf(
-                /* translators: 1: [alpacabot_agent], 2: name="get|summarize" url="…" */
-                esc_html__('%1$s, the 0.4 form (%2$s), is deprecated: it still fetches the page and, for summarize, asks the model, under the same rules, and it logs a notice under WP_DEBUG. It goes away in a later 0.x release; put the text to summarize in a prompt instead, or open the URL in this chat, where the fetch and summarize tools read it for you.', 'alpaca-bot'),
+                /* translators: 1: [alpacabot_agent], 2: name="get|summarize" url="…", 3: Settings › Tools */
+                esc_html__('%1$s, the 0.4 form (%2$s), is deprecated: it still fetches the page and, for summarize, asks the model, under the same rules, and it logs a notice under WP_DEBUG. The fetch is the chat\'s web_fetch tool, so it runs only while that tool is on under %3$s. It goes away in a later 0.x release; put the text to summarize in a prompt instead, or open the URL in this chat, where the fetch and summarize tools read it for you.', 'alpaca-bot'),
                 '<code>[alpacabot_agent]</code>',
                 '<code>name="get|summarize" url="…"</code>',
+                esc_html__('Settings › Tools', 'alpaca-bot'),
             ));
     }
 

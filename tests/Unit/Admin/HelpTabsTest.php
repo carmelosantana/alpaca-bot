@@ -58,7 +58,13 @@ it('says what both shortcodes do now, that an answer costs tokens and is cached,
     expect($content)->toContain('[alpacabot]')->toContain('[alpacabot_agent]')->toContain('prompt=')
         ->toContain('token')->toContain('cache')->toContain('edit posts')->toContain('deprecated')
         ->toContain('alpaca_bot/shortcode/allow_guests')
-        ->not->toContain('removed')->not->toContain('registers no shortcodes')->not->toContain('1.0');
+        // Review I2, documented rather than gated: anyone who can write a post can write a
+        // prompt, the tokens are the viewer's, nobody reads the answer before it is public,
+        // and links and images in it reach the page. I3: the REST API and the editor show the
+        // cache or a notice. M8: the shim's fetch is under the Tools setting.
+        ->toContain('write a post')->toContain('monthly cap')->toContain('links')->toContain('images')
+        ->toContain('REST')->toContain('Settings › Tools')
+        ->not->toContain('removed')->not->toContain('registers no shortcodes')->not->toMatch('/(?<![\d.])1\.\d/');
 });
 
 it('describes what the chat screen does now, and points support at Discord, Patreon and the issue tracker', function (): void {
