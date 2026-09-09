@@ -354,10 +354,11 @@ final class WebFetchToolkit implements ToolkitInterface
 
     /**
      * A preg_* answer, or an exception when PCRE gave up (a match or backtrack limit, a JIT
-     * stack limit, bad UTF-8 under `/u`). preg_replace() answers null then, preg_match() false,
-     * and preg_split() the pieces it had matched so far with no other sign, so the error code
-     * is read after every call: a `(string)` cast over the null, or a walk over the partial
-     * split, is a page silently emptied or truncated and reported as read.
+     * stack limit, bad UTF-8 under `/u`). preg_replace() answers null then, preg_match() and
+     * preg_split() false; the error code is read after every call as well, so a variant that
+     * answers something else on some other failure is caught the same way: a `(string)` cast
+     * over the null, or a walk over a partial split, is a page silently emptied or truncated
+     * and reported as read.
      *
      * @template T
      * @param T|null|false $result
