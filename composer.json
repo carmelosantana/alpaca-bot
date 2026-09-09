@@ -76,6 +76,7 @@
         "lint": "phpcs",
         "lint:fix": "phpcbf",
         "docs:hooks": "@php bin/hooks-doc.php",
+        "build": "bash bin/build-zip.sh",
         "check": [
             "@lint",
             "@analyse",

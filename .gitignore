@@ -1,4 +1,5 @@
 _builds/
+dist/
 vendor/
 vendor-wordpress/
 composer.phar

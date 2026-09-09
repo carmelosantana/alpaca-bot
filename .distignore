@@ -1,0 +1,93 @@
+# Everything the release zip must NOT contain. bin/build-zip.sh feeds this to rsync as an
+# --exclude-from list, so these are rsync patterns: a leading `/` anchors to the plugin root,
+# an unanchored name matches at any depth.
+#
+# The runtime needs exactly: alpaca-bot.php, readme.txt, LICENSE.md, src/, assets/ and
+# vendor-prefixed/. vendor/ is a BUILD-TIME INPUT, not an artifact: alpaca-bot.php registers its
+# own PSR-4 loader over src/ and requires only vendor-prefixed/autoload.php, and
+# bin/check-bootstrap.php is the guard that Composer's loader is never registered at runtime.
+
+# ---------------------------------------------------------------------------
+# Plugin-root paths. Anchored on purpose: an unanchored `resources` would also delete
+# vendor-prefixed/symfony/polyfill-php80/Resources on a case-insensitive filesystem, and an
+# unanchored `composer.json` would strip every vendored package's manifest. Anchoring keeps
+# this list about *this* repo's layout and leaves vendor-prefixed/ as strauss produced it.
+# ---------------------------------------------------------------------------
+
+# VCS and repo metadata
+/.git
+/.gitattributes
+/.gitignore
+/.github
+
+# Agent, editor and tool state
+/.claude
+/.superpowers
+/.editorconfig
+/.npmrc
+
+# This file, and the file it replaces
+/.distignore
+/.zipignore
+
+# Build inputs and outputs that are not the artifact
+/vendor
+/vendor-wordpress
+/node_modules
+/dist
+/_builds
+/_org
+/build.mjs
+/scripts
+/tools
+/resources
+
+# wordpress.org listing assets: uploaded to the SVN assets/ dir, never inside the plugin zip
+/.wordpress-org
+
+# Dev manifests and lockfiles
+/composer.json
+/composer.lock
+/package.json
+/pnpm-lock.yaml
+/pnpm-workspace.yaml
+/tsconfig.json
+
+# Test and QA config
+/.phpunit.cache
+/phpcs.xml
+/phpcs.xml.dist
+/phpstan.neon.dist
+/phpunit.xml
+/phpunit.integration.xml
+/playwright.config.ts
+/.wp-env.json
+
+# Developer-facing entry points (readme.txt is the user-facing one and ships)
+/bin
+/examples
+/README.md
+
+# ---------------------------------------------------------------------------
+# Unanchored: never wanted at any depth, in this repo or in a vendored package.
+# ---------------------------------------------------------------------------
+
+# Test suites and test-case base classes. symfony/*-contracts ship PHPUnit base classes under
+# Test/ that reference classes no WordPress install has; nothing autoloads them at runtime.
+tests
+Test
+
+# Package documentation (carmelosantana/php-agents ships a docs/ tree)
+docs
+
+# IDE helper stubs shipped by league/commonmark and nette/utils
+.phpstorm.meta.php
+
+# VCS and editor dotfiles, including the ones inside vendored packages
+.git
+.gitignore
+.gitattributes
+.editorconfig
+
+# Never, at any depth
+node_modules
