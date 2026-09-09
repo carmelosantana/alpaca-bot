@@ -16,11 +16,13 @@
  * (`alpaca_bot/admin/menu_capability`, Admin\Menu) hand their names to Capability::filtered(),
  * which applies the filter and reduces the result to a capability name. So `Capability::filtered(`
  * is treated as a filter call site, its first argument the hook, and the `apply_filters($hook, ...)`
- * inside src/Capability.php, the one place a hook name is legitimately a variable, is the only
- * non-literal name the scanner skips. Anywhere else a hook name that is not a string literal is an
- * error, not an omission: a wrapper added later has to be named here, in WRAPPERS, or the run
- * fails, rather than the reference quietly losing whatever went through it. An interpolated
- * literal (`"alpaca_bot/capability/{$route}"`) is documented with the variable as `{route}`.
+ * inside the body of Capability::filtered() itself, the one place a hook name is legitimately a
+ * variable, is the only non-literal name the scanner skips: that method, in that file, not the
+ * file. Anywhere else a hook name that is not a string literal is an error, not an omission: a
+ * wrapper added later, a second one in Capability.php included, has to be named here, in
+ * WRAPPERS, or the run fails, rather than the reference quietly losing whatever went through it.
+ * An interpolated literal (`"alpaca_bot/capability/{$route}"`) is documented with the variable
+ * as `{route}`.
  *
  * A call site with no docblock, a docblock with no description or no `@since`, or one whose
  * `@param` count differs from what the call passes, fails the run (every problem is listed, exit
@@ -40,10 +42,11 @@ namespace AlpacaBot\Bin\HooksDoc;
 /** Hook names this reference covers. */
 const PREFIX = 'alpaca_bot/';
 
-/** The one file whose `apply_filters($hook, ...)` is the generic wrapper body, not a hook of its own. */
-const WRAPPER_BODY = 'src/Capability.php';
-
-/** Static calls that apply a filter named by their first argument: `Class::method` => type. */
+/**
+ * Static calls that apply a filter named by their first argument: `Class::method` => type. The
+ * body of each (the method of that name, in the file named after the class) is the only place a
+ * hook name may be a variable.
+ */
 const WRAPPERS = ['Capability::filtered' => 'filter'];
 
 /** Functions that fire a hook named by their first argument: name => type. */
@@ -93,10 +96,15 @@ final class HooksDoc
             fwrite(STDOUT, $markdown);
             return 0;
         }
-        if (!is_dir(dirname($out))) {
-            mkdir(dirname($out), 0o777, true);
+        $dir = dirname($out);
+        if (!is_dir($dir) && !@mkdir($dir, 0o755, true) && !is_dir($dir)) {
+            fwrite(STDERR, "hooks-doc: cannot create {$dir}\n");
+            return 1;
         }
-        file_put_contents($out, $markdown);
+        if (@file_put_contents($out, $markdown) !== strlen($markdown)) {
+            fwrite(STDERR, "hooks-doc: cannot write {$out}\n");
+            return 1;
+        }
         $hooks = count(array_unique(array_column($rows, 'hook')));
         $shown = str_starts_with($out, $real . '/') ? substr($out, strlen($real) + 1) : $out;
         fwrite(STDOUT, sprintf("hooks-doc: %d call site(s), %d hook(s) -> %s\n", count($rows), $hooks, $shown));
@@ -161,7 +169,7 @@ final class HooksDoc
             $where = "{$file}:{$tokens[$callee]->line}";
             $hook = self::hookName($tokens, $open);
             if ($hook === null) {
-                if ($file !== WRAPPER_BODY) {
+                if (!self::isWrapperBody($tokens, $callee, $file)) {
                     $this->errors[] = "{$where}: hook name is not a string literal; a wrapper that names the hook belongs in WRAPPERS in bin/hooks-doc.php";
                 }
                 continue;
@@ -259,7 +267,7 @@ final class HooksDoc
                 $hook .= stripcslashes($part->text);
             } elseif ($part->is(T_VARIABLE)) {
                 $hook .= '{' . substr($part->text, 1) . '}';
-            } elseif ($part->is([T_CURLY_OPEN, T_DOLLAR_OPEN_CURLY_BRACES]) && isset($tokens[$j + 1], $tokens[$j + 2]) && $tokens[$j + 1]->is([T_VARIABLE, T_STRING_VARNAME]) && $tokens[$j + 2]->text === '}') {
+            } elseif (in_array($part->text, ['{', '${'], true) && isset($tokens[$j + 1], $tokens[$j + 2]) && $tokens[$j + 1]->is([T_VARIABLE, T_STRING_VARNAME]) && $tokens[$j + 2]->text === '}') {
                 $hook .= '{' . ltrim($tokens[$j + 1]->text, '$') . '}';
                 $j += 2;
             } else {
@@ -267,6 +275,82 @@ final class HooksDoc
             }
         }
         return $hook;
+    }
+
+    /**
+     * Whether the call at $callee is the body of one of WRAPPERS: inside the method of that name,
+     * in the file named after its class (`Capability::filtered` => `Capability.php`, `filtered()`).
+     *
+     * @param list<\PhpToken> $tokens
+     */
+    private static function isWrapperBody(array $tokens, int $callee, string $file): bool
+    {
+        $method = self::enclosingFunction($tokens, $callee);
+        if ($method === null) {
+            return false;
+        }
+        $class = substr(basename($file), 0, -4);
+        return isset(WRAPPERS["{$class}::{$method}"]);
+    }
+
+    /**
+     * The name of the innermost named function or method whose body contains $i, or null when
+     * there is none (top-level code, or only closures).
+     *
+     * @param list<\PhpToken> $tokens
+     */
+    private static function enclosingFunction(array $tokens, int $i): ?string
+    {
+        $depth = 0;
+        for ($j = $i - 1; $j >= 0; $j--) {
+            $text = $tokens[$j]->text;
+            if ($text === '}') {
+                $depth++;
+            } elseif ($text === '{' || $text === '${') {
+                if ($depth > 0) {
+                    $depth--;
+                    continue;
+                }
+                $name = self::functionOpenedBy($tokens, $j);
+                if ($name !== null) {
+                    return $name;
+                }
+            }
+        }
+        return null;
+    }
+
+    /**
+     * The name of the function whose body the `{` at $brace opens, when the tokens before it are
+     * `function name(...)` with an optional return type; null for any other block.
+     *
+     * @param list<\PhpToken> $tokens
+     */
+    private static function functionOpenedBy(array $tokens, int $brace): ?string
+    {
+        $j = self::significant($tokens, $brace, -1);
+        while ($j !== null && $tokens[$j]->text !== ')') {
+            if (in_array($tokens[$j]->text, [';', '{', '}'], true)) {
+                return null;
+            }
+            $j = self::significant($tokens, $j, -1);
+        }
+        for ($depth = 0; $j !== null && $j >= 0; $j--) {
+            if ($tokens[$j]->text === ')') {
+                $depth++;
+            } elseif ($tokens[$j]->text === '(' && --$depth === 0) {
+                break;
+            }
+        }
+        if ($j === null || $j < 0) {
+            return null;
+        }
+        $name = self::significant($tokens, $j, -1);
+        $keyword = $name === null ? null : self::significant($tokens, $name, -1);
+        if ($name === null || $keyword === null || !$tokens[$name]->is(T_STRING) || !$tokens[$keyword]->is(T_FUNCTION)) {
+            return null;
+        }
+        return $tokens[$name]->text;
     }
 
     /**
@@ -308,7 +392,7 @@ final class HooksDoc
             if ($token->text === ')' && $depth === 0) {
                 return $lastSignificant === '(' ? 0 : $commas + ($lastSignificant === ',' ? 0 : 1);
             }
-            if ($token->is([T_CURLY_OPEN, T_DOLLAR_OPEN_CURLY_BRACES]) || in_array($token->text, ['(', '[', '{'], true)) {
+            if (in_array($token->text, ['(', '[', '{', '${'], true)) {
                 $depth++;
             } elseif (in_array($token->text, [')', ']', '}'], true)) {
                 $depth--;

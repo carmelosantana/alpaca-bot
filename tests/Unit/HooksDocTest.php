@@ -35,6 +35,9 @@ function hooksDocTree(array $files): string
     $root = sys_get_temp_dir() . '/alpaca-hooks-doc-' . bin2hex(random_bytes(6));
     mkdir($root . '/src/Deep', 0o777, true);
     foreach ($files as $name => $source) {
+        if (!is_dir(dirname($root . '/src/' . $name))) {
+            mkdir(dirname($root . '/src/' . $name), 0o777, true);
+        }
         file_put_contents($root . '/src/' . $name, $source);
     }
     $GLOBALS['hooksDocRoots'][] = $root;
@@ -215,8 +218,15 @@ it('ignores hooks outside the alpaca_bot namespace and the wrapper body in src/C
         PHP,
         'Capability.php' => <<<'PHP'
         <?php
-        /** @var mixed $filtered */
-        $filtered = apply_filters($hook, $default, ...$args);
+        final class Capability
+        {
+            public static function filtered(string $hook, string $default, mixed ...$args): string
+            {
+                /** @var mixed $filtered */
+                $filtered = apply_filters($hook, $default, ...$args);
+                return is_string($filtered) ? $filtered : $default;
+            }
+        }
         PHP,
     ]);
 
@@ -225,6 +235,47 @@ it('ignores hooks outside the alpaca_bot namespace and the wrapper body in src/C
     expect($run['code'])->toBe(0, $run['stderr'])
         ->and($run['stdout'])->not->toContain('http_request_host_is_external')
         ->and(substr_count($run['stdout'], "\n| `alpaca_bot/"))->toBe(0);
+});
+
+it('fails on a second wrapper in src/Capability.php until it is named, rather than dropping its hooks', function (): void {
+    $root = hooksDocTree(['Capability.php' => <<<'PHP'
+    <?php
+    final class Capability
+    {
+        public static function filtered(string $hook, string $default, mixed ...$args): string
+        {
+            /** @var mixed $filtered */
+            $filtered = apply_filters($hook, $default, ...$args);
+            return is_string($filtered) ? $filtered : $default;
+        }
+
+        public static function flag(string $hook, bool $default): bool
+        {
+            return (bool) apply_filters($hook, $default);
+        }
+    }
+    PHP]);
+
+    $run = hooksDoc($root);
+
+    expect($run['code'])->toBe(1)
+        ->and($run['stderr'])->toContain('src/Capability.php:13')->toContain('not a string literal')
+        ->and($run['stderr'])->not->toContain('src/Capability.php:7');
+});
+
+it('fails, and says so, when the output file cannot be written', function (): void {
+    $root = hooksDocTree(['Documented.php' => hooksDocDocumented()]);
+    file_put_contents($root . '/blocked', 'a file where a directory is needed');
+
+    $noDir = hooksDoc($root, $root . '/blocked/hooks.md');
+    $isDir = hooksDoc($root, $root . '/src');
+
+    expect($noDir['code'])->toBe(1)
+        ->and($noDir['stderr'])->toContain('cannot create')->toContain('/blocked')
+        ->and($noDir['stdout'])->toBe('')
+        ->and($isDir['code'])->toBe(1)
+        ->and($isDir['stderr'])->toContain('cannot write')->toContain('/src')
+        ->and($isDir['stdout'])->toBe('');
 });
 
 it('orders rows by hook name, not by the order the calls appear in a file', function (): void {
