@@ -263,12 +263,8 @@ final class Pipeline
                     $failure = self::failure($output, $observer);
                     if ($failure !== null) {
                         // The agent swallowed the provider's throw; raising it here puts it on the
-                        // path a plain provider failure takes (the catch below). When tools had
-                        // already run, the turn is not discarded first: a draft the run created is
-                        // in the user's posts, and the transcript is where they learn of it.
-                        if ($observer->toolCalls() !== []) {
-                            $this->storePartial($ephemeral, $userId, $conversation, $model, $content, $reasoning, $prompt, $completion, self::elapsedMs($started), $observer->toolCalls());
-                        }
+                        // path a plain provider failure takes (the catch below, which keeps the
+                        // partial transcript when a tool had run).
                         throw new \RuntimeException($failure);
                     }
                 } else {
@@ -293,6 +289,17 @@ final class Pipeline
                 $streamEnded = true;
             } catch (\Throwable $e) {
                 $streamEnded = true;
+                // When a tool had already run, the turn is not discarded: a draft the run created
+                // is in the user's posts, and the transcript is where they learn of it. Here, on
+                // the one path every failure of a tool turn takes, rather than at the announced
+                // failure above alone: a Throwable that escapes the fiber instead (the
+                // LogicException after it, a toolkit added through `alpaca_bot/toolkits` that
+                // throws outside the agent's own catch regions, a consumer throwing into the
+                // generator) lands here with the same draft made and the same duty to record it.
+                $toolCalls = $observer?->toolCalls() ?? [];
+                if ($toolCalls !== []) {
+                    $this->storePartial($ephemeral, $userId, $conversation, $model, $content, $reasoning, $prompt, $completion, self::elapsedMs($started), $toolCalls);
+                }
                 try {
                     /**
                      * Fires when the provider call (or the tool loop) failed before the reply finished, in
@@ -452,8 +459,8 @@ final class Pipeline
     /**
      * What a turn that did not finish leaves behind: the reply as far as it got, appended and
      * saved (meta `partial: true`), and a receipt for the time and usage. Two callers: settle(),
-     * for the consumer that walked away, and the tool branch of send(), for a run whose provider
-     * failed after a tool had already run. Neither fires `chat/failed` here; each does so in its
+     * for the consumer that walked away, and send()'s catch, for a tool turn that failed after
+     * a tool had already run, whatever threw. Neither fires `chat/failed` here; each does so in its
      * own way afterwards, with the conversation already carrying this reply, so a listener sees
      * what was stored. An ephemeral turn has no post to store on and stores nothing; the receipt
      * is recorded either way.

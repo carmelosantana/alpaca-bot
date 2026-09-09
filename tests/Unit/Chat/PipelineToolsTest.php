@@ -215,6 +215,51 @@ it('keeps the turn when the provider fails after a tool ran: the partial reply i
         ->and($h->writes[3][2]['meta_input']['total_tokens'])->toBe(4);
 });
 
+it('keeps the turn when anything else throws after a tool ran, the same way: the partial reply stored with the call, the run billed, the failure raised', function (): void {
+    // Final review F3: the rule above held on one exit only, the failure the agent announced.
+    // A Throwable that escapes the fiber instead (the LogicException after it, a third-party
+    // toolkit blowing up outside the vendored catch regions, a consumer throwing into the
+    // generator) landed in the same catch, which stored nothing and let the conversation be
+    // deleted, with the draft already in the user's posts. The consumer's throw is the lever
+    // here: it reaches the catch at the yield, as any of them does.
+    $toolkit = echoToolkit('draft_post', 'Use it.', static fn(array $a): ToolResult => ToolResult::success('{"id": 225}'));
+    $provider = agentProvider([
+        [new Response('Drafting.', ProviderFinishReason::Stop), new Response('', ProviderFinishReason::ToolUse, [new ToolCall('c1', 'draft_post', ['text' => 'Hello'])], usage: new Usage(3, 1, 4))],
+        [new Response('Done.', ProviderFinishReason::Stop, usage: new Usage(2, 1, 3))],
+    ]);
+    $h = pipelineWith($provider, [], [], TOOL_MODEL, null, registryWith(['draft' => $toolkit]));
+    $failed = null;
+    Actions\expectDone('alpaca_bot/chat/failed')->once()->whenHappen(function (\Throwable $e, Conversation $c) use (&$failed): void {
+        $failed = [$e, $c];
+    });
+    Actions\expectDone('alpaca_bot/chat/completed')->never();
+
+    $turn = $h->pipeline->send(3, 'draft it');
+    $seen = '';
+    foreach ($turn as $delta) {
+        $seen .= $delta->text;
+        if (str_contains($seen, 'Done.')) {
+            break;
+        }
+    }
+    // The tool has run and the second stream is under way when the throw arrives.
+    expect($seen)->toContain('Drafting.')->toContain('Done.');
+    expect(fn() => $turn->throw(new \LogicException('boom')))->toThrow(\RuntimeException::class, 'Provider error: boom');
+    expect($failed[0])->toBeInstanceOf(\LogicException::class);
+
+    $record = ['name' => 'draft_post', 'arguments' => ['text' => 'Hello'], 'result_excerpt' => '{"id": 225}', 'ok' => true];
+    expect($failed[1]->messages)->toHaveCount(2)
+        ->and($failed[1]->messages[1]->content)->toContain('Drafting.')->toContain('Done.')
+        ->and($failed[1]->messages[1]->meta['partial'])->toBeTrue()
+        ->and($failed[1]->messages[1]->meta['tool_calls'])->toBe([$record])
+        // Billed for what had arrived, read before each yield: both calls' usage, since the
+        // second stream's chunk carried its usage with the text.
+        ->and($failed[1]->messages[1]->usage)->toBe(['prompt_tokens' => 5, 'completion_tokens' => 2])
+        ->and(array_map(static fn(array $w): string => $w[0], $h->writes))->toBe(['wp_insert_post', 'update_post_meta', 'wp_update_post', 'wp_insert_post'])
+        ->and($h->writes[1][2][1]['meta']->tool_calls)->toBe([$record])
+        ->and($h->writes[3][2]['meta_input']['total_tokens'])->toBe(7);
+});
+
 it('finishes the turn on a tool\'s own word when a toolkit ends the run with a TerminationException, not as a provider error', function (): void {
     // The vendored Tool class catches everything its callback throws, so a termination can
     // only come from a toolkit that implements ToolInterface itself: a third-party toolkit
