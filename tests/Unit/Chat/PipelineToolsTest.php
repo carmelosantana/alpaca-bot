@@ -6,11 +6,15 @@ use AlpacaBot\Chat\AgentStreamObserver;
 use AlpacaBot\Chat\Conversation;
 use AlpacaBot\Chat\Delta;
 use AlpacaBot\Chat\Message;
+use AlpacaBot\Chat\Pipeline;
 use AlpacaBot\Chat\Result;
+use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Agent\Output;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Contract\ProviderInterface;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Contract\ToolInterface;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Contract\ToolkitInterface;
+use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Enum\AgentFinishReason;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Enum\ProviderFinishReason;
+use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Enum\ToolResultStatus;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Exception\TerminationException;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Message\AssistantMessage;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Message\SystemMessage;
@@ -521,4 +525,95 @@ it('replays the stored history to the agent, bounded to chat.context_messages, u
             [UserMessage::class, 'Q3'],
         ])
         ->and($calls[0]['messages'][0]->content())->toContain('Site')->toContain('Rules.');
+});
+
+// Pipeline::failure() decides whether an Error finish is a failure to raise or a tool's own
+// stop to show. It is private and static, and the two Outputs that separate the cases cannot
+// both be produced through a real agent run (the unannounced-failure one does not exist in
+// the pinned library — it is the shape a future release could add), so these call it directly
+// on the Outputs the library builds at each of its Error sites, and on the ones it might.
+
+/** The message an unannounced failure carries, as Pipeline::failure() writes it. */
+const UNREPORTED_FAILURE = 'The run ended in an error the assistant did not report.';
+
+/** Pipeline::failure(), which is private and static. */
+function pipelineFailure(Output $output, AgentStreamObserver $observer): ?string
+{
+    /** @var ?string */
+    return (new ReflectionMethod(Pipeline::class, 'failure'))->invoke(null, $output, $observer);
+}
+
+/** An observer that heard `agent.error` with `$message`, or heard nothing when it is null. */
+function observerHearing(?string $message): AgentStreamObserver
+{
+    $observer = new AgentStreamObserver();
+    if ($message !== null) {
+        $agent = agentSubject();
+        $agent->attach($observer);
+        $agent->notify('agent.error', $message);
+    }
+    return $observer;
+}
+
+it('reads an Error finish that announced nothing and terminated nothing as a failure, in the library\'s own words or its own', function (): void {
+    // The regression this guards: a library release that returns an Error finish from a site
+    // that does not announce `agent.error`. Read by the absence of the announcement, this is a
+    // finished reply carrying 'Provider error: ...' as the assistant's answer, billed and
+    // fired as a success. Read by what it is — an Error finish that is not a termination — it
+    // is the failure it is.
+    $unannounced = new Output(content: 'Provider error: boom', finishReason: AgentFinishReason::Error);
+
+    expect(pipelineFailure($unannounced, observerHearing(null)))->toBe(UNREPORTED_FAILURE)
+        // Never the library's raw content: send() puts what comes back in a RuntimeException as
+        // the announced message, and 'Provider error: boom' is not a message anything announced.
+        ->not->toContain('boom')
+        // Announced or not, the finish decides; the announcement only supplies the words.
+        ->and(pipelineFailure($unannounced, observerHearing('boom')))->toBe('boom');
+});
+
+it('reads each of the library\'s announced Error finishes as a failure, in the announced words', function (): void {
+    // The two sites that announce: the cancellation token tripped, and the provider threw.
+    expect(pipelineFailure(new Output(content: 'Task was cancelled.', finishReason: AgentFinishReason::Error), observerHearing('Task cancelled')))->toBe('Task cancelled')
+        ->and(pipelineFailure(new Output(content: 'Provider error: 500 Internal Server Error', finishReason: AgentFinishReason::Error), observerHearing('500 Internal Server Error')))->toBe('500 Internal Server Error');
+});
+
+it('reads an Error finish whose content is a successful tool result as the termination it is, not a failure', function (): void {
+    // The one unannounced Error finish the pinned library has: executeToolCalls() caught a
+    // TerminationException, recorded its message as that tool's successful result, and the
+    // agent returned the same message as the content. Nothing failed.
+    $terminated = new Output(
+        content: 'Stopped: enough',
+        toolResults: [ToolResult::success('echo:ping'), ToolResult::success('Stopped: enough')],
+        finishReason: AgentFinishReason::Error,
+    );
+
+    expect(pipelineFailure($terminated, observerHearing(null)))->toBeNull();
+});
+
+it('reads a near miss as the failure it is: the same words as the content, but not from a tool that succeeded, and not empty', function (): void {
+    // A tool whose result content matches by coincidence but whose status is Error (or
+    // Timeout) is not the termination path: that path records ToolResult::success().
+    $failed = new Output(
+        content: 'Provider error: boom',
+        toolResults: [ToolResult::error('Provider error: boom'), new ToolResult(ToolResultStatus::Timeout, 'Provider error: boom')],
+        finishReason: AgentFinishReason::Error,
+    );
+    // Empty content matches an empty successful result under a plain comparison. A termination
+    // whose message is empty has nothing to show the user anyway, so the comparison asks for
+    // content before it can identify one.
+    $empty = new Output(
+        content: '',
+        toolResults: [ToolResult::success('')],
+        finishReason: AgentFinishReason::Error,
+    );
+
+    expect(pipelineFailure($failed, observerHearing(null)))->toBe(UNREPORTED_FAILURE)
+        ->and(pipelineFailure($failed, observerHearing('boom')))->toBe('boom')
+        ->and(pipelineFailure($empty, observerHearing(null)))->toBe(UNREPORTED_FAILURE);
+});
+
+it('leaves every finish that is not an Error alone', function (): void {
+    foreach ([AgentFinishReason::Stop, AgentFinishReason::Done, AgentFinishReason::MaxIterations, AgentFinishReason::BudgetExhausted, AgentFinishReason::EmptyResponse] as $reason) {
+        expect(pipelineFailure(new Output(content: 'Answer', finishReason: $reason), observerHearing('boom')))->toBeNull();
+    }
 });

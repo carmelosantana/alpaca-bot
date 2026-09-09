@@ -18,6 +18,7 @@ use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Contract\MessageInterface;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Contract\ProviderInterface;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Contract\ToolkitInterface;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Enum\AgentFinishReason;
+use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Enum\ToolResultStatus;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Message\AssistantMessage;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Message\Conversation as AgentConversation;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Message\SystemMessage;
@@ -487,18 +488,54 @@ final class Pipeline
     }
 
     /**
-     * The message a run failed on, or null when it did not fail. The agent reports a failure as
-     * an Error finish and announces it (`agent.error`, which the observer keeps): the provider
-     * threw, or the run was cancelled. It reports one other thing as an Error finish without
-     * announcing anything: a tool that ended the run by throwing TerminationException, whose
-     * message the agent records as that tool's (successful) result and returns as the content.
-     * Nothing failed there; a tool asked to stop, and the turn finishes on its word (agentTurn()
-     * yields it). Reading the two apart by the announcement is what keeps a toolkit's own
-     * "stop" from reaching the user as `Provider error: ...`.
+     * The message a run failed on, or null when it did not fail. An Error finish is a failure
+     * unless it is positively a termination: a tool that ended the run by throwing
+     * TerminationException, which is not a failure at all. Nothing failed there; a tool asked to
+     * stop, and the turn finishes on its word (agentTurn() yields it). Telling the two apart is
+     * what keeps a toolkit's own "stop" from reaching the user as `Provider error: ...`.
+     *
+     * The termination is identified by what it leaves behind, not by what it did not say.
+     * AbstractAgent::executeToolCalls() records the terminating tool's message as that tool's
+     * *successful* result and the agent returns the same message as the content, so an Error
+     * finish carrying content that some ToolResult of status Success repeats verbatim is a
+     * termination and only a termination — no other Error site produces that pairing. Empty
+     * content is not enough to identify one (any empty successful result would match it), and a
+     * termination with an empty message has nothing to show the user regardless. The library's
+     * one other termination path, a TerminationException out of a batch executor, leaves no
+     * results at all and so reads here as a failure; it is unreachable from this plugin, which
+     * never gives the agent a tool executor and so gets the serial SynchronousToolExecutor, and
+     * a termination misread as a failure is the harmless direction of the two.
+     *
+     * The direction matters more than the test. The library announces `agent.error` at two of
+     * its three Error sites (the cancellation token tripped, the provider threw) and at neither
+     * does anything else; reading failure as "an Error finish that announced" therefore rested on
+     * the library never adding a fourth, unannounced one — and php-agents is a dependency, so a
+     * patch release decides that, not this file. Read that way, such a release would land a
+     * provider failure as a *finished* assistant reply carrying the library's own
+     * 'Provider error: ...' text, fire `alpaca_bot/chat/completed` and bill the user for it.
+     * Read this way, an unrecognised Error finish is a failure, which is the direction a wrong
+     * guess should fail in. (The pin is `~0.15.2` besides, so a minor release cannot arrive
+     * unreviewed.)
+     *
+     * The announcement still supplies the words when there was one: it is the specific message,
+     * and send() raises it. Without one there is nothing to quote — the content is the library's
+     * own prose, never announced and not the plugin's to present as an error — so the failure is
+     * reported in words of this plugin's own, which translate.
      */
     private static function failure(Output $output, AgentStreamObserver $observer): ?string
     {
-        return $output->finishReason === AgentFinishReason::Error ? $observer->error() : null;
+        if ($output->finishReason !== AgentFinishReason::Error) {
+            return null;
+        }
+        foreach ($output->toolResults as $result) {
+            if ($result->status === ToolResultStatus::Success && $result->content !== '' && $result->content === $output->content) {
+                return null;
+            }
+        }
+        $announced = $observer->error();
+        return $announced !== null && $announced !== ''
+            ? $announced
+            : __('The run ended in an error the assistant did not report.', 'alpaca-bot');
     }
 
     /**
@@ -609,8 +646,8 @@ final class Pipeline
             throw new \LogicException('The agent run returned no Output.');
         }
         $tail = match ($output->finishReason) {
-            // An announced failure is send()'s to raise (failure()); the unannounced kind is a
-            // tool's termination, and its message is the run's last word.
+            // A failure is send()'s to raise (failure(), which reads a termination apart from
+            // one); a termination is not a failure, and its message is the run's last word.
             AgentFinishReason::Error => self::failure($output, $observer) === null ? $output->content : '',
             AgentFinishReason::Stop, AgentFinishReason::Done => $output->content !== '' && !str_ends_with($streamed, $output->content) ? $output->content : '',
             AgentFinishReason::MaxIterations, AgentFinishReason::BudgetExhausted => __('The assistant ran out of tool steps before it finished.', 'alpaca-bot'),
