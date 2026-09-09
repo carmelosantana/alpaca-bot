@@ -363,6 +363,25 @@ it('renders the chat shell for an editor with no prompt, on their model, and enq
         ->and($h->writes)->toBe([]);
 });
 
+it('never renders the shell inside a REST request: an editor gets a notice, no history query, no nonce, no bundle', function (): void {
+    // Final review F8: render() branched to shell() before answer()'s wp_is_rest_endpoint()
+    // guard, so `GET /wp/v2/posts?per_page=100` as an editor was up to a hundred shells in
+    // content.rendered, each a listFor() query and a full markup build carrying a live
+    // `wp_rest` nonce. The rule that governs the prompt form governs the shell.
+    $h = pipelineWith(null);
+    $chat = shortcodeChat($h, 7);
+    shortcodeViewer(3, ['edit_posts', 'upload_files']);
+    Functions\when('wp_is_rest_endpoint')->justReturn(true);
+    Functions\expect('get_posts')->never();
+    Functions\expect('wp_create_nonce')->never();
+    Functions\expect('wp_enqueue_script')->never();
+    Functions\expect('wp_enqueue_media')->never();
+    $html = $chat->render('', null, 'alpacabot');
+    expect($html)->toContain('class="alpaca-bot-notice"')->toContain('viewed')->not->toContain('id="ab-chat"')->not->toContain('hx-headers')
+        ->and(array_column($h->styles, 0))->toBe(['alpaca-bot-shortcode'])
+        ->and($h->writes)->toBe([]);
+});
+
 it('shows a guest the login notice instead of the shell, and enqueues only the shortcode stylesheet', function (): void {
     $h = pipelineWith(null);
     $chat = shortcodeChat($h, 7);

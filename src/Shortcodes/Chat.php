@@ -43,7 +43,8 @@ use AlpacaBot\View\Markdown;
  * is produced for every item of a collection, so a `GET /wp/v2/posts?per_page=100` by an editor
  * would otherwise be up to a hundred serialized turns in one request. Inside one, an editor is
  * served the cache or a notice, never a generation; a page render on the site is where an
- * editor's view generates, which is also what the block editor's preview should show.
+ * editor's view generates, which is also what the block editor's preview should show. The
+ * shell form is under the same rule (shell() says what a shell in a listing would cost).
  *
  * The cache is the spend control, not an optimisation. The answer is a transient keyed on the
  * attributes that shape the generation, on the post, and on the duration (cacheKey()), so two
@@ -355,11 +356,20 @@ final class Chat
         return '<div class="alpaca-bot-answer">' . $inner . '</div>';
     }
 
-    /** The chat screen on the page, as Admin\ChatScreen builds it, a new conversation and the viewer's own history. */
+    /**
+     * The chat screen on the page, as Admin\ChatScreen builds it, a new conversation and the
+     * viewer's own history. Never inside a REST request, under the rule answer() applies to a
+     * prompt: `content.rendered` is produced per item of a collection, and a shell is a history
+     * query and a full markup build carrying the viewer's `wp_rest` nonce, which belongs in a
+     * page they are looking at, not in a hundred items of a listing.
+     */
     private function shell(): string
     {
         if (!self::viewerMayGenerate()) {
             return $this->refused();
+        }
+        if (wp_is_rest_endpoint()) {
+            return $this->notice(__('Alpaca Bot opens its chat here when the page is viewed on the site.', 'alpaca-bot'));
         }
         $userId = get_current_user_id();
         $history = $this->conversations->listFor($userId, max(1, (int) $this->store->get('chat.history_limit')));
