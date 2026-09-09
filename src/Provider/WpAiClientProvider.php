@@ -36,11 +36,15 @@ use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Tool\ToolCall;
  * model message with function-call parts and a user message with one function-response part,
  * which is the only shape core accepts for a tool result. The alternative, dropping `$tools`
  * and reporting no tool capability, was rejected because it is a lie about this adapter and it
- * costs a working feature: models() reports each core model's tool capability as core states it,
- * and since 0.5.0 that is what the catalogue's flag is (Provider\Model::fromDefinition()), so
- * saying "no tools" here would switch the tools path off for every model on this kind and leave
- * a "Tools" setting that did nothing. Whether a given core provider honours the declarations is
- * that provider's business; the model list reports what its metadata claims.
+ * costs a working feature: it would say no core model can call tools while this adapter maps
+ * them one-to-one, and the "Tools" setting would have nothing to act on here. What the model
+ * list reports instead is what core's metadata claims, per model and in both directions:
+ * models() sets `toolCalls` from core's own answer and marks it as reported (`fieldSources`),
+ * which since 0.5.0 is what the catalogue's flag is (Provider\Model::fromDefinition()) and so
+ * what Chat\Pipeline::toolkitsFor() routes on. A core model core says has no function
+ * declarations is therefore flagged tool-less and offered none; the operator's per-model
+ * override outranks that either way. Whether a given core provider honours the declarations it
+ * is sent is that provider's business, not this adapter's.
  *
  * The tool schemas go to core raw. On the `ollama` kind they pass through the vendored
  * OllamaProvider::formatTools() (sanitizeSchema(), recursive), which does three things:
@@ -131,6 +135,14 @@ final class WpAiClientProvider implements ProviderInterface
                 // `name` and `provider` are what ModelDefinition requires, filled truthfully;
                 // nothing downstream reads them (Provider\Model::fromDefinition() labels a model
                 // by its id and reads only the flags), so no label is composed from them.
+                //
+                // `fieldSources` says the tool flag was reported, not defaulted. It matters only
+                // when it is `false`: ModelDefinition cannot otherwise tell "core says this model
+                // has no function declarations" from "nobody said", and Model::declaresCapabilities()
+                // reads the second as licence to keep the optimistic floor. CoreClient::models()
+                // asks each model in turn, so the `false` here is core's answer and the catalogue
+                // must take it. 'provider-api' is the value fromDiscovery() uses for the same
+                // meaning on the fields it fills.
                 $models[] = new ModelDefinition(
                     id: $m['id'],
                     name: $m['name'],
@@ -138,6 +150,7 @@ final class WpAiClientProvider implements ProviderInterface
                     capabilities: $capabilities,
                     toolCalls: $m['tools'],
                     vision: $m['vision'],
+                    fieldSources: ['toolCalls' => 'provider-api'],
                 );
             }
             return $models;

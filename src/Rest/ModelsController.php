@@ -14,6 +14,14 @@ use AlpacaBot\Settings\Store;
  * thinking}`. The site's default model rides in the `X-Alpaca-Bot-Default-Model` header rather
  * than the body, so the body stays a plain list a client can bind to a picker as is.
  *
+ * `tools` is what the turn would actually do, not only what the catalogue says: an operator's
+ * `models.overrides[<model>][tools]` outranks the catalogue at the routing decision
+ * (Chat\Pipeline::toolkitsFor()), so it is laid over the flag here too, and a model somebody
+ * forced tools off on does not list as tool-capable. The overlay is on the response only — the
+ * Model objects, the request memo and the five-minute transient behind them all keep the
+ * provider's own answer, which is what an inherit row still has to be able to read. `vision` and
+ * `thinking` have no override and are the catalogue's word alone.
+ *
  * `refresh=1` bypasses the catalog's five-minute transient and asks the provider again: what a
  * settings screen wants after the operator pulled a new model.
  *
@@ -54,7 +62,11 @@ final class ModelsController extends Controller
         } catch (\Throwable $e) {
             return Errors::provider($e);
         }
-        $response = new \WP_REST_Response(array_map(static fn(Model $m): array => $m->toArray(), $models));
+        $response = new \WP_REST_Response(array_map(function (Model $m): array {
+            $row = $m->toArray();
+            $row['tools'] = $this->store->toolsOverride($m->id) ?? $row['tools'];
+            return $row;
+        }, $models));
         $response->header('X-Alpaca-Bot-Default-Model', $this->catalog->defaultId($this->store));
         return $response;
     }

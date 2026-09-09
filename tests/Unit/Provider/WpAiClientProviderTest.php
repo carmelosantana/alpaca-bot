@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use AlpacaBot\Provider\Model;
 use AlpacaBot\Provider\WpAi\Client;
 use AlpacaBot\Provider\WpAiClientProvider;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Config\ModelDefinition;
@@ -257,6 +258,27 @@ it('models() returns ModelDefinitions under the core provider\'s id with the too
     expect((new WpAiClientProvider('m', $client))->isAvailable())->toBeTrue()
         ->and((new WpAiClientProvider('m', fakeWpAiClient(models: [])))->isAvailable())->toBeFalse()
         ->and((new WpAiClientProvider('m', fakeWpAiClient(available: false, models: $client->models())))->isAvailable())->toBeFalse();
+});
+
+// The gap the flag-level assertion above cannot see. This adapter's `tools => false` is not a
+// silence: CoreClient reads each core model's own support for function declarations
+// (ModelConfig::KEY_FUNCTION_DECLARATIONS), so it is core stating this model cannot call tools.
+// Provider\Model::fromDefinition() has no way to tell that from a provider that reported nothing
+// unless the definition says where the flag came from, so models() declares the provenance and
+// the catalogue's flag comes out false — not the optimistic floor.
+it('models() declares where its tool flag came from, so a core model core says has no tools is not flagged tool-capable', function (): void {
+    $client = fakeWpAiClient(models: [
+        ['id' => 'plain:1b', 'name' => 'plain', 'provider' => 'ollama', 'tools' => false, 'vision' => false],
+        ['id' => 'seeing:1b', 'name' => 'seeing', 'provider' => 'ollama', 'tools' => false, 'vision' => true],
+        ['id' => 'qwen3:8b', 'name' => 'qwen3', 'provider' => 'ollama', 'tools' => true, 'vision' => false],
+    ]);
+    $models = (new WpAiClientProvider('m', $client))->models();
+    expect($models[0]->fieldSources['toolCalls'] ?? null)->toBe('provider-api')
+        // No tools and no vision: nothing else in the definition is a signal, and the flag is
+        // still false because the provenance says the `false` was reported, not defaulted.
+        ->and(Model::fromDefinition($models[0])->tools)->toBeFalse()
+        ->and(Model::fromDefinition($models[1])->tools)->toBeFalse()
+        ->and(Model::fromDefinition($models[2])->tools)->toBeTrue();
 });
 
 it('models() and isAvailable() read as empty and false when the client is unavailable or throws, never as a fatal', function (): void {

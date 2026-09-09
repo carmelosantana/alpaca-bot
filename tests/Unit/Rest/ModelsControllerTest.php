@@ -5,6 +5,7 @@ declare(strict_types=1);
 use AlpacaBot\Provider\Factory;
 use AlpacaBot\Provider\ModelCatalog;
 use AlpacaBot\Rest\ModelsController;
+use AlpacaBot\Settings\Schema;
 use AlpacaBot\Settings\Store;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Config\ModelDefinition;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Contract\ProviderInterface;
@@ -46,6 +47,32 @@ it('lists the catalog as plain arrays and names the default model in a header', 
             ['id' => 'llava:7b', 'label' => 'llava', 'tools' => false, 'vision' => true, 'thinking' => false],
         ])
         ->and($res->get_headers())->toBe(['X-Alpaca-Bot-Default-Model' => 'llava:7b']);
+});
+
+// The flag is a label here, nothing routes on it — but it is the label an operator reads back to
+// check the switch they just threw, so it has to agree with the switch. The overlay is on the way
+// out only: the catalog's own Model objects, its request memo and its transient keep the
+// provider's answer, which is what the next turn's inherit case must still be able to read.
+it('reports the operator\'s per-model tools override in the listing, leaving the catalog itself alone', function (): void {
+    Functions\expect('get_transient')->once()->with(ModelCatalog::TRANSIENT)->andReturn([
+        ['id' => 'llama3.2:latest', 'label' => 'llama3.2', 'tools' => true],
+        ['id' => 'llava:7b', 'label' => 'llava', 'vision' => true],
+        ['id' => 'qwen3:8b', 'label' => 'qwen3', 'tools' => true],
+    ]);
+    $store = new Store(['models.default' => 'llava:7b', 'models.overrides' => [
+        'llama3.2:latest' => ['tools' => Schema::TOOLS_OFF],
+        'llava:7b' => ['tools' => Schema::TOOLS_ON],
+        // Inherit: a row with no tools key at all, as every row stored before 0.5.0 has.
+        'qwen3:8b' => ['temperature' => '0.2'],
+    ]]);
+    $catalog = new ModelCatalog(new Factory($store));
+    $res = (new ModelsController($catalog, $store))->index(restRequest('GET', '/alpaca-bot/v1/models'));
+
+    expect(array_column($res->get_data(), 'tools'))->toBe([false, true, true])
+        // Other flags are untouched, and so is the catalog the same request goes on to read.
+        ->and(array_column($res->get_data(), 'vision'))->toBe([false, true, false])
+        ->and($catalog->find('llama3.2:latest')?->tools)->toBeTrue()
+        ->and($catalog->find('llava:7b')?->tools)->toBeFalse();
 });
 
 it('asks the provider again when refresh is set, skipping the transient', function (): void {

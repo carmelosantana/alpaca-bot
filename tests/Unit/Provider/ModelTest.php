@@ -43,6 +43,19 @@ it('keeps the optimistic floor for a model the provider says nothing about', fun
         ->and(Model::fromDefinition(new ModelDefinition(id: 'mystery:1b', name: 'm', provider: 'ollama', capabilities: []))->tools)->toBeTrue();
 });
 
+// A provider that builds its own ModelDefinition can say "this `false` was reported" where the
+// flags alone cannot: `fieldSources['toolCalls']` names where the tool flag came from. That is a
+// description, so discovery lowers the flag on it even though no capability is set. The plugin's
+// own WP AI adapter is the caller that needs it (Provider\WpAiClientProvider::models()).
+it('reads a declared provenance for the tool flag as the provider describing the model', function (): void {
+    $declared = new ModelDefinition(id: 'plain:1b', name: 'plain', provider: 'wp-ai', toolCalls: false, vision: false, fieldSources: ['toolCalls' => 'provider-api']);
+    expect(Model::fromDefinition($declared)->tools)->toBeFalse()
+        // The arm is that one key and not "any provenance at all": ModelDefinition::fromDiscovery()
+        // fills contextWindow and maxTokens for every model it builds, including a bare
+        // /v1/models row, and neither says a word about tools.
+        ->and(Model::fromDefinition(new ModelDefinition(id: 'mystery:1b', name: 'm', provider: 'ollama', fieldSources: ['contextWindow' => 'provider-inspection', 'maxTokens' => 'heuristic']))->tools)->toBeTrue();
+});
+
 // llava, moondream and bakllava were the three names hard-coded as tool-less. The provider's
 // word is all that decides now: the real /api/show for each of them reports vision, so they
 // still come out tool-less, but by data rather than by name.

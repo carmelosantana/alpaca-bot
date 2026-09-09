@@ -27,14 +27,25 @@ final class Schema
     public const SECRETS = ['provider.api_key'];
 
     /**
-     * The two stored values of the per-model `tools` override, `models.overrides[<m>][tools]`.
-     * The third state, inherit, is not stored at all: an absent key, and a blank cell, both
-     * leave the catalogue's word (Provider\Model::$tools) standing. Read on the turn by
-     * Store::toolsOverride(), never baked into the model catalog.
+     * Force tools on for one model: the stored value of `models.overrides[<m>][tools]` that
+     * offers the enabled toolkits whatever the catalogue says (Provider\Model::$tools). One of
+     * the two values sanitizeOverrides() accepts for that cell; the third state, inherit, is not
+     * stored at all, so an absent key and a blank cell both leave the catalogue's word standing.
+     * Read on the turn by Store::toolsOverride(), never baked into the model catalog.
      *
      * @since 0.5.0
      */
     public const TOOLS_ON = 'on';
+
+    /**
+     * Force tools off for one model: the other stored value of `models.overrides[<m>][tools]`,
+     * and the one this setting exists for — a model that advertises tools and then writes the
+     * call out as prose. It beats the catalogue whatever the catalogue says, a provider that
+     * declares `tools` included; that is the case it exists for. Same wire format and same
+     * inherit rule as TOOLS_ON above.
+     *
+     * @since 0.5.0
+     */
     public const TOOLS_OFF = 'off';
 
     /** @return array<string, array{label:string, description:string}> */

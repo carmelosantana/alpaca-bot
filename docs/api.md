@@ -343,6 +343,11 @@ the site's default model in the `X-Alpaca-Bot-Default-Model` header so the body 
 list. `refresh=1` bypasses the five-minute catalog cache and asks the provider again. An
 unreachable provider is an empty list, not an error.
 
+`tools` is what a turn with that model would actually do, so a model with
+`models.overrides[<id>][tools]` set to `off` lists as `"tools":false` however the provider
+describes it, and `on` lists as `true`. The override is laid over the response only; the cached
+catalog keeps the provider's own answer. `vision` and `thinking` have no override.
+
 ```
 $ curl -si -u "admin:$PW" "$B/models"
 HTTP/2 200
@@ -429,9 +434,12 @@ Rules worth knowing before you write:
   ```
 
 - **`models.overrides` replaces wholesale.** It is a map of model id to `{temperature?,
-  num_ctx?, keep_alive?, system?}`; a PUT of the map is the whole map, and a model left out is
-  gone. To change one model, read the map, edit it, send it back. A blank or missing cell means
-  "inherit the global value", never "empty". `sanitizeOverrides()` drops anything else.
+  num_ctx?, keep_alive?, system?, tools?}`; a PUT of the map is the whole map, and a model left
+  out is gone. To change one model, read the map, edit it, send it back. A blank or missing cell
+  means "inherit the global value", never "empty". `sanitizeOverrides()` drops anything else.
+  `tools` is the one cell with no global behind it: `"on"` and `"off"` force the model's tool
+  routing either way and anything else, blank included, is not stored and leaves the catalogue's
+  flag standing.
 
 - **Line endings are normalised.** Every string field goes through `Schema::coerce()`, which
   rewrites `\r\n` and a bare `\r` to `\n`, so a client that PUTs `"a\r\nb"` into

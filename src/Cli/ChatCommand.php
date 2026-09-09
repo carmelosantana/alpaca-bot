@@ -168,7 +168,11 @@ final class ChatCommand
     /**
      * List the models the provider reports, asked fresh (the five-minute cache is bypassed).
      *
-     * Each line is the model id, then which of `tools`, `vision` and `thinking` it is flagged with.
+     * Each line is the model id, then which of `tools`, `vision` and `thinking` it is flagged
+     * with. `tools` is what the turn would do rather than only what the catalogue says: an
+     * operator's `models.overrides[<model>][tools]` outranks it at the routing decision
+     * (Chat\Pipeline::toolkitsFor()), so it is laid over the flag on the way out here too. The
+     * overlay never reaches the catalog's Model objects or its transient.
      *
      * @param list<string> $args
      * @param array<string, mixed> $assoc
@@ -186,7 +190,8 @@ final class ChatCommand
             return;
         }
         foreach ($models as $m) {
-            $flags = array_keys(array_filter(['tools' => $m->tools, 'vision' => $m->vision, 'thinking' => $m->thinking]));
+            $tools = $this->store->toolsOverride($m->id) ?? $m->tools;
+            $flags = array_keys(array_filter(['tools' => $tools, 'vision' => $m->vision, 'thinking' => $m->thinking]));
             $this->emit(sprintf("%-40s %s\n", $m->id, implode(' ', $flags)));
         }
     }

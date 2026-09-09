@@ -203,6 +203,48 @@ it('renders the tools override as a three-state select per model, with the store
         ->toContain('<option value="off" selected="selected">')
         ->and(substr_count($html, 'selected="selected"'))->toBe(2)
         ->and(substr_count($html, '[tools]"'))->toBe(2);
-    // The caption tells an operator what the switch is for, in the terms they will hit it in.
-    expect($html)->toContain('write the tool call out as text');
+    // The caption tells an operator what the switch is for, in the terms they will hit it in,
+    // and says where "Always on" stops: it offers the toolkits the Tools tab enables, so with
+    // none enabled it offers nothing.
+    expect($html)->toContain('write the tool call out as text')
+        ->toContain('no tools are enabled on the Tools tab');
+});
+
+// A hand-edited option, a migration, or an `option_alpaca_bot_settings` filter can put anything
+// in a cell. The `$cell` closure guards its cast and Store::toolsOverride() guards its own; the
+// select must too, or one unreadable row raises "Array to string conversion" while rendering the
+// Models tab. Unreadable is inherit, the same answer every other cell gives.
+it('renders an unreadable tools cell as inherit rather than casting it to a string', function (): void {
+    Functions\when('register_setting')->justReturn(null);
+    Functions\when('add_settings_section')->justReturn(null);
+    Functions\when('esc_attr')->alias(fn($s) => htmlspecialchars((string) $s, ENT_QUOTES));
+    Functions\when('esc_html')->alias(fn($s) => htmlspecialchars((string) $s, ENT_QUOTES));
+    Functions\when('get_transient')->alias(fn(string $key): mixed => $key === ModelCatalog::TRANSIENT ? [['id' => 'faker:2b', 'label' => 'faker']] : false);
+    $render = null;
+    Functions\expect('add_settings_field')->times(count(Schema::fields()))->withArgs(function (string $id, string $title, callable $cb) use (&$render): bool {
+        if ($id === 'alpaca_bot_models.overrides') {
+            $render = $cb;
+        }
+        return true;
+    });
+    settingsPage(['models.overrides' => ['faker:2b' => ['tools' => ['on']]]])->register();
+
+    $raised = [];
+    set_error_handler(static function (int $no, string $message) use (&$raised): bool {
+        $raised[] = $message;
+        return true;
+    });
+    ob_start();
+    try {
+        $render();
+    } finally {
+        $html = (string) ob_get_clean();
+        restore_error_handler();
+    }
+
+    expect($raised)->toBe([])
+        ->and($html)->toContain('<select name="alpaca_bot_settings[models.overrides][faker:2b][tools]">')
+        // Inherit, and only inherit: the same row a readable cell would render for a blank.
+        ->and($html)->toContain('<option value="" selected="selected">')
+        ->and(substr_count($html, 'selected="selected"'))->toBe(1);
 });

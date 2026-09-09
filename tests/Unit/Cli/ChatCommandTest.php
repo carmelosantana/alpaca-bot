@@ -310,6 +310,29 @@ it('lists the models the provider reports right now, with their capability flags
         );
 });
 
+// The same honesty the REST listing owes: `wp alpaca-bot models` is where an operator checks what
+// a model will be offered, and a model they forced tools off on must not print `tools`.
+it('prints the operator\'s per-model tools override rather than the catalogue\'s word', function (): void {
+    $provider = Mockery::mock(ProviderInterface::class);
+    $provider->shouldReceive('models')->once()->andReturn([
+        new ModelDefinition(id: 'llama3.2:latest', name: 'llama3.2', provider: 'ollama'),
+        new ModelDefinition(id: 'llava:7b', name: 'llava', provider: 'ollama', vision: true),
+    ]);
+    $h = pipelineWith($provider, ['models.overrides' => [
+        'llama3.2:latest' => ['tools' => Schema::TOOLS_OFF],
+        'llava:7b' => ['tools' => Schema::TOOLS_ON],
+    ]]);
+    $c = cliCommand($h);
+
+    $c->command->models([], []);
+
+    expect($c->errors)->toBe([])
+        ->and($c->out)->toBe(
+            sprintf("%-40s %s\n", 'llama3.2:latest', '')
+            . sprintf("%-40s %s\n", 'llava:7b', 'tools vision'),
+        );
+});
+
 it('fails legibly when the provider lists nothing or cannot be reached', function (): void {
     $provider = Mockery::mock(ProviderInterface::class);
     $provider->shouldReceive('models')->once()->andThrow(new \RuntimeException('connection refused'));

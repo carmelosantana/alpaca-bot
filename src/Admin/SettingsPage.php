@@ -179,12 +179,16 @@ final class SettingsPage
                 );
             };
             $placeholder = fn(string $key): string => ' placeholder="' . esc_attr((string) $this->store->get($key)) . '"';
+            // Unreadable is inherit, as it is for every other cell ($cell above,
+            // Store::toolsOverride()): a row a filter or a hand edit left holding an array must
+            // render, not warn.
+            $stored = is_scalar($o['tools'] ?? null) ? (string) $o['tools'] : '';
             $tools = '<td><select name="' . esc_attr(Plugin::OPTION . '[models.overrides][' . $id . '][tools]') . '">';
             foreach (self::toolsStates() as $value => $label) {
                 $tools .= sprintf(
                     '<option value="%s"%s>%s</option>',
                     esc_attr($value),
-                    (string) ($o['tools'] ?? '') === $value ? ' selected="selected"' : '',
+                    $stored === $value ? ' selected="selected"' : '',
                     esc_html($label),
                 );
             }
@@ -203,7 +207,7 @@ final class SettingsPage
         $head .= '<th>' . esc_html__('Tools', 'alpaca-bot') . '</th>';
         return '<table class="widefat striped"><thead><tr>' . $head . '</tr></thead><tbody>' . $rows . '</tbody></table>'
             . '<p class="description">' . esc_html__('A blank cell uses the global value: the fields above for temperature, context window and keep alive, and the system prompt on the Chat tab. A model-level system prompt replaces the global one for that model.', 'alpaca-bot') . '</p>'
-            . '<p class="description">' . esc_html__('Tools decides whether this model is offered the tools enabled on the Tools tab. Leave it on the model default unless the model misbehaves: some models accept tools and then write the tool call out as text in the reply instead of calling it, and turning tools off for that model gives a plain answer instead. Turn them on for a model you know can call tools that is not being offered them.', 'alpaca-bot') . '</p>';
+            . '<p class="description">' . esc_html__('Tools decides whether this model is offered the tools enabled on the Tools tab. Leave it on the model default unless the model misbehaves: some models accept tools and then write the tool call out as text in the reply instead of calling it, and turning tools off for that model gives a plain answer instead. Turn them on for a model you know can call tools that is not being offered them; if no tools are enabled on the Tools tab, this model gets none either way.', 'alpaca-bot') . '</p>';
     }
 
     /**
