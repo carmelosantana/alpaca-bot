@@ -227,13 +227,13 @@ it('ignores hooks outside the alpaca_bot namespace and the wrapper body in src/C
         ->and(substr_count($run['stdout'], "\n| `alpaca_bot/"))->toBe(0);
 });
 
-it('orders rows by hook name, not by where the filesystem lists the files', function (): void {
+it('orders rows by hook name, not by the order the calls appear in a file', function (): void {
     $docblock = "/**\n * Filters %s.\n *\n * @since 0.5.0\n * @param int \$v value\n */\n";
-    $root = hooksDocTree([
-        'Zeta.php' => "<?php\n{$docblock}\$a = apply_filters('alpaca_bot/fixture/aaa', \$v);\n",
-        'Deep/Alpha.php' => "<?php\n{$docblock}\$z = apply_filters('alpaca_bot/fixture/zzz', \$v);\n",
-        'Mid.php' => "<?php\n{$docblock}\$m = apply_filters('alpaca_bot/fixture/mmm', \$v);\n",
-    ]);
+    // One file, so no filesystem is in the loop: only the row sort can put aaa first.
+    $root = hooksDocTree(['Order.php' => "<?php\n"
+        . "{$docblock}\$z = apply_filters('alpaca_bot/fixture/zzz', \$v);\n"
+        . "{$docblock}\$m = apply_filters('alpaca_bot/fixture/mmm', \$v);\n"
+        . "{$docblock}\$a = apply_filters('alpaca_bot/fixture/aaa', \$v);\n"]);
 
     $run = hooksDoc($root);
 
@@ -241,6 +241,32 @@ it('orders rows by hook name, not by where the filesystem lists the files', func
     preg_match_all('~^\| `(alpaca_bot/[^`]+)`~m', $run['stdout'], $m);
     expect($m[1])->toBe(['alpaca_bot/fixture/aaa', 'alpaca_bot/fixture/mmm', 'alpaca_bot/fixture/zzz'])
         ->and($run['stdout'])->not->toContain($root);
+});
+
+it('lists problems in file order, not in the order the filesystem returns the files', function (): void {
+    // Rows carry a total order of their own (hook, file, line), so the sorted file listing is
+    // observable only in the problem list. Eight files, created in a rotated order so that
+    // neither a creation-ordered nor a newest-first filesystem lists them sorted; a hash-ordered
+    // one is checked below rather than trusted.
+    $names = ['Eel', 'Fox', 'Gnu', 'Hen', 'Ant', 'Bee', 'Cat', 'Dog'];
+    $files = [];
+    foreach ($names as $name) {
+        $files["{$name}.php"] = "<?php\n\$x = apply_filters('alpaca_bot/fixture/" . strtolower($name) . "', 1);\n";
+    }
+    $root = hooksDocTree($files);
+    $sorted = $names;
+    sort($sorted, SORT_STRING);
+    $raw = array_values(array_map(
+        static fn(string $f): string => substr($f, 0, -4),
+        array_filter((array) scandir($root . '/src', SCANDIR_SORT_NONE), static fn($f): bool => is_string($f) && str_ends_with($f, '.php')),
+    ));
+    expect($raw)->not->toBe($sorted, 'the filesystem listed the fixtures already sorted, so this run could not tell the sort from luck; rename the fixtures');
+
+    $run = hooksDoc($root);
+
+    expect($run['code'])->toBe(1);
+    preg_match_all('~^  src/(\w+)\.php:2 ~m', $run['stderr'], $m);
+    expect($m[1])->toBe($sorted);
 });
 
 it('documents exactly the twenty hooks the plugin ships, the two built through Capability::filtered() included', function (): void {
