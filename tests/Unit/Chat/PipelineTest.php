@@ -820,3 +820,16 @@ it('leaves nothing behind when an ephemeral turn fails at the provider', functio
     expect(fn() => $h->pipeline->complete(3, 'Hi', ['ephemeral' => true]))->toThrow(\RuntimeException::class, 'Provider error')
         ->and($h->writes)->toBe([]);
 });
+
+it('sends a caller\'s temperature option to the provider over the model\'s setting, and the setting when the caller has none', function (): void {
+    // The [alpacabot temperature="…"] shortcode: the attribute is per turn, and the pipeline's
+    // provider options came from the store alone. The option overrides only the temperature;
+    // num_ctx and keep_alive stay the model's.
+    $h = pipelineWith(pipelineProvider([new Response('ok', ProviderFinishReason::Stop, usage: new Usage(1, 1, 2))], $call), ['models.overrides' => ['llama3.2' => ['temperature' => 0.1]]]);
+    $h->pipeline->complete(3, 'Hi', ['temperature' => 0.9, 'ephemeral' => true]);
+    expect($call['options'])->toBe(['temperature' => 0.9, 'num_ctx' => 8192, 'keep_alive' => '5m']);
+
+    $h = pipelineWith(pipelineProvider([new Response('ok', ProviderFinishReason::Stop, usage: new Usage(1, 1, 2))], $call), ['models.overrides' => ['llama3.2' => ['temperature' => 0.1]]]);
+    $h->pipeline->complete(3, 'Hi', ['ephemeral' => true]);
+    expect($call['options'])->toBe(['temperature' => 0.1, 'num_ctx' => 8192, 'keep_alive' => '5m']);
+});

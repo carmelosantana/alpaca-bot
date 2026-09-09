@@ -103,7 +103,7 @@ final class Pipeline
     /**
      * send() drained: the Result once the whole reply is in.
      *
-     * @param array{conversation_id?: int, model?: string, images?: string[], context?: array<string, mixed>, system?: string, ephemeral?: bool} $options see send()
+     * @param array{conversation_id?: int, model?: string, images?: string[], context?: array<string, mixed>, system?: string, temperature?: float, ephemeral?: bool} $options see send()
      * @throws CapExceeded|\InvalidArgumentException|\RuntimeException as send()
      */
     public function complete(int $userId, string $text, array $options = []): Result
@@ -140,13 +140,14 @@ final class Pipeline
      * later turn without ever being shown; their decoded bytes together may not exceed
      * Admin\Assets::maxImageBytes() (images()); `context` is the request the context sources
      * see (a post id, a screen); `system` replaces the configured system prompt for this turn;
-     * `ephemeral` keeps no conversation (the class docblock), and is refused together with a
+     * `temperature` replaces the model's for this turn (the other generation options are not a
+     * caller's to set; the code says why); `ephemeral` keeps no conversation (the class docblock), and is refused together with a
      * `conversation_id`, since a turn cannot both continue a conversation and leave no trace.
      *
      * The cap check is check-then-act with no reservation: concurrent requests from one user can
      * overshoot a cap by roughly their number. It is a monthly budget, not a hard ceiling.
      *
-     * @param array{conversation_id?: int, model?: string, images?: string[], context?: array<string, mixed>, system?: string, ephemeral?: bool} $options
+     * @param array{conversation_id?: int, model?: string, images?: string[], context?: array<string, mixed>, system?: string, temperature?: float, ephemeral?: bool} $options
      * @return \Generator<int, Delta, mixed, Result>
      * @throws \InvalidArgumentException for an empty message (also one `before_send` blanked), an image that is not a base64 image data URL or a set of them past the site's allowance, a requested model a non-empty catalog does not list, a conversation the user does not own, or `ephemeral` with a `conversation_id`
      * @throws CapExceeded before any provider call
@@ -180,8 +181,12 @@ final class Pipeline
             $contexts = $this->collector->collect($userId, (array) ($options['context'] ?? []));
             $messages = $this->buildMessages($conversation, $model, $contexts, isset($options['system']) ? (string) $options['system'] : null);
             $generation = $this->store->modelOverrides($model);
+            // `temperature` is the one generation option a caller may set per turn (the
+            // `[alpacabot temperature]` attribute): it shapes this answer and nothing else. num_ctx
+            // and keep_alive stay the model's: the context window is a budget the administrator
+            // set against the host's memory, and keep_alive is about the host, not the turn.
             $providerOptions = [
-                'temperature' => (float) $generation['temperature'],
+                'temperature' => isset($options['temperature']) ? (float) $options['temperature'] : (float) $generation['temperature'],
                 'num_ctx' => (int) $generation['num_ctx'],
                 'keep_alive' => (string) $generation['keep_alive'],
             ];
