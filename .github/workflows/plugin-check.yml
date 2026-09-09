@@ -114,12 +114,15 @@ jobs:
       # faith. wp-env resolves .wp-env.json and .wp-env.override.json from its working directory,
       # which is this workspace: the same directory whose .wp-env.json the action rewrites.
       #
-      # Two guards keep this file out of the artifact, and it needs them. bin/build-zip.sh rsyncs
-      # the repository root into dist/alpaca-bot with .distignore as its exclude list, and before
-      # .distignore named this file, an override written ahead of the build was copied into the
-      # plugin and shipped inside the zip - measured, not feared. The .distignore line is what
-      # protects a developer who keeps a personal override and runs bin/build-zip.sh by hand;
-      # placing this step after the build is what keeps CI right if that line is ever lost.
+      # This file must not reach the plugin directory. bin/build-zip.sh rsyncs the repository root
+      # into dist/alpaca-bot with .distignore as its exclude list, and before .distignore named
+      # this file, an override written ahead of the build was copied into the plugin and landed
+      # inside dist/alpaca-bot.zip - measured, not feared. It would not have reached a release even
+      # then: build-zip.sh's forbidden-pattern loop rejects every dot-prefixed entry, '(^|/)\.',
+      # so a hand-run build exits 1 with "zip contents check FAILED" instead of handing anyone a
+      # zip. The .distignore line therefore buys a clean build rather than a loud one - unlike the
+      # CLAUDE.md line added beside it, which is that file's only guard because it carries no dot.
+      # Running this step after the build is what keeps CI right if either line is ever lost.
       - name: Pin wp-env to PHP 8.4
         run: |
           printf '{ "phpVersion": "8.4" }\n' > .wp-env.override.json
