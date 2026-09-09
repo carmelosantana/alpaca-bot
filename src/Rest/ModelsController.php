@@ -20,9 +20,11 @@ use AlpacaBot\Settings\Store;
  * forced tools off on does not list as tool-capable. It is not a promise about a turn:
  * toolkitsFor() returns [] before it ever reads the override when the user whose turn it is has
  * no toolkit enabled, and enablement is resolved per user (Toolkit\Registry::enabled(), through
- * `alpaca_bot/toolkits`), which a site-wide listing cannot reflect — so `tools: true` here can
- * describe a turn that runs plain. The overlay is on the response only — the
- * Model objects, the request memo and the five-minute transient behind them all keep the
+ * `alpaca_bot/toolkits`). This route is not short of a user — it requires `edit_posts`, so there
+ * always is one — but the controller is constructed with a ModelCatalog and a Store and never
+ * asks the toolkit registry at all, so the row it prints cannot reflect enablement for anybody:
+ * `tools: true` here can describe a turn that runs plain. The overlay is on the response only —
+ * the Model objects, the request memo and the five-minute transient behind them all keep the
  * provider's own answer, which is what an inherit row still has to be able to read. `vision` and
  * `thinking` have no override and are the catalogue's word alone.
  *
