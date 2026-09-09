@@ -36,11 +36,17 @@ set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
 MODE="${WPH_MODE:-harness}"
+# The site is only used in harness mode, but its name is the domain default, so both settings
+# are resolved in one place.
+SITE="${WPH_SITE:-alpaca10}"
 DB_NAME_DEFAULT=wordpress_tests
+DOMAIN_DEFAULT="$SITE.wp.test"
 if [ "$MODE" = "wp-env" ]; then
     DB_NAME_DEFAULT=tests-wordpress
+    DOMAIN_DEFAULT=localhost
 fi
 DB_NAME="${WP_TESTS_DB_NAME:-$DB_NAME_DEFAULT}"
+DOMAIN="${WP_TESTS_DOMAIN:-$DOMAIN_DEFAULT}"
 
 # In harness mode the name is spliced into a CREATE DATABASE below (backtick-quoted) as well as
 # into wp-tests-config.php, so a bad value should fail here, plainly, rather than as SQL. The
@@ -51,21 +57,33 @@ if [[ ! "$DB_NAME" =~ ^[A-Za-z0-9_-]+$ ]]; then
     exit 1
 fi
 
+# The domain is spliced into the single-quoted `sh -c` payload in wp-env mode, exactly like the
+# database name, so it gets the same treatment: a value carrying a quote would close that quoting
+# and run in the container. Both are developer-set, not untrusted input -- checking one and not
+# the other is the part that was wrong. A host, optionally with a port, is all core wants here.
+if [[ ! "$DOMAIN" =~ ^[A-Za-z0-9.-]+(:[0-9]+)?$ ]]; then
+    echo "bin/test-integration.sh: WP_TESTS_DOMAIN '$DOMAIN' must match ^[A-Za-z0-9.-]+(:[0-9]+)?\$" >&2
+    exit 1
+fi
+
 composer install --working-dir=tools/integration --no-interaction
 
 if [ "$MODE" = "wp-env" ]; then
     SLUG="$(basename "$PWD")"
     # Quoted for the shell inside the container, so a phpunit argument with a space survives.
-    # Guarded on $#: printf runs its format once even with nothing to substitute, which would
-    # hand phpunit one empty argument on the common no-arguments run.
-    # An `x && y` here would also be the last status of the line, which under `set -e` exits the
-    # script the moment there are no arguments; an if block has no such reading.
+    # The container's /bin/sh is dash, so the quoting has to be POSIX: single quotes protect
+    # everything except a single quote itself, which is closed, escaped and reopened. bash's
+    # printf %q was the wrong tool here -- for an argument holding a tab or a newline it emits
+    # $'...' ANSI-C quoting, which bash understands and dash passes through literally ($'a\tb'
+    # arrives as the four characters $a\tb). The loop also runs zero times with no arguments,
+    # which is what the old `printf ' %q'` needed an explicit $# guard to avoid: printf runs its
+    # format once even with nothing to substitute, handing phpunit one empty argument.
     ARGS=""
-    if [ "$#" -gt 0 ]; then
-        ARGS=$(printf ' %q' "$@")
-    fi
+    for arg in "$@"; do
+        ARGS="$ARGS '${arg//\'/\'\\\'\'}'"
+    done
     exec pnpm exec wp-env run tests-cli --env-cwd="wp-content/plugins/$SLUG" -- \
-        sh -c "WP_TESTS_DB_NAME='$DB_NAME' WP_TESTS_DOMAIN='${WP_TESTS_DOMAIN:-localhost}' \
+        sh -c "WP_TESTS_DB_NAME='$DB_NAME' WP_TESTS_DOMAIN='$DOMAIN' \
             php tools/integration/vendor/bin/phpunit -c phpunit.integration.xml$ARGS"
 fi
 
@@ -74,7 +92,6 @@ if [ "$MODE" != "harness" ]; then
     exit 1
 fi
 
-SITE="${WPH_SITE:-alpaca10}"
 COMPOSE="$HOME/Sites/$SITE/.harness/compose.yml"
 PLUGIN=/var/www/html/wp-content/plugins/alpaca-bot
 
@@ -91,5 +108,5 @@ docker compose -f "$COMPOSE" exec -T -e DB_NAME="$DB_NAME" db sh -c \
     'mariadb -uroot -p"$MARIADB_ROOT_PASSWORD" -e "CREATE DATABASE IF NOT EXISTS \`$DB_NAME\`; GRANT ALL ON \`$DB_NAME\`.* TO \"$MARIADB_USER\"@\"%\";"'
 
 docker compose -f "$COMPOSE" run --rm -T -w "$PLUGIN" \
-    -e WP_TESTS_DB_NAME="$DB_NAME" -e WP_TESTS_DOMAIN="${WP_TESTS_DOMAIN:-$SITE.wp.test}" \
+    -e WP_TESTS_DB_NAME="$DB_NAME" -e WP_TESTS_DOMAIN="$DOMAIN" \
     cli php tools/integration/vendor/bin/phpunit -c phpunit.integration.xml "$@"
