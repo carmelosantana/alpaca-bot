@@ -170,10 +170,13 @@ final class ChatCommand
      * List the models the provider reports, asked fresh (the five-minute cache is bypassed).
      *
      * Each line is the model id, then which of `tools`, `vision` and `thinking` it is flagged
-     * with. `tools` is what the turn would do rather than only what the catalogue says: an
-     * operator's `models.overrides[<model>][tools]` outranks it at the routing decision
-     * (Chat\Pipeline::toolkitsFor()), so it is laid over the flag on the way out here too. The
-     * overlay never reaches the catalog's Model objects or its transient.
+     * with. `tools` is the per-model routing decision rather than the catalogue alone: an
+     * operator's `models.overrides[<model>][tools]` outranks it at that decision
+     * (Chat\Pipeline::toolkitsFor()), so it is laid over the flag on the way out here too. It
+     * does not promise what a turn does: toolkitsFor() returns [] before it reads the override
+     * when the user whose turn it is has no toolkit enabled, and enablement is resolved per user
+     * (Toolkit\Registry::enabled()), which this listing takes no user for. The overlay never
+     * reaches the catalog's Model objects or its transient.
      *
      * @param list<string> $args
      * @param array<string, mixed> $assoc

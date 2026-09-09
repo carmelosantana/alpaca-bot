@@ -343,10 +343,12 @@ the site's default model in the `X-Alpaca-Bot-Default-Model` header so the body 
 list. `refresh=1` bypasses the five-minute catalog cache and asks the provider again. An
 unreachable provider is an empty list, not an error.
 
-`tools` is what a turn with that model would actually do, so a model with
+`tools` is the per-model routing decision rather than the catalogue alone, so a model with
 `models.overrides[<id>][tools]` set to `off` lists as `"tools":false` however the provider
-describes it, and `on` lists as `true`. The override is laid over the response only; the cached
-catalog keeps the provider's own answer. `vision` and `thinking` have no override.
+describes it, and `on` lists as `true`. It is not a promise about a turn: routing also needs the
+calling user to have a toolkit enabled, and with none enabled the turn runs plain whatever this
+flag says. The override is laid over the response only; the cached catalog keeps the provider's
+own answer. `vision` and `thinking` have no override.
 
 ```
 $ curl -si -u "admin:$PW" "$B/models"

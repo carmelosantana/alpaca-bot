@@ -14,10 +14,14 @@ use AlpacaBot\Settings\Store;
  * thinking}`. The site's default model rides in the `X-Alpaca-Bot-Default-Model` header rather
  * than the body, so the body stays a plain list a client can bind to a picker as is.
  *
- * `tools` is what the turn would actually do, not only what the catalogue says: an operator's
- * `models.overrides[<model>][tools]` outranks the catalogue at the routing decision
+ * `tools` is the per-model routing decision, not the catalogue alone: an operator's
+ * `models.overrides[<model>][tools]` outranks the catalogue at that decision
  * (Chat\Pipeline::toolkitsFor()), so it is laid over the flag here too, and a model somebody
- * forced tools off on does not list as tool-capable. The overlay is on the response only — the
+ * forced tools off on does not list as tool-capable. It is not a promise about a turn:
+ * toolkitsFor() returns [] before it ever reads the override when the user whose turn it is has
+ * no toolkit enabled, and enablement is resolved per user (Toolkit\Registry::enabled(), through
+ * `alpaca_bot/toolkits`), which a site-wide listing cannot reflect — so `tools: true` here can
+ * describe a turn that runs plain. The overlay is on the response only — the
  * Model objects, the request memo and the five-minute transient behind them all keep the
  * provider's own answer, which is what an inherit row still has to be able to read. `vision` and
  * `thinking` have no override and are the catalogue's word alone.
