@@ -55,7 +55,7 @@ final class UsageRetentionTest extends TestCase
         $this->assertSame('1', get_option(Migrate04::FLAG_RETENTION));
         $this->assertFalse((new Migrate04(new Store()))->needed());
 
-        // A 1.0 row from before the field: 0, and the rest of the row as it was.
+        // A 0.5 row from before the field: 0, and the rest of the row as it was.
         delete_option(Migrate04::FLAG_RETENTION);
         update_option(Plugin::OPTION, ['models.default' => 'qwen3-vl:2b', 'provider.base_url' => 'http://ollama.internal:11434/v1']);
         $this->assertArrayNotHasKey('privacy.usage_retention_days', get_option(Plugin::OPTION));

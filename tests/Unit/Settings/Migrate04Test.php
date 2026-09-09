@@ -23,7 +23,7 @@ it('maps 0.4 options into the new schema and appends /v1 to the base url', funct
         'alpaca_bot_default_assistant_prompt_placeholder' => 'Ask me',
         'alpaca_bot_default_avatar' => 'https://example.com/bot.png',
         'alpaca_bot_spellcheck' => '1',
-        // 0.4 sent this as HTTP Basic next to api_username; 1.0 sends api_key as Bearer. Never carried over.
+        // 0.4 sent this as HTTP Basic next to api_username; 0.5 sends api_key as Bearer. Never carried over.
         'alpaca_bot_api_password' => 'app-password',
     ];
     Functions\when('get_option')->alias(fn(string $k, mixed $d = false) => $legacy[$k] ?? ($k === 'alpaca_bot_settings' ? [] : $d));
@@ -59,7 +59,7 @@ it('is not needed when all three flags are set, and writes nothing', function ()
     expect((new Migrate04(new Store()))->needed())->toBeFalse();
 });
 
-// Without the flags a 1.0-only site would re-run the detection get_option() calls (all
+// Without the flags a 0.5-only site would re-run the detection get_option() calls (all
 // non-autoloaded, so uncached misses) and the conversation query on every admin request forever.
 it('on a fresh install moves no options, runs one empty conversation batch, and flags all three steps so detection runs only once', function (): void {
     $stored = [];

@@ -47,7 +47,7 @@ it('maps every integer 0.4 role to user, including 0, and keeps the Ollama times
         ->and(Message::fromArray(['message' => ['content' => 'x']])->role)->toBe('user');
 });
 
-it('round-trips the 1.0 shape through toArray and fromArray', function (): void {
+it('round-trips the 0.5 shape through toArray and fromArray', function (): void {
     $m = new Message('assistant', 'hi', 'llama3.2', ['prompt_tokens' => 1, 'completion_tokens' => 2], 1_700_000_000, ['data:image/png;base64,x'], ['finish' => 'stop']);
     $a = $m->toArray();
     expect($a)->toEqual(['role' => 'assistant', 'content' => 'hi', 'model' => 'llama3.2', 'usage' => ['prompt_tokens' => 1, 'completion_tokens' => 2], 'created' => 1_700_000_000, 'images' => ['data:image/png;base64,x'], 'meta' => (object) ['finish' => 'stop']]);
@@ -392,7 +392,7 @@ it('fits the transcript by its size on the wire, so escape-dense text that fits 
 
 // ------------------------------------------------------------------ load()
 
-// The 0.4 -> 1.0 conversion is lossy (Message::fromLegacy() keeps role, content, model, timestamp,
+// The 0.4 -> 0.5 conversion is lossy (Message::fromLegacy() keeps role, content, model, timestamp,
 // token counts and images; 0.4's total_duration, load_duration, done, context and the authoring
 // user id it stored as the role are gone), so the legacy key is left in place as the record of
 // what 0.4 stored. P3 sweeps it once the migration story is closed.
@@ -552,7 +552,7 @@ it('deletes only the owner\'s conversation, permanently, and reports a second de
 // ---------------------------------------------------------- deleteIfEmpty()
 
 // Pipeline takes back the post it made for a turn that then failed. "Empty" is judged on what is
-// stored, not on the in-memory Conversation: a row with a 1.0 transcript, or a 0.4 one that has
+// stored, not on the in-memory Conversation: a row with a 0.5 transcript, or a 0.4 one that has
 // not been converted yet, is a conversation somebody can still open and stays.
 it('deletes the owner\'s conversation only while nothing is stored on it, checking both transcript keys', function (): void {
     $post = (object) ['ID' => 42, 'post_author' => '3', 'post_title' => 'T', 'post_type' => 'chat_history', 'post_date_gmt' => '2024-01-01 00:00:00'];

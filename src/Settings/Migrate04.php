@@ -10,7 +10,7 @@ use AlpacaBot\Plugin;
 /**
  * One-time moves, each under its own flag: from 0.4, the scattered `alpaca_bot_*` options into
  * the single settings option and the `chat_history` rows into the shape ConversationStore
- * expects; and for a setting that arrived after sites were already running 1.0, the value an
+ * expects; and for a setting that arrived after sites were already running 0.5, the value an
  * upgraded site gets when it differs from a fresh install's default (migrateRetention()).
  *
  * The options move and the retention step are one request each and flag themselves at once;
@@ -33,7 +33,7 @@ final class Migrate04
      * Legacy option (without prefix) => new dotted key.
      *
      * Not carried over: `api_password`. 0.4 sent it as HTTP Basic alongside an
-     * `api_username` that 1.0 has no field for, while `provider.api_key` goes out
+     * `api_username` that 0.5 has no field for, while `provider.api_key` goes out
      * as a Bearer token. Migrating it would hand every upgrading admin a credential
      * guaranteed to fail auth, silently; an empty field they must re-fill is
      * strictly better than a populated one that cannot work.
@@ -52,7 +52,7 @@ final class Migrate04
         'user_can_change_model' => 'chat.user_can_change_model',
         // 0.4's "Limit chat history" was the number of messages sent to the model, which
         // is chat.context_messages, not chat.history_limit (conversations listed in the
-        // history UI; that one starts at its 1.0 default). A stored 0 or '' is skipped
+        // history UI; that one starts at its 0.5 default). A stored 0 or '' is skipped
         // below like any other non-boolean, which matches what 0.4 actually did with it:
         // its Options::get() read 0 as unset and fell back to the placeholder.
         'chat_history_limit' => 'chat.context_messages',
@@ -104,7 +104,7 @@ final class Migrate04
      * default (90) would have the daily cleanup delete an upgraded site's whole usage history a
      * day after the upgrade, unasked. A site with anything the field could act on when it first
      * appears gets 0 written explicitly, so nothing is deleted until an admin chooses a window:
-     * a settings row written before the field existed (a site upgrading within 1.0), or a
+     * a settings row written before the field existed (a site upgrading within 0.5), or a
      * receipt row and no settings row (a 0.4 site; its options are moved right after this). A
      * row that already carries the field was saved by an admin who saw it, and stands. A fresh
      * install has neither row and keeps the default. The receipts query runs only on a site
@@ -177,7 +177,7 @@ final class Migrate04
             // 0.4's Options::get() went through empty() and `$value ? $value : $default`,
             // so a stored '', '0' or 0 all meant "unset, use the default". For its
             // boolean radios the stored '' *was* the "No" value (they only ever wrote
-            // '1' or ''), so only non-boolean keys fall back to the 1.0 default here.
+            // '1' or ''), so only non-boolean keys fall back to the 0.5 default here.
             if ($fields[$key]['type'] !== 'boolean' && in_array($value, ['', '0', 0], true)) {
                 continue;
             }
