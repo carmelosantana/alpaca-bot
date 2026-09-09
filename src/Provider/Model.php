@@ -107,13 +107,16 @@ final class Model
      * itself. The five sites that construct a ModelDefinition directly — AnthropicProvider's
      * discovery loop and its static fallback list, GeminiProvider, LlamaCppProvider, and the
      * Claude CLI adapter — each write `contextWindow` and `maxTokens` and nothing else, and the
-     * discovery helper (ModelDefinition::fromDiscovery(), reached from OllamaProvider,
-     * OpenAICompatibleProvider and OpenAIResponsesProvider) fills those same two provenances
-     * itself while passing any `fieldSources` already in the payload through unchanged:
-     * normalizeFieldSources() keeps every non-empty string => string pair and whitelists no
-     * keys. OllamaProvider hands the helper a literal of those two keys, but the two OpenAI
-     * callers hand it the raw upstream model entry, so a provider API that answered with a
-     * `fieldSources.toolCalls` key would arrive here as a stated provenance. Across the payloads
+     * discovery helper fills those same two provenances itself while passing every *other*
+     * `fieldSources` pair in the payload through unchanged: normalizeFieldSources() keeps each
+     * non-empty string => string pair and whitelists no keys, and only `contextWindow` and
+     * `maxTokens` are written over. Three methods call ModelDefinition::fromDiscovery() --
+     * OllamaProvider::models(), OpenAICompatibleProvider::models() and
+     * OpenAIResponsesProvider::models() -- and the second of those is inherited unchanged by
+     * MistralProvider and XAIProvider, so five vendored providers reach it. Ollama hands the
+     * helper a literal of those two keys, but the OpenAI-compatible path hands it the raw
+     * upstream model entry, so a provider API that answered with a `fieldSources.toolCalls`
+     * key would arrive here as a stated provenance. Across the payloads
      * the vendored code shapes itself the key is unambiguous, and a vendored model reads as
      * silent exactly as before.
      */
