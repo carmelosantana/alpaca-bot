@@ -7,7 +7,8 @@
 # Same properties as ci.yml, for the same reasons: third-party actions pinned to full commit SHAs
 # (tags are mutable), `permissions: contents: read` never raised, `persist-credentials: false` on
 # the checkout, no pull_request_target, no cache, no secrets. `workflow_call` is here so the
-# release workflow can require this file rather than restate it.
+# release workflow can require this file rather than restate it — with one caveat that comes
+# with reusing ci.yml's concurrency shape too: see the note on `concurrency` below.
 #
 # On permissions specifically: wordpress/plugin-check-action posts a summary comment on the pull
 # request when it is given a token, which is the only thing in it that would need
@@ -26,6 +27,14 @@ on:
 permissions:
   contents: read
 
+# A pull request's superseded runs are cancelled; a `workflow_dispatch` and a release
+# (`workflow_call`) are not, because those are the runs someone is waiting on to decide
+# something. This is ci.yml's group verbatim, and that has a consequence under `workflow_call`:
+# `github.workflow` is then the *caller's* workflow name, so a release workflow that calls both
+# ci.yml and this file puts the two in one group. `cancel-in-progress`
+# is false for a non-`pull_request` event, so they serialize instead of cancelling each other --
+# slower, never wrong. If that ever costs more than it is worth, give this group a literal
+# prefix of its own rather than dropping the reuse.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -79,9 +88,14 @@ jobs:
       # instead of a silent widening.
       #
       # No `exclude-directories`: Plugin Check already excludes `.git`, `vendor`,
-      # `vendor_prefixed`, `vendor-prefixed` and `node_modules` from file scans by default, so
-      # naming vendor-prefixed here would only restate that. Note the consequence — the prefixed
-      # tree that *does* ship is a blind spot for this job, and .distignore is what guards it.
+      # `vendor_prefixed`, `vendor-prefixed` and `node_modules` from file scans by default
+      # (`Plugin_Request_Utility::get_directories_to_ignore()`), so naming vendor-prefixed here
+      # would only restate that. Note the consequence — the prefixed tree that *does* ship is a
+      # blind spot for this job, and .distignore plus bin/build-zip.sh's content assertions are
+      # what guard it. That default list *is* filterable — `wp_plugin_check_ignore_directories`,
+      # same method — but the filter is not reachable through this action: the `.wp-env.json` it
+      # generates carries only the one plugin mapping and no mu-plugin mapping, so there is
+      # nowhere to hang the filter without stopping and reconfiguring wp-env ourselves.
       #
       # One code is ignored, and it is the only one: `ExceptionNotEscaped`, which fires 36 times
       # on `throw new RuntimeException(__('...'))`.
@@ -115,16 +129,26 @@ jobs:
       # reported and failing if it is not.
       #
       # It reuses the environment the action just left behind: wp-env is installed globally by
-      # the action, .wp-env.json in the workspace root maps wp-content/plugins/alpaca-bot to
-      # dist/alpaca-bot as a live bind mount, and plugin-check is installed and activated. So the
-      # canary needs no second wp-env start — writing the file into dist/alpaca-bot makes it
-      # visible inside the container immediately.
+      # the action, plugin-check is installed and activated, and nothing stops wp-env afterwards.
+      # The mapping is a side-effect worth stating, because it is what breaks first when this
+      # action is bumped: the action's "Setup wp-env" step truncates and rewrites `.wp-env.json`
+      # in the workspace root, on top of this repository's own tracked copy — whose
+      # `"plugins": ["."]` would have pointed Plugin Check at the repo — leaving a single mapping
+      # of wp-content/plugins/alpaca-bot to dist/alpaca-bot. That mapping is a live bind mount,
+      # so the canary needs no second `wp-env start`: writing the file into dist/alpaca-bot makes
+      # it visible inside the container immediately.
       #
-      # `if:` covers the case that matters: the check step failing is precisely when the proof is
-      # worth having, so `always()` is not enough and `success()` is wrong. Restricting it to a
-      # step that actually ran keeps a failed build from producing a confusing second error.
+      # `!cancelled()` is load-bearing, not decoration. A step `if:` that names no status-check
+      # function gets an implicit `success()` wrapped around it, and an earlier version of this
+      # condition had none — so it was skipped on precisely the runs it exists for, observed as
+      # `skipped` in run 34405747111 while `check` was red. As written the canary runs whenever
+      # `check` reached a conclusion of its own, passed or failed, and is skipped only if the job
+      # was cancelled or `check` never ran (a failed build), where a second error would only
+      # confuse. Note that `check` is expected to fail on every run until Task 7 unfreezes
+      # readme.txt's four header errors, so "the canary ran while the job was red" is the normal
+      # state of this file, not an exception to it.
       - name: The gate is real - a planted error is reported as an error
-        if: ${{ steps.check.conclusion == 'success' || steps.check.conclusion == 'failure' }}
+        if: ${{ !cancelled() && (steps.check.conclusion == 'success' || steps.check.conclusion == 'failure') }}
         run: |
           canary=dist/alpaca-bot/plugin-check-canary.php
           # Armed before the file is written, so the canary is removed on every exit path -
@@ -135,12 +159,28 @@ jobs:
           <?php
           echo $_GET['x'];
           PHP
-          # The same arguments the action above passes, ignore-codes included: an assertion run
-          # with a wider configuration than the gate would prove something the gate does not do.
+          # The same categories, the same ignore-codes and the same --require as the action's own
+          # "Run Plugin Check" step; only --format differs, because this step reads rows and the
+          # action reads JSON. A wider configuration would prove something the gate does not do,
+          # and a different command-registration path would prove it about code CI never runs:
+          # --require loads plugin-check's cli.php in wp-cli's own bootstrap, before WordPress,
+          # so the after_wp_config_load hook that file registers is in place in time to install
+          # the object-cache drop-in its runtime checks use. Activating the plugin loads the same
+          # file (Plugin_Main::add_hooks) but only after that hook has fired. Measured on a site
+          # where plugin-check was already active, the two invocations return byte-identical
+          # output, so this flag is here to match the action rather than to change the rows.
+          #
+          # The exit status is captured rather than discarded with `|| true`. It must not fail
+          # the step -- the assertions below are the gate and their MISSING lines say more than a
+          # number -- but it separates the two silent failures: a real run that reports nothing
+          # exits 0 (measured: findings present, exit 0), while an unregistered subcommand or a
+          # dead wp-env exits non-zero. The failure output below prints which.
+          status=0
           out=$(wp-env run cli wp plugin check alpaca-bot \
             --format=csv --fields=file,line,type,code \
             --categories=general,plugin_repo,security,performance,accessibility \
-            --ignore-codes=WordPress.Security.EscapeOutput.ExceptionNotEscaped 2>&1) || true
+            --ignore-codes=WordPress.Security.EscapeOutput.ExceptionNotEscaped \
+            --require=./wp-content/plugins/plugin-check/cli.php 2>&1) || status=$?
           # Two rows, chosen for what each one proves.
           #
           # `missing_direct_file_access_protection` is the rule that catches a stray
@@ -163,7 +203,7 @@ jobs:
           done
           if [ "$fail" != 0 ]; then
             echo "::error::Plugin Check did not report the planted errors; this job cannot be trusted to catch a real one"
-            echo "--- what it actually said ---"
+            echo "--- wp plugin check exited $status ---"
             cat <<<"$out"
             exit 1
           fi
