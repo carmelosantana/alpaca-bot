@@ -587,9 +587,18 @@ data: {"conversation_id":169,"message":{"role":"assistant","content":"orange","m
 | Event | Data | When |
 |---|---|---|
 | `start` | `{conversation_id, model}` | Once the conversation exists (created on the spot for a ticket that named 0), before any text. This is where a new conversation's id arrives. |
-| `delta` | `{text, reasoning}` | One per fragment. A thinking model sends its reasoning as `reasoning` deltas with empty `text` first, then the answer as `text`. |
+| `delta` | `{text, reasoning}` | One per fragment, and both fields may be empty (see below). A thinking model sends its reasoning as `reasoning` deltas with empty `text` first, then the answer as `text`. |
 | `done` | The exact body a direct `POST /chat` answers with: `{conversation_id, message, receipt, contexts}` | The turn finished. The connection closes after it. |
 | `error` | `{code, message, data}`, the same JSON body a non-streaming error would carry | The turn was refused or failed. A refusal (cap exceeded, bad request) is an `error` frame alone with no `start`; a provider that fails mid-reply sends its deltas first, then `error`. The connection closes after it. |
+
+A `delta` frame may be wholly empty — `{"text":"","reasoning":""}` — and an empty one may
+arrive before any text at all, including as the very first `delta` of a turn. That is not a bug
+to guard against: on a turn that calls tools the server writes one immediately before each tool
+call, as the heartbeat that bounds an abandoned turn. The stream keeps running when the client
+goes away and the server learns of it only from a write that fails, so an iteration that calls a
+tool with no text before it would otherwise leave nothing to write, and the tool's side effect
+(a draft created) would land with the tab already closed. Append the empty strings and render
+nothing.
 
 A client that disconnects mid-stream is not refunded: the server notices at the next write,
 stores what was sent so far with `message.meta.partial: true`, and records a receipt for the
