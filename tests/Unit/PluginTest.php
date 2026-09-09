@@ -273,3 +273,52 @@ it('registers the abilities on the two hooks core fires when its registries are 
         ->and((new ReflectionProperty(Abilities\Register::class, 'pipeline'))->getValue($register))->toBe($plugin->get(Pipeline::class))
         ->and((new ReflectionProperty(Abilities\Register::class, 'registry'))->getValue($register))->toBe($plugin->get(Registry::class));
 });
+
+// The fallback notice is the factory's verdict (Factory::fallbackNotice()) rendered where admin
+// notices render; the hook is here so the verdict has one source and the factory prints nothing.
+// The catalog bust is the other half of the provider picker: the model list is cached site-wide
+// for five minutes, and a site that switched kinds would otherwise see the previous provider's
+// models (and route a turn at one) until it expired.
+it('prints the wp-ai fallback notice to administrators on admin_notices, and busts the model catalog when a provider setting changes', function (): void {
+    Functions\when('add_shortcode')->justReturn();
+    $onNotices = null;
+    Actions\expectAdded('admin_notices')->once()->with(Mockery::on(static function (mixed $cb) use (&$onNotices): bool {
+        $onNotices = $cb;
+        return $cb instanceof Closure;
+    }));
+    $onUpdate = null;
+    Actions\expectAdded('update_option_' . Plugin::OPTION)->once()->with(Mockery::on(static function (mixed $cb) use (&$onUpdate): bool {
+        $onUpdate = $cb;
+        return $cb instanceof Closure;
+    }), 10, 2);
+    $plugin = Plugin::boot();
+    $plugin->register();
+
+    // This process has no core AI client, so wp-ai selected is the fallback case.
+    Functions\when('get_option')->justReturn(['provider.kind' => 'wp-ai', 'provider.base_url' => 'http://ollama:11434/v1']);
+    Functions\when('current_user_can')->justReturn(true);
+    ob_start();
+    $onNotices();
+    $html = (string) ob_get_clean();
+    expect($html)->toContain('notice-warning')
+        ->and($html)->toContain('http://ollama:11434/v1');
+
+    // Not for a user who cannot change the setting.
+    Functions\when('current_user_can')->justReturn(false);
+    ob_start();
+    $onNotices();
+    expect((string) ob_get_clean())->toBe('');
+
+    // Nothing when Ollama is selected: the factory has no fallback to report.
+    (new ReflectionProperty(Store::class, 'cache'))->setValue($plugin->get(Store::class), null);
+    Functions\when('get_option')->justReturn(['provider.kind' => 'ollama']);
+    Functions\when('current_user_can')->justReturn(true);
+    ob_start();
+    $onNotices();
+    expect((string) ob_get_clean())->toBe('');
+
+    Functions\expect('delete_transient')->twice()->with(ModelCatalog::TRANSIENT)->andReturn(true);
+    $onUpdate(['provider.kind' => 'ollama', 'chat.welcome' => 'a'], ['provider.kind' => 'wp-ai', 'chat.welcome' => 'a']);
+    $onUpdate(['provider.kind' => 'ollama', 'chat.welcome' => 'a'], ['provider.kind' => 'ollama', 'chat.welcome' => 'b']);
+    $onUpdate('not an array', ['provider.kind' => 'ollama']);
+});

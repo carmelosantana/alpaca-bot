@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 use AlpacaBot\Provider\BearerHttpClient;
 use AlpacaBot\Provider\Factory;
+use AlpacaBot\Provider\WpAi\Client;
+use AlpacaBot\Provider\WpAiClientProvider;
 use AlpacaBot\Settings\Store;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Contract\ProviderInterface;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Provider\AbstractProvider;
@@ -125,9 +127,71 @@ it('puts the configured key on the wire instead of ollama-local, on /v1 and nati
         ]);
 });
 
-it('falls through to the default provider for the wp-ai kind until its adapter lands', function (): void {
-    $p = (new Factory(new Store(['provider.kind' => 'wp-ai'])))->make('m');
-    expect($p)->toBeInstanceOf(OllamaProvider::class);
+/**
+ * A Provider\WpAi\Client whose only answer is whether core's AI client is present; make() reads
+ * nothing else of it, so the test can flip that one word and watch the branch follow.
+ */
+function wpAiPresence(bool $available): Client
+{
+    return new class ($available) implements Client {
+        public function __construct(private bool $available) {}
+
+        public function available(): bool
+        {
+            return $this->available;
+        }
+
+        public function models(): array
+        {
+            return [];
+        }
+
+        public function generate(array $request): array
+        {
+            throw new RuntimeException('not asked');
+        }
+    };
+}
+
+it('builds the WP AI Client adapter when wp-ai is selected and core has the client, runs it through the same filter, and raises no notice', function (): void {
+    $store = new Store(['provider.kind' => 'wp-ai', 'provider.api_key' => 'sk-secret', 'models.default' => 'qwen3:8b']);
+    $client = wpAiPresence(true);
+    Filters\expectApplied('alpaca_bot/provider')->once()
+        ->with(Mockery::type(WpAiClientProvider::class), 'qwen3:8b', Mockery::type(Store::class))
+        ->andReturnFirstArg();
+    $factory = new Factory($store, $client);
+    $p = $factory->make();
+    expect($p)->toBeInstanceOf(WpAiClientProvider::class)
+        ->and($p->getModel())->toBe('qwen3:8b')
+        ->and(providerProp($p, 'client'))->toBe($client)
+        ->and($factory->fallbackNotice())->toBeNull();
+    expect($factory->make('other')->getModel())->toBe('other');
+});
+
+it('falls back to Ollama, and says so, when wp-ai is selected but core has no AI client; the same store on a core that has it does not fall back', function (): void {
+    $store = new Store(['provider.kind' => 'wp-ai', 'provider.base_url' => 'http://ollama:11434', 'models.default' => 'qwen3:8b']);
+    $absent = new Factory($store, wpAiPresence(false));
+    $p = $absent->make();
+    expect($p)->toBeInstanceOf(OllamaProvider::class)
+        ->and($p->getModel())->toBe('qwen3:8b')
+        ->and($absent->fallbackNotice())->toBeString()
+        ->and($absent->fallbackNotice())->toContain('WordPress AI provider')
+        ->and($absent->fallbackNotice())->toContain('http://ollama:11434/v1');
+    $present = new Factory($store, wpAiPresence(true));
+    expect($present->make())->toBeInstanceOf(WpAiClientProvider::class)
+        ->and($present->fallbackNotice())->toBeNull();
+});
+
+it('keeps Ollama, with no notice, when Ollama is selected, whether or not core has an AI client', function (bool $available): void {
+    $factory = new Factory(new Store(['provider.kind' => 'ollama']), wpAiPresence($available));
+    expect($factory->make('m'))->toBeInstanceOf(OllamaProvider::class)
+        ->and($factory->fallbackNotice())->toBeNull();
+})->with(['core has the client' => [true], 'core has no client' => [false]]);
+
+it('probes the running process when no client is given: this test process has no core, so wp-ai falls back', function (): void {
+    $factory = new Factory(new Store(['provider.kind' => 'wp-ai']));
+    expect($factory->make('m'))->toBeInstanceOf(OllamaProvider::class)
+        ->and($factory->fallbackNotice())->toBeString();
 });
 
 it('lets the alpaca_bot/provider filter replace the provider', function (): void {

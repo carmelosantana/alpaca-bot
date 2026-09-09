@@ -43,7 +43,11 @@ final class Schema
     public static function fields(): array
     {
         return [
-            'provider.kind' => ['type' => 'select', 'default' => 'ollama', 'section' => 'provider', 'label' => __('Provider', 'alpaca-bot'), 'options' => ['ollama' => 'Ollama', 'wp-ai' => __('WordPress AI provider', 'alpaca-bot')]],
+            // Both options are always offered, whatever this WordPress has: hiding `wp-ai` when
+            // the AI client is absent would show Ollama selected on a site whose stored value is
+            // `wp-ai`, and the next save of this tab would silently make that the setting. The
+            // stored value stands; the factory falls back and an admin notice names the fallback.
+            'provider.kind' => ['type' => 'select', 'default' => 'ollama', 'section' => 'provider', 'label' => __('Provider', 'alpaca-bot'), 'description' => __('Ollama talks to your Ollama server directly, using the settings below, and streams replies as they are produced. WordPress AI provider routes every turn through the AI client built into WordPress 7.0 and later, to whichever AI provider plugin this site has installed and configured (Settings → Connectors); the settings below are not used, the models offered are that provider\'s, and a reply arrives whole rather than streamed, since the WordPress client does not stream.', 'alpaca-bot'), 'options' => ['ollama' => 'Ollama', 'wp-ai' => __('WordPress AI provider', 'alpaca-bot')]],
             'provider.base_url' => ['type' => 'string', 'default' => 'http://localhost:11434/v1', 'section' => 'provider', 'label' => __('Base URL', 'alpaca-bot'), 'description' => __('OpenAI-compatible endpoint. For Ollama this ends in /v1.', 'alpaca-bot'), 'sanitize' => [self::class, 'sanitizeUrl']],
             'provider.api_key' => ['type' => 'string', 'default' => '', 'section' => 'provider', 'label' => __('API key', 'alpaca-bot'), 'description' => __('Optional. Sent as a Bearer token.', 'alpaca-bot')],
             'provider.timeout' => ['type' => 'integer', 'default' => 60, 'section' => 'provider', 'label' => __('Timeout (seconds)', 'alpaca-bot'), 'description' => __('How long one request may wait for the provider before it fails. The first request after a restart loads the model from cold, and a large model can take longer than the 60 seconds default to load; raise this if that first request times out and the next one works. Leave it low otherwise, so a provider that has stopped answering fails quickly instead of holding every chat open.', 'alpaca-bot'), 'min' => 5, 'max' => 600],

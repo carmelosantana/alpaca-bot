@@ -43,9 +43,39 @@ final class Plugin
     {
         $store = new Store();
         $this->set(Store::class, $store);
-        $factory = new Provider\Factory($store);
+        $factory = new Provider\Factory($store, new Provider\WpAi\CoreClient());
         $this->set(Provider\Factory::class, $factory);
         $this->set(Provider\ModelCatalog::class, new Provider\ModelCatalog($factory));
+        // The provider picker's two loose ends. The notice: `provider.kind` may say `wp-ai` on a
+        // WordPress without the AI client (the setting outlived a downgrade, or was written
+        // over REST), and the factory then builds Ollama; it is the factory's verdict
+        // (fallbackNotice()), printed here because the factory also runs under REST and WP-CLI,
+        // and only to someone who can change the setting. The catalog bust: the model list is
+        // one site-wide transient for five minutes, and a save that changes the provider (its
+        // kind, where it is, or the key that reaches it) would otherwise leave the previous
+        // provider's models on offer, and a turn routed at one of them, until it expired.
+        // On `update_option_*` rather than in Store: every writer (the settings page, the REST
+        // route, WP-CLI, a filter) goes through the option, and only one of them through Store.
+        // Neither closure is `static`, for the reason the cleanup hook above gives.
+        add_action('admin_notices', function () use ($factory): void {
+            $notice = $factory->fallbackNotice();
+            if ($notice === null || !current_user_can('manage_options')) {
+                return;
+            }
+            printf('<div class="notice notice-warning"><p>%s</p></div>', esc_html($notice));
+        });
+        add_action('update_option_' . self::OPTION, function (mixed $old, mixed $new): void {
+            if (is_array($old) && is_array($new)) {
+                $changed = false;
+                foreach (['provider.kind', 'provider.base_url', 'provider.api_key'] as $key) {
+                    $changed = $changed || ($old[$key] ?? null) !== ($new[$key] ?? null);
+                }
+                if (!$changed) {
+                    return;
+                }
+            }
+            delete_transient(Provider\ModelCatalog::TRANSIENT);
+        }, 10, 2);
         $conversations = new Chat\ConversationStore($store);
         $this->set(Chat\ConversationStore::class, $conversations);
         add_action('init', [$conversations, 'registerPostType']);

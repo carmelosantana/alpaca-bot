@@ -15,10 +15,26 @@ use AlpacaBot\Vendor\Symfony\Component\HttpClient\HttpClient;
  *
  * Settings are read when make()/baseUrl() run, never at construction, so the
  * factory is safe to register on plugins_loaded.
+ *
+ * `provider.kind` picks between two providers. `ollama` is OllamaProvider over the site's
+ * base URL, key and timeout. `wp-ai` is WpAiClientProvider over WordPress's own AI client
+ * (WordPress 7.0+), which routes the turn to whatever provider plugin the site registered with
+ * core; it takes none of the Ollama settings, since the core provider plugin holds its own.
+ * When `wp-ai` is selected on a WordPress without the client, make() builds Ollama instead and
+ * fallbackNotice() says so, for Plugin to print on admin_notices: a stored setting must not
+ * fatal, and a site whose WordPress went backwards should chat, but not without being told which
+ * provider is answering. The probe is the client's presence alone, not whether a core provider
+ * is configured: that check lists every provider's models (an HTTP call each on a site with no
+ * persistent object cache), and make() runs on every turn. A selected `wp-ai` with core present
+ * but no provider configured is a loud failure at the turn instead (WpAiClientProvider::chat()
+ * throws, the catalog is empty), never a silent switch to Ollama.
  */
 final class Factory
 {
-    public function __construct(private Store $store) {}
+    /**
+     * @param WpAi\Client $wpAi core's AI client, probed when `provider.kind` is `wp-ai`; the real one unless a test hands in another
+     */
+    public function __construct(private Store $store, private WpAi\Client $wpAi = new WpAi\CoreClient()) {}
 
     /**
      * The OpenAI-compatible endpoint, always ending in `/v1`.
@@ -54,6 +70,43 @@ final class Factory
     public function make(?string $model = null): ProviderInterface
     {
         $model = ($model === null || $model === '') ? (string) $this->store->get('models.default') : $model;
+
+        // Both kinds go through the same filter, the extension point for swapping in another
+        // provider: a filter that wraps or replaces the provider sees whichever kind is selected.
+        $provider = $this->usesWpAi() ? new WpAiClientProvider($model, $this->wpAi) : $this->ollama($model);
+
+        $filtered = apply_filters('alpaca_bot/provider', $provider, $model, $this->store);
+        if (!$filtered instanceof ProviderInterface) {
+            throw new \UnexpectedValueException('alpaca_bot/provider must return a ' . ProviderInterface::class . ', got ' . get_debug_type($filtered));
+        }
+        return $filtered;
+    }
+
+    /**
+     * The message for the administrator when `wp-ai` is selected but make() is building Ollama,
+     * null otherwise. The verdict lives here, next to the decision it reports, and Plugin prints
+     * it on admin_notices; the factory itself prints nothing, since it also runs under REST and
+     * WP-CLI.
+     */
+    public function fallbackNotice(): ?string
+    {
+        if ($this->store->get('provider.kind') !== 'wp-ai' || $this->wpAi->available()) {
+            return null;
+        }
+        return sprintf(
+            /* translators: %s: the Ollama base URL replies are coming from */
+            __('Alpaca Bot is set to the WordPress AI provider, but this WordPress has no AI client (it arrived in WordPress 7.0), so replies are coming from Ollama at %s instead. Choose Ollama on the Alpaca Bot settings page to make that the setting, or update WordPress.', 'alpaca-bot'),
+            $this->baseUrl(),
+        );
+    }
+
+    private function usesWpAi(): bool
+    {
+        return $this->store->get('provider.kind') === 'wp-ai' && $this->wpAi->available();
+    }
+
+    private function ollama(string $model): OllamaProvider
+    {
         // Symfony's `timeout` is the idle timeout between chunks, which is the one that
         // matters for a streamed reply; the library default would be 300s.
         $http = HttpClient::create(['timeout' => (int) $this->store->get('provider.timeout')]);
@@ -66,20 +119,11 @@ final class Factory
             $http = new BearerHttpClient($http, $apiKey);
         }
 
-        // `provider.kind`: 'ollama' is the only kind with an adapter. 'wp-ai' falls through
-        // to it until its adapter lands (P4); the filter below is the extension point for
-        // swapping in another provider.
-        $provider = new OllamaProvider(
+        return new OllamaProvider(
             model: $model,
             baseUrl: $this->baseUrl(),
             httpClient: $http,
             numCtx: (int) $this->store->get('models.num_ctx'),
         );
-
-        $filtered = apply_filters('alpaca_bot/provider', $provider, $model, $this->store);
-        if (!$filtered instanceof ProviderInterface) {
-            throw new \UnexpectedValueException('alpaca_bot/provider must return a ' . ProviderInterface::class . ', got ' . get_debug_type($filtered));
-        }
-        return $filtered;
     }
 }
