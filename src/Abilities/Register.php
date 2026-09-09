@@ -424,26 +424,23 @@ final class Register
     }
 
     /**
-     * The tool named `$name` in `$toolkit` run with `$args`, as the model runs it: its content
-     * on success, else its text refusal as `alpaca_bot_tool_error` (400), or a 500 when the
-     * toolkit has no such tool. By name rather than position, so a toolkit that grows a second
-     * tool keeps working.
+     * The tool named `$name` in `$toolkit` (Registry::tool()) run with `$args`, as the model
+     * runs it: its content on success, else its text refusal as `alpaca_bot_tool_error` (400),
+     * or a 500 when the toolkit has no such tool.
      *
      * @param array<string, mixed> $args
      */
     private static function run(ToolkitInterface $toolkit, string $name, array $args): string|\WP_Error
     {
-        foreach ($toolkit->tools() as $tool) {
-            if ($tool->name() !== $name) {
-                continue;
-            }
-            $result = $tool->execute($args);
-            if ($result->status !== ToolResultStatus::Success) {
-                return new \WP_Error('alpaca_bot_tool_error', $result->content, ['status' => 400]);
-            }
-            return $result->content;
+        $tool = Registry::tool($toolkit, $name);
+        if ($tool === null) {
+            /* translators: %s: the tool's id, e.g. draft_post */
+            return new \WP_Error('alpaca_bot_tool_error', sprintf(__('The %s tool is not available.', 'alpaca-bot'), $name), ['status' => 500]);
         }
-        /* translators: %s: the tool's id, e.g. draft_post */
-        return new \WP_Error('alpaca_bot_tool_error', sprintf(__('The %s tool is not available.', 'alpaca-bot'), $name), ['status' => 500]);
+        $result = $tool->execute($args);
+        if ($result->status !== ToolResultStatus::Success) {
+            return new \WP_Error('alpaca_bot_tool_error', $result->content, ['status' => 400]);
+        }
+        return $result->content;
     }
 }

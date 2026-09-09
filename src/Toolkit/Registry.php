@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace AlpacaBot\Toolkit;
 
 use AlpacaBot\Settings\Store;
+use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Contract\ToolInterface;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Contract\ToolkitInterface;
 
 /**
@@ -27,6 +28,11 @@ use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Contract\ToolkitInterface;
  *
  * Nothing here is resolved at boot: register() only records, and enabled() reads the option
  * when a turn asks, so a setting saved during the request is seen by the next call.
+ *
+ * tool() is the one way a surface other than the model runs a toolkit's tool directly (the
+ * abilities, the `[alpacabot_agent]` shim): by name, out of whatever enabled() handed back
+ * under the toolkit's id, so what runs is the instance the model would have run, filter
+ * included. The refusal when the tool is missing is each caller's own to word.
  *
  * @since 0.5.0
  */
@@ -80,5 +86,21 @@ final class Registry
             }
         }
         return $out;
+    }
+
+    /**
+     * The tool named `$name` in `$toolkit`, or null when it has none. By name rather than
+     * position, so a toolkit that grows a second tool keeps working; the last one of that
+     * name wins, as it does in the agent's own index.
+     */
+    public static function tool(ToolkitInterface $toolkit, string $name): ?ToolInterface
+    {
+        $found = null;
+        foreach ($toolkit->tools() as $tool) {
+            if ($tool->name() === $name) {
+                $found = $tool;
+            }
+        }
+        return $found;
     }
 }

@@ -105,17 +105,15 @@ final class AgentShim
         if ($toolkit === null) {
             throw new \InvalidArgumentException(__('The web_fetch tool is switched off in Settings › Tools, so [alpacabot_agent] fetches nothing.', 'alpaca-bot'));
         }
-        foreach ($toolkit->tools() as $tool) {
-            if ($tool->name() !== 'web_fetch') {
-                continue;
-            }
-            $result = $tool->execute(['url' => $url]);
-            if ($result->status !== ToolResultStatus::Success) {
-                throw new \InvalidArgumentException($result->content);
-            }
-            return $result->content;
+        $tool = Registry::tool($toolkit, 'web_fetch');
+        if ($tool === null) {
+            throw new \RuntimeException(__('The web_fetch tool is not available.', 'alpaca-bot'));
         }
-        throw new \RuntimeException(__('The web_fetch tool is not available.', 'alpaca-bot'));
+        $result = $tool->execute(['url' => $url]);
+        if ($result->status !== ToolResultStatus::Success) {
+            throw new \InvalidArgumentException($result->content);
+        }
+        return $result->content;
     }
 
     private function deprecate(): void

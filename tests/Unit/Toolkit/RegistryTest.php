@@ -5,6 +5,8 @@ declare(strict_types=1);
 use AlpacaBot\Settings\Store;
 use AlpacaBot\Toolkit\Registry;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Contract\ToolkitInterface;
+use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Tool\Tool;
+use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Tool\ToolResult;
 use Brain\Monkey\Filters;
 
 // The registry knows every toolkit the plugin built; the `toolkits.enabled` setting says which of
@@ -62,4 +64,23 @@ it('replaces a toolkit registered again under the same id, keeping its place', f
     $r->register('a', $a2);
     expect($r->ids())->toBe(['a', 'b'])
         ->and($r->enabled(3))->toBe(['a' => $a2, 'b' => $b]);
+});
+
+it('finds a tool in a toolkit by name, the last of that name, and none when the toolkit has no such tool', function (): void {
+    // Final review F6: the abilities and the [alpacabot_agent] shim each walked a toolkit's
+    // tools() for one name; this is that walk, once.
+    $kit = new class implements ToolkitInterface {
+        public function tools(): array
+        {
+            return [new Tool('first', 'd', [], static fn(array $a): ToolResult => ToolResult::success('1')), new Tool('web_fetch', 'd', [], static fn(array $a): ToolResult => ToolResult::success('old')), new Tool('web_fetch', 'd', [], static fn(array $a): ToolResult => ToolResult::success('new'))];
+        }
+
+        public function guidelines(): string
+        {
+            return '';
+        }
+    };
+    expect(Registry::tool($kit, 'web_fetch')?->execute([])->content)->toBe('new')
+        ->and(Registry::tool($kit, 'first')?->name())->toBe('first')
+        ->and(Registry::tool($kit, 'summarize'))->toBeNull();
 });
