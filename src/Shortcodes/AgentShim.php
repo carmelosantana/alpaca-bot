@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace AlpacaBot\Shortcodes;
 
 use AlpacaBot\Chat\Pipeline;
-use AlpacaBot\Toolkit\WebFetchToolkit;
+use AlpacaBot\Toolkit\Registry;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Enum\ToolResultStatus;
 
 /**
@@ -23,9 +23,12 @@ use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Enum\ToolResultStatus;
  * `length` as 0.4 took it, free text ("2 sentences", "3 bullet points") appended as "in …".
  * The fetch is the toolkit's tool run directly, not a tool turn: an ephemeral turn runs no
  * tools (Pipeline's docblock), and here the URL is the author's, not the model's, so nothing
- * is lost by not letting the model choose it. The toolkit is used whether or not the
- * `toolkits.enabled` setting lists web_fetch: that setting is what the model may do on its
- * own, and this is a fetch the author wrote into the page.
+ * is lost by not letting the model choose it. The toolkit is the one the registry enables for
+ * the viewer (Toolkit\Registry::enabled(): the `toolkits.enabled` setting, then the
+ * `alpaca_bot/toolkits` filter), so an administrator who switches web_fetch off in Settings ›
+ * Tools has switched off this fetch too: the setting's words are what the assistant may do,
+ * and an outbound request from the server on a page's say-so is not exempt from them. The
+ * shortcode then shows the editor a notice naming the setting, and caches nothing.
  *
  * What the hint says is deliberately not `[alpacabot prompt="Summarize {url}"]`: that turn
  * runs no tools either, so the model would be handed a URL it cannot open and answer from
@@ -43,7 +46,7 @@ final class AgentShim
     /** _doing_it_wrong() once per request, however many of the shortcode a page carries. */
     private bool $warned = false;
 
-    public function __construct(private Chat $chat, private Pipeline $pipeline, private WebFetchToolkit $fetcher) {}
+    public function __construct(private Chat $chat, private Pipeline $pipeline, private Registry $toolkits) {}
 
     public function register(): void
     {
@@ -58,17 +61,17 @@ final class AgentShim
         $name = strtolower(trim((string) $a['name']));
         $url = trim((string) $a['url']);
         $length = trim((string) $a['length']);
-        $model = trim((string) $a['model']);
+        $model = $this->chat->resolveModel(trim((string) $a['model']));
         if (!in_array($name, self::AGENTS, true)) {
             /* translators: %s: the name attribute as written */
-            return Chat::notice(sprintf(__('[alpacabot_agent] has no agent named "%s"; it knows get and summarize.', 'alpaca-bot'), $name));
+            return $this->chat->notice(sprintf(__('[alpacabot_agent] has no agent named "%s"; it knows get and summarize.', 'alpaca-bot'), $name));
         }
         if ($url === '') {
-            return Chat::notice(__('[alpacabot_agent] needs a url attribute.', 'alpaca-bot'));
+            return $this->chat->notice(__('[alpacabot_agent] needs a url attribute.', 'alpaca-bot'));
         }
         $identity = ['name' => $name, 'url' => $url, 'length' => $length, 'model' => $model];
         return $this->chat->answer(self::TAG, $identity, Chat::cacheSeconds((string) $a['cache']), $name === 'get' ? 'text' : 'markdown', function (int $userId) use ($name, $url, $length, $model): string {
-            $page = $this->fetch($url);
+            $page = $this->fetch($userId, $url);
             if ($name === 'get') {
                 return $page;
             }
@@ -87,20 +90,28 @@ final class AgentShim
     }
 
     /**
-     * The page's text through the web_fetch tool; its refusal (an address that is not public, a
-     * page that is not text, an HTTP error) is thrown, and Chat::answer() shows it as the notice.
+     * The page's text through the web_fetch tool the registry enables for this viewer. Its
+     * refusal (an address that is not public, a page that is not text, an HTTP error) and the
+     * tool being switched off are thrown as the caller's mistake, the arm of
+     * Rest\Errors::fromPipeline() that shows the message: the URL is the author's and the
+     * tool's words are written for them, and the setting is the administrator's to name.
      *
-     * @throws \RuntimeException with the tool's own message
+     * @throws \InvalidArgumentException with the tool's own message, or the setting's name
+     * @throws \RuntimeException when the enabled toolkit has no web_fetch tool, which is a plugin bug
      */
-    private function fetch(string $url): string
+    private function fetch(int $userId, string $url): string
     {
-        foreach ($this->fetcher->tools() as $tool) {
+        $toolkit = $this->toolkits->enabled($userId)['web_fetch'] ?? null;
+        if ($toolkit === null) {
+            throw new \InvalidArgumentException(__('The web_fetch tool is switched off in Settings › Tools, so [alpacabot_agent] fetches nothing.', 'alpaca-bot'));
+        }
+        foreach ($toolkit->tools() as $tool) {
             if ($tool->name() !== 'web_fetch') {
                 continue;
             }
             $result = $tool->execute(['url' => $url]);
             if ($result->status !== ToolResultStatus::Success) {
-                throw new \RuntimeException($result->content);
+                throw new \InvalidArgumentException($result->content);
             }
             return $result->content;
         }

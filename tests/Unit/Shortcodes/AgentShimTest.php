@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use AlpacaBot\Shortcodes\AgentShim;
 use AlpacaBot\Shortcodes\Chat;
+use AlpacaBot\Toolkit\Registry;
 use AlpacaBot\Toolkit\WebFetchToolkit;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Enum\ProviderFinishReason;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Message\SystemMessage;
@@ -32,7 +33,11 @@ function agentShimPage(string $url, string $body): void
 
 function agentShim(object $h): AgentShim
 {
-    return new AgentShim(shortcodeChat($h, 7), $h->pipeline, new WebFetchToolkit($h->store, static fn(string $host): array => ['93.184.216.34']));
+    // The registry the shim reads: the fetch toolkit under its id, gated by the harness's
+    // `toolkits.enabled` (the schema default lists it; a test about the setting says otherwise).
+    $registry = new Registry($h->store);
+    $registry->register('web_fetch', new WebFetchToolkit($h->store, static fn(string $host): array => ['93.184.216.34']));
+    return new AgentShim(shortcodeChat($h, 7), $h->pipeline, $registry);
 }
 
 it('maps name=summarize url=… to a prompt that begins with Summarize over the fetched page, through an ephemeral turn, and says it is deprecated once', function (): void {
@@ -52,12 +57,14 @@ it('maps name=summarize url=… to a prompt that begins with Summarize over the 
         ->and($call['messages'][1])->toBeInstanceOf(UserMessage::class)
         ->and($call['messages'][1]->content())->toStartWith('Summarize')
         ->and($call['messages'][1]->content())->toContain('https://example.test/a')->toContain('2 sentences')->toContain("Title\n\nBody text")
-        // The hint names the replacement, which begins the same way, and never says 1.0.
-        ->and($message)->toContain('[alpacabot prompt="Summarize')->toContain('0.5.0')->not->toContain('1.0');
-    // Ephemeral: a receipt, no conversation; cached under the shim's own tag and the post.
+        // The hint names the replacement, which begins the same way, and never names the reserved major version.
+        ->and($message)->toContain('[alpacabot prompt="Summarize')->toContain('0.5.0')->not->toMatch('/(?<![\d.])1\.\d/');
+    // Ephemeral: a receipt, no conversation; cached under the shim's own tag, the post, the
+    // duration and the model the site resolved (no model= means the site's default).
     expect(array_map(static fn(array $w): array => [$w[0], $w[1]], $h->writes))->toBe([['wp_insert_post', 'chat_log']])
+        ->and($h->model)->toBe('llama3.2')
         ->and($h->stored)->toHaveCount(1)
-        ->and($h->stored[0][0])->toBe(Chat::cacheKey('alpacabot_agent', ['name' => 'summarize', 'url' => 'https://example.test/a', 'length' => '2 sentences', 'model' => ''], 7))
+        ->and($h->stored[0][0])->toBe(Chat::cacheKey('alpacabot_agent', ['name' => 'summarize', 'url' => 'https://example.test/a', 'length' => '2 sentences', 'model' => 'llama3.2'], 7, 3600))
         ->and($h->stored[0][1])->toBe('A **summary**.')
         ->and($h->stored[0][2])->toBe(3600);
 });
@@ -102,6 +109,22 @@ it('shows the fetch tool\'s refusal as a notice and caches nothing, so a private
     Functions\expect('wp_safe_remote_get')->never();
     $html = $shim->render(['name' => 'summarize', 'url' => 'http://127.0.0.1/'], null, 'alpacabot_agent');
     expect($html)->toContain('class="alpaca-bot-notice"')->toContain('not allowed')
+        ->and($h->stored)->toBe([]);
+});
+
+it('does not fetch while the administrator has web_fetch switched off in Settings › Tools, and says so', function (): void {
+    // Review M8: the setting's words are "what the assistant may do", and an unticked fetch
+    // tool is a policy about outbound requests from this server; a shortcode is not exempt
+    // from it. Nothing is requested, nothing is cached, and the notice names the setting.
+    $h = pipelineWith(null, ['toolkits.enabled' => ['summarize']]);
+    $shim = agentShim($h);
+    shortcodeViewer(3);
+    Functions\when('home_url')->justReturn('https://site.test/');
+    Functions\when('_doing_it_wrong')->justReturn();
+    Functions\expect('wp_safe_remote_get')->never();
+    Functions\expect('wp_http_validate_url')->never();
+    $html = $shim->render(['name' => 'get', 'url' => 'https://example.test/a'], null, 'alpacabot_agent');
+    expect($html)->toContain('class="alpaca-bot-notice"')->toContain('switched off')
         ->and($h->stored)->toBe([]);
 });
 

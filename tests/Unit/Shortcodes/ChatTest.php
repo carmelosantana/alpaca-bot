@@ -25,6 +25,12 @@ function shortcodeReply(string $text): array
     return [new Response($text, ProviderFinishReason::Stop), new Response('', ProviderFinishReason::Stop, usage: new Usage(5, 2, 7))];
 }
 
+/** The identity of `[alpacabot prompt="Say hi"]` with nothing else set, as the harness's site resolves it: its default model, no system prompt. */
+function sayHiKey(int $postId = 7, int $cacheSeconds = 3600): string
+{
+    return Chat::cacheKey('alpacabot', ['prompt' => 'Say hi', 'model' => 'llama3.2', 'system' => '', 'temperature' => null], $postId, $cacheSeconds);
+}
+
 it('parses the attributes with their defaults, and only the word off switches the cache off', function (): void {
     Functions\when('shortcode_atts')->alias(static fn(array $pairs, array $atts): array => array_merge($pairs, array_intersect_key($atts, $pairs)));
     expect(Chat::attributes(''))->toBe(['prompt' => '', 'model' => '', 'system' => '', 'temperature' => null, 'format' => 'markdown', 'cache' => 3600])
@@ -35,7 +41,8 @@ it('parses the attributes with their defaults, and only the word off switches th
         // A temperature that is not a number is not sent; one past the schema's range is held to it.
         ->and(Chat::attributes(['temperature' => 'warm'])['temperature'])->toBeNull()
         ->and(Chat::attributes(['temperature' => '9'])['temperature'])->toBe(2.0)
-        ->and(Chat::attributes(['temperature' => '-1'])['temperature'])->toBe(0.0);
+        ->and(Chat::attributes(['temperature' => '-1'])['temperature'])->toBe(0.0)
+        ->and(Chat::attributes(['temperature' => '1e999'])['temperature'])->toBe(2.0);
     // The cache is the spend control: a value that is not a duration keeps the default rather
     // than reading as "no cache", and "0" is not a way to switch it off.
     expect(Chat::cacheSeconds('off'))->toBe(0)
@@ -50,6 +57,22 @@ it('parses the attributes with their defaults, and only the word off switches th
         ->and(Chat::cacheSeconds('1 hour'))->toBe(3600)
         ->and(Chat::cacheSeconds('forever'))->toBe(3600)
         ->and(Chat::DEFAULT_CACHE)->toBe('1h');
+});
+
+it('holds a cache duration to a year, so an attribute that overflows an int cannot fatal the page', function (): void {
+    // Review C1: `(int) $m[1] * 86400` overflowed to a float and, under strict_types, the int
+    // return type threw a TypeError out of attribute parsing, outside answer()'s try and before
+    // the capability check: a published page white-screened for every visitor, from an
+    // attribute any Contributor can write. The reviewer's exact value first; a year is the ceiling.
+    Functions\when('shortcode_atts')->alias(static fn(array $pairs, array $atts): array => array_merge($pairs, array_intersect_key($atts, $pairs)));
+    expect(Chat::cacheSeconds('999999999999999d'))->toBe(31536000)
+        ->and(Chat::cacheSeconds('99999999999999999999'))->toBe(31536000)
+        ->and(Chat::cacheSeconds('9223372036854775807h'))->toBe(31536000)
+        ->and(Chat::cacheSeconds('366d'))->toBe(31536000)
+        ->and(Chat::cacheSeconds('365d'))->toBe(31536000)
+        ->and(Chat::cacheSeconds('364d'))->toBe(364 * 86400)
+        ->and(Chat::MAX_SECONDS)->toBe(31536000)
+        ->and(Chat::attributes(['prompt' => 'x', 'cache' => '999999999999999d'])['cache'])->toBe(31536000);
 });
 
 it('answers an editor through an ephemeral turn with the attributes as options, renders markdown, and caches the text for the post', function (): void {
@@ -67,19 +90,46 @@ it('answers an editor through an ephemeral turn with the attributes as options, 
         ->and($call['options']['temperature'])->toBe(0.2);
     // Ephemeral: the turn is billed (a chat_log receipt for user 3) and no conversation post is made.
     expect(array_map(static fn(array $w): array => [$w[0], $w[1]], $h->writes))->toBe([['wp_insert_post', 'chat_log']]);
-    // Cached for the default hour under the attributes and the post.
+    // Cached for the default hour under the attributes, the post and the duration.
     expect($h->stored)->toHaveCount(1)
-        ->and($h->stored[0][0])->toBe(Chat::cacheKey('alpacabot', ['prompt' => 'Say hi', 'model' => 'llama3.2', 'system' => 'Be terse', 'temperature' => 0.2], 7))
+        ->and($h->stored[0][0])->toBe(Chat::cacheKey('alpacabot', ['prompt' => 'Say hi', 'model' => 'llama3.2', 'system' => 'Be terse', 'temperature' => 0.2], 7, 3600))
         ->and($h->stored[0][0])->toStartWith('alpaca_bot_shortcode_')
         ->and($h->stored[0][1])->toBe("**Hi** there\n\n<script>x()</script>")
         ->and($h->stored[0][2])->toBe(3600);
+});
+
+it('keys the cache on the model and system prompt the site resolves, never on the viewer\'s own preference, so changing either changes the page', function (): void {
+    // Review M6: with no model= the pipeline fell back to the viewer's stored preference, and
+    // with no system= to chat.system_prompt, and neither was in the identity: the page's answer
+    // was whichever model the first editor to open it preferred, and editing the site prompt or
+    // its default model invalidated nothing. The page's answer is the page's: the site's model
+    // (the attribute where users may pick one, else the default) and the site's prompt, both in the key.
+    $provider = pipelineProvider(shortcodeReply('Answer'), $call);
+    $h = pipelineWith($provider, ['chat.system_prompt' => 'Site prompt', 'models.default' => 'llama3.2'], catalog: ['llama3.2', 'mistral']);
+    $chat = shortcodeChat($h, 7);
+    shortcodeViewer(3);
+    // The viewer prefers another listed model, and users may change it: the page still gets the site's.
+    Functions\when('get_user_meta')->justReturn('mistral');
+    $chat->render(['prompt' => 'Say hi'], null, 'alpacabot');
+    expect($h->model)->toBe('llama3.2')
+        ->and($call['messages'][0]->content())->toBe('Site prompt')
+        ->and($h->stored[0][0])->toBe(Chat::cacheKey('alpacabot', ['prompt' => 'Say hi', 'model' => 'llama3.2', 'system' => 'Site prompt', 'temperature' => null], 7, 3600))
+        ->and($h->stored[0][0])->not->toBe(Chat::cacheKey('alpacabot', ['prompt' => 'Say hi', 'model' => 'mistral', 'system' => 'Site prompt', 'temperature' => null], 7, 3600))
+        ->and($h->stored[0][0])->not->toBe(Chat::cacheKey('alpacabot', ['prompt' => 'Say hi', 'model' => 'llama3.2', 'system' => 'Another prompt', 'temperature' => null], 7, 3600));
+    // Where users may not change the model, a model= attribute is not honoured, and the identity says what was used, not what was asked.
+    $h = pipelineWith(pipelineProvider(shortcodeReply('Answer')), ['chat.user_can_change_model' => false], catalog: ['llama3.2', 'mistral']);
+    $chat = shortcodeChat($h, 7);
+    shortcodeViewer(3);
+    $chat->render(['prompt' => 'Say hi', 'model' => 'mistral'], null, 'alpacabot');
+    expect($h->model)->toBe('llama3.2')
+        ->and($h->stored[0][0])->toBe(sayHiKey());
 });
 
 it('serves a cached answer to an editor without building a provider', function (): void {
     $h = pipelineWith(null);
     $chat = shortcodeChat($h, 7);
     shortcodeViewer(3);
-    $h->transients[Chat::cacheKey('alpacabot', ['prompt' => 'Say hi', 'model' => '', 'system' => '', 'temperature' => null], 7)] = 'From the cache';
+    $h->transients[sayHiKey()] = 'From the cache';
     expect($chat->render(['prompt' => 'Say hi'], null, 'alpacabot'))->toContain('From the cache')
         ->and($h->stored)->toBe([])
         ->and($h->writes)->toBe([]);
@@ -104,7 +154,7 @@ it('serves a guest the cached answer when the filter allows guests, still withou
     $chat = shortcodeChat($h, 7);
     shortcodeViewer(0);
     Filters\expectApplied('alpaca_bot/shortcode/allow_guests')->once()->andReturn(true);
-    $h->transients[Chat::cacheKey('alpacabot', ['prompt' => 'Say hi', 'model' => '', 'system' => '', 'temperature' => null], 7)] = 'From the cache';
+    $h->transients[sayHiKey()] = 'From the cache';
     $html = $chat->render(['prompt' => 'Say hi'], null, 'alpacabot');
     expect($html)->toContain('From the cache')->not->toContain('alpaca-bot-notice')
         ->and($h->writes)->toBe([]);
@@ -113,7 +163,7 @@ it('serves a guest the cached answer when the filter allows guests, still withou
 it('keeps a cached answer from a guest, and from a logged-in user who cannot edit posts, while the filter is off', function (): void {
     $h = pipelineWith(null);
     $chat = shortcodeChat($h, 7);
-    $h->transients[Chat::cacheKey('alpacabot', ['prompt' => 'Say hi', 'model' => '', 'system' => '', 'temperature' => null], 7)] = 'From the cache';
+    $h->transients[sayHiKey()] = 'From the cache';
     shortcodeViewer(0);
     Filters\expectApplied('alpaca_bot/shortcode/allow_guests')->once()->andReturn(false);
     expect($chat->render(['prompt' => 'Say hi'], null, 'alpacabot'))->toContain('Log in')->not->toContain('From the cache');
@@ -123,6 +173,22 @@ it('keeps a cached answer from a guest, and from a logged-in user who cannot edi
     $html = $chat->render(['prompt' => 'Say hi'], null, 'alpacabot');
     expect($html)->toContain('class="alpaca-bot-notice"')->toContain('edit posts')->not->toContain('wp-login.php')->not->toContain('From the cache')
         ->and($h->writes)->toBe([]);
+});
+
+it('never generates inside a REST request: an editor gets the cached answer, or a notice, and only a page view generates', function (): void {
+    // Review I3: content.rendered is produced per item, so GET /wp/v2/posts?per_page=100 as an
+    // editor was up to 100 serialized turns in one request. The rule that governs guests
+    // governs REST: serve the cache or the notice; generation is a page render's.
+    $h = pipelineWith(null);
+    $chat = shortcodeChat($h, 7);
+    shortcodeViewer(3);
+    Functions\when('wp_is_rest_endpoint')->justReturn(true);
+    $html = $chat->render(['prompt' => 'Say hi'], null, 'alpacabot');
+    expect($html)->toContain('class="alpaca-bot-notice"')->toContain('viewed')->not->toContain('alpaca-bot-answer')
+        ->and($h->stored)->toBe([])
+        ->and($h->writes)->toBe([]);
+    $h->transients[sayHiKey()] = 'From the cache';
+    expect($chat->render(['prompt' => 'Say hi'], null, 'alpacabot'))->toContain('From the cache')->not->toContain('alpaca-bot-notice');
 });
 
 it('cache="off" reads no transient and writes none, and generates on every render', function (): void {
@@ -139,6 +205,25 @@ it('cache="off" reads no transient and writes none, and generates on every rende
     expect($first)->toContain('Fresh')->and($second)->toContain('Fresh')
         ->and($h->stored)->toBe([])
         ->and(array_filter($h->reads, static fn(string $k): bool => str_starts_with($k, 'alpaca_bot_shortcode_')))->toBe([]);
+});
+
+it('keys a cache="off" shortcode apart from its cached twin, so neither one\'s memo stands in for the other', function (): void {
+    // Review M7: with one key for both, whichever rendered second was served from the memo; when
+    // the `off` one came first, the caching twin never wrote its transient and the page
+    // generated on every request for good. The duration is part of the identity.
+    $provider = Mockery::mock(ProviderInterface::class);
+    $provider->shouldReceive('stream')->twice()->andReturnUsing(static function (): \Generator {
+        yield from shortcodeReply('Fresh');
+    });
+    $h = pipelineWith($provider, turns: 2);
+    $chat = shortcodeChat($h, 7);
+    shortcodeViewer(3);
+    $chat->render(['prompt' => 'Say hi', 'cache' => 'off'], null, 'alpacabot');
+    $chat->render(['prompt' => 'Say hi'], null, 'alpacabot');
+    expect($h->stored)->toHaveCount(1)
+        ->and($h->stored[0][2])->toBe(3600)
+        ->and($h->stored[0][0])->toBe(sayHiKey(7, 3600))
+        ->and(sayHiKey(7, 0))->not->toBe(sayHiKey(7, 3600));
 });
 
 it('keys the cache on the post, so the same shortcode on two pages generates twice, and the same one twice on a page generates once', function (): void {
@@ -158,10 +243,10 @@ it('keys the cache on the post, so the same shortcode on two pages generates twi
     $chat->render(['prompt' => 'Say hi'], null, 'alpacabot');
     expect($h->stored)->toHaveCount(2)
         ->and($h->stored[1][0])->not->toBe($h->stored[0][0])
-        ->and($h->stored[1][0])->toBe(Chat::cacheKey('alpacabot', ['prompt' => 'Say hi', 'model' => '', 'system' => '', 'temperature' => null], 8));
+        ->and($h->stored[1][0])->toBe(sayHiKey(8));
     // And a shortcode with no post at all (a widget) keys on 0 rather than sharing a page's entry.
-    expect(Chat::cacheKey('alpacabot', ['prompt' => 'Say hi'], 0))->not->toBe(Chat::cacheKey('alpacabot', ['prompt' => 'Say hi'], 7))
-        ->and(Chat::cacheKey('alpacabot', ['prompt' => 'Say hi'], 7))->not->toBe(Chat::cacheKey('alpacabot_agent', ['prompt' => 'Say hi'], 7));
+    expect(Chat::cacheKey('alpacabot', ['prompt' => 'Say hi'], 0, 3600))->not->toBe(Chat::cacheKey('alpacabot', ['prompt' => 'Say hi'], 7, 3600))
+        ->and(Chat::cacheKey('alpacabot', ['prompt' => 'Say hi'], 7, 3600))->not->toBe(Chat::cacheKey('alpacabot_agent', ['prompt' => 'Say hi'], 7, 3600));
 });
 
 it('renders format="text" escaped, so a reply that spells markup shows it as text', function (): void {
@@ -172,13 +257,52 @@ it('renders format="text" escaped, so a reply that spells markup shows it as tex
     expect($html)->toContain('&lt;b&gt;bold&lt;/b&gt; &amp; &quot;quoted&quot;')->toContain('<br')->not->toContain('<b>');
 });
 
-it('shows an editor a notice and caches nothing when the turn fails', function (): void {
-    $h = pipelineWith(pipelineProvider([new \RuntimeException('connection refused')]));
+it('shows an editor the fixed provider message when the turn fails, never the provider\'s own text, and caches nothing', function (): void {
+    // Review I1, and Rest\Errors::provider()'s policy in one place: what the provider threw
+    // quotes its endpoint, and anyone who may view the page can make it throw by viewing while
+    // the provider is down, so the raw text is the debug log's and the page gets the fixed message.
+    $h = pipelineWith(pipelineProvider([new \RuntimeException('Failed to connect to localhost port 11434 after 1 ms: Couldn\'t connect to server for "http://localhost:11434/v1/chat/completions".')]));
     $chat = shortcodeChat($h, 7);
     shortcodeViewer(3);
     $html = $chat->render(['prompt' => 'Say hi'], null, 'alpacabot');
-    expect($html)->toContain('class="alpaca-bot-notice"')->toContain('could not answer')->toContain('connection refused')
+    expect($html)->toContain('class="alpaca-bot-notice"')->toContain('could not answer')->toContain('The model provider could not complete the request.')
+        ->not->toContain('11434')->not->toContain('localhost')->not->toContain('Provider error')
         ->and($h->stored)->toBe([]);
+});
+
+it('shows an editor the cap and a refused model in their own words, the other two arms of the REST routes\' policy', function (): void {
+    // Errors::fromPipeline(): CapExceeded's message and an InvalidArgumentException's are written for the person who asked.
+    $h = pipelineWith(null, ['governance.user_monthly_tokens' => 10]);
+    $h->transients['alpaca_bot_usage_3_2024-08'] = ['tokens' => 12, 'requests' => 1];
+    $chat = shortcodeChat($h, 7);
+    shortcodeViewer(3);
+    expect($chat->render(['prompt' => 'Say hi'], null, 'alpacabot'))->toContain('could not answer')->toContain('Your monthly token cap has been reached (12 of 10 tokens).')
+        ->and($h->stored)->toBe([]);
+    // A model the catalog does not list is refused by the pipeline before any provider is built.
+    $h = pipelineWith(null);
+    $chat = shortcodeChat($h, 7);
+    shortcodeViewer(3);
+    expect($chat->render(['prompt' => 'Say hi', 'model' => 'nope'], null, 'alpacabot'))->toContain('Model &quot;nope&quot; is not available.')
+        ->and($h->stored)->toBe([]);
+});
+
+it('enqueues the shortcode stylesheet for an answer and for a notice, and never the chat bundle', function (): void {
+    // Review M9: .alpaca-bot-answer and .alpaca-bot-notice had no rule anywhere, and the
+    // prompt form enqueued nothing, so they were unstyled for good. The prompt form's own
+    // stylesheet is a few rules; the bundle stays the shell's.
+    $h = pipelineWith(null);
+    $chat = shortcodeChat($h, 7);
+    Functions\expect('wp_enqueue_script')->never();
+    Functions\expect('wp_enqueue_media')->never();
+    $h->transients[sayHiKey()] = 'From the cache';
+    shortcodeViewer(3);
+    expect($chat->render(['prompt' => 'Say hi'], null, 'alpacabot'))->toContain('From the cache')
+        ->and($h->styles)->toBe([['alpaca-bot-shortcode', '/plugins/alpaca-bot/assets/css/alpaca-bot-shortcode.css']]);
+    shortcodeViewer(0);
+    Filters\expectApplied('alpaca_bot/shortcode/allow_guests')->once()->andReturn(false);
+    expect($chat->render(['prompt' => 'Say hi'], null, 'alpacabot'))->toContain('Log in')
+        ->and($h->styles)->toHaveCount(2)
+        ->and($h->styles[1][0])->toBe('alpaca-bot-shortcode');
 });
 
 it('renders the chat shell for an editor with no prompt, on their model, and enqueues the front-end bundle', function (): void {
@@ -188,7 +312,6 @@ it('renders the chat shell for an editor with no prompt, on their model, and enq
     Functions\when('get_posts')->justReturn([]);
     Functions\when('wp_get_current_user')->justReturn((object) ['display_name' => 'Carmelo', 'ID' => 3]);
     Functions\when('get_avatar_url')->justReturn('/u.png');
-    Functions\when('plugins_url')->alias(static fn(string $p): string => '/plugins/alpaca-bot/' . $p);
     Functions\when('admin_url')->alias(static fn(string $p): string => '/wp-admin/' . $p);
     Functions\when('rest_url')->alias(static fn(string $p): string => '/wp-json/' . $p);
     Functions\when('wp_create_nonce')->justReturn('n');
@@ -198,28 +321,29 @@ it('renders the chat shell for an editor with no prompt, on their model, and enq
     Functions\when('number_format_i18n')->alias(static fn(mixed $n): string => (string) $n);
     Functions\expect('wp_enqueue_script')->once()->with('alpaca-bot-htmx', Mockery::type('string'), [], Assets::HTMX_VERSION, true);
     Functions\expect('wp_enqueue_script')->once()->with('alpaca-bot-chat', Mockery::type('string'), ['alpaca-bot-htmx', 'heartbeat'], Mockery::type('string'), true);
-    Functions\expect('wp_enqueue_style')->once()->with('alpaca-bot', Mockery::type('string'), [], Mockery::type('string'));
     Functions\expect('wp_localize_script')->once()->with('alpaca-bot-chat', 'alpacaBot', Mockery::type('array'));
     Functions\expect('wp_enqueue_media')->once();
     $html = $chat->render('', null, 'alpacabot');
     expect($html)->toContain('id="ab-chat"')->toContain('data-conversation="0"')->toContain('name="model" value="llama3.2"')
         // The page the shortcode is on is not "the post being edited": no post context rides on the turn.
         ->toContain('name="context[post_id]" value="0"')
+        // The chat screen's stylesheet; the shell's markup does not use the shortcode's two classes.
+        ->and(array_column($h->styles, 0))->toBe(['alpaca-bot'])
         ->and($h->writes)->toBe([]);
 });
 
-it('shows a guest the login notice instead of the shell, and enqueues nothing', function (): void {
+it('shows a guest the login notice instead of the shell, and enqueues only the shortcode stylesheet', function (): void {
     $h = pipelineWith(null);
     $chat = shortcodeChat($h, 7);
     shortcodeViewer(0);
     Functions\expect('wp_enqueue_script')->never();
-    Functions\expect('wp_enqueue_style')->never();
     Functions\expect('wp_enqueue_media')->never();
     // The shell is for logged-in editors only in 0.5; the guest filter is about cached answers and is not consulted.
     Filters\expectApplied('alpaca_bot/shortcode/allow_guests')->never();
     expect($chat->render('', null, 'alpacabot'))->toContain('class="alpaca-bot-notice"')->toContain('Log in')->not->toContain('id="ab-chat"');
     shortcodeViewer(5, ['read']);
-    expect($chat->render('', null, 'alpacabot'))->toContain('edit posts')->not->toContain('id="ab-chat"');
+    expect($chat->render('', null, 'alpacabot'))->toContain('edit posts')->not->toContain('id="ab-chat"')
+        ->and(array_column($h->styles, 0))->toBe(['alpaca-bot-shortcode', 'alpaca-bot-shortcode']);
 });
 
 it('registers itself as [alpacabot]', function (): void {

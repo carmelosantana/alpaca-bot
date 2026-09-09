@@ -6,6 +6,7 @@ namespace AlpacaBot\Tests\Integration;
 
 use AlpacaBot\Plugin;
 use AlpacaBot\Provider\ModelCatalog;
+use AlpacaBot\Settings\Store;
 use AlpacaBot\Shortcodes\AgentShim;
 use AlpacaBot\Shortcodes\Chat;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Config\ModelDefinition;
@@ -69,6 +70,8 @@ final class ShortcodesTest extends TestCase
     {
         $this->asAdmin();
         $this->fakeProvider();
+        // The site's default model, as an administrator sets it: the identity is that setting.
+        Plugin::instance()->get(Store::class)->set('models.default', 'fake-model');
         $built = $this->countProviders();
         $post = self::factory()->post->create(['post_content' => '[alpacabot prompt="x"]']);
         $this->go_to(get_permalink($post));
@@ -87,9 +90,86 @@ final class ShortcodesTest extends TestCase
         // the unit tests pin, since a timed transient is not autoloaded.)
         $this->assertStringContainsString('fake reply', do_shortcode('[alpacabot prompt="x"]'));
         $this->assertSame(1, $built());
-        $this->assertSame('fake reply', get_transient(Chat::cacheKey('alpacabot', ['prompt' => 'x', 'model' => '', 'system' => '', 'temperature' => null], $post)));
+        // The identity is what the site resolved: its default model setting and its system prompt, with the duration.
+        $this->assertSame('fake reply', get_transient(Chat::cacheKey('alpacabot', ['prompt' => 'x', 'model' => 'fake-model', 'system' => (string) Plugin::instance()->get(Store::class)->get('chat.system_prompt'), 'temperature' => null], $post, 3600)));
         $this->assertSame(1, $this->shortcodeTransients());
     }
+
+    public function test_an_overflowing_cache_attribute_is_held_to_a_year_rather_than_fataling_the_page(): void
+    {
+        // Review C1, the reviewer's exact value: `cache="999999999999999d"` overflowed an int in
+        // cacheSeconds(), which threw a TypeError out of attribute parsing, outside the try and
+        // before the capability check, so a published page was a white screen for every visitor.
+        $this->asAdmin();
+        $this->fakeProvider();
+        $post = self::factory()->post->create(['post_content' => '[alpacabot prompt="hi" cache="999999999999999d"]']);
+        $this->go_to(get_permalink($post));
+        $html = do_shortcode('[alpacabot prompt="hi" cache="999999999999999d"]');
+        $this->assertStringContainsString('fake reply', $html);
+        global $wpdb;
+        $timeout = (int) $wpdb->get_var("SELECT option_value FROM {$wpdb->options} WHERE option_name LIKE '_transient_timeout_" . Chat::TRANSIENT_PREFIX . "%'");
+        $this->assertGreaterThan(time(), $timeout);
+        $this->assertLessThanOrEqual(time() + YEAR_IN_SECONDS, $timeout);
+        // And a visitor, who is the one this fatal reached, gets the notice.
+        wp_set_current_user(0);
+        $this->assertStringContainsString('Log in', do_shortcode('[alpacabot prompt="hi" cache="999999999999999d"]'));
+    }
+
+    public function test_a_failed_turn_shows_the_fixed_provider_message_and_not_the_endpoint(): void
+    {
+        // Review I1: the provider's own text quotes its endpoint, and the page went to every
+        // edit_posts viewer; Rest\Errors::provider() already says that text is the log's.
+        $this->asAdmin();
+        $this->fakeProvider(new \RuntimeException('Could not resolve host: ollama.internal for "http://ollama.internal:11434/v1/chat/completions".'));
+        $post = self::factory()->post->create(['post_content' => '[alpacabot prompt="x"]']);
+        $this->go_to(get_permalink($post));
+        $html = do_shortcode('[alpacabot prompt="x"]');
+        $this->assertStringContainsString('class="alpaca-bot-notice"', $html);
+        $this->assertStringContainsString('The model provider could not complete the request.', $html);
+        $this->assertStringNotContainsString('ollama.internal', $html);
+        $this->assertStringNotContainsString('11434', $html);
+        $this->assertSame(0, $this->shortcodeTransients());
+    }
+
+    public function test_a_rest_collection_as_an_editor_generates_nothing_and_a_page_view_does(): void
+    {
+        // Review I3: content.rendered is produced for every item of a collection, so one
+        // GET /wp/v2/posts?per_page=100 as an editor was up to 100 serialized turns in one
+        // request. The rule that governs guests governs REST: the cache or a notice, and
+        // generation happens on a page render only. The single-item case after, from the cache.
+        $this->fakeProvider();
+        wp_set_current_user(self::factory()->user->create(['role' => 'editor']));
+        $built = $this->countProviders();
+        $posts = [];
+        foreach (['one', 'two', 'three'] as $n) {
+            $posts[] = self::factory()->post->create(['post_content' => '[alpacabot prompt="' . $n . '"]']);
+        }
+        $request = new \WP_REST_Request('GET', '/wp/v2/posts');
+        $request->set_query_params(['per_page' => 100, 'context' => 'edit']);
+        $response = rest_get_server()->dispatch($request);
+        $this->assertSame(200, $response->get_status());
+        $items = $response->get_data();
+        $this->assertCount(3, $items);
+        foreach ($items as $item) {
+            $this->assertStringContainsString('class="alpaca-bot-notice"', $item['content']['rendered']);
+            $this->assertStringNotContainsString('fake reply', $item['content']['rendered']);
+        }
+        $this->assertSame(0, $built());
+        $this->assertSame(0, $this->shortcodeTransients());
+
+        // The page render is where an editor's view generates, once.
+        $this->go_to(get_permalink($posts[0]));
+        $this->assertStringContainsString('fake reply', apply_filters('the_content', get_post($posts[0])->post_content));
+        $this->assertSame(1, $built());
+
+        // A single item over REST now carries that cached answer, and still generates nothing.
+        $response = rest_get_server()->dispatch(new \WP_REST_Request('GET', '/wp/v2/posts/' . $posts[0]));
+        $this->assertSame(200, $response->get_status());
+        $this->assertStringContainsString('fake reply', $response->get_data()['content']['rendered']);
+        $this->assertSame(1, $built());
+        $this->assertSame(1, $this->shortcodeTransients());
+    }
+
 
     public function test_a_visitor_gets_the_login_notice_and_the_cached_answer_only_when_the_filter_allows(): void
     {
@@ -148,6 +228,8 @@ final class ShortcodesTest extends TestCase
         $this->assertStringNotContainsString('id="ab-chat"', $html);
         $this->assertFalse(wp_script_is('alpaca-bot-chat', 'enqueued'));
         $this->assertFalse(wp_style_is('alpaca-bot', 'enqueued'));
+        // The notice's few rules are its own stylesheet, not the chat screen's.
+        $this->assertTrue(wp_style_is('alpaca-bot-shortcode', 'enqueued'));
     }
 
     public function test_the_agent_shim_summarizes_a_fetched_page_with_a_prompt_beginning_summarize_and_is_doing_it_wrong(): void

@@ -9,6 +9,7 @@ use AlpacaBot\Chat\ConversationStore;
 use AlpacaBot\Chat\Pipeline;
 use AlpacaBot\Chat\UserPrefs;
 use AlpacaBot\Provider\ModelCatalog;
+use AlpacaBot\Rest\Errors;
 use AlpacaBot\Settings\Store;
 use AlpacaBot\View\Chat\Shell;
 use AlpacaBot\View\Markdown;
@@ -38,18 +39,26 @@ use AlpacaBot\View\Markdown;
  * the cache holds, and a page nobody with the capability opens again spends nothing. The
  * capability is not filterable: the plugin's one guard for a filtered capability (Capability)
  * exists because `__return_true` on such a filter opens a surface to every role, and this is
- * the surface where that costs money.
+ * the surface where that costs money. The same rule governs a REST request: `content.rendered`
+ * is produced for every item of a collection, so a `GET /wp/v2/posts?per_page=100` by an editor
+ * would otherwise be up to a hundred serialized turns in one request. Inside one, an editor is
+ * served the cache or a notice, never a generation; a page render on the site is where an
+ * editor's view generates, which is also what the block editor's preview should show.
  *
  * The cache is the spend control, not an optimisation. The answer is a transient keyed on the
- * attributes that shape the generation and on the post (cacheKey()), so two identical
- * shortcodes on two pages are two answers and one page's prompt never serves another's; the
- * default is an hour, and only the word `off` switches it off (cacheSeconds() says what else
- * a value can be, and that a mistyped one keeps the default rather than reading as "off").
- * Within one request the same shortcode is generated once whatever the cache says (`$served`):
- * a theme that runs `the_content` twice, or the REST API's `rendered` beside the page, must not
+ * attributes that shape the generation, on the post, and on the duration (cacheKey()), so two
+ * identical shortcodes on two pages are two answers, one page's prompt never serves another's,
+ * and a `cache="off"` twin is never served from, or stands in for, its cached sibling; the
+ * default is an hour, only the word `off` switches it off, and a year is the most an author
+ * can ask for (cacheSeconds() says what else a value can be, and that a mistyped one keeps the
+ * default rather than reading as "off"). Within one request the same shortcode is generated
+ * once whatever the cache says (`$served`): a theme that runs `the_content` twice must not
  * spend twice. A failed turn is shown to the editor as a notice and cached as nothing, so the
  * next view tries again; that costs the provider's timeout per view while it is down, and
- * caching a failure would cost showing a stale one after it is back.
+ * caching a failure would cost showing a stale one after it is back. What the notice says is
+ * Rest\Errors::fromPipeline()'s decision, made once for every caller that runs a turn: the cap
+ * and a refused model in their own words, and for a provider failure the fixed message, since
+ * what the provider threw quotes its endpoint and the raw text is the debug log's.
  *
  * The attributes are the post author's, and the output lands on a public page, so the answer
  * goes through Markdown (raw HTML stripped, links held, wp_kses over an allowlist) or through
@@ -57,7 +66,12 @@ use AlpacaBot\View\Markdown;
  * but not unfiltered HTML gains here is a model turn with their prompt, billed to whoever views
  * the page with `edit_posts`, held to that viewer's monthly cap; a `system` attribute is a
  * prompt, and a prompt is what the shortcode is for. `temperature` is held to the schema's
- * range and `model` to the catalog (the pipeline refuses one it does not list).
+ * range and `model` to the catalog (the pipeline refuses one it does not list). That anyone
+ * who can write a post can write a prompt whose answer nobody reads before it is public, and
+ * that the answer's links and images reach the page, is the feature's shape, said in the help
+ * tab rather than gated here: an authoring gate would be a second copy of WordPress's own
+ * contributor model, and a per-site capability setting belongs to the admin-wide panel of a
+ * later 0.x release.
  *
  * The shell form carries no post context: the page the shortcode is on is not "the post being
  * edited", and a context block on every turn would spend the page's length in tokens each time.
@@ -73,6 +87,9 @@ final class Chat
 
     /** The `cache` attribute's default, as an author would write it. */
     public const DEFAULT_CACHE = '1h';
+
+    /** The most a `cache` attribute can ask for, in seconds: a year. */
+    public const MAX_SECONDS = 365 * 86400;
 
     /** The transient prefix; ShortcodesTest reads the options table for it. */
     public const TRANSIENT_PREFIX = 'alpaca_bot_shortcode_';
@@ -111,11 +128,20 @@ final class Chat
         if ($a['prompt'] === '') {
             return $this->shell();
         }
-        $identity = ['prompt' => $a['prompt'], 'model' => $a['model'], 'system' => $a['system'], 'temperature' => $a['temperature']];
-        return $this->answer(self::TAG, $identity, $a['cache'], $a['format'], function (int $userId) use ($a): string {
+        $model = $this->resolveModel($a['model']);
+        // The identity is what will shape the text: the model and system prompt the site
+        // resolves, not the attributes as written, so a `model=` the site does not honour, or
+        // a default the administrator changes, is a different entry (or the same one).
+        $identity = [
+            'prompt' => $a['prompt'],
+            'model' => $model,
+            'system' => $a['system'] !== '' ? $a['system'] : (string) $this->store->get('chat.system_prompt'),
+            'temperature' => $a['temperature'],
+        ];
+        return $this->answer(self::TAG, $identity, $a['cache'], $a['format'], function (int $userId) use ($a, $model): string {
             $options = ['ephemeral' => true, 'context' => []];
-            if ($a['model'] !== '') {
-                $options['model'] = $a['model'];
+            if ($model !== '') {
+                $options['model'] = $model;
             }
             if ($a['system'] !== '') {
                 $options['system'] = $a['system'];
@@ -140,7 +166,7 @@ final class Chat
     public function answer(string $tag, array $identity, int $cacheSeconds, string $format, \Closure $generate): string
     {
         $postId = self::postId();
-        $key = self::cacheKey($tag, $identity, $postId);
+        $key = self::cacheKey($tag, $identity, $postId, $cacheSeconds);
         // What this request already made, else the transient (never read with the cache off).
         $cached = $this->served[$key] ?? ($cacheSeconds > 0 ? get_transient($key) : false);
         if (!self::viewerMayGenerate()) {
@@ -159,22 +185,47 @@ final class Chat
             if ($allowed && is_string($cached)) {
                 return $this->output($cached, $format);
             }
-            return self::refused();
+            return $this->refused();
         }
         if (is_string($cached)) {
             return $this->output($cached, $format);
         }
+        if (wp_is_rest_endpoint()) {
+            // A REST response is being produced (a standalone request, or an internal
+            // dispatch): the cache was not there, and generating here is the class docblock's
+            // hundred-turns-in-one-request case.
+            return $this->notice(__('Alpaca Bot answers here when the page is viewed on the site; there is no cached answer yet.', 'alpaca-bot'));
+        }
         try {
             $text = $generate(get_current_user_id());
         } catch (\Throwable $e) {
-            /* translators: %s: the reason, e.g. the provider's error or the monthly cap */
-            return self::notice(sprintf(__('Alpaca Bot could not answer: %s', 'alpaca-bot'), $e->getMessage()));
+            /* translators: %s: the reason, in the words the REST routes use: the cap, a refused model, or the fixed provider message */
+            return $this->notice(sprintf(__('Alpaca Bot could not answer: %s', 'alpaca-bot'), Errors::fromPipeline($e)->get_error_message()));
         }
         $this->served[$key] = $text;
         if ($cacheSeconds > 0) {
             set_transient($key, $text, $cacheSeconds);
         }
         return $this->output($text, $format);
+    }
+
+    /**
+     * The model a shortcode's turn runs on, which is the page's, not the viewer's: the `model`
+     * attribute where the site lets users pick one (the rule the pipeline applies to it), else
+     * the site's default model setting. Given no model, the pipeline falls back to the viewer's
+     * own stored preference, and the page's answer would then be whichever model the first
+     * editor to open it prefers. It is the stored setting rather than the catalog's resolution
+     * of it because the catalog discovers over the network when it is cold, and this runs for a
+     * visitor's view too, which must cost nothing (a site with no default set is left to the
+     * pipeline's own resolution, and the identity records that nothing was set). Public for
+     * the shim, whose `model` attribute is the same attribute.
+     */
+    public function resolveModel(string $requested): string
+    {
+        if ($requested !== '' && (bool) $this->store->get('chat.user_can_change_model')) {
+            return $requested;
+        }
+        return trim((string) $this->store->get('models.default'));
     }
 
     /**
@@ -196,6 +247,7 @@ final class Chat
             'prompt' => trim((string) $a['prompt']),
             'model' => trim((string) $a['model']),
             'system' => trim((string) $a['system']),
+            // min() over a float first: a numeric string past the float range is INF, and the range holds it.
             'temperature' => is_numeric($temperature) ? max(0.0, min(2.0, (float) $temperature)) : null,
             'format' => strtolower(trim((string) $a['format'])) === 'text' ? 'text' : 'markdown',
             'cache' => self::cacheSeconds((string) $a['cache']),
@@ -204,10 +256,15 @@ final class Chat
 
     /**
      * A `cache` attribute in seconds: `off` is 0, a positive count with an optional unit
-     * (`45s`, `30m`, `1h`, `2d`; bare is seconds) is that, and anything else, `0` and a blank
-     * included, is the default hour. The word is the only way off on purpose: the cache is what
-     * keeps a page from generating on every view, and a value that is not a duration is far
-     * more often a slip than a decision to spend on every view.
+     * (`45s`, `30m`, `1h`, `2d`; bare is seconds) is that, held to a year, and anything else,
+     * `0` and a blank included, is the default hour. The word is the only way off on purpose:
+     * the cache is what keeps a page from generating on every view, and a value that is not a
+     * duration is far more often a slip than a decision to spend on every view.
+     *
+     * The arithmetic is in floats and clamped before the cast: a digit run is the author's,
+     * and one long enough overflows an int product to a float, which the int return type
+     * would refuse with a TypeError, here, outside answer()'s try and before the capability
+     * check, from any Contributor's attribute, for every visitor of the published page.
      *
      * @internal Public only so the tests and the shim can call it; not part of the plugin's API.
      */
@@ -217,29 +274,37 @@ final class Chat
         if ($spec === 'off') {
             return 0;
         }
-        if (preg_match('/^(\d+)\s*([smhd])?$/', $spec, $m) === 1 && (int) $m[1] > 0) {
-            return (int) $m[1] * self::UNITS[$m[2] ?? 's'];
+        if (preg_match('/^(\d+)\s*([smhd])?$/', $spec, $m) === 1 && (float) $m[1] > 0) {
+            return (int) min((float) $m[1] * self::UNITS[$m[2] ?? 's'], (float) self::MAX_SECONDS);
         }
         return self::DEFAULT_SECONDS;
     }
 
     /**
-     * The transient name for one shortcode's answer: the tag, the post and the identity, hashed
-     * (a transient name is bounded at 172 characters and a prompt is not). The post is part of
-     * it so two pages with the same shortcode are two entries; the tag so the shim's `url`
-     * never collides with a prompt.
+     * The transient name for one shortcode's answer: the tag, the post, the identity and the
+     * cache duration, hashed (a transient name is bounded at 172 characters and a prompt is
+     * not). The post is part of it so two pages with the same shortcode are two entries; the
+     * tag so the shim's `url` never collides with a prompt; the duration so two shortcodes that
+     * differ only in `cache` are two entries, and the `off` one's per-request memo can never
+     * stand in for the other's transient, or keep it from being written.
      *
      * @param array<string, mixed> $identity
      * @internal Public only so the tests and the shim can call it; not part of the plugin's API.
      */
-    public static function cacheKey(string $tag, array $identity, int $postId): string
+    public static function cacheKey(string $tag, array $identity, int $postId, int $cacheSeconds): string
     {
-        return self::TRANSIENT_PREFIX . md5((string) wp_json_encode([$tag, $postId, $identity]));
+        return self::TRANSIENT_PREFIX . md5((string) wp_json_encode([$tag, $postId, $identity, $cacheSeconds]));
     }
 
-    /** A notice in the page, escaped: the login or permission text, or why a turn failed. */
-    public static function notice(string $text): string
+    /**
+     * A notice in the page, escaped: the login or permission text, or why a turn failed. Its few
+     * rules are enqueued with it, here and in the two other places that print the classes
+     * (output() and the visitor's link in refused()), so the stylesheet rides with the markup
+     * and nowhere else; the shell's markup does not use them.
+     */
+    public function notice(string $text): string
     {
+        $this->assets->enqueueShortcode();
         return '<p class="alpaca-bot-notice">' . esc_html($text) . '</p>';
     }
 
@@ -260,11 +325,12 @@ final class Chat
      * and for a logged-in user without the capability, who the answer is for, since a login
      * link would send them round in a circle.
      */
-    private static function refused(): string
+    private function refused(): string
     {
         if (is_user_logged_in()) {
-            return self::notice(__('Alpaca Bot answers here only for users who can edit posts.', 'alpaca-bot'));
+            return $this->notice(__('Alpaca Bot answers here only for users who can edit posts.', 'alpaca-bot'));
         }
+        $this->assets->enqueueShortcode();
         $link = '<a href="' . esc_url(wp_login_url((string) get_permalink())) . '">' . esc_html__('Log in', 'alpaca-bot') . '</a>';
         /* translators: %s: a "Log in" link */
         return '<p class="alpaca-bot-notice">' . sprintf(esc_html__('%s to see what Alpaca Bot answers here.', 'alpaca-bot'), $link) . '</p>';
@@ -273,6 +339,7 @@ final class Chat
     /** The text as the page shows it: markdown (raw HTML stripped, then kses) or escaped text with its line breaks. */
     private function output(string $text, string $format): string
     {
+        $this->assets->enqueueShortcode();
         $inner = $format === 'text' ? '<p>' . nl2br(esc_html($text)) . '</p>' : $this->markdown->toHtml($text);
         return '<div class="alpaca-bot-answer">' . $inner . '</div>';
     }
@@ -281,7 +348,7 @@ final class Chat
     private function shell(): string
     {
         if (!self::viewerMayGenerate()) {
-            return self::refused();
+            return $this->refused();
         }
         $userId = get_current_user_id();
         $history = $this->conversations->listFor($userId, max(1, (int) $this->store->get('chat.history_limit')));

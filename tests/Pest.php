@@ -313,6 +313,8 @@ function pipelineWith(mixed $provider, array $settings = [], array $contexts = [
         public array $reads = [];
         /** @var list<array{0: string, 1: mixed, 2: int}> every transient write as [key, value, ttl], once shortcodeChat() records them */
         public array $stored = [];
+        /** @var list<array{0: string, 1: string}> every stylesheet enqueued as [handle, src], once shortcodeChat() records them */
+        public array $styles = [];
     };
     $h->post = conversationChatPost();
     if ($catalog !== null) {
@@ -591,6 +593,15 @@ function shortcodeChat(object $h, int $postId = 7): AlpacaBot\Shortcodes\Chat
     Functions\when('get_permalink')->justReturn('https://site.test/?p=' . $postId);
     Functions\when('wp_kses')->alias(static fn(string $html, array $allowed): string => strip_tags($html, array_map(static fn(string $t): string => "<$t>", array_keys($allowed))));
     Functions\when('get_user_meta')->justReturn('');
+    // A page render, not a REST one; a test about REST says otherwise. Stylesheets are recorded
+    // rather than expect()ed: Brain Monkey routes a function to its mock only when no stub
+    // exists yet, so a when() here would swallow a test's later expect() on the same name.
+    Functions\when('wp_is_rest_endpoint')->justReturn(false);
+    Functions\when('plugins_url')->alias(static fn(string $p): string => '/plugins/alpaca-bot/' . $p);
+    $h->styles = [];
+    Functions\when('wp_enqueue_style')->alias(static function (string $handle, string $src = '', array $deps = [], mixed $ver = false) use ($h): void {
+        $h->styles[] = [$handle, $src];
+    });
     return new AlpacaBot\Shortcodes\Chat($h->store, $h->catalog, new ConversationStore($h->store), new AlpacaBot\Chat\UserPrefs(), $h->pipeline, new AlpacaBot\View\Markdown(), new AlpacaBot\Admin\Assets());
 }
 

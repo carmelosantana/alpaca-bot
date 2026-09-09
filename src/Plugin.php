@@ -125,7 +125,7 @@ final class Plugin
         $shortcode = new Shortcodes\Chat($store, $this->get(Provider\ModelCatalog::class), $conversations, $prefs, $this->get(Chat\Pipeline::class), new View\Markdown(), $assets);
         $this->set(Shortcodes\Chat::class, $shortcode);
         $shortcode->register();
-        $shim = new Shortcodes\AgentShim($shortcode, $this->get(Chat\Pipeline::class), $webFetch);
+        $shim = new Shortcodes\AgentShim($shortcode, $this->get(Chat\Pipeline::class), $registry);
         $this->set(Shortcodes\AgentShim::class, $shim);
         $shim->register();
         // WP-CLI is not a dependency: the command is only registered when WP-CLI is the
