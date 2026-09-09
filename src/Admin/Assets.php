@@ -8,7 +8,7 @@ use AlpacaBot\Plugin;
 
 /**
  * The chat screen's scripts and stylesheet, enqueued on `admin_enqueue_scripts` for that screen
- * only: htmx, then the chat bundle (which needs it, plus core's heartbeat for the nonce
+ * only (and, through enqueueFront(), for a front-end page that rendered the shell): htmx, then the chat bundle (which needs it, plus core's heartbeat for the nonce
  * refresh; it fetches with bare fetch(), so api-fetch is not among its dependencies), the
  * stylesheet, and the media library for the image picker. `alpacaBot` is the bundle's settings
  * object: the REST root (rest_url(), so it is right under either permalink form), the REST
@@ -39,6 +39,44 @@ final class Assets
             return;
         }
         wp_enqueue_media();
+        $this->enqueueChat();
+    }
+
+    /**
+     * The same bundle for a `[alpacabot]` shell on a front-end page, called from the shortcode
+     * handler (Shortcodes\Chat) as it renders, so only a page that rendered a shell loads it and
+     * every other front-end page loads nothing. That is later than wp_enqueue_scripts: the
+     * scripts are footer scripts (`in_footer`) and print with wp_footer, and a stylesheet
+     * enqueued after wp_head prints there too, through print_late_styles(), so the shell is
+     * unstyled for the moment between its markup and the footer. The alternative, scanning the
+     * queried post for the shortcode on wp_enqueue_scripts, loads the bundle for a page whose
+     * shortcode then renders nothing (a visitor, a `prompt` form) and for one whose content the
+     * theme never prints; the flash is the cheaper cost.
+     *
+     * What of the admin enqueue is kept: the same handles, so a page that somehow carries both
+     * loads each file once; the localised settings whole, since the bundle signs every request
+     * with the nonce and reads the REST root and the image cap on the front end as in wp-admin,
+     * and rest_url() is right under either permalink form; core's heartbeat, which the bundle
+     * depends on for the nonce refresh and which runs on the front end for a logged-in user
+     * (the `heartbeat_received` answer is hooked at register(), not from any screen). What is
+     * not: wp_enqueue_media() unconditionally. It is the whole media library (Backbone, the
+     * views, plupload, the modal templates in wp_footer), and the picker it opens queries the
+     * library as the viewer, which core refuses to a user without `upload_files`: an editor's
+     * Contributor would load all of it for an empty modal. So it is loaded for a viewer who can
+     * upload, and the composer's image button is inert for one who cannot (chat.ts's
+     * pickImage() returns when `wp.media` is absent).
+     */
+    public function enqueueFront(): void
+    {
+        if (current_user_can('upload_files')) {
+            wp_enqueue_media();
+        }
+        $this->enqueueChat();
+    }
+
+    /** htmx, the bundle, the stylesheet and the bundle's settings: the class docblock. */
+    private function enqueueChat(): void
+    {
         wp_enqueue_script('alpaca-bot-htmx', plugins_url('assets/js/htmx.min.js', ALPACA_BOT_FILE), [], self::HTMX_VERSION, true);
         wp_enqueue_script('alpaca-bot-chat', plugins_url('assets/js/chat.js', ALPACA_BOT_FILE), ['alpaca-bot-htmx', 'heartbeat'], self::version('assets/js/chat.js'), true);
         wp_enqueue_style('alpaca-bot', plugins_url('assets/css/alpaca-bot.css', ALPACA_BOT_FILE), [], self::version('assets/css/alpaca-bot.css'));

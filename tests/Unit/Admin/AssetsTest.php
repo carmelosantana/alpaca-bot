@@ -141,3 +141,30 @@ it('answers the heartbeat with a fresh REST nonce only when the chat screen aske
         ->and($assets->heartbeat(['server_time' => 1], ['alpaca_bot_nonce' => 0]))->toBe(['server_time' => 1])
         ->and($assets->heartbeat(['server_time' => 1], ['wp-refresh-post-nonces' => ['post_id' => 1]]))->toBe(['server_time' => 1]);
 });
+
+it('enqueues the same bundle for a front-end shortcode render, the media picker only for a user who can upload, and no admin hook', function (): void {
+    // A [alpacabot] shell on a page: the handles are the admin screen's, so a page that carries
+    // the shell and (somehow) the admin bundle loads each file once. wp_enqueue_media() is the
+    // whole media library (Backbone, the views, the modal templates in wp_footer); a viewer who
+    // cannot upload_files gets an empty modal from it, so it is loaded for those who can.
+    Functions\when('plugins_url')->alias(fn(string $p) => '/plugins/alpaca-bot/' . $p);
+    Functions\when('rest_url')->alias(fn(string $p) => '/wp-json/' . $p);
+    Functions\when('wp_create_nonce')->justReturn('n');
+    Functions\when('wp_convert_hr_to_bytes')->justReturn(8 * 1024 * 1024);
+    Functions\stubTranslationFunctions();
+    foreach ([true, false] as $canUpload) {
+        Functions\when('current_user_can')->alias(static fn(string $cap): bool => $cap === 'upload_files' && $canUpload);
+        Functions\expect('wp_enqueue_media')->times($canUpload ? 1 : 0);
+        Functions\expect('wp_enqueue_script')->once()->with('alpaca-bot-htmx', '/plugins/alpaca-bot/assets/js/htmx.min.js', [], Assets::HTMX_VERSION, true);
+        Functions\expect('wp_enqueue_script')->once()->with('alpaca-bot-chat', '/plugins/alpaca-bot/assets/js/chat.js', ['alpaca-bot-htmx', 'heartbeat'], Mockery::type('string'), true);
+        Functions\expect('wp_enqueue_style')->once()->with('alpaca-bot', '/plugins/alpaca-bot/assets/css/alpaca-bot.css', [], Mockery::type('string'));
+        $localised = null;
+        Functions\expect('wp_localize_script')->once()->with('alpaca-bot-chat', 'alpacaBot', Mockery::on(static function (array $data) use (&$localised): bool {
+            $localised = $data;
+            return true;
+        }));
+        (new Assets())->enqueueFront();
+        // The bundle signs every request with the nonce and reads the REST root, on the front end as in wp-admin.
+        expect($localised['rest'])->toBe('/wp-json/alpaca-bot/v1')->and($localised['nonce'])->toBe('n')->and($localised['maxImageBytes'])->toBe(6242304);
+    }
+});
