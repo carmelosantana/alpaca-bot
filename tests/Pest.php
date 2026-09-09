@@ -36,6 +36,10 @@ uses()->beforeEach(function (): void {
     // Rest\Sse frames are wp_json_encode()d, which is json_encode() plus a non-UTF-8 fallback
     // no test needs; the plain function stands in.
     Functions\when('wp_json_encode')->alias('json_encode');
+    // Every write that WordPress unslashes is wrapped in wp_slash(). The real thing stands in,
+    // not a pass-through: a test that asserts on what a write was handed should see the value
+    // the site's database would (wpSlashLikeCore() does what core's does).
+    Functions\when('wp_slash')->alias('wpSlashLikeCore');
     // Plugin is a process-wide singleton and Pest runs the suite in one process:
     // reset it so every test's boot() starts from a cold state.
     $instance = new ReflectionProperty(Plugin::class, 'instance');
@@ -69,6 +73,20 @@ if (!class_exists(\WpOrg\Requests\Exception::class, false)) {
 // Pest loads every test file into one process, so a helper declared at the root of a test
 // file is a global: a second file declaring the same name is a fatal redeclare, not a test
 // failure. Helpers live here instead, one declaration each, prefixed by the suite they serve.
+
+/**
+ * What core's wp_slash() does: addslashes() over every string, recursively through arrays,
+ * everything else (an int, an object) untouched. Brain Monkey stands in for the real function
+ * with this one, so a unit test sees a write's argument exactly as WordPress would hand it to
+ * the database, and a stray double-slash shows up as a failure rather than passing unnoticed.
+ */
+function wpSlashLikeCore(mixed $value): mixed
+{
+    if (is_array($value)) {
+        return array_map('wpSlashLikeCore', $value);
+    }
+    return is_string($value) ? addslashes($value) : $value;
+}
 
 /**
  * Rest\ControllerTest (and every later REST test): a Controller over exactly the given route

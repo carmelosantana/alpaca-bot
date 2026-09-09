@@ -105,7 +105,10 @@ final class UsageMeter
         if ($userId >= 1) {
             $post['post_author'] = $userId;
         }
-        $id = wp_insert_post($post, true);
+        // Slashed at the write and nowhere else: wp_insert_post() unslashes post_title, and it
+        // passes meta_input through update_post_meta(), which unslashes too. `$post` itself stays
+        // as it is — the receipt below is built from the same values, unslashed.
+        $id = wp_insert_post(wp_slash($post), true);
         $logId = is_int($id) ? $id : 0;
         foreach ($this->keys($userId, $now) as $key) {
             if ($logId > 0) {

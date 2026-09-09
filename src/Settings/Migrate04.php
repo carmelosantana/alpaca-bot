@@ -221,7 +221,10 @@ final class Migrate04
                     $update['post_author'] = $role;
                 }
             }
-            wp_update_post($update);
+            // wp_update_post() unslashes the fields it is given. These are an id, a status and
+            // sometimes an author id, none of which can carry a backslash, so this changes
+            // nothing today; it is here so the rule holds at every write, whatever is added.
+            wp_update_post(wp_slash($update));
         }
         if (count($posts) < self::BATCH) {
             update_option(self::FLAG_CONVERSATIONS, '1', false);

@@ -32,7 +32,9 @@ final class UserPrefs
 
     public function setDefaultModel(int $userId, string $model): void
     {
-        update_user_meta($userId, self::META_DEFAULT_MODEL, $model);
+        // update_user_meta() unslashes what it is given. A provider's model id has no backslash
+        // in it today, but nothing here enforces that and the cost of being sure is one call.
+        update_user_meta($userId, self::META_DEFAULT_MODEL, wp_slash($model));
     }
 
     /** The model a turn of `$userId`'s runs on when the request names none: see the class docblock. */

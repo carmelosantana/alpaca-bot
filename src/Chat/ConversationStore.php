@@ -12,6 +12,15 @@ use AlpacaBot\Settings\Store;
  *
  * Ownership is the security boundary: load(), save() and delete() answer only for the post's
  * author, and a row with no author recorded belongs to nobody.
+ *
+ * Every write here goes through wp_slash(). WordPress's post and metadata APIs want slashed
+ * input and wp_unslash() it themselves, so an unslashed write loses a level of backslashes:
+ * a Windows path, a regular expression, a LaTeX fragment and the two-character `\n` a code
+ * fence carries are all corrupted the moment they are stored. The slashing is at the write
+ * call and nowhere else — the values it wraps stay unslashed everywhere they are read, kept
+ * in memory, or handed back — and it does not change what the database receives, so it does
+ * not change what fit() has to measure (fit() says why). Reads are left alone: what
+ * get_post_meta() answers has already been unslashed by the storage layer.
  */
 final class ConversationStore
 {
@@ -92,13 +101,13 @@ final class ConversationStore
         if ($userId < 1 || !$this->store->get('privacy.save_history')) {
             return $c;
         }
-        $id = wp_insert_post([
+        $id = wp_insert_post(wp_slash([
             'post_type' => self::POST_TYPE,
             'post_author' => $userId,
             'post_status' => 'private',
             'post_title' => $title !== '' ? $title : $this->defaultTitle(),
             'post_name' => wp_generate_uuid4(),
-        ], true);
+        ]), true);
         $c->id = is_int($id) ? $id : 0;
         return $c;
     }
@@ -151,7 +160,7 @@ final class ConversationStore
         if ($c->id === 0 || $this->owned($c->id, $c->userId) === null) {
             return;
         }
-        update_post_meta($c->id, self::META_MESSAGES, $this->fit($c));
+        update_post_meta($c->id, self::META_MESSAGES, wp_slash($this->fit($c)));
         $first = $c->messages[0] ?? null;
         $last = $c->last();
         if ($first === null || $last === null) {
@@ -161,11 +170,11 @@ final class ConversationStore
             $derived = wp_trim_words(sanitize_text_field(rtrim($first->content, '?.!')), 8, '');
             $c->title = $derived !== '' ? $derived : $c->title;
         }
-        wp_update_post([
+        wp_update_post(wp_slash([
             'ID' => $c->id,
             'post_title' => $c->title,
             'post_excerpt' => wp_trim_words(sanitize_text_field($last->content), 30, '…'),
-        ]);
+        ]));
     }
 
     /**
@@ -210,10 +219,13 @@ final class ConversationStore
      * (save() says the order and why). The size is measured as the database sees it:
      * update_post_meta() runs the value through maybe_serialize() and wpdb escapes the result
      * into the statement, so that is what is measured (packetBytes()), on the exact rows about
-     * to be written, after every eviction. Measuring the whole transcript again each round
-     * costs a serialisation and a scan per eviction, and each eviction takes megabytes off, so
-     * the rounds are few; the alternative, arithmetic on the parts, would have to reproduce
-     * serialize()'s framing to be trusted.
+     * to be written, after every eviction. save() wraps these rows in wp_slash() and that is
+     * still what the database receives: update_metadata() wp_unslash()es the value before it
+     * serialises it, so the slashing is gone by the time any of this is measured against, and
+     * the figure here is exact rather than an over- or under-estimate. Measuring the whole
+     * transcript again each round costs a serialisation and a scan per eviction, and each
+     * eviction takes megabytes off, so the rounds are few; the alternative, arithmetic on the
+     * parts, would have to reproduce serialize()'s framing to be trusted.
      *
      * An eviction is only taken when it makes room. Recording it costs a marker, 28 serialised
      * bytes for a turn's first, so an image entry shorter than that would leave the rows
@@ -416,7 +428,7 @@ final class ConversationStore
                 $converted[] = Message::fromArray($entry)->toArray();
             }
         }
-        update_post_meta($id, self::META_MESSAGES, $converted);
+        update_post_meta($id, self::META_MESSAGES, wp_slash($converted));
         return $converted;
     }
 

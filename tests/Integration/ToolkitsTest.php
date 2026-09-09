@@ -103,6 +103,28 @@ final class ToolkitsTest extends TestCase
     }
 
     /**
+     * A draft is very often the one thing the model wrote that is full of backslashes — a regex,
+     * a Windows path, a LaTeX fragment — and wp_insert_post() unslashes the title and the body it
+     * is given, so both have to go in slashed to come out as the model wrote them (Kanboard
+     * #4110). Asserted on the stored post, byte for byte.
+     */
+    public function test_draft_post_stores_a_backslash_heavy_title_and_body_byte_for_byte(): void
+    {
+        $this->asAdmin();
+        $title = 'Matching \d+ under C:\Users\x';
+        $content = '<p>A literal \n, LaTeX \frac{1}{2}, and a doubled \\\\ pair.</p>';
+        $tool = (new DraftPostToolkit(get_current_user_id(...)))->tools()[0];
+
+        $res = $tool->execute(['title' => $title, 'content' => $content]);
+
+        $this->assertSame(ToolResultStatus::Success, $res->status, $res->content);
+        $post = get_post((int) json_decode($res->content, true)['id']);
+        $this->assertNotNull($post);
+        $this->assertSame($title, $post->post_title);
+        $this->assertSame($content, $post->post_content);
+    }
+
+    /**
      * What core's wp_http_validate_url() answers on the harness's WordPress: it resolves a
      * hostname to decide, so a loopback name, a private address and a scheme the HTTP API does
      * not speak are all refused before any request is built. This proves core, on this core

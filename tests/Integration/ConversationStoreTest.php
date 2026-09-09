@@ -28,9 +28,22 @@ use AlpacaBot\Plugin;
  * ^Z on the way, a cost base64 never pays. A transcript of quotes that serialises to well under
  * the budget is twice that on the wire; through a bare update_post_meta() it fails exactly as
  * the images did, and save() fits it by what the database will receive.
+ *
+ * The last pair is the backslash round trip (Kanboard #4110). Every write below unslashes what
+ * it is handed, so a transcript, a title and a converted 0.4 transcript all have to be slashed
+ * on the way in to come back out as they went in.
  */
 final class ConversationStoreTest extends TestCase
 {
+    /**
+     * A string that costs a backslash at every level WordPress touches: a Windows path, a regular
+     * expression, the two-character `\n` sequence a code fence carries, a LaTeX fragment, and a
+     * doubled pair. WordPress's post and metadata APIs wp_unslash() what they are given, so an
+     * unslashed write stores this one level of backslashes lighter — `C:\Users\x` comes back
+     * `C:Usersx` and `\d+` comes back `d+`.
+     */
+    private const BACKSLASHED = 'C:\Users\x, a regex \d+, a literal \n, LaTeX \frac{1}{2}, a doubled \\\\ pair';
+
     /** A PNG data URL carrying `$bytes` decoded bytes (4 base64 characters per 3 bytes), `$fill` repeated so two are told apart. */
     private static function image(int $bytes, string $fill): string
     {
@@ -221,5 +234,74 @@ final class ConversationStoreTest extends TestCase
         $this->assertStringContainsString('max_allowed_packet', $error);
         wp_cache_delete($c->id, 'post_meta');
         $this->assertSame('', get_post_meta($c->id, ConversationStore::META_MESSAGES, true), 'nothing was stored');
+    }
+
+    /**
+     * The transcript, the title and the excerpt through save() and back through load(), byte for
+     * byte. Three writes are on this path and every one of them unslashes: the update_post_meta()
+     * that stores the rows, the wp_insert_post() create() gave the title to, and the
+     * wp_update_post() save() writes the title and excerpt with.
+     */
+    public function test_a_backslash_heavy_conversation_round_trips_byte_for_byte_through_save_and_load(): void
+    {
+        $uid = $this->asAdmin();
+        $store = Plugin::instance()->get(ConversationStore::class);
+        $c = $store->create($uid, self::BACKSLASHED);
+        $this->assertGreaterThan(0, $c->id);
+        // Asserted here as well as after save(): save() writes the title again from the copy in
+        // memory, so it would cover for an unslashed insert if this were only checked at the end.
+        $inserted = get_post($c->id);
+        $this->assertNotNull($inserted);
+        $this->assertSame(self::BACKSLASHED, $inserted->post_title, 'the title create() inserted');
+        $c->append(new Message('user', self::BACKSLASHED, 'fake-model'));
+        $c->append(new Message('assistant', 'reply: ' . self::BACKSLASHED, 'fake-model'));
+
+        $store->save($c);
+
+        wp_cache_delete($c->id, 'post_meta');
+        clean_post_cache($c->id);
+        $stored = get_post_meta($c->id, ConversationStore::META_MESSAGES, true);
+        $this->assertIsArray($stored, 'the transcript is there');
+        $this->assertSame(self::BACKSLASHED, $stored[0]['content']);
+        $this->assertSame('reply: ' . self::BACKSLASHED, $stored[1]['content']);
+
+        $loaded = $store->load($c->id, $uid);
+        $this->assertNotNull($loaded);
+        $this->assertSame(self::BACKSLASHED, $loaded->messages[0]->content);
+        $this->assertSame('reply: ' . self::BACKSLASHED, $loaded->messages[1]->content);
+        $this->assertSame(self::BACKSLASHED, $loaded->title, 'the title create() inserted and save() wrote back');
+        $post = get_post($c->id);
+        $this->assertNotNull($post);
+        $this->assertSame(self::BACKSLASHED, $post->post_title);
+        $this->assertSame('reply: ' . self::BACKSLASHED, $post->post_excerpt, 'the excerpt is the newest turn, short enough to be it whole');
+    }
+
+    /**
+     * The 0.4 migration's own write: the first load() of a row that has only 0.4's `messages` key
+     * converts it and stores the result under META_MESSAGES, and that write unslashes too. The
+     * legacy row is seeded the way WordPress wants it — slashed — so what this measures is the
+     * plugin's write, not the fixture's.
+     */
+    public function test_the_0_4_transcript_converted_on_first_load_is_stored_with_its_backslashes(): void
+    {
+        $uid = $this->asAdmin();
+        $store = Plugin::instance()->get(ConversationStore::class);
+        $id = self::factory()->post->create([
+            'post_type' => ConversationStore::POST_TYPE,
+            'post_author' => $uid,
+            'post_status' => 'private',
+            'post_title' => 'a 0.4 conversation',
+        ]);
+        update_post_meta($id, 'messages', wp_slash([['model' => 'legacy-model', 'message' => ['role' => $uid, 'content' => self::BACKSLASHED]]]));
+        $this->assertSame(self::BACKSLASHED, get_post_meta($id, 'messages', true)[0]['message']['content'], 'the legacy row is seeded intact');
+
+        $loaded = $store->load($id, $uid);
+        $this->assertNotNull($loaded);
+        $this->assertSame(self::BACKSLASHED, $loaded->messages[0]->content, 'what this load answered');
+
+        wp_cache_delete($id, 'post_meta');
+        $converted = get_post_meta($id, ConversationStore::META_MESSAGES, true);
+        $this->assertIsArray($converted, 'the conversion was written');
+        $this->assertSame(self::BACKSLASHED, $converted[0]['content'], 'and stored as it was read, so every later load answers the same');
     }
 }

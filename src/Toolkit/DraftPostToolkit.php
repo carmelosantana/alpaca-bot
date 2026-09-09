@@ -32,7 +32,10 @@ use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Tool\ToolResult;
  * The title goes through sanitize_text_field() and the body through wp_kses_post(): what the
  * model wrote is treated exactly as what a user pasted into the editor would be, no more
  * trusted for having come from a model. Markdown is stored as it is; the editor shows it as
- * text, which is what a draft for review should show.
+ * text, which is what a draft for review should show. Sanitising happens on the real value and
+ * wp_slash() goes around the whole array afterwards, at the write: wp_insert_post() unslashes
+ * what it is handed, and a draft is often exactly the thing that is full of backslashes — a
+ * regular expression, a Windows path, a LaTeX fragment.
  *
  * The description and guidelines are English on purpose (see WebFetchToolkit); the errors are
  * translated.
@@ -76,13 +79,13 @@ final class DraftPostToolkit implements ToolkitInterface
         if ($capability === null || !user_can($userId, $capability)) {
             return ToolResult::error(__('You cannot create this kind of content on this site.', 'alpaca-bot'));
         }
-        $id = wp_insert_post([
+        $id = wp_insert_post(wp_slash([
             'post_type' => $type,
             'post_status' => 'draft',
             'post_author' => $userId,
             'post_title' => sanitize_text_field($title),
             'post_content' => wp_kses_post($content),
-        ], true);
+        ]), true);
         if (is_wp_error($id)) {
             /* translators: %s: WordPress's reason the post could not be created */
             return ToolResult::error(sprintf(__('The draft could not be created: %s', 'alpaca-bot'), $id->get_error_message()));
