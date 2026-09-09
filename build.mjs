@@ -8,8 +8,10 @@ const require = createRequire(import.meta.url);
 const here = (p) => fileURLToPath(new URL(p, import.meta.url));
 const watch = process.argv.includes('--watch');
 async function copyCss() {
-  await copyFile(here('resources/css/alpaca-bot.css'), here('assets/css/alpaca-bot.css'));
-  console.log('css: assets/css/alpaca-bot.css');
+  for (const name of ['alpaca-bot.css', 'alpaca-bot-shortcode.css']) {
+    await copyFile(here(`resources/css/${name}`), here(`assets/css/${name}`));
+    console.log(`css: assets/css/${name}`);
+  }
 }
 await mkdir(here('assets/js'), { recursive: true });
 await mkdir(here('assets/css'), { recursive: true });

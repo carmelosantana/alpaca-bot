@@ -74,6 +74,21 @@ final class Assets
         $this->enqueueChat();
     }
 
+    /**
+     * The few rules for what a shortcode prints on a page that is not the chat screen: the
+     * `.alpaca-bot-answer` block and the `.alpaca-bot-notice` line. Its own small file rather
+     * than the chat screen's stylesheet, since a visitor's login notice must not cost the
+     * screen's twelve kilobytes, and theme-neutral (the theme's type and colour, a quiet box
+     * for the notice) so a theme's own rules over the two classes win without a fight. The
+     * shortcode runs after `wp_head`, so it prints from the footer through print_late_styles():
+     * the markup is unstyled for the moment between its position and the footer, which for a
+     * paragraph is a reflow, not a flash of the shell.
+     */
+    public function enqueueShortcode(): void
+    {
+        wp_enqueue_style('alpaca-bot-shortcode', plugins_url('assets/css/alpaca-bot-shortcode.css', ALPACA_BOT_FILE), [], self::version('assets/css/alpaca-bot-shortcode.css'));
+    }
+
     /** htmx, the bundle, the stylesheet and the bundle's settings: the class docblock. */
     private function enqueueChat(): void
     {

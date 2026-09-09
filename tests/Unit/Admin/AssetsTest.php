@@ -142,6 +142,21 @@ it('answers the heartbeat with a fresh REST nonce only when the chat screen aske
         ->and($assets->heartbeat(['server_time' => 1], ['wp-refresh-post-nonces' => ['post_id' => 1]]))->toBe(['server_time' => 1]);
 });
 
+it('enqueues the shortcode stylesheet on its own, a few rules for the answer and the notice, without the bundle', function (): void {
+    // Review M9: .alpaca-bot-answer and .alpaca-bot-notice had no rule anywhere and the prompt
+    // form enqueued nothing, so they were unstyled for good. Their stylesheet is its own small
+    // file (a visitor's login notice must not cost the chat screen's stylesheet), one source
+    // under resources/css that build.mjs copies to assets/css like the other.
+    Functions\when('plugins_url')->alias(fn(string $p) => '/plugins/alpaca-bot/' . $p);
+    Functions\expect('wp_enqueue_style')->once()->with('alpaca-bot-shortcode', '/plugins/alpaca-bot/assets/css/alpaca-bot-shortcode.css', [], Mockery::type('string'));
+    Functions\expect('wp_enqueue_script')->never();
+    Functions\expect('wp_enqueue_media')->never();
+    (new Assets())->enqueueShortcode();
+    $source = (string) file_get_contents(dirname(__DIR__, 3) . '/resources/css/alpaca-bot-shortcode.css');
+    expect($source)->toContain('.alpaca-bot-answer')->toContain('.alpaca-bot-notice')
+        ->and((string) file_get_contents(dirname(__DIR__, 3) . '/build.mjs'))->toContain('alpaca-bot-shortcode.css');
+});
+
 it('enqueues the same bundle for a front-end shortcode render, the media picker only for a user who can upload, and no admin hook', function (): void {
     // A [alpacabot] shell on a page: the handles are the admin screen's, so a page that carries
     // the shell and (somehow) the admin bundle loads each file once. wp_enqueue_media() is the
