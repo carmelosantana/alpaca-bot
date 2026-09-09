@@ -263,7 +263,7 @@ final class SettingsPageTest extends TestCase
         $this->fakeProvider();
         add_filter('alpaca_bot/models', static fn(): array => [Model::fromArray(['id' => $evilId, 'label' => 'x']), Model::fromArray(['id' => 'qwen3-vl:2b', 'label' => 'qwen'])]);
         $store = Plugin::instance()->get(Store::class);
-        $store->replace(['models.num_ctx' => 4096, 'models.overrides' => ['qwen3-vl:2b' => ['num_ctx' => 2048, 'system' => $evilValue], 'gone-model' => ['temperature' => 0.2]]]);
+        $store->replace(['models.num_ctx' => 4096, 'models.overrides' => ['qwen3-vl:2b' => ['num_ctx' => 2048, 'system' => $evilValue, 'tools' => Schema::TOOLS_OFF], 'gone-model' => ['temperature' => 0.2]]]);
 
         $_GET['tab'] = 'models';
         set_current_screen('alpaca-bot_page_alpaca-bot-settings');
@@ -278,6 +278,9 @@ final class SettingsPageTest extends TestCase
         $this->assertStringContainsString('name="alpaca_bot_settings[models.overrides][qwen3-vl:2b][system]" value="' . esc_attr($evilValue) . '"', $html);
         $this->assertStringContainsString('<th scope="row">gone-model</th>', $html);
         $this->assertStringContainsString('<th>Context window (tokens)</th><th>Keep alive</th>', $html);
+        // The tools override is a three-state select, and the stored state is the selected one.
+        $this->assertStringContainsString('name="alpaca_bot_settings[models.overrides][qwen3-vl:2b][tools]"', $html);
+        $this->assertStringContainsString('<option value="off" selected="selected">', $html);
         $this->assertStringContainsString('placeholder="4096"', $html);
         // Three table rows (the settings fields above the table are <th scope="row"> too).
         $this->assertSame(1, preg_match('#<tbody>(.*)</tbody>#s', $html, $body));
@@ -286,7 +289,7 @@ final class SettingsPageTest extends TestCase
         $_POST = ['alpaca_bot_settings' => [], SettingsPage::END_MARKER => '1'];
         update_option('alpaca_bot_settings', self::postedFrom($html));
         $this->assertSame(
-            ['qwen3-vl:2b' => ['num_ctx' => 2048, 'system' => $evilValue], 'gone-model' => ['temperature' => 0.2]],
+            ['qwen3-vl:2b' => ['num_ctx' => 2048, 'system' => $evilValue, 'tools' => Schema::TOOLS_OFF], 'gone-model' => ['temperature' => 0.2]],
             get_option('alpaca_bot_settings')['models.overrides'],
         );
     }

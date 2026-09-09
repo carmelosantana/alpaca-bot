@@ -872,13 +872,25 @@ final class Pipeline
 
     /**
      * The toolkits this turn runs with: what the registry enables for the user, provided the
-     * catalogue lists the model as able to call tools; none when either says no. The capability
-     * gate is on the catalogue's word (Provider\Model::$tools: the name heuristic raised by what
-     * `/api/show` reported), not the provider's: sending tools to a model that cannot take them
-     * is a provider error on every turn, and a model the catalogue does not list at all (an
-     * unreachable provider reads as an empty catalogue) is not given tools, so its turn fails
-     * or succeeds the way a plain turn would in the same outage. The registry is asked on every
-     * turn, never at boot, so a setting saved this request applies to the next turn.
+     * model may call tools; none when either says no.
+     *
+     * Whether it may is the operator's to settle first (`models.overrides[<model>][tools]`,
+     * Store::toolsOverride()), and only where they have not is it the catalogue's
+     * (Provider\Model::$tools, which is what the provider declared, or the optimistic floor
+     * where it declared nothing). The override wins in both directions on purpose: forced off
+     * is the only lever there is for a model that advertises tools and then writes the call out
+     * as prose, and it must beat a provider saying `tools` because that is exactly the case it
+     * exists for; forced on is the same lever the other way, for a model whose provider
+     * undersells it. Off also beats the catalogue not listing the model at all.
+     *
+     * The catalogue's word is not the provider's asked live: sending tools to a model that
+     * cannot take them is a provider error on every turn, and a model the catalogue does not
+     * list (an unreachable provider reads as an empty catalogue) is not given tools unless
+     * forced, so its turn fails or succeeds the way a plain turn would in the same outage.
+     *
+     * Both are read here, on the turn. The registry is asked every turn, never at boot, and the
+     * override is read from settings rather than baked into ModelCatalog's five-minute
+     * transient, so a save applies to the next turn with the cached model list still in place.
      *
      * @return array<string, ToolkitInterface>
      */
@@ -887,6 +899,10 @@ final class Pipeline
         $toolkits = $this->toolkits?->enabled($userId) ?? [];
         if ($toolkits === []) {
             return [];
+        }
+        $forced = $this->store->toolsOverride($model);
+        if ($forced !== null) {
+            return $forced ? $toolkits : [];
         }
         $listed = $this->catalog->find($model);
         return $listed !== null && $listed->tools ? $toolkits : [];

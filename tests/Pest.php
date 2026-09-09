@@ -303,9 +303,9 @@ function currentScreenPost(int $id, string $title, string $content, string $type
  *
  * @param array<string, mixed> $settings seeded into the shared Store
  * @param \AlpacaBot\Context\Context[] $contexts what the one registered source returns
- * @param list<string|array<string, mixed>>|null $catalog what the cached catalog lists: a model id (a model with no
- *   capability flags, as the transient stores one discovered from a bare `/v1/models`), or a whole Model::toArray()
- *   row for a test that needs a flag (`['id' => 'llama3.2', 'tools' => true]` is a tool-capable model); null leaves
+ * @param list<string|array<string, mixed>>|null $catalog what the cached catalog lists: a model id alone (a transient
+ *   row carrying no flags at all, which Model::fromArray() reads as tools, vision and thinking all false), or a whole
+ *   Model::toArray() row for a test that needs a flag (`['id' => 'llama3.2', 'tools' => true]` is tool-capable); null leaves
  *   the catalog transient expired, so the catalog is discovered from `$provider` (its models() is called) and the
  *   provider filter fires twice
  * @param \AlpacaBot\Chat\UserPrefs|null $prefs the per-user preferences the pipeline consults; null is the CLI's case (none)

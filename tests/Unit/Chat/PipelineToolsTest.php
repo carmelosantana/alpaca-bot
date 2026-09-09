@@ -488,6 +488,93 @@ it('runs the plain path when the catalogued model cannot call tools', function (
     expect($call['tools'])->toBe([])->and($r->reply->meta)->toBe(['duration_ms' => $r->receipt['duration_ms']]);
 });
 
+// The operator's lever over the catalogue. A model that advertises tools and then writes the
+// call out as prose is the case it exists for: the catalogue cannot tell (the provider says
+// `tools` for a template that cannot parse them), so an administrator says so instead, per
+// model, on the Models tab.
+it('offers no toolkits for a model the operator forced tools off on, whatever the catalogue says', function (): void {
+    $h = pipelineWith(
+        pipelineProvider([new Response('plain answer', ProviderFinishReason::Stop)], $call),
+        ['models.overrides' => ['llama3.2' => ['tools' => 'off']]],
+        [],
+        TOOL_MODEL,
+        null,
+        registryWith(['echo' => echoToolkit('echo_tool')]),
+    );
+    $r = $h->pipeline->complete(3, 'hi');
+    // A plain turn, indistinguishable from one on a model the catalogue never flagged: no tools
+    // advertised, the same options, and no tool_calls on the reply.
+    expect($call['tools'])->toBe([])
+        ->and($call['options'])->toBe(PLAIN_OPTIONS)
+        ->and($r->reply->content)->toBe('plain answer')
+        ->and($r->reply->meta)->toBe(['duration_ms' => $r->receipt['duration_ms']])
+        // The catalogue is untouched: force-off is a routing decision, not a re-flagging.
+        ->and($h->catalog->find('llama3.2')?->tools)->toBeTrue();
+});
+
+it('offers the toolkits for a model the operator forced tools on, though the catalogue says it cannot', function (): void {
+    $provider = agentProvider([[new Response('tools were offered', ProviderFinishReason::Stop)]], $calls);
+    $h = pipelineWith(
+        $provider,
+        ['models.overrides' => ['llama3.2' => ['tools' => 'on']]],
+        [],
+        ['llama3.2'],
+        null,
+        registryWith(['echo' => echoToolkit('echo_tool')]),
+    );
+    $r = $h->pipeline->complete(3, 'hi');
+    expect(array_map(static fn(object $t): string => $t->name(), $calls[0]['tools']))->toBe(['echo_tool', 'done'])
+        ->and($r->reply->content)->toBe('tools were offered')
+        ->and($h->catalog->find('llama3.2')?->tools)->toBeFalse();
+});
+
+// Inherit is the third state, and it is what an untouched row, a blank cell, a row about
+// another model and a row that overrides something else all mean.
+$inheriting = [
+    'no overrides at all' => [[]],
+    'a blank cell' => [['llama3.2' => ['tools' => '']]],
+    'a row that overrides something else' => [['llama3.2' => ['keep_alive' => '5m']]],
+    'a row about another model' => [['other-model' => ['tools' => 'off']]],
+];
+
+it('inherits the catalogue yes when nothing overrides it', function (array $overrides): void {
+    $h = pipelineWith(agentProvider([[new Response('ok', ProviderFinishReason::Stop)]], $calls), ['models.overrides' => $overrides], [], TOOL_MODEL, null, registryWith(['echo' => echoToolkit('echo_tool')]));
+    $h->pipeline->complete(3, 'hi');
+    expect(array_map(static fn(object $t): string => $t->name(), $calls[0]['tools']))->toBe(['echo_tool', 'done']);
+})->with($inheriting);
+
+it('inherits the catalogue no when nothing overrides it', function (array $overrides): void {
+    $h = pipelineWith(pipelineProvider([new Response('ok', ProviderFinishReason::Stop)], $call), ['models.overrides' => $overrides], [], ['llama3.2'], null, registryWith(['echo' => echoToolkit('echo_tool')]));
+    $h->pipeline->complete(3, 'hi');
+    expect($call['tools'])->toBe([]);
+})->with($inheriting);
+
+// The routing decision is made on the turn, from settings, and the catalogue is asked for the
+// flag alone: nothing per-model-override is baked into the five-minute transient. So a save
+// applies to the very next turn, with the same cached catalogue still in place.
+it('applies a saved override on the next turn, with the model transient untouched', function (): void {
+    \Brain\Monkey\Functions\when('update_option')->justReturn(true);
+    $provider = agentProvider([
+        [new Response('with tools', ProviderFinishReason::Stop)],
+        [new Response('without tools', ProviderFinishReason::Stop)],
+    ], $calls);
+    $h = pipelineWith($provider, [], [], TOOL_MODEL, null, registryWith(['echo' => echoToolkit('echo_tool')]), 2);
+    $cached = $h->transients[\AlpacaBot\Provider\ModelCatalog::TRANSIENT];
+
+    $first = $h->pipeline->complete(3, 'before the save');
+    $h->store->set('models.overrides', ['llama3.2' => ['tools' => 'off']]);
+    $second = $h->pipeline->complete(3, 'after the save');
+
+    expect(array_map(static fn(object $t): string => $t->name(), $calls[0]['tools']))->toBe(['echo_tool', 'done'])
+        ->and($calls[1]['tools'])->toBe([])
+        ->and($first->reply->content)->toBe('with tools')
+        ->and($second->reply->content)->toBe('without tools')
+        // Same transient, never refreshed or deleted, and the same catalogue instance still
+        // flags the model: the override lives in settings, not in the cached list.
+        ->and($h->transients[\AlpacaBot\Provider\ModelCatalog::TRANSIENT])->toBe($cached)
+        ->and($h->catalog->find('llama3.2')?->tools)->toBeTrue();
+});
+
 it('runs an ephemeral turn plainly, and sends it the same options a tool turn gets', function (): void {
     $provider = agentProvider([
         [new Response('summary', ProviderFinishReason::Stop, usage: new Usage(1, 1, 2))],

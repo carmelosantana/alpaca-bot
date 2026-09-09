@@ -64,6 +64,10 @@ final class Store
     /**
      * Generation options for one model: its `models.overrides` entry merged over the global values.
      *
+     * The row is merged whole, so a key that is not a generation option rides along with it
+     * (`system`, which Pipeline reads from here for the model-level prompt, and `tools`, which
+     * has its own reader below). Callers take the keys they came for.
+     *
      * @return array<string, mixed> always carries temperature, num_ctx and keep_alive
      */
     public function modelOverrides(string $model): array
@@ -73,8 +77,38 @@ final class Store
             'num_ctx' => (int) $this->get('models.num_ctx'),
             'keep_alive' => (string) $this->get('models.keep_alive'),
         ];
+        return array_merge($global, $this->override($model));
+    }
+
+    /**
+     * The operator's answer for one model: true forces tools on, false forces them off, null is
+     * inherit and means the caller must ask the catalogue instead.
+     *
+     * Three states, so the answer is `?bool` and not a bool with a default: a model nobody has
+     * touched must reach the catalogue's word, and any bool here would shadow it. Only the two
+     * literals sanitizeOverrides() stores are read; anything else (a row written before this
+     * key existed, a hand-edited option, a blank cell that was never stored) is inherit.
+     *
+     * @since 0.5.0
+     */
+    public function toolsOverride(string $model): ?bool
+    {
+        $stored = $this->override($model)['tools'] ?? null;
+        return match (is_scalar($stored) ? (string) $stored : '') {
+            Schema::TOOLS_ON => true,
+            Schema::TOOLS_OFF => false,
+            default => null,
+        };
+    }
+
+    /**
+     * One model's stored `models.overrides` row, or [] when there is none.
+     *
+     * @return array<string, mixed>
+     */
+    private function override(string $model): array
+    {
         $overrides = $this->get('models.overrides', []);
-        $own = is_array($overrides) && is_array($overrides[$model] ?? null) ? $overrides[$model] : [];
-        return array_merge($global, $own);
+        return is_array($overrides) && is_array($overrides[$model] ?? null) ? $overrides[$model] : [];
     }
 }

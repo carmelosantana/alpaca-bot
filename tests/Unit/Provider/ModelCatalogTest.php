@@ -28,7 +28,7 @@ function untouchedFactory(): Factory
     return new Factory(new Store([]));
 }
 
-it('lists models from the provider, caches them, and flags capabilities by name', function (): void {
+it('lists models from the provider, caches them, and carries their capability flags', function (): void {
     Functions\when('get_option')->justReturn([]);
     Functions\expect('get_transient')->once()->with(ModelCatalog::TRANSIENT)->andReturn(false);
     Functions\expect('set_transient')->once()->withArgs(fn(string $k, array $v, int $ttl): bool => $k === ModelCatalog::TRANSIENT && $ttl === 300 && count($v) === 2);
@@ -36,7 +36,9 @@ it('lists models from the provider, caches them, and flags capabilities by name'
     $provider = Mockery::mock(ProviderInterface::class);
     $provider->shouldReceive('models')->once()->andReturn([
         new ModelDefinition(id: 'llama3.2:latest', name: 'llama3.2', provider: 'ollama'),
-        new ModelDefinition(id: 'llava:7b', name: 'llava', provider: 'ollama'),
+        // Ollama reports llava as vision and not tools; the plugin used to guess that from the
+        // name and now reads it here, which is why the definition carries it (Provider\ModelTest).
+        new ModelDefinition(id: 'llava:7b', name: 'llava', provider: 'ollama', vision: true),
     ]);
     $models = (new ModelCatalog(catalogFactory($provider)))->all();
     expect($models)->toHaveCount(2)

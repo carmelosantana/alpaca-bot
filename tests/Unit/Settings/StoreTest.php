@@ -70,3 +70,31 @@ it('resolves a masked secret against what it already holds, on set and on replac
     expect($s->get('provider.api_key'))->toBe('')
         ->and($written)->toBe(['sk-stored', 'sk-stored', 'sk-stored', '']);
 });
+
+// The tools override is read on the turn, not baked into the model catalog, so the Store is
+// where the pipeline asks. Only the two stored literals answer; anything else is inherit, which
+// is null, and null is the only value the caller may read as "ask the catalogue".
+it('toolsOverride answers true, false or inherit for one model', function (): void {
+    Functions\when('get_option')->justReturn(['models.overrides' => [
+        'on-model' => ['tools' => Schema::TOOLS_ON],
+        'off-model' => ['tools' => Schema::TOOLS_OFF, 'temperature' => 0.2],
+        'blank-model' => ['tools' => ''],
+        'other-model' => ['temperature' => 0.2],
+        'junk-model' => ['tools' => 'yes'],
+    ]]);
+    $s = new Store();
+    expect($s->toolsOverride('on-model'))->toBeTrue()
+        ->and($s->toolsOverride('off-model'))->toBeFalse()
+        ->and($s->toolsOverride('blank-model'))->toBeNull()
+        ->and($s->toolsOverride('other-model'))->toBeNull()
+        ->and($s->toolsOverride('junk-model'))->toBeNull()
+        ->and($s->toolsOverride('never-heard-of-it'))->toBeNull();
+    // The generation options are untouched by it: `tools` is not one of them.
+    expect($s->modelOverrides('off-model'))->toMatchArray(['temperature' => 0.2, 'num_ctx' => 8192, 'keep_alive' => '5m']);
+});
+
+it('toolsOverride reads inherit from settings that hold no overrides at all', function (): void {
+    Functions\expect('get_option')->never();
+    expect((new Store([]))->toolsOverride('anything'))->toBeNull()
+        ->and((new Store(['models.overrides' => 'not an array']))->toolsOverride('anything'))->toBeNull();
+});

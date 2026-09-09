@@ -35,11 +35,12 @@ use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Tool\ToolCall;
  * history the agent loop sends back (an assistant turn with calls, a tool result) becomes a
  * model message with function-call parts and a user message with one function-response part,
  * which is the only shape core accepts for a tool result. The alternative, dropping `$tools`
- * and reporting no tool capability, would not have kept the agent off the tools path: the
- * catalogue's tool flag is a name heuristic that discovery may raise but never lower
- * (Provider\Model::fromDefinition()), so the agent would have offered tools the adapter then
- * swallowed, and a "Tools" setting that did nothing. Whether a given core provider honours the
- * declarations is that provider's business; the model list reports what its metadata claims.
+ * and reporting no tool capability, was rejected because it is a lie about this adapter and it
+ * costs a working feature: models() reports each core model's tool capability as core states it,
+ * and since 0.5.0 that is what the catalogue's flag is (Provider\Model::fromDefinition()), so
+ * saying "no tools" here would switch the tools path off for every model on this kind and leave
+ * a "Tools" setting that did nothing. Whether a given core provider honours the declarations is
+ * that provider's business; the model list reports what its metadata claims.
  *
  * The tool schemas go to core raw. On the `ollama` kind they pass through the vendored
  * OllamaProvider::formatTools() (sanitizeSchema(), recursive), which does three things:

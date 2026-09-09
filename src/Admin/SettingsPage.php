@@ -19,7 +19,7 @@ use AlpacaBot\Settings\Store;
  * the entire array every time. Under that, Schema::sanitize() keeps the stored value for any key
  * a post does not name, so a save can never reset a field it did not carry (the old first-save
  * bug, where saving one tab reset the others to their defaults). The two together cover PHP's
- * max_input_vars, which drops the tail of a long post (an overrides table is four inputs per
+ * max_input_vars, which drops the tail of a long post (an overrides table is five controls per
  * model) and tells no one: the carry-over is printed before the visible tab so the tail is never
  * the key or the URL, a dropped field keeps its stored value, and the form ends with END_MARKER,
  * whose absence from a post means it was cut and the whole save is refused with a notice rather
@@ -143,6 +143,12 @@ final class SettingsPage
      * is multi-line and lives on the Chat tab, so the caption names it instead. A model with a
      * stored override that the catalog no longer lists still gets a row, so the override can be
      * seen and cleared rather than carried invisibly.
+     *
+     * The last column overrides no global field: `tools` overrides the model catalog's
+     * capability flag, which is not a setting, so its heading is its own word and its control is
+     * a three-state select rather than a text cell. The empty state has to be a real option an
+     * operator can go back to, which is why it is a select and not a checkbox: a checkbox has
+     * two states and the third one, "whatever the catalog says", is the default.
      */
     private function renderOverrides(): string
     {
@@ -173,18 +179,45 @@ final class SettingsPage
                 );
             };
             $placeholder = fn(string $key): string => ' placeholder="' . esc_attr((string) $this->store->get($key)) . '"';
+            $tools = '<td><select name="' . esc_attr(Plugin::OPTION . '[models.overrides][' . $id . '][tools]') . '">';
+            foreach (self::toolsStates() as $value => $label) {
+                $tools .= sprintf(
+                    '<option value="%s"%s>%s</option>',
+                    esc_attr($value),
+                    (string) ($o['tools'] ?? '') === $value ? ' selected="selected"' : '',
+                    esc_html($label),
+                );
+            }
             $rows .= '<tr><th scope="row">' . esc_html($id) . '</th>'
                 . $cell('temperature', 'number', 'small-text', ' step="0.1" min="0" max="2"' . $placeholder('models.temperature'))
                 . $cell('num_ctx', 'number', 'small-text', ' step="1" min="512" max="1048576"' . $placeholder('models.num_ctx'))
                 . $cell('keep_alive', 'text', 'small-text', $placeholder('models.keep_alive'))
                 . $cell('system', 'text', 'regular-text')
+                . $tools . '</select></td>'
                 . '</tr>';
         }
         $head = '<th>' . esc_html__('Model', 'alpaca-bot') . '</th>';
         foreach (['models.temperature', 'models.num_ctx', 'models.keep_alive', 'chat.system_prompt'] as $key) {
             $head .= '<th>' . esc_html($fields[$key]['label']) . '</th>';
         }
+        $head .= '<th>' . esc_html__('Tools', 'alpaca-bot') . '</th>';
         return '<table class="widefat striped"><thead><tr>' . $head . '</tr></thead><tbody>' . $rows . '</tbody></table>'
-            . '<p class="description">' . esc_html__('A blank cell uses the global value: the fields above for temperature, context window and keep alive, and the system prompt on the Chat tab. A model-level system prompt replaces the global one for that model.', 'alpaca-bot') . '</p>';
+            . '<p class="description">' . esc_html__('A blank cell uses the global value: the fields above for temperature, context window and keep alive, and the system prompt on the Chat tab. A model-level system prompt replaces the global one for that model.', 'alpaca-bot') . '</p>'
+            . '<p class="description">' . esc_html__('Tools decides whether this model is offered the tools enabled on the Tools tab. Leave it on the model default unless the model misbehaves: some models accept tools and then write the tool call out as text in the reply instead of calling it, and turning tools off for that model gives a plain answer instead. Turn them on for a model you know can call tools that is not being offered them.', 'alpaca-bot') . '</p>';
+    }
+
+    /**
+     * The three states of the per-model `tools` cell, in the order the select offers them:
+     * inherit first, under the empty value Schema::sanitizeOverrides() stores nothing for.
+     *
+     * @return array<string, string> stored value => label
+     */
+    private static function toolsStates(): array
+    {
+        return [
+            '' => __('Model default', 'alpaca-bot'),
+            Schema::TOOLS_ON => __('Always on', 'alpaca-bot'),
+            Schema::TOOLS_OFF => __('Always off', 'alpaca-bot'),
+        ];
     }
 }

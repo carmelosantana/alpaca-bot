@@ -185,3 +185,36 @@ it('drops blank override cells so a row of blanks is no override at all', functi
     ]], []);
     expect($out['models.overrides'])->toBe(['b' => ['keep_alive' => '1h']]);
 });
+
+// The per-model `tools` override is tri-state, and unlike every other override it has no global
+// field to borrow a type from: what it overrides is the catalogue, which is not a setting. Only
+// the two literals mean anything; a blank cell is the third state, inherit, and stores nothing.
+it('round-trips the three states of the per-model tools override and stores nothing for inherit', function (): void {
+    $out = Schema::sanitize(['models.overrides' => [
+        'forced-on' => ['tools' => Schema::TOOLS_ON],
+        'forced-off' => ['tools' => Schema::TOOLS_OFF],
+        'inherit-blank' => ['tools' => '', 'keep_alive' => '1h'],
+        'inherit-absent' => ['keep_alive' => '2h'],
+        'inherit-junk' => ['tools' => 'maybe'],
+        'inherit-not-scalar' => ['tools' => ['on']],
+    ]], []);
+    expect($out['models.overrides'])->toBe([
+        'forced-on' => ['tools' => 'on'],
+        'forced-off' => ['tools' => 'off'],
+        'inherit-blank' => ['keep_alive' => '1h'],
+        'inherit-absent' => ['keep_alive' => '2h'],
+    ])
+        ->and(Schema::TOOLS_ON)->toBe('on')
+        ->and(Schema::TOOLS_OFF)->toBe('off');
+    // Stored and read back unchanged: a second save over the first keeps all three states.
+    expect(Schema::sanitize([], $out)['models.overrides'])->toBe($out['models.overrides']);
+});
+
+// A site upgrading from a release without this key: every stored row is an inherit row for
+// tools, and the next save carries the rest of the row through untouched.
+it('reads an overrides row stored before the tools key as inherit and drops nothing from it', function (): void {
+    $stored = ['models.overrides' => ['llama3.2' => ['temperature' => 0.2, 'num_ctx' => 4096, 'keep_alive' => '1h', 'system' => 'be terse']]];
+    $out = Schema::sanitize([], $stored);
+    expect($out['models.overrides'])->toBe($stored['models.overrides'])
+        ->and($out['models.overrides']['llama3.2'])->not->toHaveKey('tools');
+});

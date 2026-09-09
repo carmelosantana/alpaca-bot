@@ -292,7 +292,8 @@ it('lists the models the provider reports right now, with their capability flags
     $provider = Mockery::mock(ProviderInterface::class);
     $provider->shouldReceive('models')->once()->andReturn([
         new ModelDefinition(id: 'llama3.2:latest', name: 'llama3.2', provider: 'ollama'),
-        new ModelDefinition(id: 'llava:7b', name: 'llava', provider: 'ollama'),
+        // As Ollama describes it: vision and no tools. Nothing here is flagged by the name any more.
+        new ModelDefinition(id: 'llava:7b', name: 'llava', provider: 'ollama', vision: true),
         new ModelDefinition(id: 'qwen3:8b', name: 'qwen3', provider: 'ollama'),
         new ModelDefinition(id: 'nomic-embed-text', name: 'nomic', provider: 'ollama'),
     ]);

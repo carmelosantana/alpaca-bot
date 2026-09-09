@@ -171,3 +171,38 @@ it('falls back to the provider tab for an unknown or missing tab', function (): 
     expect($pages)->toBe([SettingsPage::SLUG . '-provider', SettingsPage::SLUG . '-provider'])
         ->and($html)->not->toContain('name="alpaca_bot_settings[provider.base_url]"');
 });
+
+// The operator's lever needs a control. It is a three-state select, not a checkbox: the third
+// state is "whatever the catalogue says", and a checkbox cannot say that.
+it('renders the tools override as a three-state select per model, with the stored state selected', function (): void {
+    Functions\when('register_setting')->justReturn(null);
+    Functions\when('add_settings_section')->justReturn(null);
+    Functions\when('esc_attr')->alias(fn($s) => htmlspecialchars((string) $s, ENT_QUOTES));
+    Functions\when('esc_html')->alias(fn($s) => htmlspecialchars((string) $s, ENT_QUOTES));
+    Functions\when('get_transient')->alias(fn(string $key): mixed => $key === ModelCatalog::TRANSIENT ? [['id' => 'faker:2b', 'label' => 'faker'], ['id' => 'llama3.2', 'label' => 'llama3.2']] : false);
+    $render = null;
+    Functions\expect('add_settings_field')->times(count(Schema::fields()))->withArgs(function (string $id, string $title, callable $cb) use (&$render): bool {
+        if ($id === 'alpaca_bot_models.overrides') {
+            $render = $cb;
+        }
+        return true;
+    });
+    settingsPage(['models.overrides' => ['faker:2b' => ['tools' => Schema::TOOLS_OFF]]])->register();
+    ob_start();
+    $render();
+    $html = (string) ob_get_clean();
+
+    expect($html)->toContain('<th>Tools</th>')
+        ->toContain('<select name="alpaca_bot_settings[models.overrides][faker:2b][tools]">')
+        ->toContain('<select name="alpaca_bot_settings[models.overrides][llama3.2][tools]">')
+        // Three options in every row, inherit first and blank so a save stores nothing for it.
+        ->toContain('<option value="">')
+        ->toContain('<option value="on">')
+        ->toContain('<option value="off">')
+        // The stored state is the selected one, and only on the row that stores it.
+        ->toContain('<option value="off" selected="selected">')
+        ->and(substr_count($html, 'selected="selected"'))->toBe(2)
+        ->and(substr_count($html, '[tools]"'))->toBe(2);
+    // The caption tells an operator what the switch is for, in the terms they will hit it in.
+    expect($html)->toContain('write the tool call out as text');
+});

@@ -26,6 +26,17 @@ final class Schema
     /** @var list<string> the fields sanitize() applies the mask rule to */
     public const SECRETS = ['provider.api_key'];
 
+    /**
+     * The two stored values of the per-model `tools` override, `models.overrides[<m>][tools]`.
+     * The third state, inherit, is not stored at all: an absent key, and a blank cell, both
+     * leave the catalogue's word (Provider\Model::$tools) standing. Read on the turn by
+     * Store::toolsOverride(), never baked into the model catalog.
+     *
+     * @since 0.5.0
+     */
+    public const TOOLS_ON = 'on';
+    public const TOOLS_OFF = 'off';
+
     /** @return array<string, array{label:string, description:string}> */
     public static function sections(): array
     {
@@ -191,10 +202,17 @@ final class Schema
     }
 
     /**
-     * model => {temperature?, num_ctx?, keep_alive?, system?}; anything else is dropped.
+     * model => {temperature?, num_ctx?, keep_alive?, system?, tools?}; anything else is dropped.
      *
      * Each override is coerced with the schema field it overrides, so the type and
      * min/max bounds have one source of truth: fields().
+     *
+     * `tools` is the exception, and has to be: what it overrides is the catalogue's capability
+     * flag, which is not a setting and so has no field to borrow from. Bending an unrelated
+     * field's coercion onto it would give it that field's default on a value it could not read,
+     * and a default here is a decision about somebody's turn. So it is checked against its own
+     * two literals and dropped otherwise, which lands it on the same rule as every other cell:
+     * unreadable is no override, not a coerced one.
      *
      * @return array<string, array<string, float|int|string>>
      */
@@ -228,6 +246,10 @@ final class Schema
                     continue;
                 }
                 $clean[$k] = $v;
+            }
+            // Last, so a stored row reads in the order the settings table shows it.
+            if (is_scalar($opts['tools'] ?? null) && in_array((string) $opts['tools'], [self::TOOLS_ON, self::TOOLS_OFF], true)) {
+                $clean['tools'] = (string) $opts['tools'];
             }
             if ($clean !== []) {
                 $out[$model] = $clean;
