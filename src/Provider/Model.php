@@ -101,15 +101,21 @@ final class Model
      * be honoured where something else was true — which leaves a provider that genuinely knows a
      * model has no features unable to say so. The `fieldSources` arm is that sentence: it says
      * the tool flag was reported rather than defaulted, so a bare `false` from such a provider
-     * is an answer and not a silence. Setting it takes a provider that fills `fieldSources`
-     * itself, and the plugin's WpAiClientProvider does, because CoreClient reads each core
-     * model's support for function declarations one model at a time. No vendored provider
-     * writes a `toolCalls` provenance, however it builds its definitions: the discovery helper
-     * (ModelDefinition::fromDiscovery(), which the Ollama and OpenAI-compatible providers go
-     * through) fills only `contextWindow` and `maxTokens`, and so do the five sites that
-     * construct a ModelDefinition directly — AnthropicProvider's discovery loop and its static
-     * fallback list, GeminiProvider, LlamaCppProvider, and the Claude CLI adapter. So the key is
-     * unambiguous and a vendored model reads as silent exactly as before.
+     * is an answer and not a silence. What sets it is a `fieldSources` entry keyed `toolCalls`,
+     * and the plugin's WpAiClientProvider writes one, because CoreClient reads each core model's
+     * support for function declarations one model at a time. No vendored code writes that entry
+     * itself. The five sites that construct a ModelDefinition directly — AnthropicProvider's
+     * discovery loop and its static fallback list, GeminiProvider, LlamaCppProvider, and the
+     * Claude CLI adapter — each write `contextWindow` and `maxTokens` and nothing else, and the
+     * discovery helper (ModelDefinition::fromDiscovery(), reached from OllamaProvider,
+     * OpenAICompatibleProvider and OpenAIResponsesProvider) fills those same two provenances
+     * itself while passing any `fieldSources` already in the payload through unchanged:
+     * normalizeFieldSources() keeps every non-empty string => string pair and whitelists no
+     * keys. OllamaProvider hands the helper a literal of those two keys, but the two OpenAI
+     * callers hand it the raw upstream model entry, so a provider API that answered with a
+     * `fieldSources.toolCalls` key would arrive here as a stated provenance. Across the payloads
+     * the vendored code shapes itself the key is unambiguous, and a vendored model reads as
+     * silent exactly as before.
      */
     private static function declaresCapabilities(ModelDefinition $definition): bool
     {
