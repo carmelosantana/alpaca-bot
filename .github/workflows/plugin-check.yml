@@ -43,6 +43,15 @@ jobs:
   plugin-check:
     name: WordPress Plugin Check on the built zip
     runs-on: ubuntu-latest
+    # GitHub's default for a Linux `run:` is `bash -e {0}`, which does not set `pipefail`; the
+    # `bash` keyword is `bash --noprofile --norc -eo pipefail {0}`. Declared once here rather than
+    # per step, so every `run:` step in this job fails on a broken pipe the way bin/build-zip.sh
+    # already does under its own `set -euo pipefail`. It does not reach inside the composite
+    # action: `defaults` applies to this job's steps, and a composite's steps must name their own
+    # shell anyway.
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
@@ -83,6 +92,39 @@ jobs:
           fi
           echo "dist/alpaca-bot holds $(find dist/alpaca-bot -type f | wc -l) files"
 
+      # The PHP version wp-env runs. alpaca-bot.php declares `Requires PHP: 8.4`, so WordPress
+      # refuses to activate the plugin on anything older - and the action activates it
+      # (action.yml:184) before it runs a single check. Runs 34405747111 and 34407254337 both died
+      # exactly there, on "Current PHP version (8.3.33) does not meet minimum requirements": the
+      # composite aborted, "Process results" was skipped, no results file was uploaded and not one
+      # finding was ever reported. Lowering `Requires PHP` to suit the tool is not on the table;
+      # this makes the tool match the plugin.
+      #
+      # The action exposes no `php-version` input, and this repository's own tracked .wp-env.json -
+      # which does carry "phpVersion": "8.4" - does not survive: the action's "Setup wp-env" step
+      # truncates and rewrites it (action.yml:110-114) with a generated config carrying only
+      # `core`, `port`, `testsPort` and the one mapping, and wp-env then falls back to its default
+      # PHP. wp-env merges four sources, later winning over earlier - built-in defaults,
+      # .wp-env.json, .wp-env.override.json, then WP_ENV_* environment variables
+      # (lib/config/parse-config.js, parseConfig) - and the action writes only the second of them.
+      # So there are two ways in the action cannot clobber, the override file and
+      # WP_ENV_PHP_VERSION; this is the file, because a file written into the workspace by a step
+      # is something we can and did reproduce locally end to end, while whether a job-level `env:`
+      # reaches a composite action's inner steps is a runner behaviour we would be taking on
+      # faith. wp-env resolves .wp-env.json and .wp-env.override.json from its working directory,
+      # which is this workspace: the same directory whose .wp-env.json the action rewrites.
+      #
+      # Two guards keep this file out of the artifact, and it needs them. bin/build-zip.sh rsyncs
+      # the repository root into dist/alpaca-bot with .distignore as its exclude list, and before
+      # .distignore named this file, an override written ahead of the build was copied into the
+      # plugin and shipped inside the zip - measured, not feared. The .distignore line is what
+      # protects a developer who keeps a personal override and runs bin/build-zip.sh by hand;
+      # placing this step after the build is what keeps CI right if that line is ever lost.
+      - name: Pin wp-env to PHP 8.4
+        run: |
+          printf '{ "phpVersion": "8.4" }\n' > .wp-env.override.json
+          cat .wp-env.override.json
+
       # Categories: all five that `wp plugin list-check-categories` reports, named rather than
       # left to the default so that a category added upstream is a visible change to this file
       # instead of a silent widening.
@@ -122,6 +164,30 @@ jobs:
           # Decline the pull-request comment; see the note at the top of this file.
           repo-token: ''
 
+      # Which kind of red this is. `check` fails when Plugin Check reports an ERROR - with `strict`
+      # left at its default, the action's result processor sets exit code 1 per ERROR row and
+      # annotates it, and annotates a WARNING without failing (src/main.ts:36-50 at the pinned
+      # SHA). It fails in exactly the same way when it never got as far as running a check at all:
+      # a failed `wp plugin activate`, a dead wp-env, an upstream change to the composite. From the
+      # step's conclusion the two are the same colour - and for both runs of this workflow before
+      # this step existed, it was the second one.
+      #
+      # The results file is what tells them apart. The action redirects `wp plugin check` into
+      # ${RUNNER_TEMP}/plugin-check-results.txt (action.yml:189), so the file exists if and only if
+      # the step got as far as invoking that command. A plugin with no findings leaves it empty,
+      # which is why this tests for existence and not for size. Nothing else notices its absence -
+      # "Upload artifact" is `if: always()` with `if-no-files-found: ignore` (action.yml:221-227),
+      # so a missing file is a quiet skip.
+      - name: Plugin Check actually ran
+        if: ${{ !cancelled() && (steps.check.conclusion == 'success' || steps.check.conclusion == 'failure') }}
+        run: |
+          results="$RUNNER_TEMP/plugin-check-results.txt"
+          if [ ! -f "$results" ]; then
+            echo "::error::The action never reached its Plugin Check run - $results was never written. Read the Plugin Check step's log from the top: it failed before the check, so nothing in this job has inspected the plugin."
+            exit 1
+          fi
+          echo "ok: the action wrote $results ($(wc -c < "$results") bytes)"
+
       # A gate that reports nothing is indistinguishable from a gate that ran nothing: Plugin
       # Check writes one `FILE:` block per file *with findings*, so on a clean plugin its output
       # is empty — exactly what a run that scanned the wrong directory, or never started wp-env,
@@ -144,9 +210,12 @@ jobs:
       # `skipped` in run 34405747111 while `check` was red. As written the canary runs whenever
       # `check` reached a conclusion of its own, passed or failed, and is skipped only if the job
       # was cancelled or `check` never ran (a failed build), where a second error would only
-      # confuse. Note that `check` is expected to fail on every run until Task 7 unfreezes
-      # readme.txt's four header errors, so "the canary ran while the job was red" is the normal
-      # state of this file, not an exception to it.
+      # confuse. "The canary ran while the job was red" is the normal state of this file, not an
+      # exception to it: what makes `check` red on this branch is readme.txt's four frozen header
+      # errors - outdated_tested_upto_header, stable_tag_mismatch, readme_mismatched_header_requires
+      # and readme_mismatched_header_requires_php. As of this commit they are the only ERROR rows
+      # the gate reports; everything else it finds is a WARNING, which annotates without failing.
+      # Task 7 rewriting that header is what turns the step green.
       - name: The gate is real - a planted error is reported as an error
         if: ${{ !cancelled() && (steps.check.conclusion == 'success' || steps.check.conclusion == 'failure') }}
         run: |
@@ -159,9 +228,14 @@ jobs:
           <?php
           echo $_GET['x'];
           PHP
-          # The same categories, the same ignore-codes and the same --require as the action's own
-          # "Run Plugin Check" step; only --format differs, because this step reads rows and the
-          # action reads JSON. A wider configuration would prove something the gate does not do,
+          # Categories, ignore-codes and --require are the action's own "Run Plugin Check"
+          # arguments verbatim. Three things differ and none of them widens the check: this step
+          # asks for --format=csv and --fields=file,line,type,code because it matches whole rows
+          # where the action reads JSON, and the action adds an --exclude-files=.wp-env.json of its
+          # own (action.yml:141-147, that branch taken because dist/alpaca-bot holds no
+          # .wp-env.json). The exclusion is inert either way: the .wp-env.json it names is in the
+          # workspace root and Plugin Check only ever reads dist/alpaca-bot.
+          # A wider configuration would prove something the gate does not do,
           # and a different command-registration path would prove it about code CI never runs:
           # --require loads plugin-check's cli.php in wp-cli's own bootstrap, before WordPress,
           # so the after_wp_config_load hook that file registers is in place in time to install
@@ -198,7 +272,10 @@ jobs:
             'plugin-check-canary.php,2,ERROR,WordPress.Security.EscapeOutput.OutputNotEscaped'
           do
             # Herestring, never `printf | grep -q`: -q closes the pipe on the first match, the
-            # writer takes SIGPIPE, and `pipefail` then reports a found row as missing.
+            # writer takes SIGPIPE, and `pipefail` then reports a found row as missing. The
+            # hazard is live rather than hypothetical because this job sets `shell: bash` in its
+            # `defaults` - see the note there - which is the same rule bin/build-zip.sh runs its
+            # identical assertion loop under.
             grep -qxF -- "$want" <<<"$out" || { echo "MISSING $want"; fail=1; }
           done
           if [ "$fail" != 0 ]; then

@@ -63,6 +63,12 @@
 /phpunit.integration.xml
 /playwright.config.ts
 /.wp-env.json
+# wp-env reads .wp-env.override.json from the same directory and merges it over .wp-env.json.
+# It is the file a developer keeps their personal wp-env settings in, and .github/workflows/
+# plugin-check.yml writes one in CI to pin PHP 8.4 -- so it is exactly as unwelcome in the zip as
+# .wp-env.json. (In CI the workflow also writes it *after* this script has run, so ordering and
+# this line each stop it on their own.)
+/.wp-env.override.json
 /playwright-report
 /test-results
 
