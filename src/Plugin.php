@@ -54,6 +54,14 @@ final class Plugin
         // one site-wide transient for five minutes, and a save that changes the provider (its
         // kind, where it is, or the key that reaches it) would otherwise leave the previous
         // provider's models on offer, and a turn routed at one of them, until it expired.
+        // There is no per-kind default model (`models.default` is the one default for both
+        // kinds), and that is safe only because of this bust: Chat\Pipeline resolves the model
+        // as UserPrefs::modelFor() ?? ModelCatalog::defaultId(), and both validate the stored
+        // id against the catalogue's list, so after a switch a stale id is replaced by a model
+        // the new provider lists. Against the previous provider's cached list they would pass a
+        // model the new provider does not have, and on `wp-ai` CoreClient refuses it by name
+        // on every turn for the transient's lifetime. Removing this bust needs a per-kind
+        // default (or an eager re-list) to go in with it.
         // On `update_option_*` rather than in Store: every writer (the settings page, the REST
         // route, WP-CLI, a filter) goes through the option, and only one of them through Store.
         // Neither closure is `static`, for the reason the cleanup hook above gives.

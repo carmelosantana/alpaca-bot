@@ -113,7 +113,12 @@ final class Factory
 
         // OllamaProvider pins 'ollama-local' as its Bearer token on every request, so a
         // configured key is swapped in at the wire: the provider (and the tool-schema
-        // sanitising in its formatTools()) stays, and the key is never dropped.
+        // sanitising in its formatTools()) stays, and the key is never dropped. That
+        // sanitising is this kind's only: it strips `additionalProperties`, `enum` constraints
+        // and the validation keywords from every toolkit schema before Ollama sees them, and
+        // WpAiClientProvider sends the schemas to core raw, so a toolkit schema that works
+        // here may be rejected on `wp-ai` by the core provider (WpAiClientProvider says why
+        // the sanitising is not copied there).
         $apiKey = (string) $this->store->get('provider.api_key');
         if ($apiKey !== '') {
             $http = new BearerHttpClient($http, $apiKey);
