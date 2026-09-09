@@ -23,6 +23,7 @@
 # Agent, editor and tool state
 /.claude
 /.superpowers
+/CLAUDE.md
 /.editorconfig
 /.npmrc
 
