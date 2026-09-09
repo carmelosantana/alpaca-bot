@@ -114,8 +114,11 @@ final class Factory
         // OllamaProvider pins 'ollama-local' as its Bearer token on every request, so a
         // configured key is swapped in at the wire: the provider (and the tool-schema
         // sanitising in its formatTools()) stays, and the key is never dropped. That
-        // sanitising is this kind's only: it strips `additionalProperties`, `enum` constraints
-        // and the validation keywords from every toolkit schema before Ollama sees them, and
+        // sanitising is this kind's only: before Ollama sees a toolkit schema it flattens the
+        // combinators, demotes the validation keywords (`minimum`..`maxItems`, `pattern`,
+        // `format`, `const`, `default`) into the description and strips them, and strips
+        // `additionalProperties`, `uniqueItems`, `$ref`, `$defs` and `patternProperties` with
+        // no hint; `enum` is untouched (the full lists are on WpAiClientProvider's docblock).
         // WpAiClientProvider sends the schemas to core raw, so a toolkit schema that works
         // here may be rejected on `wp-ai` by the core provider (WpAiClientProvider says why
         // the sanitising is not copied there).

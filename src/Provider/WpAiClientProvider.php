@@ -42,17 +42,23 @@ use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Tool\ToolCall;
  * declarations is that provider's business; the model list reports what its metadata claims.
  *
  * The tool schemas go to core raw. On the `ollama` kind they pass through the vendored
- * OllamaProvider::formatTools(), which flattens `anyOf`/`oneOf`/`allOf` to one type, demotes
- * validation keywords (`minimum`, `maxLength`, `pattern`, `format`, `default`, ...) into the
- * description and strips them, `additionalProperties` and `enum` constraints included; on the
- * `wp-ai` kind nothing does that, and the core provider plugin gets `toFunctionSchema()` as the
- * toolkit wrote it. So a schema keyword a provider rejects works on `ollama` and fails on
- * `wp-ai` with that provider's error on the tool turn, and the likeliest core provider is
- * Ollama itself (`ai-provider-for-ollama`, over Ollama's OpenAI-compatible endpoint), where the
- * built-in toolkits' `additionalProperties: false` and `enum` went through in the real check.
- * The sanitising is not copied here because it is Ollama's, not core's: a core provider that
- * rejects a keyword needs the fix in that provider plugin, and a toolkit that wants to work on
- * both kinds should keep to the keywords formatTools() leaves alone.
+ * OllamaProvider::formatTools() (sanitizeSchema(), recursive), which does three things:
+ * flattens `anyOf`/`oneOf`/`allOf` to the first non-null variant; demotes the twelve
+ * DEMOTABLE_KEYWORDS (`minimum`, `maximum`, `exclusiveMinimum`, `exclusiveMaximum`,
+ * `minLength`, `maxLength`, `pattern`, `minItems`, `maxItems`, `const`, `default`, `format`)
+ * into the description as a sentence each, then strips them; and strips outright, with no
+ * hint left behind, the rest of UNSUPPORTED_SCHEMA_KEYWORDS (`additionalProperties`,
+ * `uniqueItems`, `$ref`, `$defs`, `patternProperties`, plus the three combinators already
+ * flattened). `enum` is in neither list and passes through unchanged, as do `type`,
+ * `properties`, `required`, `items` and `description`. On the `wp-ai` kind nothing does any
+ * of that, and the core provider plugin gets `toFunctionSchema()` as the toolkit wrote it. So
+ * a schema keyword a provider rejects works on `ollama` and fails on `wp-ai` with that
+ * provider's error on the tool turn, and the likeliest core provider is Ollama itself
+ * (`ai-provider-for-ollama`, over Ollama's OpenAI-compatible endpoint), where the built-in
+ * toolkits' `additionalProperties: false` and `enum` went through in the real check. The
+ * sanitising is not copied here because it is Ollama's, not core's: a core provider that
+ * rejects a keyword needs the fix in that provider plugin, and a toolkit that wants to work
+ * on both kinds should keep to the keywords formatTools() leaves alone.
  *
  * Of the site's generation options only `temperature` is sent. `num_ctx` and `keep_alive` are
  * Ollama's, and a core provider that is not Ollama would either reject them or ignore them;
