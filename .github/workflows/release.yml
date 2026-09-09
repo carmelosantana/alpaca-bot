@@ -1,7 +1,7 @@
-# The release, driven by a `v*` tag and nothing else. It is split into five jobs because they
-# need different privileges and because the last of them cannot be undone: the two gates run,
-# the artifact is built once, a GitHub release is published, and only then does wordpress.org
-# get an SVN commit.
+# The release, driven by a `v*` tag and nothing else. It is split into six jobs because they
+# need different privileges and because the last of them cannot be undone: the two gates run
+# and the credentials are checked, the artifact is built once, a GitHub release is published,
+# and only then does wordpress.org get an SVN commit.
 #
 # Third-party actions are pinned to full commit SHAs (tags are mutable), as in ci.yml and
 # plugin-check.yml. `permissions:` is declared on every job rather than once at the top, and the
@@ -78,11 +78,68 @@ jobs:
     permissions:
       contents: read
 
+  # The only job besides the deploy itself that references the wordpress.org credentials, and all
+  # it ever asks is whether they are there. It declares no `needs:`, so it starts alongside the
+  # two gates: if bin/release-secrets-wizard.sh was never run, an armed tag fails on this
+  # one-step job instead of after the full CI matrix, a build, and a published GitHub release.
+  #
+  # A job of its own rather than a step in `build` for one reason: `build` is where `composer
+  # install` and `pnpm install` execute third-party code, and the note on that job -- that it is
+  # handed no secret -- is a property worth keeping literally true.
+  #
+  # It cannot be expressed as a job-level `if:` instead. GitHub's context availability table
+  # allows `github`, `needs`, `vars` and `inputs` in `jobs.<job_id>.if` and not `secrets`; and a
+  # job that skipped itself would skip `github-release`, which needs it, along with it.
+  #
+  # `permissions: {}` for the reason the top of this file gives -- an empty map is no scopes at
+  # all -- and it needs none: it checks nothing out and calls no API.
+  preflight:
+    name: Release credentials
+    runs-on: ubuntu-latest
+    permissions: {}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      # Nothing here can print a credential. Both values are read only by `[[ -n ... ]]`; what
+      # the failure line interpolates is `$missing`, built from the two names as string literals
+      # in this script and never from a value; there is no `set -x`; and this `run:` block is
+      # the whole of what the step executes.
+      - name: The wordpress.org credentials exist if this tag will publish
+        env:
+          # "Armed" is both halves: the pre-release rule the `wordpress-org` job below applies to
+          # itself, and SVN_DRY_RUN spelling `false`. A step's `env:` may read `github`, `vars`
+          # and `secrets` alike -- unlike a job-level `if:`, which is why this is a step.
+          ARMED: ${{ !contains(github.ref_name, '-') && vars.SVN_DRY_RUN == 'false' }}
+          SVN_USERNAME: ${{ secrets.SVN_USERNAME }}
+          SVN_PASSWORD: ${{ secrets.SVN_PASSWORD }}
+        run: |
+          if [[ "$ARMED" != 'true' ]]; then
+            echo "This tag does not publish: it is a pre-release, or SVN_DRY_RUN is not false."
+            exit 0
+          fi
+          missing=''
+          [[ -n "$SVN_USERNAME" ]] || missing="$missing SVN_USERNAME"
+          [[ -n "$SVN_PASSWORD" ]] || missing="$missing SVN_PASSWORD"
+          if [[ -n "$missing" ]]; then
+            echo "SVN_DRY_RUN is false, so this tag would commit to wordpress.org for real."
+            echo "These repository secrets are unset or empty:$missing"
+            echo "Run bin/release-secrets-wizard.sh, then re-run this workflow."
+            exit 1
+          fi
+          echo "Both wordpress.org secrets are set."
+
   # One build, feeding both publish jobs. Nothing here is handed a secret and nothing here needs
   # one, which matters because this is the job that runs the repository's own build scripts and
   # therefore the job that installs and executes composer and pnpm dependency code.
   build:
     name: Build the release zip
+    # Both are hard gates. Nothing downstream of this job exists until they are green, and
+    # `plugin-check` is red on this branch today: readme.txt's `Stable tag`, `Tested up to`,
+    # `Requires at least` and `Requires PHP` are the four ERROR rows named above. Stated plainly
+    # so nobody has to rediscover it at the tag -- a `v*` tag cannot complete a release until
+    # those four headers are reconciled. That is the intended order, not an obstacle: the header
+    # rewrite is part of deciding to release.
     needs: [checks, plugin-check]
     runs-on: ubuntu-latest
     permissions:
@@ -149,11 +206,15 @@ jobs:
           if-no-files-found: error
 
   # The reversible half of publishing, and the only job in this file with a writable token. It
-  # holds no other credential: the SVN secrets live in the job below, which in turn has no write
-  # access to this repository.
+  # holds no other credential: the SVN secrets are referenced only by `preflight`, which asks
+  # whether they are non-empty, and by the job below, which uses them -- and neither of those two
+  # can write to this repository.
   github-release:
     name: GitHub release
-    needs: [build]
+    # `preflight` as well as `build`: nothing is published until the credentials the last job
+    # will need are known to exist, because a release published ahead of a failed SVN deploy is
+    # the half-done state this ordering is for.
+    needs: [build, preflight]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -183,18 +244,22 @@ jobs:
   # gates it on that job having succeeded.
   #
   # Skipped for a pre-release, matching `prerelease` above and bin/version-check.sh's treatment
-  # of a version containing `-`. A job-level `if:` is not wrapped in an implicit `success()` the
-  # way a step's is, but it does not need to be: a job runs only when every entry in its `needs:`
-  # succeeded unless the condition says otherwise, and this one does not.
+  # of a version containing `-`. Adding that `if:` does not loosen the `needs:` gate. GitHub's
+  # reference for `jobs.<job_id>.needs` says that when a job it needs fails or is skipped, a job
+  # is skipped too "unless the jobs use a conditional expression that causes the job to
+  # continue", and names `always()` as how such an expression is written. The condition here is
+  # `!contains(...)` over `github.ref_name` -- no `always()`, `failure()` or `cancelled()` in it
+  # -- so a `github-release` that failed still skips this job.
   wordpress-org:
     name: wordpress.org SVN deploy
     needs: [github-release]
     if: ${{ !contains(github.ref_name, '-') }}
     runs-on: ubuntu-latest
-    # Read only. This is the job that sees SVN_USERNAME and SVN_PASSWORD; it has no business
-    # writing to this repository, so it cannot. Nothing here runs the repository's own build or
-    # install scripts either -- the plugin arrives already built, as an artifact -- so the only
-    # code the credentials are exposed to is the deploy action pinned below.
+    # Read only. This is the job that uses SVN_USERNAME and SVN_PASSWORD -- `preflight` only
+    # asks whether they are empty -- and it has no business writing to this repository, so it
+    # cannot. Nothing here runs the repository's own build or install scripts either -- the
+    # plugin arrives already built, as an artifact -- so the only code the credentials are
+    # exposed to is the deploy action pinned below.
     permissions:
       contents: read
     defaults:
@@ -203,9 +268,19 @@ jobs:
     steps:
       # Checked out for one directory: .wordpress-org/, which the action's deploy.sh resolves
       # against GITHUB_WORKSPACE and rsyncs into the SVN `assets/` directory (deploy.sh:179-183
-      # at the pinned SHA). The repository tracks five files there -- three banners and two
-      # icons -- and .distignore keeps that directory out of the plugin zip, which is why it has
-      # to come from the checkout rather than from the artifact.
+      # at the pinned SHA). The repository tracks four files there -- banner-772x250.jpg,
+      # banner-1544x500.jpg, icon-128x128.png, icon-256x256.png -- and .distignore keeps that
+      # directory out of the plugin zip, which is why it has to come from the checkout rather
+      # than from the artifact.
+      #
+      # Those four names are not a style: developer.wordpress.org's plugin-assets page defines
+      # exactly `banner-772x250`, `banner-1544x500` (each with `-rtl`/locale variants),
+      # `icon-128x128`, `icon-256x256`, `icon.svg` and `screenshot-N`, and says outright that no
+      # other banner size exists to rename a file to. Anything else in this directory is
+      # published to public SVN and then never rendered, because deploy.sh:180 is a recursive
+      # rsync of the whole tree. banner-1880x609.jpg was such a file -- an oversized banner in
+      # the same 3.09:1 shape as the other two, under a name nothing reads -- so it now lives in
+      # resources/wordpress-org/, which is neither ASSETS_DIR nor in the zip.
       #
       # persist-credentials: false, as everywhere else in this repository's workflows, so no git
       # credential is left sitting on a runner that also holds the SVN password.
@@ -239,8 +314,10 @@ jobs:
       # to be the literal word `true` or `false`. With `vars.SVN_DRY_RUN == 'true'`, a repository
       # where nobody had yet created that variable would evaluate to false and commit for real on
       # the first tag. `!= 'false'` makes the unconfigured state the safe one: every deploy is a
-      # dry run until someone sets SVN_DRY_RUN to exactly `false`. bin/release-secrets-wizard.sh
-      # walks that setup.
+      # dry run until someone sets SVN_DRY_RUN to the word `false`. GitHub's expressions
+      # reference states that it ignores case when comparing strings, so `False` and `FALSE`
+      # disarm the dry run just as `false` does -- which is the behaviour you want from someone
+      # who typed it in a browser. bin/release-secrets-wizard.sh walks that setup.
       #
       # One property of deploy.sh worth knowing before the first live run: it passes the password
       # to `svn commit` on the command line (deploy.sh:223). That is upstream's design, not
