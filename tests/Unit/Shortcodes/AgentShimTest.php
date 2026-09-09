@@ -79,7 +79,9 @@ it('maps name=get url=… to the fetched text, escaped, with no model turn, and 
     expect($html)->toContain('Fish &amp; chips')->toContain('&lt;b&gt;not bold&lt;/b&gt;')->not->toContain('<b>')
         ->and($h->stored)->toHaveCount(1)
         ->and($h->stored[0][1])->toBe("Fish & chips\n\n<b>not bold</b>")
-        ->and($h->writes)->toBe([]);
+        ->and($h->writes)->toBe([])
+        // No tokens, but an outbound fetch on a page's say-so: a hit in the same bucket (final review F2).
+        ->and($h->limited)->toHaveCount(1);
     // The second render is the memo (one fetch, expect()ed once above) and no second warning.
     expect($shim->render(['name' => 'get', 'url' => 'https://example.test/a'], null, 'alpacabot_agent'))->toBe($html);
     // `name` defaults to get, as it did in 0.4.

@@ -10,6 +10,7 @@ use AlpacaBot\Chat\Pipeline;
 use AlpacaBot\Chat\UserPrefs;
 use AlpacaBot\Provider\ModelCatalog;
 use AlpacaBot\Rest\Errors;
+use AlpacaBot\Rest\RateLimit;
 use AlpacaBot\Settings\Store;
 use AlpacaBot\View\Chat\Shell;
 use AlpacaBot\View\Markdown;
@@ -30,7 +31,7 @@ use AlpacaBot\View\Markdown;
  * The prompt form is what 0.4's `[alpacabot]` was: content generated at render time. P3 shipped
  * no shortcodes rather than that, because a page nobody is watching would go on spending
  * provider tokens on every view, and this class exists to bring the feature back without that.
- * Two rules do it, and they are the design, not details:
+ * Three rules do it, and they are the design, not details:
  *
  * A viewer who is not logged in with `edit_posts` never triggers generation. They may be served
  * what an editor's view already cached, and only when the site says so through filter
@@ -60,6 +61,21 @@ use AlpacaBot\View\Markdown;
  * Rest\Errors::fromPipeline()'s decision, made once for every caller that runs a turn: the cap
  * and a refused model in their own words, and for a provider failure the fixed message, since
  * what the provider threw quotes its endpoint and the raw text is the debug log's.
+ *
+ * A generation is a hit on the limiter every other spending surface shares: Rest\RateLimit,
+ * the `chat` bucket the REST chat and stream routes and the chat and summarize abilities count
+ * against, under the one `alpaca_bot/rate_limit` filter, so a site that moves the limit moves
+ * it here too and one person on five surfaces is one person. The cache and the monthly caps
+ * are not that brake: both caps default to unlimited, `cache="off"` is an attribute any
+ * Contributor can write, and the memo dedupes identical shortcodes only, so fifty distinct
+ * prompts on one page were fifty turns per editor view. The hit is recorded where the REST
+ * wrapper records one, on a request that will run: after the capability, the cache and the
+ * REST rule, so a cached answer, a visitor and a listing cost nothing; and the shim's `get`,
+ * an outbound fetch on a page's say-so, is in the bucket with the rest. A page past the
+ * minute shows the refused shortcodes as the notice the routes' 429 carries, in the frame the
+ * cap and the provider failure use (failed()), caches nothing, and memoises nothing, so the
+ * next view generates them once the minute turns over; a page carrying five shortcodes
+ * spends five of thirty. Counted even when refused, as the routes count it.
  *
  * The attributes are the post author's, and the output lands on a public page, so the answer
  * goes through Markdown (raw HTML stripped, links held, wp_kses over an allowlist) or through
@@ -200,11 +216,16 @@ final class Chat
             // hundred-turns-in-one-request case.
             return $this->notice(__('Alpaca Bot answers here when the page is viewed on the site; there is no cached answer yet.', 'alpaca-bot'));
         }
+        // Only a generation is a hit: the limiter the REST routes and the abilities share, in
+        // their bucket, as the class docblock says.
+        $hit = (new RateLimit())->hit(get_current_user_id(), 'chat');
+        if (!$hit['allowed']) {
+            return $this->failed(Errors::tooMany($hit['retry_after'])->get_error_message());
+        }
         try {
             $text = $generate(get_current_user_id());
         } catch (\Throwable $e) {
-            /* translators: %s: the reason, in the words the REST routes use: the cap, a refused model, or the fixed provider message */
-            return $this->notice(sprintf(__('Alpaca Bot could not answer: %s', 'alpaca-bot'), Errors::fromPipeline($e)->get_error_message()));
+            return $this->failed(Errors::fromPipeline($e)->get_error_message());
         }
         $this->served[$key] = $text;
         if ($cacheSeconds > 0) {
@@ -318,6 +339,16 @@ final class Chat
     {
         $this->assets->enqueueShortcode();
         return '<p class="alpaca-bot-notice">' . esc_html($text) . '</p>';
+    }
+
+    /**
+     * The notice for a generation that did not happen, with the reason in the words the REST
+     * routes use: the cap, a refused model, the fixed provider message, or the minute's limit.
+     */
+    private function failed(string $reason): string
+    {
+        /* translators: %s: the reason, in the words the REST routes use: the cap, a refused model, the rate limit, or the fixed provider message */
+        return $this->notice(sprintf(__('Alpaca Bot could not answer: %s', 'alpaca-bot'), $reason));
     }
 
     /** The post the shortcode is being rendered in, or 0 outside a post (a widget, a template part). */

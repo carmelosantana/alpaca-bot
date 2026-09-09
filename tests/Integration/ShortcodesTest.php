@@ -190,6 +190,30 @@ final class ShortcodesTest extends TestCase
     }
 
 
+    public function test_a_page_past_the_minute_limit_shows_the_notice_and_the_bucket_is_the_rest_routes_own(): void
+    {
+        // Final review F2: the shortcodes were the one spending surface with no per-minute
+        // limiter. The limit is the REST routes' and the abilities', through the same filter:
+        // at one a minute the page's second prompt is a notice, and POST /chat by the same
+        // user is then the 429 the route answers when the bucket is spent.
+        $this->asAdmin();
+        $this->fakeProvider();
+        $built = $this->countProviders();
+        add_filter('alpaca_bot/rate_limit', static fn(): int => 1);
+        $post = self::factory()->post->create(['post_content' => '[alpacabot prompt="one"] [alpacabot prompt="two" cache="off"]']);
+        $this->go_to(get_permalink($post));
+        $html = apply_filters('the_content', get_post($post)->post_content);
+        $this->assertSame(1, substr_count($html, 'fake reply'), $html);
+        $this->assertStringContainsString('Too many requests', $html);
+        $this->assertSame(1, $built());
+        $this->assertSame(1, $this->shortcodeTransients());
+
+        $response = $this->rest('POST', '/chat', ['message' => 'hi']);
+        $this->assertSame(429, $response->get_status(), (string) wp_json_encode($response->get_data()));
+        $this->assertSame('alpaca_bot_rate_limited', $response->get_data()['code']);
+        $this->assertSame(1, $built());
+    }
+
     public function test_a_visitor_gets_the_login_notice_and_the_cached_answer_only_when_the_filter_allows(): void
     {
         $this->asAdmin();

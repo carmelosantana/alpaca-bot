@@ -59,8 +59,9 @@ use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Enum\ToolResultStatus;
  * pipeline through core's run route and every MCP client without that route's wrapper, so
  * the two execute callbacks record the same hit themselves: the same limiter, the same `chat`
  * bucket (one person on two surfaces is one person, as Rest\Controller says of two routes) and
- * the same `alpaca_bot/rate_limit` filter, so a site that moves the limit moves it for both
- * at once. The hit is recorded after the capability and the switch, as the REST wrapper counts
+ * the same `alpaca_bot/rate_limit` filter, so a site that moves the limit moves it for every
+ * surface at once (Shortcodes\Chat counts a shortcode's generation there too). The hit is
+ * recorded after the capability and the switch, as the REST wrapper counts
  * only requests that were allowed, and before the run; the refusal is Errors::tooMany(), 429
  * with `retry_after` in its data, the one place a client of an ability can read it (there is
  * no response header to carry Retry-After on this path). Without this the monthly caps were

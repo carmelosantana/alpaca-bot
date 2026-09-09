@@ -311,8 +311,10 @@ function pipelineWith(mixed $provider, array $settings = [], array $contexts = [
         public array $meta = [];
         /** @var list<string> every transient read, once shortcodeChat() records them */
         public array $reads = [];
-        /** @var list<array{0: string, 1: mixed, 2: int}> every transient write as [key, value, ttl], once shortcodeChat() records them */
+        /** @var list<array{0: string, 1: mixed, 2: int}> every transient write but the limiter's as [key, value, ttl], once shortcodeChat() records them */
         public array $stored = [];
+        /** @var list<array{0: string, 1: int}> every write of the rate limiter's counter as [key, count], once shortcodeChat() records them */
+        public array $limited = [];
         /** @var list<array{0: string, 1: string}> every stylesheet enqueued as [handle, src], once shortcodeChat() records them */
         public array $styles = [];
     };
@@ -571,13 +573,17 @@ function chatShell(?AlpacaBot\Chat\Conversation $conversation, array $history, ?
  * merge (the pairs' keys only), and the transients are the harness's own `$h->transients`, so
  * set_transient() writes where get_transient() reads and a test can seed a cache entry or read
  * what was written. Every transient read is recorded in `$h->reads` and every write in
- * `$h->stored` as [key, value, ttl], for the tests about the cache. wp_kses() is the strip_tags
- * stand-in MarkdownTest uses, so the markdown path keeps its allowed tags and drops the rest.
+ * `$h->stored` as [key, value, ttl], for the tests about the cache, except the rate limiter's
+ * counter (`alpaca_bot_rl_*`), which goes to `$h->limited` as [key, count] so a test about the
+ * cache reads the cache alone and a test about the limiter reads its hits. wp_kses() is the
+ * strip_tags stand-in MarkdownTest uses, so the markdown path keeps its allowed tags and drops
+ * the rest.
  */
 function shortcodeChat(object $h, int $postId = 7): AlpacaBot\Shortcodes\Chat
 {
     $h->reads = [];
     $h->stored = [];
+    $h->limited = [];
     Functions\when('get_the_ID')->justReturn($postId > 0 ? $postId : false);
     Functions\when('shortcode_atts')->alias(static fn(array $pairs, array $atts): array => array_merge($pairs, array_intersect_key($atts, $pairs)));
     Functions\when('get_transient')->alias(static function (string $key) use ($h): mixed {
@@ -585,7 +591,11 @@ function shortcodeChat(object $h, int $postId = 7): AlpacaBot\Shortcodes\Chat
         return $h->transients[$key] ?? false;
     });
     Functions\when('set_transient')->alias(static function (string $key, mixed $value, int $ttl = 0) use ($h): bool {
-        $h->stored[] = [$key, $value, $ttl];
+        if (str_starts_with($key, 'alpaca_bot_rl_')) {
+            $h->limited[] = [$key, (int) $value];
+        } else {
+            $h->stored[] = [$key, $value, $ttl];
+        }
         $h->transients[$key] = $value;
         return true;
     });

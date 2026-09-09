@@ -7,7 +7,10 @@ namespace AlpacaBot\Rest;
 /**
  * A fixed-window counter: PER_MINUTE hits per user per UTC calendar minute, kept in a transient.
  * Filter `alpaca_bot/rate_limit` (int $perMinute, int $userId, string $bucket) sets the limit
- * per call, and is the only way the limit changes.
+ * per call, and is the only way the limit changes. Every surface that spends provider tokens
+ * on a request records a hit here, in the one `chat` bucket: the REST chat and stream routes
+ * (Controller), the chat and summarize abilities (Abilities\Register) and the shortcodes
+ * (Shortcodes\Chat), so one person on any of them is one person to the counter.
  *
  * Calendar minutes rather than a sliding window because the counter must survive across PHP
  * processes and the only shared store a plain WordPress is guaranteed to have is options or
@@ -61,8 +64,9 @@ final class RateLimit
         /**
          * Filters the per-minute request limit for one hit, the only way the limit changes. The
          * bucket names the surface that shares the counter: `chat` covers the REST chat and stream
-         * routes and, because Abilities\Register counts against the same bucket, the chat and
-         * summarize abilities; set a limit per bucket, per role, or per user. Anything below 1 is
+         * routes and, because Abilities\Register and Shortcodes\Chat count against the same bucket,
+         * the chat and summarize abilities and a generation (or the agent shim's fetch) for a
+         * shortcode on a page; set a limit per bucket, per role, or per user. Anything below 1 is
          * raised to 1 rather than closing the route: a filter that forgot to return should show up
          * as a 429, not an outage.
          *

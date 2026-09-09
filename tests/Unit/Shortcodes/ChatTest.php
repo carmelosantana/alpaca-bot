@@ -317,6 +317,67 @@ it('shows an editor the cap and a refused model in their own words, the other tw
         ->and($h->stored)->toBe([]);
 });
 
+// ---------------------------------------------------------------- the rate limit
+// Final review F2: every other surface that spends (POST /chat, the stream route, the chat
+// and summarize abilities) counts a hit on Rest\RateLimit's `chat` bucket; the shortcodes had
+// the cache and the monthly caps, both of which default to unlimited, and `cache="off"` is an
+// attribute any Contributor can write. Fifty distinct prompts on one page were fifty turns
+// per editor view. The same limiter, the same bucket, the same filter: a site that moves the
+// limit moves it everywhere, and one person on five surfaces is one person.
+
+it('holds a generation to the limiter the REST routes and the abilities share, in the chat bucket: at the limit the page shows a notice, caches nothing, and the hit is counted', function (): void {
+    $h = pipelineWith(pipelineProvider(shortcodeReply('Answer')));
+    $chat = shortcodeChat($h, 7);
+    shortcodeViewer(3);
+    // The key RateLimit writes for the REST route and the abilities: twenty-nine hits already
+    // this minute, from whichever surface. The thirtieth generates.
+    $key = 'alpaca_bot_rl_chat_3_' . gmdate('YmdHi', 1_725_000_000);
+    $h->transients[$key] = 29;
+    Filters\expectApplied('alpaca_bot/rate_limit')->times(2)->with(30, 3, 'chat')->andReturnFirstArg();
+    expect($chat->render(['prompt' => 'Say hi'], null, 'alpacabot'))->toContain('class="alpaca-bot-answer"')
+        ->and($h->transients[$key])->toBe(30)
+        ->and($h->limited)->toBe([[$key, 30]])
+        ->and($h->stored)->toHaveCount(1);
+    // The thirty-first, a distinct prompt the memo does not cover: the notice, in the REST
+    // routes' words, distinct from the cap's and the provider's; nothing cached, no turn run,
+    // and counted even when refused, as the REST route counts it.
+    $html = $chat->render(['prompt' => 'Say more', 'cache' => 'off'], null, 'alpacabot');
+    expect($html)->toContain('class="alpaca-bot-notice"')->toContain('could not answer')->toContain('Too many requests')->not->toContain('alpaca-bot-answer')
+        ->and($h->transients[$key])->toBe(31)
+        ->and($h->stored)->toHaveCount(1)
+        ->and(array_map(static fn(array $w): array => [$w[0], $w[1]], $h->writes))->toBe([['wp_insert_post', 'chat_log']]);
+    // The first shortcode again in the same request is the memo: no hit.
+    expect($chat->render(['prompt' => 'Say hi'], null, 'alpacabot'))->toContain('class="alpaca-bot-answer"')
+        ->and($h->transients[$key])->toBe(31);
+});
+
+it('the alpaca_bot/rate_limit filter moves the shortcodes\' limit as it moves the REST routes\': at one a minute the second prompt on a page is refused', function (): void {
+    $h = pipelineWith(pipelineProvider(shortcodeReply('Answer')));
+    $chat = shortcodeChat($h, 7);
+    shortcodeViewer(3);
+    Filters\expectApplied('alpaca_bot/rate_limit')->times(2)->with(30, 3, 'chat')->andReturn(1);
+    expect($chat->render(['prompt' => 'one'], null, 'alpacabot'))->toContain('class="alpaca-bot-answer"')
+        ->and($chat->render(['prompt' => 'two'], null, 'alpacabot'))->toContain('Too many requests')
+        ->and($h->limited)->toHaveCount(2)
+        ->and($h->stored)->toHaveCount(1);
+});
+
+it('counts no hit for a cached answer, a guest, or a REST request: only a generation is a hit', function (): void {
+    $h = pipelineWith(null);
+    $chat = shortcodeChat($h, 7);
+    Filters\expectApplied('alpaca_bot/rate_limit')->never();
+    $h->transients[sayHiKey()] = 'From the cache';
+    shortcodeViewer(3);
+    expect($chat->render(['prompt' => 'Say hi'], null, 'alpacabot'))->toContain('From the cache');
+    Functions\when('wp_is_rest_endpoint')->justReturn(true);
+    expect($chat->render(['prompt' => 'Say more'], null, 'alpacabot'))->toContain('viewed');
+    Functions\when('wp_is_rest_endpoint')->justReturn(false);
+    shortcodeViewer(0);
+    Filters\expectApplied('alpaca_bot/shortcode/allow_guests')->once()->andReturn(true);
+    expect($chat->render(['prompt' => 'Say more', 'cache' => 'off'], null, 'alpacabot'))->toContain('Log in')
+        ->and($h->limited)->toBe([]);
+});
+
 it('enqueues the shortcode stylesheet for an answer and for a notice, and never the chat bundle', function (): void {
     // Review M9: .alpaca-bot-answer and .alpaca-bot-notice had no rule anywhere, and the
     // prompt form enqueued nothing, so they were unstyled for good. The prompt form's own
