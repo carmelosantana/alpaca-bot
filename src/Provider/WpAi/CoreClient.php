@@ -80,7 +80,17 @@ final class CoreClient implements Client
 
     public function models(): array
     {
-        if (!$this->available() || !wp_supports_ai()) {
+        // `wp_supports_ai()` is a third WordPress 7.0 name, and available() does not probe it:
+        // it probes the builder class and the function that makes one. They ship together in
+        // wp-includes/ai-client.php, so in practice the extra guard never decides anything --
+        // but the plugin header says "Requires at least: 6.9", and on a 6.9 site an unguarded
+        // call here would be a fatal rather than the empty list this method promises.
+        // Written as a literal function_exists() call rather than through the injected probe
+        // because that is the form a static reader can see: Plugin Check's WP-version
+        // compatibility scan recognises a `function_exists('name')` guard by tokenising the
+        // file (Checker/Checks/Plugin_Repo/WP_Functions_Compatibility_Check.php), and a closure
+        // called with a class constant is invisible to it, as it is to a human skimming.
+        if (!$this->available() || !function_exists('wp_supports_ai') || !wp_supports_ai()) {
             return [];
         }
         $models = [];
@@ -98,7 +108,12 @@ final class CoreClient implements Client
 
     public function generate(array $request): array
     {
-        if (!$this->available()) {
+        // The second clause asks what available()'s injected probe already asked. It is written
+        // out because the guard on the wp_ai_client_prompt() call below has to be *visible*, not
+        // only present: a closure invoked with a class constant tells a static reader nothing,
+        // and this method calls a WordPress 7.0 function on a plugin that declares 6.9. It also
+        // means a stand-in probe that lies gets this exception instead of a fatal.
+        if (!$this->available() || !function_exists('wp_ai_client_prompt')) {
             throw new \RuntimeException(__('The WordPress AI client is not available on this site; it needs WordPress 7.0 or later.', 'alpaca-bot'));
         }
         $providerId = null;
