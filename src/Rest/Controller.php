@@ -63,6 +63,18 @@ abstract class Controller
     public function permission(string $route, string $capability): \Closure
     {
         return static function (\WP_REST_Request $request) use ($route, $capability): bool|\WP_Error {
+            /**
+             * Filters the capability a REST route's permission callback checks, per request. `{route}`
+             * is the route's key (Controller::routeKey(): `chat`, `conversations`, `chat/stream`,
+             * `settings/schema`...), so one filter covers a collection and its items. Return a
+             * capability to tighten a route, or to open one to a role (a subscriber-facing chat). Only
+             * a non-empty, non-numeric string is honoured (Capability::filtered()): a bool or a number
+             * would become a legacy user-level check, so it is ignored and the default stands.
+             *
+             * @since 0.5.0
+             * @param string           $capability the route's default capability
+             * @param \WP_REST_Request $request    the request being authorised
+             */
             $cap = Capability::filtered("alpaca_bot/capability/{$route}", $capability, $request);
             return current_user_can($cap) ? true : Errors::forbidden();
         };

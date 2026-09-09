@@ -35,6 +35,16 @@ final class Menu
 
     public function register(): void
     {
+        /**
+         * Filters the capability that shows the Alpaca Bot menu and its chat screen. Filtered apart
+         * from the REST routes' `alpaca_bot/capability/chat`, so a site can open the screen to a
+         * role and not the API, or the reverse. Only a non-empty, non-numeric string is honoured
+         * (Capability::filtered()): `true`, `__return_true` or a number would turn the check into a
+         * legacy user level, so they are ignored and `edit_posts` stands.
+         *
+         * @since 0.5.0
+         * @param string $capability `edit_posts`
+         */
         $cap = Capability::filtered('alpaca_bot/admin/menu_capability', 'edit_posts');
         add_menu_page(__('Alpaca Bot', 'alpaca-bot'), __('Alpaca Bot', 'alpaca-bot'), $cap, self::SLUG, $this->chatRenderer, 'dashicons-format-chat', 3);
         add_submenu_page(self::SLUG, __('Chat', 'alpaca-bot'), __('Chat', 'alpaca-bot'), $cap, self::SLUG, $this->chatRenderer);

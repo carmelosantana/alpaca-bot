@@ -179,6 +179,7 @@ final class Chat
              * generation, so a page with no cache entry (expired, or never primed) shows them
              * the notice until someone with the capability opens it.
              *
+             * @since 0.5.0
              * @param bool   $allow  false
              * @param int    $postId the post being rendered, 0 outside a post
              * @param string $tag    the shortcode, `alpacabot` or `alpacabot_agent`

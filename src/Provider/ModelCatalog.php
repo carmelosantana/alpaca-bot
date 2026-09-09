@@ -35,6 +35,17 @@ final class ModelCatalog
             $this->discovered = $this->discover($refresh);
         }
 
+        /**
+         * Filters the models the picker, the REST models route and the CLI list, on every read of
+         * the catalog, over the list as discovered from the provider (that list, not the filtered
+         * one, is what the transient caches, so a per-user or per-capability filter is never baked
+         * into the site-wide cache). Drop a Model to hide it, or add one the provider did not list;
+         * anything that is not a Model is dropped. The catalog is also the allow-list: a turn may
+         * only use a model that survives this filter.
+         *
+         * @since 0.5.0
+         * @param Model[] $models the models the provider listed, cached for five minutes
+         */
         $filtered = apply_filters('alpaca_bot/models', $this->discovered);
 
         return array_values(array_filter(is_array($filtered) ? $filtered : [], static fn(mixed $m): bool => $m instanceof Model));

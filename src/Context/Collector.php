@@ -30,6 +30,18 @@ final class Collector
      */
     public function collect(int $userId, array $request): array
     {
+        /**
+         * Filters the context sources asked for one chat turn, before any of them runs. Add a
+         * ContextSourceInterface to feed the model something of the site's own (a product record,
+         * a knowledge-base hit), or remove one of the plugin's to keep it out. Anything that is not
+         * a source is dropped, and a source that throws is skipped: less context is a worse answer,
+         * a broken chat is no answer.
+         *
+         * @since 0.5.0
+         * @param ContextSourceInterface[] $sources the registered sources, in registration order
+         * @param int                      $userId  the user whose turn it is
+         * @param array<string, mixed>     $request the caller's `context` option: the REST `context` object as sent (the admin screen passes the post being edited), empty from the shortcodes and the abilities
+         */
         $sources = apply_filters('alpaca_bot/context/sources', $this->sources, $userId, $request);
         $out = [];
         foreach (is_array($sources) ? $sources : [] as $source) {
@@ -45,6 +57,18 @@ final class Collector
                 $out[] = $context;
             }
         }
+        /**
+         * Filters the Context values collected for the turn, after every source has run and before
+         * they are appended to the system prompt. Edit, reorder, drop or add here; anything that is
+         * not a Context is dropped. This is where a site trims what a source gathered, budgets the
+         * block as a whole (the collector sets no ceiling of its own), or blanks it for a user who
+         * must not see it.
+         *
+         * @since 0.5.0
+         * @param Context[]            $contexts what the sources collected, in source order
+         * @param int                  $userId   the user whose turn it is
+         * @param array<string, mixed> $request  the caller's `context` option, as `alpaca_bot/context/sources` saw it
+         */
         $contexts = apply_filters('alpaca_bot/context', $out, $userId, $request);
         return array_values(array_filter(
             is_array($contexts) ? $contexts : [],

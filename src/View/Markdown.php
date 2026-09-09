@@ -53,6 +53,15 @@ final class Markdown
     {
         $attrs = ['class' => true];
         $tags = ['p' => [], 'br' => [], 'strong' => [], 'em' => [], 'del' => [], 'code' => $attrs, 'pre' => $attrs, 'blockquote' => [], 'ul' => [], 'ol' => ['start' => true], 'li' => [], 'h1' => [], 'h2' => [], 'h3' => [], 'h4' => [], 'h5' => [], 'h6' => [], 'hr' => [], 'a' => ['href' => true, 'rel' => true, 'target' => true], 'table' => [], 'thead' => [], 'tbody' => [], 'tr' => [], 'th' => ['align' => true], 'td' => ['align' => true], 'img' => ['src' => true, 'alt' => true]];
+        /**
+         * Filters the wp_kses allowlist every rendered reply passes through (the chat screen, the
+         * shortcodes, the REST view route). Add a tag or an attribute the model's markdown should
+         * be allowed to keep (`kbd`, a `title` on links), or remove one to have it stripped. The
+         * shape is wp_kses's: tag => attribute => true.
+         *
+         * @since 0.5.0
+         * @param array<string, array<string, bool>> $tags the default allowlist
+         */
         return (array) apply_filters('alpaca_bot/render/allowed_tags', $tags);
     }
 }

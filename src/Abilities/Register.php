@@ -156,6 +156,16 @@ final class Register
         if (!($this->exists)('wp_register_ability')) {
             return;
         }
+        /**
+         * Filters the abilities the plugin registers with the WordPress Abilities API, keyed by
+         * ability id. Drop an entry to keep that ability off every surface the API feeds (WP-CLI,
+         * MCP servers, other plugins) without touching the REST routes, or add one of your own
+         * under any namespace. An entry whose key is not a string or whose value is not an array
+         * is dropped before core sees it, which would otherwise refuse it with a notice.
+         *
+         * @since 0.5.0
+         * @param array<string, array<string, mixed>> $abilities ability id => the wp_register_ability() arguments
+         */
         $filtered = apply_filters('alpaca_bot/abilities', $this->definitions());
         foreach (is_array($filtered) ? $filtered : [] as $id => $args) {
             if (is_string($id) && is_array($args)) {

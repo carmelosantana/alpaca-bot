@@ -58,6 +58,19 @@ final class RateLimit
         // so the route stays reachable and the mistake shows up as a 429 rather than an outage.
         // An operator who means "off" removes the route or returns a capability nobody holds
         // from the capability filter; a limit is not the tool for that.
+        /**
+         * Filters the per-minute request limit for one hit, the only way the limit changes. The
+         * bucket names the surface that shares the counter: `chat` covers the REST chat and stream
+         * routes and, because Abilities\Register counts against the same bucket, the chat and
+         * summarize abilities; set a limit per bucket, per role, or per user. Anything below 1 is
+         * raised to 1 rather than closing the route: a filter that forgot to return should show up
+         * as a 429, not an outage.
+         *
+         * @since 0.5.0
+         * @param int    $perMinute the default, RateLimit::PER_MINUTE (30)
+         * @param int    $userId    the user, 0 for a visitor (then keyed by client address)
+         * @param string $bucket    which counter the hit lands in, `chat`
+         */
         $limit = max(1, (int) apply_filters('alpaca_bot/rate_limit', self::PER_MINUTE, $userId, $bucket));
         $subject = $userId > 0 ? (string) $userId : 'ip_' . self::client();
         $key = sprintf('alpaca_bot_rl_%s_%s_%s', $bucket, $subject, gmdate('YmdHi', $now));

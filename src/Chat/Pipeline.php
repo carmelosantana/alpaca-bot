@@ -173,6 +173,19 @@ final class Pipeline
         // throw), so any exception out of this block is a turn that stored nothing: the post
         // made for it, if this turn made it, is taken back on the way out.
         try {
+            /**
+             * Filters the user's message before it joins the conversation and is sent. The first hook
+             * of a turn, ahead of `alpaca_bot/system_prompt`, so a system-prompt listener later sees
+             * the message it is prompting for. Return rewritten text to change what the model and the
+             * transcript get. Return '' to refuse a text-only turn: that throws (InvalidArgumentException,
+             * a 400 on the REST routes) without `alpaca_bot/chat/failed`, and stores nothing. Attached
+             * images are not filtered here and are sent as they are.
+             *
+             * @since 0.5.0
+             * @param string               $text         the message, trimmed
+             * @param Conversation         $conversation the conversation the turn joins, with its earlier turns; a new one is empty and has no id yet
+             * @param array<string, mixed> $options      the caller's turn options (`model`, `system`, `context`, `temperature`, `images`, `ephemeral`)
+             */
             $text = trim((string) apply_filters('alpaca_bot/message/before_send', $text, $conversation, $options));
             if ($text === '' && $images === []) {
                 throw new \InvalidArgumentException(__('The message is empty.', 'alpaca-bot'));
@@ -193,6 +206,18 @@ final class Pipeline
             $toolkits = $ephemeral ? [] : $this->toolkitsFor($userId, $model);
             $observer = null;
 
+            /**
+             * Fires when the turn is committed: the message is on the conversation, the system prompt
+             * and the site context are assembled, and the provider is about to be called. The stream
+             * route listens here to learn a new conversation's id before the first delta; a listener can
+             * start a timer or a log line against `$conversation->id`. Nothing is stored yet: the
+             * transcript is saved after `alpaca_bot/message/after_receive`, and a turn that fails ends in
+             * `alpaca_bot/chat/failed` instead.
+             *
+             * @since 0.5.0
+             * @param Conversation $conversation the conversation, holding the new user turn
+             * @param string       $model        the model id resolved for this turn
+             */
             do_action('alpaca_bot/chat/started', $conversation, $model);
             $started = microtime(true);
             $content = '';
@@ -269,6 +294,20 @@ final class Pipeline
             } catch (\Throwable $e) {
                 $streamEnded = true;
                 try {
+                    /**
+                     * Fires when the provider call (or the tool loop) failed before the reply finished, in
+                     * place of `alpaca_bot/message/after_receive` and `alpaca_bot/chat/completed`. The reply is
+                     * not stored (a tool turn that had already run tools keeps its partial transcript, so the
+                     * draft it made is traceable), and a conversation this turn created is deleted afterwards
+                     * unless a listener saved a turn onto it. A listener that throws does not replace the
+                     * provider error: that is rethrown as a RuntimeException with the listener's exception
+                     * chained behind it. The same action fires from settle() when the consumer abandons the
+                     * stream, with a RuntimeException saying so.
+                     *
+                     * @since 0.5.0
+                     * @param \Throwable   $e            what the provider or the tool loop threw
+                     * @param Conversation $conversation the conversation, with the user turn appended and no finished reply
+                     */
                     do_action('alpaca_bot/chat/failed', $e, $conversation);
                 } finally {
                     // Thrown from the finally so a listener that throws cannot replace the
@@ -303,6 +342,17 @@ final class Pipeline
             [],
             ['duration_ms' => $durationMs] + ($reasoning !== '' ? ['reasoning' => $reasoning] : []) + self::toolCallsMeta($observer?->toolCalls() ?? []),
         );
+        /**
+         * Filters the finished assistant reply before it is appended to the conversation, saved and
+         * metered. Return a Message to replace it (content rewritten, meta added); anything else is
+         * ignored and the original is kept, so a filter's mistake can never lose a reply. What is
+         * returned is what is stored and what the CLI and `POST /chat` return; the deltas already
+         * streamed to a client are not rewritten.
+         *
+         * @since 0.5.0
+         * @param Message      $reply        the assistant turn: content, model, token usage, and meta (duration, reasoning, tool calls)
+         * @param Conversation $conversation the conversation it will join
+         */
         $filtered = apply_filters('alpaca_bot/message/after_receive', $reply, $conversation);
         if ($filtered instanceof Message) {
             $reply = $filtered;
@@ -323,6 +373,17 @@ final class Pipeline
             'log_id' => $logId,
             'created' => $reply->created,
         ], $contexts);
+        /**
+         * Fires when a turn has finished and everything about it is stored: the conversation is
+         * saved (unless the turn was ephemeral), the usage receipt is recorded and
+         * `alpaca_bot/usage/recorded` has fired. The Result carries the conversation, the reply, the
+         * receipt and the context that was folded in; this is the place for analytics, a
+         * notification or a webhook. Listeners run inside the request, before the consumer gets the
+         * result, so anything slow belongs in a scheduled event.
+         *
+         * @since 0.5.0
+         * @param Result $result the finished turn
+         */
         do_action('alpaca_bot/chat/completed', $result);
         return $result;
     }
@@ -369,6 +430,17 @@ final class Pipeline
             return;
         }
         $this->storePartial($ephemeral, $userId, $conversation, $model, $content, $reasoning, $prompt, $completion, self::elapsedMs($started), $toolCalls);
+        /**
+         * Fires when the consumer stopped reading the stream before the reply finished (a client
+         * that disconnected mid-turn). Unlike the provider-failure site, what had arrived is already
+         * stored: the partial reply is on the conversation (meta `partial: true`) and a usage receipt
+         * covers the time and tokens spent, so the conversation stays. Nothing is thrown afterwards;
+         * the generator simply ends.
+         *
+         * @since 0.5.0
+         * @param \RuntimeException $e            says the stream was abandoned
+         * @param Conversation      $conversation the conversation, with the partial reply appended
+         */
         do_action(
             'alpaca_bot/chat/failed',
             new \RuntimeException('The stream was abandoned by the consumer before the reply finished.'),
@@ -690,6 +762,19 @@ final class Pipeline
         if ($system === '') {
             $system = (string) $this->store->get('chat.system_prompt');
         }
+        /**
+         * Filters the system prompt for a turn: the caller's `system` option, else the model's
+         * `system` override, else the `chat.system_prompt` setting. Fires after
+         * `alpaca_bot/message/before_send`, with the user's turn already on the conversation, so a
+         * listener can shape the prompt to the message, or to the user (`$conversation->userId`).
+         * Return '' for no system message. Site context collected for the turn is appended after
+         * this filter runs and is not affected by it; `alpaca_bot/context` is where that is edited.
+         *
+         * @since 0.5.0
+         * @param string       $system       the prompt as configured
+         * @param Conversation $conversation the conversation, its last message the new user turn
+         * @param string       $model        the model id for this turn
+         */
         return (string) apply_filters('alpaca_bot/system_prompt', $system, $c, $model);
     }
 

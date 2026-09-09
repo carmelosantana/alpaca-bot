@@ -209,6 +209,16 @@ final class Plugin
      */
     private function controllers(): array
     {
+        /**
+         * Filters the REST controllers registered under `alpaca-bot/v1`, on `rest_api_init`. Append
+         * a Rest\Controller subclass to get the namespace, the `alpaca_bot/capability/{route}`
+         * permission filters and the rate limit without writing them, or drop one of the plugin's
+         * to unregister its routes (each controller's docblock says what a site loses with it).
+         * Anything that is not a Controller is dropped rather than left to fatal inside register().
+         *
+         * @since 0.5.0
+         * @param list<Rest\Controller> $controllers the plugin's controllers
+         */
         $controllers = apply_filters('alpaca_bot/rest/controllers', [
             new Rest\ChatController($this->get(Chat\Pipeline::class)),
             new Rest\StreamController($this->get(Chat\Pipeline::class)),

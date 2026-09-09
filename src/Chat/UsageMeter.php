@@ -127,6 +127,17 @@ final class UsageMeter
             'log_id' => $logId,
             'created' => $now,
         ];
+        /**
+         * Fires after a usage receipt has been written for a turn (finished or partial) and folded
+         * into the user's and the site's cached month totals. The receipt is complete whatever the
+         * `privacy.usage_log` setting says: with the log off the stored row has no model or
+         * conversation id, but this action fires in-process and stores nothing, so a listener that
+         * keeps the full receipt somewhere is the site owner's choice to make. `log_id` is the
+         * receipt row's post id, 0 when the insert failed.
+         *
+         * @since 0.5.0
+         * @param array<string, int|string> $receipt `user_id`, `model`, `prompt_tokens`, `completion_tokens`, `total_tokens`, `duration_ms`, `conversation_id`, `log_id`, `created` (a UTC timestamp)
+         */
         do_action('alpaca_bot/usage/recorded', $receipt);
         return $logId;
     }

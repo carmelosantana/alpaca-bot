@@ -59,6 +59,18 @@ final class Registry
         $setting = $this->store->get('toolkits.enabled', []);
         $enabled = is_array($setting) ? $setting : [];
         $subset = array_filter($this->toolkits, static fn(string $id): bool => in_array($id, $enabled, true), ARRAY_FILTER_USE_KEY);
+        /**
+         * Filters the toolkits a user's turn may call, after the `toolkits.enabled` setting has
+         * chosen among the built-ins. The one way to give the model a toolkit the plugin did not
+         * ship (add `id => ToolkitInterface`), or to take one away for a user or a role. A toolkit
+         * added here never appears in Settings; gating it is the site's job, in code. An entry whose
+         * key is not a string or whose value is not a ToolkitInterface is dropped, and a return that
+         * is not an array enables nothing.
+         *
+         * @since 0.5.0
+         * @param array<string, ToolkitInterface> $toolkits the enabled built-ins, by id
+         * @param int                             $userId   the user whose turn it is
+         */
         $filtered = apply_filters('alpaca_bot/toolkits', $subset, $userId);
         $out = [];
         foreach (is_array($filtered) ? $filtered : [] as $id => $toolkit) {

@@ -69,6 +69,7 @@
         "test": "pest --colors=always",
         "test:integration": "bash bin/test-integration.sh",
         "analyse": "phpstan analyse --memory-limit=1G",
+        "docs:hooks": "@php bin/hooks-doc.php",
         "check": [
             "@analyse",
             "@test"

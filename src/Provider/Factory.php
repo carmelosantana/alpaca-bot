@@ -75,6 +75,19 @@ final class Factory
         // provider: a filter that wraps or replaces the provider sees whichever kind is selected.
         $provider = $this->usesWpAi() ? new WpAiClientProvider($model, $this->wpAi) : $this->ollama($model);
 
+        /**
+         * Filters the provider built for a model, whichever kind Settings selected (Ollama or the
+         * WordPress AI Client adapter): the extension point for another backend, or for wrapping
+         * this one with logging or a retry. The filter must return a ProviderInterface; anything else
+         * throws UnexpectedValueException, loudly, because a silent fallback would send a turn to a
+         * backend the site did not choose. Fires per make(), so once per turn and once per model
+         * listing.
+         *
+         * @since 0.5.0
+         * @param ProviderInterface $provider the provider as built from settings
+         * @param string            $model    the model id it was built for
+         * @param Store             $store    the plugin settings
+         */
         $filtered = apply_filters('alpaca_bot/provider', $provider, $model, $this->store);
         if (!$filtered instanceof ProviderInterface) {
             throw new \UnexpectedValueException('alpaca_bot/provider must return a ' . ProviderInterface::class . ', got ' . get_debug_type($filtered));
