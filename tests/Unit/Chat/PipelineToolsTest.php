@@ -651,6 +651,81 @@ it('recovers the answer without reflowing the answer around it: an indented code
         ->and($r->reply->content)->toContain("\n\n        run();");
 });
 
+it('keeps every byte of a segment that holds a marker-less faked call beside an indented code block', function (): void {
+    // The shape pass 2 exists for: prose and a call the template left no marker around, in one
+    // streamed segment (AgentStreamObserver::separated() joins an iteration's text to the next
+    // with a blank line). Cutting that segment at its blank lines to find the call must not cost
+    // the answer around it a single byte — the indentation of a four-space code block, and the
+    // blank line inside it, are the model's own and are what the user came for.
+    $code = "Here is the fix:\n\n    if (\$x) {\n\n        run();\n    }\n\nThat is all.";
+    $leak = "<tool_call>{\"name\": \"web_fetch\", \"arguments\": {\"url\": \"https://example.com\"}}</tool_call>\n\n"
+        . "{$code}\n\n{\"name\": \"done\", \"arguments\": {\"response\": \"Indent it by four spaces.\"}}";
+    $provider = agentProvider([[new Response($leak, ProviderFinishReason::Stop, usage: new Usage(2, 2, 4))]]);
+    $h = pipelineWith($provider, [], [], TOOL_MODEL, null, registryWith(['echo' => echoToolkit('echo_tool')]));
+
+    $r = $h->pipeline->complete(3, 'how do I indent?');
+
+    expect($r->reply->content)->toBe("{$code}\n\nIndent it by four spaces.")
+        ->and($r->reply->content)->toContain("\n\n        run();")
+        ->and($r->reply->content)->toContain("\n    if (\$x) {");
+});
+
+it('leaves an answer about tool calls whole, fenced JSON example and all, on the tools branch', function (): void {
+    // A reply explaining tool-call syntax carries a marker and a JSON object with a name, which
+    // is every trigger this has. Nothing may be rewritten: not the sentence the marker sits in,
+    // and not the fenced example. A fence is how a model *shows* a call; only a marker says it
+    // is making one, so a fenced block outside the markers is never read as a call.
+    $prose = "Tool calls look like <tool_call>.\n\nExample:\n\n```json\n"
+        . "{\"name\": \"web_fetch\", \"arguments\": {\"url\": \"https://example.com\"}}\n```\n\nThat's it.";
+    $provider = agentProvider([[new Response($prose, ProviderFinishReason::Stop, usage: new Usage(2, 2, 4))]]);
+    $h = pipelineWith($provider, [], [], TOOL_MODEL, null, registryWith(['echo' => echoToolkit('echo_tool')]));
+
+    expect($h->pipeline->complete(3, 'how do tool calls work?')->reply->content)->toBe($prose);
+});
+
+it('leaves the plain-turn prose whole on the tools branch too', function (): void {
+    // The fixture test 7 runs on the plain branch; the same string on the tools branch is the
+    // hazard, and it must come back byte for byte there as well.
+    $prose = "Write <tool_call>{\"name\": \"done\", \"arguments\": {\"response\": \"x\"}}</tool_call> to fake a call.";
+    $provider = agentProvider([[new Response($prose, ProviderFinishReason::Stop, usage: new Usage(2, 2, 4))]]);
+    $h = pipelineWith($provider, [], [], TOOL_MODEL, null, registryWith(['echo' => echoToolkit('echo_tool')]));
+
+    expect($h->pipeline->complete(3, 'how do models fake calls?')->reply->content)->toBe($prose);
+});
+
+it('gives back a done answer that is itself indented with its indentation on', function (): void {
+    // Trailing whitespace goes with the markup; leading whitespace is the answer's own. A model
+    // that buried a code block in a `done` response gets the code block back, not its left edge
+    // shaved off.
+    $answer = "    if (\$x) {\n        run();\n    }";
+    $leak = "Here:\n\n<tool_call>{\"name\": \"done\", \"arguments\": {\"response\": \"    if (\$x) {\\n        run();\\n    }  \"}}</tool_call>";
+    $provider = agentProvider([[new Response($leak, ProviderFinishReason::Stop, usage: new Usage(2, 2, 4))]]);
+    $h = pipelineWith($provider, [], [], TOOL_MODEL, null, registryWith(['echo' => echoToolkit('echo_tool')]));
+
+    expect($h->pipeline->complete(3, 'how do I indent?')->reply->content)->toBe("Here:\n\n{$answer}");
+});
+
+it('leaves a payload that names no call where the model put it', function (): void {
+    // `{"tool_calls": []}` decodes as a call payload and holds no call. Nothing was faked, so
+    // there is nothing to take out, and a block this reads but finds nothing in is the model's
+    // own text like any other.
+    $leak = "Hello.\n\n<tool_call>{\"tool_calls\": []}</tool_call>";
+    $provider = agentProvider([[new Response($leak, ProviderFinishReason::Stop, usage: new Usage(2, 2, 4))]]);
+    $h = pipelineWith($provider, [], [], TOOL_MODEL, null, registryWith(['echo' => echoToolkit('echo_tool')]));
+
+    expect($h->pipeline->complete(3, 'say hello')->reply->content)->toBe($leak);
+});
+
+it('leaves no blank line behind where the markup was the whole of the reply', function (): void {
+    // The blank lines the template wrapped the call in are the markup's, not the answer's: a
+    // reply must not open or close on the hole a recovery left.
+    $leak = "\n\n<tool_call>{\"name\": \"done\", \"arguments\": {\"response\": \"An alpaca is a camelid.\"}}</tool_call>\n\n";
+    $provider = agentProvider([[new Response($leak, ProviderFinishReason::Stop, usage: new Usage(2, 2, 4))]]);
+    $h = pipelineWith($provider, [], [], TOOL_MODEL, null, registryWith(['echo' => echoToolkit('echo_tool')]));
+
+    expect($h->pipeline->complete(3, 'what is an alpaca?')->reply->content)->toBe('An alpaca is a camelid.');
+});
+
 it('leaves a plain turn that mentions <tool_call> untouched, tools branch or not', function (): void {
     // The regression guard: recovery lives in the tools branch, and a turn with no toolkit runs
     // the plain provider stream, byte for byte what it was before any of this.

@@ -271,7 +271,11 @@ final class Pipeline
                     // The run is over and the accumulated text is what will be stored, shown and
                     // built into the receipt: the last moment to take back an answer the model
                     // wrote as a tool call instead of calling one (recovered(), which says why
-                    // this cannot be left to the provider's capability data).
+                    // this cannot be left to the provider's capability data). Only a turn that
+                    // reaches its return comes through here: a consumer that walks away is
+                    // settled from the finally below while this generator is still suspended in
+                    // the foreach, so an abandoned turn stores the raw leak, as it stores
+                    // whatever else had streamed.
                     $content = self::recovered($content);
                     $failure = self::failure($output, $observer);
                     if ($failure !== null) {
@@ -594,13 +598,13 @@ final class Pipeline
      * consumed it for a first call that did run properly through the API, and the raw text
      * leaked as well — a stray closing one, a second call with no markers at all, and two JSON
      * objects separated by a blank line, so json_decode() over the whole string is null. The
-     * content is therefore cut into candidate blocks (blocks(), which says where and why) and
-     * each is offered to the vendored LlamaCppToolCallParser alone: it decodes one payload, and
-     * reads a bare `{name, arguments}` as well as a `tool_calls` array, which is exactly the
-     * shape a template with no tool handling leaves behind. A block it reads is a faked call; a
-     * block it throws on is prose the model wrote, and is kept as the model wrote it.
+     * content is therefore searched for the byte ranges that are markup (markup(), which says
+     * how) and only those ranges are taken out of it; everything else is copied across
+     * verbatim, byte for byte, including the model's own indentation, its single newlines and
+     * the spacing between its paragraphs. This never rebuilds the reply out of trimmed pieces:
+     * a fix whose first rule is never losing text may not re-flow the text it keeps.
      *
-     * A faked `done` gives up its `response`, in the block's place. Every other faked call is
+     * A faked `done` gives up its `response`, in the markup's place. Every other faked call is
      * dropped and never executed: recovering text is one thing, running a tool the provider
      * never authorised through its own API is another. Nor is a recovered call added to
      * `meta['tool_calls']`, which stays the record of what the agent actually ran
@@ -610,14 +614,16 @@ final class Pipeline
      * run" — it would read as a call made and unanswered, which is a different event.
      *
      * Three ways out return `$content` byte for byte, since losing text is the one outcome this
-     * must never have: no block parsed as a call at all (prose that merely mentions the marker
-     * — the guard against mangling an answer *about* tool calls); a recovered `done` whose
+     * must never have: nothing in it was markup at all (prose that merely mentions the marker —
+     * the guard against mangling an answer *about* tool calls); a recovered `done` whose
      * `response` is missing or blank (nothing to put in its place, so nothing is taken away);
      * and a recovery that came to nothing (a faked call and no other text, where the raw JSON
-     * at least shows the user what happened and an empty bubble shows them nothing). Only once
-     * a call is recovered and something is left to show is the content rewritten, and then the
-     * kept blocks are rejoined with a blank line between them: what is normalised is the
-     * whitespace at the seam a call was cut out of, and nothing inside a block the model wrote.
+     * at least shows the user what happened and an empty bubble shows them nothing).
+     *
+     * The only whitespace this writes is at a seam. Markup taken out of the middle of a reply
+     * leaves the blank line that preceded it against the one that followed it, so the one after
+     * goes with it; and blank lines a removal leaves at the very top, along with trailing space,
+     * go at the end. Indentation on the first line that survives is the model's and stays.
      *
      * The deltas already streamed still carry the markup; suppressing it live is separate. The
      * front end replaces the assistant bubble wholesale when the turn ends (`POST /view/bubble`
@@ -630,75 +636,163 @@ final class Pipeline
         if (!str_contains($content, '<tool_call>') && !str_contains($content, '</tool_call>')) {
             return $content;
         }
-        $kept = [];
-        $recovered = false;
-        foreach (self::blocks($content) as [$block, $calls]) {
-            if ($calls === null) {
-                $kept[] = $block;
-                continue;
-            }
-            $recovered = true;
-            foreach ($calls as $call) {
-                if ($call->name !== DoneTool::NAME) {
-                    continue;
-                }
-                $response = $call->arguments['response'] ?? null;
-                if (!is_string($response) || trim($response) === '') {
-                    return $content;
-                }
-                $kept[] = trim($response);
-            }
-        }
-        if (!$recovered) {
+        $edits = self::excisions($content, self::markup($content));
+        if ($edits === null || $edits === []) {
             return $content;
         }
-        $reply = trim(implode("\n\n", $kept));
+        $reply = '';
+        $cursor = 0;
+        foreach ($edits as [$start, $end, $answer]) {
+            if ($start > $cursor) {
+                $reply .= substr($content, $cursor, $start - $cursor);
+            }
+            $cursor = max($cursor, $end);
+            if ($answer !== '') {
+                $reply .= $answer;
+                continue;
+            }
+            // The blank line before the hole belongs to the text that is staying; the one after
+            // it went with the markup. Only where a line had already ended, though — never after
+            // an answer just written in the markup's place, and never inside a line of prose.
+            if (($reply === '' || preg_match('~\R[^\S\r\n]*\z~', $reply) === 1)
+                && preg_match('~\A[^\S\r\n]*\R\s*~', substr($content, $cursor), $seam) === 1
+            ) {
+                $cursor += strlen($seam[0]);
+            }
+        }
+        $reply .= substr($content, $cursor);
+        $reply = rtrim((string) preg_replace('~\A(?:[^\S\r\n]*\R)+~', '', $reply));
         return $reply === '' ? $content : $reply;
     }
 
     /**
-     * The candidate blocks of a reply carrying a tool-call marker, in the order written, each
-     * with the faked calls it holds or null when it holds none.
+     * Every byte range of the reply that might be markup rather than the model's own words, in
+     * written order, each with the faked calls it holds or null when it is a marker.
      *
-     * Cut at every marker first, and each segment offered whole: the recorded leak's two calls
-     * are one segment each, since the blank line before the second is only leading whitespace
-     * to the parser. A segment that is not a payload is cut again at every blank line — that is
-     * what finds a call the template left no marker around at all, the shape the second half of
-     * the leak would have had if the first had not been marked either — but only if one of the
-     * pieces then is a call. Blank lines separate the paragraphs of an ordinary answer too, and
-     * a piece is trimmed, which would take the indentation off a fenced code block's first line
-     * after every blank line in it; a split that finds nothing to take out is therefore thrown
-     * away and the segment kept whole, as the model wrote it.
+     * Two passes. The content is cut at every marker first and each segment offered whole: the
+     * recorded leak's two calls are one segment each, since the blank line before the second is
+     * only leading whitespace to the parser. A segment that is not itself a payload is cut again
+     * at every blank line, which is what finds a call the template left no marker around at all
+     * — the shape the second half of the leak would have had if the first had not been marked
+     * either, and the shape a leak takes once AgentStreamObserver::separated() has joined the
+     * prose of one iteration to it. Only the pieces that parse are named here, and a name is a
+     * byte range: the rest of the segment is never read out and never rewritten, so cutting a
+     * segment that holds a call costs the answer around it nothing — not the indentation of a
+     * code block in it, not the blank line inside that block.
      *
-     * @return list<array{0: string, 1: list<ToolCall>|null}>
+     * A marker is named only when the segment on one side of it is a call. A marker that bounds
+     * no call is a marker the model wrote into its prose, and stays in it.
+     *
+     * A fenced block outside the markers is refused: the vendored parser strips a Markdown code
+     * fence and `arguments` is optional, so any fenced JSON object with a name would otherwise
+     * read as a call, and an answer explaining tool-call syntax would lose its own example. A
+     * fence is how a model *shows* a call; only a marker says it is making one, which is why
+     * the refusal is scoped to the second pass — inside the markers a fence is the call's own
+     * formatting and is read as one.
+     *
+     * @return list<array{0: int, 1: int, 2: list<ToolCall>|null}>
      */
-    private static function blocks(string $content): array
+    private static function markup(string $content): array
     {
-        $blocks = [];
-        foreach (preg_split('~</?tool_call>~', $content) ?: [] as $segment) {
-            $segment = trim($segment);
-            if ($segment === '') {
+        $segments = preg_split('~</?tool_call>~', $content, -1, PREG_SPLIT_OFFSET_CAPTURE) ?: [];
+        $calls = [];
+        foreach ($segments as [$text, $offset]) {
+            $calls[] = self::fakedCalls(trim($text));
+        }
+        $found = [];
+        $after = 0;
+        foreach ($segments as $i => [$text, $offset]) {
+            if ($i > 0 && ($calls[$i - 1] !== null || $calls[$i] !== null)) {
+                $found[] = [$after, $offset, null];
+            }
+            $after = $offset + strlen($text);
+            $whole = $calls[$i];
+            if ($whole !== null) {
+                $found[] = [$offset, $after, $whole];
                 continue;
             }
-            $calls = self::fakedCalls($segment);
-            if ($calls !== null) {
-                $blocks[] = [$segment, $calls];
-                continue;
-            }
-            $split = [];
-            $found = false;
-            foreach (preg_split('~\R[ \t]*\R~', $segment) ?: [] as $block) {
-                $block = trim($block);
-                if ($block === '') {
+            foreach (preg_split('~\R[ \t]*\R~', $text, -1, PREG_SPLIT_OFFSET_CAPTURE) ?: [] as [$piece, $at]) {
+                $block = trim($piece);
+                if (preg_match('~^```(?:json)?\s*.*?\s*```$~si', $block) === 1) {
                     continue;
                 }
-                $calls = self::fakedCalls($block);
-                $found = $found || $calls !== null;
-                $split[] = [$block, $calls];
+                $inside = self::fakedCalls($block);
+                if ($inside !== null) {
+                    $found[] = [$offset + $at, $offset + $at + strlen($piece), $inside];
+                }
             }
-            $blocks = array_merge($blocks, $found ? $split : [[$segment, null]]);
         }
-        return $blocks;
+        return $found;
+    }
+
+    /**
+     * The ranges that really are markup, each with what goes in its place — a faked `done`'s
+     * answer, or nothing at all for a faked call, which is dropped and never run. Null when a
+     * recovered `done` carried no answer, which calls the whole recovery off.
+     *
+     * Candidates are taken a run at a time: a call and the markers around it are one range as
+     * far as the reply is concerned, and the run has to stand on its own lines to be markup at
+     * all. A template leaking a call emits it between newlines; a call written inside a line of
+     * prose is a model writing *about* calls, and the line it sits in is the user's answer.
+     * Missing an inline leak costs the user nothing — the answer is still there to read, in the
+     * raw JSON that was not touched — where rewriting an inline mention costs them the sentence.
+     *
+     * @param list<array{0: int, 1: int, 2: list<ToolCall>|null}> $found
+     * @return list<array{0: int, 1: int, 2: string}>|null
+     */
+    private static function excisions(string $content, array $found): ?array
+    {
+        $edits = [];
+        $count = count($found);
+        $end = 0;
+        for ($i = 0; $i < $count; $i = $end) {
+            // One run: a call and the markers around it touch, byte to byte.
+            $end = $i + 1;
+            while ($end < $count && $found[$end][0] === $found[$end - 1][1]) {
+                $end++;
+            }
+            if (preg_match('~(?:\A|\R)[^\S\r\n]*\z~', substr($content, 0, $found[$i][0])) !== 1
+                || preg_match('~\A[^\S\r\n]*(?:\R|\z)~', substr($content, $found[$end - 1][1])) !== 1
+            ) {
+                continue;
+            }
+            for ($at = $i; $at < $end; $at++) {
+                [$start, $stop, $calls] = $found[$at];
+                $answer = $calls === null ? '' : self::answer($calls);
+                if ($answer === null) {
+                    return null;
+                }
+                $edits[] = [$start, $stop, $answer];
+            }
+        }
+        return $edits;
+    }
+
+    /**
+     * What a block of faked calls leaves behind: the answers the `done` calls in it carry, and
+     * the empty string when it carries none. Null when a `done` came with no answer at all —
+     * there is nothing to put in the block's place, so the recovery is off and the content
+     * stands as the model wrote it.
+     *
+     * Trailing whitespace goes with the markup; leading whitespace does not. A `done` whose
+     * answer is itself an indented block keeps the indentation of its first line.
+     *
+     * @param list<ToolCall> $calls
+     */
+    private static function answer(array $calls): ?string
+    {
+        $answers = [];
+        foreach ($calls as $call) {
+            if ($call->name !== DoneTool::NAME) {
+                continue;
+            }
+            $response = $call->arguments['response'] ?? null;
+            if (!is_string($response) || trim($response) === '') {
+                return null;
+            }
+            $answers[] = rtrim($response);
+        }
+        return implode("\n\n", $answers);
     }
 
     /**
@@ -707,17 +801,19 @@ final class Pipeline
      * reads the same way here — an empty payload, text that is not JSON, JSON that is not a
      * call, a call with no name or with arguments that are not an object — because each of them
      * says the same thing about the block: it is not a call, and it is not this method's to
-     * take out of the reply.
+     * take out of the reply. A payload the parser reads but finds no call in — `{"tool_calls":
+     * []}` — says it too: nothing was faked there, so there is nothing to take out.
      *
-     * @return list<ToolCall>|null
+     * @return non-empty-list<ToolCall>|null
      */
     private static function fakedCalls(string $block): ?array
     {
         try {
-            return array_values((new LlamaCppToolCallParser())->parse($block, 'json'));
+            $calls = array_values((new LlamaCppToolCallParser())->parse($block, 'json'));
         } catch (\Throwable) {
             return null;
         }
+        return $calls === [] ? null : $calls;
     }
 
     /**
