@@ -61,7 +61,7 @@ final class AgentShim
         $name = strtolower(trim((string) $a['name']));
         $url = trim((string) $a['url']);
         $length = trim((string) $a['length']);
-        $model = $this->chat->resolveModel(trim((string) $a['model']));
+        $model = $this->chat->authorModel(trim((string) $a['model']));
         if (!in_array($name, self::AGENTS, true)) {
             /* translators: %s: the name attribute as written */
             return $this->chat->notice(sprintf(__('[alpacabot_agent] has no agent named "%s"; it knows get and summarize.', 'alpaca-bot'), $name));

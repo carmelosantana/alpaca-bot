@@ -25,10 +25,10 @@ function shortcodeReply(string $text): array
     return [new Response($text, ProviderFinishReason::Stop), new Response('', ProviderFinishReason::Stop, usage: new Usage(5, 2, 7))];
 }
 
-/** The identity of `[alpacabot prompt="Say hi"]` with nothing else set, as the harness's site resolves it: its default model, no system prompt. */
+/** The identity of `[alpacabot prompt="Say hi"]` with nothing else set: no model named (the pipeline's choice is not recorded), and the harness's site has no system prompt. */
 function sayHiKey(int $postId = 7, int $cacheSeconds = 3600): string
 {
-    return Chat::cacheKey('alpacabot', ['prompt' => 'Say hi', 'model' => 'llama3.2', 'system' => '', 'temperature' => null], $postId, $cacheSeconds);
+    return Chat::cacheKey('alpacabot', ['prompt' => 'Say hi', 'model' => '', 'system' => '', 'temperature' => null], $postId, $cacheSeconds);
 }
 
 it('parses the attributes with their defaults, and only the word off switches the cache off', function (): void {
@@ -98,31 +98,62 @@ it('answers an editor through an ephemeral turn with the attributes as options, 
         ->and($h->stored[0][2])->toBe(3600);
 });
 
-it('keys the cache on the model and system prompt the site resolves, never on the viewer\'s own preference, so changing either changes the page', function (): void {
-    // Review M6: with no model= the pipeline fell back to the viewer's stored preference, and
-    // with no system= to chat.system_prompt, and neither was in the identity: the page's answer
-    // was whichever model the first editor to open it preferred, and editing the site prompt or
-    // its default model invalidated nothing. The page's answer is the page's: the site's model
-    // (the attribute where users may pick one, else the default) and the site's prompt, both in the key.
+it('keys the cache on the system prompt the site resolves and on the model the author named where the site honours it, and otherwise lets the pipeline pick the model as it would for a chat turn', function (): void {
+    // Review M6: with no system= the pipeline fell back to chat.system_prompt, and it was not
+    // in the identity, so editing the site prompt invalidated nothing. The site's prompt is in
+    // the key. The model is the pipeline's to choose when the author names none (the viewer's
+    // preference where users may change it, else the site's default through the catalog), and
+    // the key does not record it: the shortcode sends the pipeline no model it did not get from
+    // the author, and records none it did not send (re-review N1/N2 are what recording the
+    // stored default cost).
     $provider = pipelineProvider(shortcodeReply('Answer'), $call);
-    $h = pipelineWith($provider, ['chat.system_prompt' => 'Site prompt', 'models.default' => 'llama3.2'], catalog: ['llama3.2', 'mistral']);
+    // The pipeline is given the per-user preferences here, as Plugin builds it (the harness's
+    // default is the CLI's, none), so the viewer's own model is a real premise, not a stub nothing reads.
+    $h = pipelineWith($provider, ['chat.system_prompt' => 'Site prompt', 'models.default' => 'llama3.2'], catalog: ['llama3.2', 'mistral'], prefs: new AlpacaBot\Chat\UserPrefs());
     $chat = shortcodeChat($h, 7);
     shortcodeViewer(3);
-    // The viewer prefers another listed model, and users may change it: the page still gets the site's.
+    // The viewer prefers another listed model, and users may change it: the turn runs on it, as their chat would.
     Functions\when('get_user_meta')->justReturn('mistral');
     $chat->render(['prompt' => 'Say hi'], null, 'alpacabot');
-    expect($h->model)->toBe('llama3.2')
+    expect($h->model)->toBe('mistral')
         ->and($call['messages'][0]->content())->toBe('Site prompt')
-        ->and($h->stored[0][0])->toBe(Chat::cacheKey('alpacabot', ['prompt' => 'Say hi', 'model' => 'llama3.2', 'system' => 'Site prompt', 'temperature' => null], 7, 3600))
+        ->and($h->stored[0][0])->toBe(Chat::cacheKey('alpacabot', ['prompt' => 'Say hi', 'model' => '', 'system' => 'Site prompt', 'temperature' => null], 7, 3600))
         ->and($h->stored[0][0])->not->toBe(Chat::cacheKey('alpacabot', ['prompt' => 'Say hi', 'model' => 'mistral', 'system' => 'Site prompt', 'temperature' => null], 7, 3600))
-        ->and($h->stored[0][0])->not->toBe(Chat::cacheKey('alpacabot', ['prompt' => 'Say hi', 'model' => 'llama3.2', 'system' => 'Another prompt', 'temperature' => null], 7, 3600));
-    // Where users may not change the model, a model= attribute is not honoured, and the identity says what was used, not what was asked.
+        ->and($h->stored[0][0])->not->toBe(Chat::cacheKey('alpacabot', ['prompt' => 'Say hi', 'model' => '', 'system' => 'Another prompt', 'temperature' => null], 7, 3600));
+    // Where users may not change the model, a model= attribute is not honoured: the pipeline
+    // resolves it as it would with none, and the identity says none was honoured, not what was asked.
     $h = pipelineWith(pipelineProvider(shortcodeReply('Answer')), ['chat.user_can_change_model' => false], catalog: ['llama3.2', 'mistral']);
     $chat = shortcodeChat($h, 7);
     shortcodeViewer(3);
     $chat->render(['prompt' => 'Say hi', 'model' => 'mistral'], null, 'alpacabot');
     expect($h->model)->toBe('llama3.2')
         ->and($h->stored[0][0])->toBe(sayHiKey());
+});
+
+it('answers on the catalog\'s fallback when the stored default model is one the provider no longer lists, as every other surface does, and records no model the author did not name', function (): void {
+    // Re-review N1: fix round 1 sent the stored `models.default` to the pipeline as an explicit
+    // model, and Pipeline::model() refuses an explicit model the catalog does not list, so a
+    // default the provider had since dropped turned every shortcode on the site into "not
+    // available" while the chat screen, REST and the CLI kept answering through
+    // ModelCatalog::defaultId()'s grace. With no model= the pipeline resolves the model as it
+    // does for a chat turn, and the identity says the author named none.
+    $h = pipelineWith(pipelineProvider(shortcodeReply('Answer')), ['models.default' => 'gone-model'], catalog: ['llama3.2', 'mistral']);
+    $chat = shortcodeChat($h, 7);
+    shortcodeViewer(3);
+    $html = $chat->render(['prompt' => 'Say hi'], null, 'alpacabot');
+    expect($html)->not->toContain('not available')->toContain('class="alpaca-bot-answer"')
+        ->and($h->model)->toBe('llama3.2')
+        ->and($h->stored[0][0])->toBe(sayHiKey());
+    // Re-review N2, the mirror: with users unable to change the model the pipeline ignored the
+    // option and ran on the catalog's default, while the key named the stored setting, a model
+    // the turn did not run on. The key never names a model the author did not write.
+    $h = pipelineWith(pipelineProvider(shortcodeReply('Answer')), ['models.default' => 'gone-model', 'chat.user_can_change_model' => false], catalog: ['llama3.2', 'mistral']);
+    $chat = shortcodeChat($h, 7);
+    shortcodeViewer(3);
+    $chat->render(['prompt' => 'Say hi'], null, 'alpacabot');
+    expect($h->model)->toBe('llama3.2')
+        ->and($h->stored[0][0])->toBe(sayHiKey())
+        ->and($h->stored[0][0])->not->toBe(Chat::cacheKey('alpacabot', ['prompt' => 'Say hi', 'model' => 'gone-model', 'system' => '', 'temperature' => null], 7, 3600));
 });
 
 it('serves a cached answer to an editor without building a provider', function (): void {

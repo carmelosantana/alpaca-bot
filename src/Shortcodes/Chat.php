@@ -128,10 +128,12 @@ final class Chat
         if ($a['prompt'] === '') {
             return $this->shell();
         }
-        $model = $this->resolveModel($a['model']);
-        // The identity is what will shape the text: the model and system prompt the site
-        // resolves, not the attributes as written, so a `model=` the site does not honour, or
-        // a default the administrator changes, is a different entry (or the same one).
+        $model = $this->authorModel($a['model']);
+        // The identity is what will shape the text, as far as this can know it without asking
+        // the catalog: the author's model where the site honours it (else that none was named,
+        // authorModel()), and the system prompt the site resolves, so a `model=` the site does
+        // not honour and none are the same entry, and a site prompt the administrator edits is
+        // a new one.
         $identity = [
             'prompt' => $a['prompt'],
             'model' => $model,
@@ -210,22 +212,30 @@ final class Chat
     }
 
     /**
-     * The model a shortcode's turn runs on, which is the page's, not the viewer's: the `model`
-     * attribute where the site lets users pick one (the rule the pipeline applies to it), else
-     * the site's default model setting. Given no model, the pipeline falls back to the viewer's
-     * own stored preference, and the page's answer would then be whichever model the first
-     * editor to open it prefers. It is the stored setting rather than the catalog's resolution
-     * of it because the catalog discovers over the network when it is cold, and this runs for a
-     * visitor's view too, which must cost nothing (a site with no default set is left to the
-     * pipeline's own resolution, and the identity records that nothing was set). Public for
-     * the shim, whose `model` attribute is the same attribute.
+     * The model the author named, where the site honours it: the `model` attribute while
+     * `chat.user_can_change_model` is on (the rule the pipeline applies to the option), else ''.
+     * That is the only model a shortcode sends the pipeline, and the only one the cache
+     * identity records. Given none, the pipeline resolves the model as it does for a chat turn:
+     * the viewer's own stored preference where users may change it, else the site's default
+     * with the catalog's grace (ModelCatalog::defaultId(): a default the provider has since
+     * dropped falls back to the first listed model rather than refusing every turn), and the
+     * identity records that none was named, never a model the turn may not have run on.
+     *
+     * Not the stored `models.default`, sent as an explicit option: the pipeline holds an
+     * explicit model strictly to the catalog, so a default the provider dropped refused every
+     * shortcode on the site while the chat screen, REST and the CLI kept answering. Not the
+     * catalog's resolution either, because the catalog discovers over the network when it is
+     * cold, and this runs for a visitor's view too, which must cost nothing. The cost, said in
+     * the README: with no `model=` the page's answer runs on whichever model the editor who
+     * primed it runs on, and changing the site's default model does not start a new answer.
+     * Public for the shim, whose `model` attribute is the same attribute.
      */
-    public function resolveModel(string $requested): string
+    public function authorModel(string $requested): string
     {
         if ($requested !== '' && (bool) $this->store->get('chat.user_can_change_model')) {
             return $requested;
         }
-        return trim((string) $this->store->get('models.default'));
+        return '';
     }
 
     /**

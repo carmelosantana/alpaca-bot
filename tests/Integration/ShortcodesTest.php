@@ -70,8 +70,6 @@ final class ShortcodesTest extends TestCase
     {
         $this->asAdmin();
         $this->fakeProvider();
-        // The site's default model, as an administrator sets it: the identity is that setting.
-        Plugin::instance()->get(Store::class)->set('models.default', 'fake-model');
         $built = $this->countProviders();
         $post = self::factory()->post->create(['post_content' => '[alpacabot prompt="x"]']);
         $this->go_to(get_permalink($post));
@@ -90,9 +88,30 @@ final class ShortcodesTest extends TestCase
         // the unit tests pin, since a timed transient is not autoloaded.)
         $this->assertStringContainsString('fake reply', do_shortcode('[alpacabot prompt="x"]'));
         $this->assertSame(1, $built());
-        // The identity is what the site resolved: its default model setting and its system prompt, with the duration.
-        $this->assertSame('fake reply', get_transient(Chat::cacheKey('alpacabot', ['prompt' => 'x', 'model' => 'fake-model', 'system' => (string) Plugin::instance()->get(Store::class)->get('chat.system_prompt'), 'temperature' => null], $post, 3600)));
+        // The identity: no model named (the pipeline's choice is not recorded), the site's system prompt, the duration.
+        $this->assertSame('fake reply', get_transient(Chat::cacheKey('alpacabot', ['prompt' => 'x', 'model' => '', 'system' => (string) Plugin::instance()->get(Store::class)->get('chat.system_prompt'), 'temperature' => null], $post, 3600)));
         $this->assertSame(1, $this->shortcodeTransients());
+    }
+
+    public function test_a_default_model_the_provider_no_longer_lists_still_gets_an_answer(): void
+    {
+        // Re-review N1: the fake provider lists only `fake-model`; the administrator's stored
+        // default names one it dropped. The chat screen answers on the catalog's fallback, and
+        // so must the page, rather than refusing every shortcode on the site.
+        $this->asAdmin();
+        $this->fakeProvider();
+        Plugin::instance()->get(Store::class)->set('models.default', 'gone-model');
+        $built = $this->countProviders();
+        $post = self::factory()->post->create(['post_content' => '[alpacabot prompt="x"]']);
+        $this->go_to(get_permalink($post));
+        $html = do_shortcode('[alpacabot prompt="x"]');
+        $this->assertStringNotContainsString('not available', $html);
+        $this->assertStringContainsString('fake reply', $html);
+        $this->assertSame(1, $built());
+        // An author's own model= that the provider does not list is still refused, before any provider is built.
+        $html = do_shortcode('[alpacabot prompt="x" model="gone-model"]');
+        $this->assertStringContainsString('Model &quot;gone-model&quot; is not available.', $html);
+        $this->assertSame(1, $built());
     }
 
     public function test_an_overflowing_cache_attribute_is_held_to_a_year_rather_than_fataling_the_page(): void

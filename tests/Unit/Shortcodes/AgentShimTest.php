@@ -60,11 +60,11 @@ it('maps name=summarize url=… to a prompt that begins with Summarize over the 
         // The hint names the replacement, which begins the same way, and never names the reserved major version.
         ->and($message)->toContain('[alpacabot prompt="Summarize')->toContain('0.5.0')->not->toMatch('/(?<![\d.])1\.\d/');
     // Ephemeral: a receipt, no conversation; cached under the shim's own tag, the post, the
-    // duration and the model the site resolved (no model= means the site's default).
+    // duration and the model the author named (none here: the pipeline's choice is not recorded).
     expect(array_map(static fn(array $w): array => [$w[0], $w[1]], $h->writes))->toBe([['wp_insert_post', 'chat_log']])
         ->and($h->model)->toBe('llama3.2')
         ->and($h->stored)->toHaveCount(1)
-        ->and($h->stored[0][0])->toBe(Chat::cacheKey('alpacabot_agent', ['name' => 'summarize', 'url' => 'https://example.test/a', 'length' => '2 sentences', 'model' => 'llama3.2'], 7, 3600))
+        ->and($h->stored[0][0])->toBe(Chat::cacheKey('alpacabot_agent', ['name' => 'summarize', 'url' => 'https://example.test/a', 'length' => '2 sentences', 'model' => ''], 7, 3600))
         ->and($h->stored[0][1])->toBe('A **summary**.')
         ->and($h->stored[0][2])->toBe(3600);
 });
