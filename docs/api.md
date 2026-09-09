@@ -593,8 +593,10 @@ data: {"conversation_id":169,"message":{"role":"assistant","content":"orange","m
 
 A `delta` frame may be wholly empty — `{"text":"","reasoning":""}` — and an empty one may
 arrive before any text at all, including as the very first `delta` of a turn. That is not a bug
-to guard against: on a turn that calls tools the server writes one immediately before each tool
-call, as the heartbeat that bounds an abandoned turn. The stream keeps running when the client
+to guard against: on a turn that calls tools the server writes one per tool call, all of them
+before any tool of that iteration runs, as the heartbeat that bounds an abandoned turn. An
+iteration that calls three tools therefore sends three empty `delta` frames back to back, not
+one between each pair of tools. The stream keeps running when the client
 goes away and the server learns of it only from a write that fails, so an iteration that calls a
 tool with no text before it would otherwise leave nothing to write, and the tool's side effect
 (a draft created) would land with the tab already closed. Append the empty strings and render
