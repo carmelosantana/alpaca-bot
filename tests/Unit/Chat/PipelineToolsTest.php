@@ -527,6 +527,143 @@ it('replays the stored history to the agent, bounded to chat.context_messages, u
         ->and($calls[0]['messages'][0]->content())->toContain('Site')->toContain('Rules.');
 });
 
+// A model whose deployed Ollama template cannot really call tools is still offered them (the
+// provider advertises `tools` for a template that is a bare `{{ .Prompt }}` passthrough), so it
+// writes the call it was asked for as prose. The endpoint returns that as ordinary assistant
+// content, it streams as text, and when the faked call is the agent's own `done` the user's
+// whole answer is inside its `response` argument and never reaches the bubble. The pipeline
+// recovers it after the run, before anything is stored. Capability data cannot discriminate,
+// so recovery is not optional; the live deltas still carry the markup (a separate item) and
+// the front end replaces the bubble wholesale on `done`, so the stored reply is what shows.
+
+/** The verbatim leak recorded on alpaca10.wp.test from qwen3-vl:2b, 2026-09-09. */
+function fakedToolCallLeak(): string
+{
+    return (string) file_get_contents(__DIR__ . '/../../fixtures/faked-tool-call-qwen3-vl-2b.txt');
+}
+
+it('recovers the answer a faked done call buried in its own JSON, from the recorded leak', function (): void {
+    $leak = fakedToolCallLeak();
+    // The recorded shape, which is why a parser handed the whole string gets null: the opening
+    // marker was eaten by the template (the first call did run, through the API), only the
+    // stray closing one leaked, the second block carries no markers at all, and there are two
+    // JSON objects in the one string.
+    expect($leak)->toContain('</tool_call>')
+        ->and(str_contains($leak, '<tool_call>'))->toBeFalse()
+        ->and(json_decode($leak, true))->toBeNull();
+
+    $toolkit = echoToolkit('web_fetch', 'Use it.', static fn(array $a): ToolResult => ToolResult::success('Alpaca - Wikipedia'));
+    $provider = agentProvider([
+        // The call the provider really made, through its own API: it runs, and it is the one
+        // record on the reply.
+        [new Response('', ProviderFinishReason::ToolUse, [new ToolCall('c1', 'web_fetch', ['text' => 'https://en.wikipedia.org/wiki/Alpaca'])], usage: new Usage(3, 1, 4))],
+        // The next turn, where the same model wrote its calls as text instead.
+        [new Response($leak, ProviderFinishReason::Stop, usage: new Usage(4, 2, 6))],
+    ]);
+    $h = pipelineWith($provider, [], [], TOOL_MODEL, null, registryWith(['fetch' => $toolkit]));
+    Actions\expectDone('alpaca_bot/chat/failed')->never();
+
+    $r = $h->pipeline->complete(3, 'In one sentence, what is an alpaca?');
+
+    expect($r->reply->content)->toBe('An alpaca (Lama pacos) is a domesticated species of South American camelid, traditionally bred for their valuable fiber in the textile industry.')
+        ->not->toContain('tool_call')
+        ->not->toContain('{"name"')
+        ->not->toContain('web_fetch')
+        // The record says what actually ran, once: the API call the agent made. The leaked
+        // web_fetch is the same call written out as prose, and listing it again would tell the
+        // reader of the transcript that a fetch was attempted twice.
+        ->and($r->reply->meta['tool_calls'])->toBe([['name' => 'web_fetch', 'arguments' => ['text' => 'https://en.wikipedia.org/wiki/Alpaca'], 'result_excerpt' => 'Alpaca - Wikipedia', 'ok' => true]])
+        ->and($h->writes[1][2][1]['content'])->toBe($r->reply->content);
+});
+
+it('recovers a well-formed faked done call, markers and all, and drops the markup around it', function (): void {
+    $leak = "Let me answer that.\n\n<tool_call>\n{\"name\": \"done\", \"arguments\": {\"response\": \"An alpaca is a camelid.\"}}\n</tool_call>";
+    $provider = agentProvider([[new Response($leak, ProviderFinishReason::Stop, usage: new Usage(2, 2, 4))]]);
+    $h = pipelineWith($provider, [], [], TOOL_MODEL, null, registryWith(['echo' => echoToolkit('echo_tool')]));
+
+    $r = $h->pipeline->complete(3, 'what is an alpaca?');
+
+    // The prose the model wrote before the faked call is its own and is kept; the call is not.
+    expect($r->reply->content)->toBe("Let me answer that.\n\nAn alpaca is a camelid.")
+        ->and($r->reply->meta)->toBe(['duration_ms' => $r->receipt['duration_ms']]);
+});
+
+it('strips a faked call that is not done from the reply and never executes it', function (): void {
+    $ran = 0;
+    $toolkit = echoToolkit('draft_post', 'Use it.', static function (array $a) use (&$ran): ToolResult {
+        $ran++;
+        return ToolResult::success('{"id": 225}');
+    });
+    $leak = "I will draft that for you.\n\n<tool_call>{\"name\": \"draft_post\", \"arguments\": {\"text\": \"Hello\"}}</tool_call>\n\nDone.";
+    $provider = agentProvider([[new Response($leak, ProviderFinishReason::Stop, usage: new Usage(2, 2, 4))]]);
+    $h = pipelineWith($provider, [], [], TOOL_MODEL, null, registryWith(['draft' => $toolkit]));
+
+    $r = $h->pipeline->complete(3, 'draft it');
+
+    // Recovering text is one thing; running a tool the provider never authorised through its
+    // own API is another. The markup goes, the tool does not run, and nothing on the reply
+    // claims it did.
+    expect($r->reply->content)->toBe("I will draft that for you.\n\nDone.")
+        ->and($ran)->toBe(0)
+        ->and($r->reply->meta)->toBe(['duration_ms' => $r->receipt['duration_ms']]);
+});
+
+it('leaves prose that merely mentions <tool_call> exactly as the model wrote it', function (): void {
+    $prose = "A model without a tools template writes <tool_call> markers into its answer.\n\nThey look like this: <tool_call>...</tool_call>, and they are not calls at all.";
+    $provider = agentProvider([[new Response($prose, ProviderFinishReason::Stop, usage: new Usage(2, 2, 4))]]);
+    $h = pipelineWith($provider, [], [], TOOL_MODEL, null, registryWith(['echo' => echoToolkit('echo_tool')]));
+
+    $r = $h->pipeline->complete(3, 'explain the markers');
+
+    // Nothing between the markers decoded as a call, so nothing was recovered and not one byte
+    // of the answer is rewritten.
+    expect($r->reply->content)->toBe($prose);
+});
+
+it('keeps the whole leak when the faked done call carries no answer, rather than storing an empty reply', function (): void {
+    foreach (['{"name": "done", "arguments": {"response": ""}}', '{"name": "done", "arguments": {}}'] as $call) {
+        $leak = "<tool_call>{$call}</tool_call>";
+        $provider = agentProvider([[new Response($leak, ProviderFinishReason::Stop, usage: new Usage(2, 2, 4))]]);
+        $h = pipelineWith($provider, [], [], TOOL_MODEL, null, registryWith(['echo' => echoToolkit('echo_tool')]));
+
+        // There is no answer to recover, so recovery is off: whatever the model sent survives
+        // verbatim and the user can at least see what happened. Losing text is the one outcome
+        // this must never have.
+        expect($h->pipeline->complete(3, 'answer')->reply->content)->toBe($leak);
+    }
+});
+
+it('recovers the answer without reflowing the answer around it: an indented code block keeps its indentation', function (): void {
+    // Recovery cuts a segment at its blank lines to find a call the template left no marker
+    // around, and a piece of that cut is trimmed. An ordinary answer is separated by blank
+    // lines too, so cutting one that holds no call would take the indentation off every line of
+    // a code block that follows one — text lost to a fix whose whole point is not losing text.
+    // The cut is kept only where it finds a call; here it finds none in the prose, and the
+    // marked call it does find is a segment of its own.
+    $code = "Here is the fix:\n\n    if (\$x) {\n\n        run();\n    }\n\nThat is all.";
+    $leak = "{$code}\n\n<tool_call>{\"name\": \"done\", \"arguments\": {\"response\": \"Indent it by four spaces.\"}}</tool_call>";
+    $provider = agentProvider([[new Response($leak, ProviderFinishReason::Stop, usage: new Usage(2, 2, 4))]]);
+    $h = pipelineWith($provider, [], [], TOOL_MODEL, null, registryWith(['echo' => echoToolkit('echo_tool')]));
+
+    $r = $h->pipeline->complete(3, 'how do I indent?');
+
+    expect($r->reply->content)->toBe("{$code}\n\nIndent it by four spaces.")
+        ->and($r->reply->content)->toContain("\n\n        run();");
+});
+
+it('leaves a plain turn that mentions <tool_call> untouched, tools branch or not', function (): void {
+    // The regression guard: recovery lives in the tools branch, and a turn with no toolkit runs
+    // the plain provider stream, byte for byte what it was before any of this.
+    $prose = "Write <tool_call>{\"name\": \"done\", \"arguments\": {\"response\": \"x\"}}</tool_call> to fake a call.";
+    $h = pipelineWith(pipelineProvider([new Response($prose, ProviderFinishReason::Stop, usage: new Usage(1, 1, 2))], $call), [], [], TOOL_MODEL, null, registryWith([]));
+
+    $r = $h->pipeline->complete(3, 'how do models fake calls?');
+
+    expect($r->reply->content)->toBe($prose)
+        ->and($call['tools'])->toBe([])
+        ->and($r->reply->meta)->toBe(['duration_ms' => $r->receipt['duration_ms']]);
+});
+
 // Pipeline::failure() decides whether an Error finish is a failure to raise or a tool's own
 // stop to show. It is private and static, and the two Outputs that separate the cases cannot
 // both be produced through a real agent run (the unannounced-failure one does not exist in

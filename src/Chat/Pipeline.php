@@ -23,6 +23,9 @@ use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Message\AssistantMessage;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Message\Conversation as AgentConversation;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Message\SystemMessage;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Message\UserMessage;
+use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Provider\LlamaCpp\LlamaCppToolCallParser;
+use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Tool\DoneTool;
+use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Tool\ToolCall;
 
 /**
  * Turns one user message into a streamed model reply: enforces the caps, resolves the model and
@@ -73,19 +76,23 @@ use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Message\UserMessage;
  * behind) is the same code. The model gets the same generation options a plain turn sends
  * (Provider\BoundOptionsProvider), the text streams as it is produced (agentTurn() says how),
  * and the stored reply carries `meta['tool_calls']`, one `{name, arguments, result_excerpt,
- * ok}` per call. One departure from the plain path's "a failed turn persists nothing": a
- * provider failure after a tool has already run keeps the turn, stored as an abandoned one is
- * (the partial reply with its `tool_calls`, a receipt for the calls made), and then fails it
- * the same way (`chat/failed`, `Provider error: ...`). Every tool call is recorded on the
- * transcript (the spec's rule), and a draft the run created is in the user's posts whether
- * or not the reply finished; the record is how they learn of it. A failure before any tool
- * ran persists nothing, as a plain one does. The usage metered is the whole run:
- * Output::$usage is the sum over every provider call the agent made, so a turn that took
- * three calls is billed three calls' tokens against the cap; a turn the consumer abandons is
- * billed the calls it had completed by then (the provider decorator's running tally). An
- * ephemeral turn runs plainly, tools or no tools: its one caller is a tool wanting a text
- * condensed, and an agent inside a tool inside an agent would be a recursion with no bound
- * but each level's iteration budget.
+ * ok}` per call. The stored reply is the one thing on this branch that can differ from what
+ * streamed: a model whose template cannot really call tools writes the call as prose, and when
+ * the faked call is `done` the whole answer is inside it, so the reply is recovered from it
+ * before anything is stored (recovered(), which says how, and why the provider's capability
+ * data cannot be trusted to tell such a model apart). One departure from the plain path's "a
+ * failed turn persists nothing": a provider failure after a tool has already run keeps the
+ * turn, stored as an abandoned one is (the partial reply with its `tool_calls`, a receipt for
+ * the calls made), and then fails it the same way (`chat/failed`, `Provider error: ...`).
+ * Every tool call is recorded on the transcript (the spec's rule), and a draft the run created
+ * is in the user's posts whether or not the reply finished; the record is how they learn of
+ * it. A failure before any tool ran persists nothing, as a plain one does. The usage metered
+ * is the whole run: Output::$usage is the sum over every provider call the agent made, so a
+ * turn that took three calls is billed three calls' tokens against the cap; a turn the
+ * consumer abandons is billed the calls it had completed by then (the provider decorator's
+ * running tally). An ephemeral turn runs plainly, tools or no tools: its one caller is a tool
+ * wanting a text condensed, and an agent inside a tool inside an agent would be a recursion
+ * with no bound but each level's iteration budget.
  */
 final class Pipeline
 {
@@ -261,6 +268,11 @@ final class Pipeline
                         // The nudged attempts' thoughts go with it; the user saw them stream.
                         $reasoning = '';
                     }
+                    // The run is over and the accumulated text is what will be stored, shown and
+                    // built into the receipt: the last moment to take back an answer the model
+                    // wrote as a tool call instead of calling one (recovered(), which says why
+                    // this cannot be left to the provider's capability data).
+                    $content = self::recovered($content);
                     $failure = self::failure($output, $observer);
                     if ($failure !== null) {
                         // The agent swallowed the provider's throw; raising it here puts it on the
@@ -558,6 +570,154 @@ final class Pipeline
         return $announced !== null && $announced !== ''
             ? $announced
             : __('The run ended in an error the assistant did not report.', 'alpaca-bot');
+    }
+
+    /**
+     * The reply with a faked tool call taken back out of it, and the answer a faked `done`
+     * buried in its `response` argument given back as the reply.
+     *
+     * Ollama advertises `tools` for a model whose deployed template is a bare `{{ .Prompt }}`
+     * passthrough: no roles, no `.Tools`, nothing that parses a call back out. Offered tools,
+     * such a model writes the call it was asked for as prose; the OpenAI-compatible endpoint
+     * returns it as ordinary assistant content, and it arrives here as text. When the faked
+     * call is the agent's own `done`, the user's entire answer is inside its `response` and
+     * never reaches the bubble. Detection cannot close that: the capability the provider
+     * reports is the thing that is wrong, and what fails is the deployed template, not the
+     * parameter count (a 2B with a proper template works; a 27B with `{{ .Prompt }}` fails
+     * identically), so this runs on the content whatever the catalogue said about the model.
+     *
+     * The marker is the trigger and the only one: content carrying neither `<tool_call>` nor
+     * `</tool_call>` is returned untouched, and a plain answer never goes near a JSON parser.
+     *
+     * What the markers hold is not one payload. The recorded leak (qwen3-vl:2b, kept verbatim
+     * as tests/fixtures/faked-tool-call-qwen3-vl-2b.txt) has no *opening* marker — the template
+     * consumed it for a first call that did run properly through the API, and the raw text
+     * leaked as well — a stray closing one, a second call with no markers at all, and two JSON
+     * objects separated by a blank line, so json_decode() over the whole string is null. The
+     * content is therefore cut into candidate blocks (blocks(), which says where and why) and
+     * each is offered to the vendored LlamaCppToolCallParser alone: it decodes one payload, and
+     * reads a bare `{name, arguments}` as well as a `tool_calls` array, which is exactly the
+     * shape a template with no tool handling leaves behind. A block it reads is a faked call; a
+     * block it throws on is prose the model wrote, and is kept as the model wrote it.
+     *
+     * A faked `done` gives up its `response`, in the block's place. Every other faked call is
+     * dropped and never executed: recovering text is one thing, running a tool the provider
+     * never authorised through its own API is another. Nor is a recovered call added to
+     * `meta['tool_calls']`, which stays the record of what the agent actually ran
+     * (AgentStreamObserver): the leaked call in the fixture is a copy of one already on that
+     * record, so listing it again would tell a reader of the transcript that a fetch was
+     * attempted twice, and the record's `{result_excerpt, ok}` has no way to say "written, not
+     * run" — it would read as a call made and unanswered, which is a different event.
+     *
+     * Three ways out return `$content` byte for byte, since losing text is the one outcome this
+     * must never have: no block parsed as a call at all (prose that merely mentions the marker
+     * — the guard against mangling an answer *about* tool calls); a recovered `done` whose
+     * `response` is missing or blank (nothing to put in its place, so nothing is taken away);
+     * and a recovery that came to nothing (a faked call and no other text, where the raw JSON
+     * at least shows the user what happened and an empty bubble shows them nothing). Only once
+     * a call is recovered and something is left to show is the content rewritten, and then the
+     * kept blocks are rejoined with a blank line between them: what is normalised is the
+     * whitespace at the seam a call was cut out of, and nothing inside a block the model wrote.
+     *
+     * The deltas already streamed still carry the markup; suppressing it live is separate. The
+     * front end replaces the assistant bubble wholesale when the turn ends (`POST /view/bubble`
+     * with the stored reply), so what this returns is what the user is left reading.
+     *
+     * @since 0.5.0
+     */
+    private static function recovered(string $content): string
+    {
+        if (!str_contains($content, '<tool_call>') && !str_contains($content, '</tool_call>')) {
+            return $content;
+        }
+        $kept = [];
+        $recovered = false;
+        foreach (self::blocks($content) as [$block, $calls]) {
+            if ($calls === null) {
+                $kept[] = $block;
+                continue;
+            }
+            $recovered = true;
+            foreach ($calls as $call) {
+                if ($call->name !== DoneTool::NAME) {
+                    continue;
+                }
+                $response = $call->arguments['response'] ?? null;
+                if (!is_string($response) || trim($response) === '') {
+                    return $content;
+                }
+                $kept[] = trim($response);
+            }
+        }
+        if (!$recovered) {
+            return $content;
+        }
+        $reply = trim(implode("\n\n", $kept));
+        return $reply === '' ? $content : $reply;
+    }
+
+    /**
+     * The candidate blocks of a reply carrying a tool-call marker, in the order written, each
+     * with the faked calls it holds or null when it holds none.
+     *
+     * Cut at every marker first, and each segment offered whole: the recorded leak's two calls
+     * are one segment each, since the blank line before the second is only leading whitespace
+     * to the parser. A segment that is not a payload is cut again at every blank line — that is
+     * what finds a call the template left no marker around at all, the shape the second half of
+     * the leak would have had if the first had not been marked either — but only if one of the
+     * pieces then is a call. Blank lines separate the paragraphs of an ordinary answer too, and
+     * a piece is trimmed, which would take the indentation off a fenced code block's first line
+     * after every blank line in it; a split that finds nothing to take out is therefore thrown
+     * away and the segment kept whole, as the model wrote it.
+     *
+     * @return list<array{0: string, 1: list<ToolCall>|null}>
+     */
+    private static function blocks(string $content): array
+    {
+        $blocks = [];
+        foreach (preg_split('~</?tool_call>~', $content) ?: [] as $segment) {
+            $segment = trim($segment);
+            if ($segment === '') {
+                continue;
+            }
+            $calls = self::fakedCalls($segment);
+            if ($calls !== null) {
+                $blocks[] = [$segment, $calls];
+                continue;
+            }
+            $split = [];
+            $found = false;
+            foreach (preg_split('~\R[ \t]*\R~', $segment) ?: [] as $block) {
+                $block = trim($block);
+                if ($block === '') {
+                    continue;
+                }
+                $calls = self::fakedCalls($block);
+                $found = $found || $calls !== null;
+                $split[] = [$block, $calls];
+            }
+            $blocks = array_merge($blocks, $found ? $split : [[$segment, null]]);
+        }
+        return $blocks;
+    }
+
+    /**
+     * The faked tool calls one candidate block holds, or null when it is not a tool-call payload
+     * at all and so is the model's own prose. Every way the vendored parser can refuse a block
+     * reads the same way here — an empty payload, text that is not JSON, JSON that is not a
+     * call, a call with no name or with arguments that are not an object — because each of them
+     * says the same thing about the block: it is not a call, and it is not this method's to
+     * take out of the reply.
+     *
+     * @return list<ToolCall>|null
+     */
+    private static function fakedCalls(string $block): ?array
+    {
+        try {
+            return array_values((new LlamaCppToolCallParser())->parse($block, 'json'));
+        } catch (\Throwable) {
+            return null;
+        }
     }
 
     /**
