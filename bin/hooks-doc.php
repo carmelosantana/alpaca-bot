@@ -24,6 +24,12 @@
  * An interpolated literal (`"alpaca_bot/capability/{$route}"`) is documented with the variable
  * as `{route}`.
  *
+ * The table is alphabetical, so the order a chat turn fires its hooks in is shown separately,
+ * ahead of it, read from the "Hooks, in firing order:" paragraph of Chat\Pipeline's class
+ * docblock (the place the plan names as the source of that order): every name in that paragraph
+ * must be a documented hook, or the run fails, so the paragraph and the table cannot drift apart
+ * unnoticed. The pipeline's other hooks (`chat/failed`) are named after the list as outside it.
+ *
  * A call site with no docblock, a docblock with no description or no `@since`, or one whose
  * `@param` count differs from what the call passes, fails the run (every problem is listed, exit
  * 1, nothing written): an undocumented hook is the thing this file exists to prevent, and a row
@@ -52,9 +58,14 @@ const WRAPPERS = ['Capability::filtered' => 'filter'];
 /** Functions that fire a hook named by their first argument: name => type. */
 const FUNCTIONS = ['apply_filters' => 'filter', 'do_action' => 'action'];
 
+/** The file whose class docblock states the order a turn fires its hooks in, and how that paragraph starts. */
+const ORDER_FILE = 'src/Chat/Pipeline.php';
+const ORDER_MARKER = 'Hooks, in firing order:';
+
 /**
  * @phpstan-type Param array{type: string, name: string, description: string}
  * @phpstan-type Row array{hook: string, type: string, file: string, line: int, params: list<Param>, description: string}
+ * @phpstan-type Order array{sequence: list<array{hook: string, type: string}>, outside: list<array{hook: string, type: string}>}
  */
 final class HooksDoc
 {
@@ -87,11 +98,12 @@ final class HooksDoc
 
         $doc = new self();
         $rows = $doc->scan($real);
+        $order = $doc->firingOrder($real, $rows);
         if ($doc->errors !== []) {
             fwrite(STDERR, "hooks-doc: " . count($doc->errors) . " problem(s); nothing written\n  " . implode("\n  ", $doc->errors) . "\n");
             return 1;
         }
-        $markdown = self::render($rows);
+        $markdown = self::render($rows, $order);
         if ($out === '-') {
             fwrite(STDOUT, $markdown);
             return 0;
@@ -132,6 +144,56 @@ final class HooksDoc
         }
         usort($rows, static fn(array $a, array $b): int => [$a['hook'], $a['file'], $a['line']] <=> [$b['hook'], $b['file'], $b['line']]);
         return $rows;
+    }
+
+    /**
+     * The order a turn fires its hooks in, from the ORDER_MARKER paragraph of the first docblock
+     * in ORDER_FILE that has one: the `alpaca_bot/*` names in that paragraph, in order, each of
+     * which must be a documented hook, plus ORDER_FILE's other hooks as `outside`. Null when the
+     * tree has no ORDER_FILE (a fixture); a missing paragraph or an unknown name is a problem.
+     *
+     * @param list<Row> $rows
+     * @return Order|null
+     */
+    private function firingOrder(string $root, array $rows): ?array
+    {
+        $path = $root . '/' . ORDER_FILE;
+        if (!is_file($path)) {
+            return null;
+        }
+        $code = file_get_contents($path);
+        $paragraph = null;
+        foreach ($code === false ? [] : \PhpToken::tokenize($code) as $token) {
+            $at = $token->is(T_DOC_COMMENT) ? strpos($token->text, ORDER_MARKER) : false;
+            if ($at !== false) {
+                $paragraph = (string) preg_split('~\R[ \t]*\*?[ \t]*\R~', substr($token->text, $at), 2)[0];
+                break;
+            }
+        }
+        if ($paragraph === null) {
+            $this->errors[] = ORDER_FILE . ': no docblock paragraph starts with "' . ORDER_MARKER . '", which is where the turn\'s firing order is read from';
+            return null;
+        }
+        $types = [];
+        foreach ($rows as $row) {
+            $types[$row['hook']] = $row['type'];
+        }
+        preg_match_all('~`(' . preg_quote(PREFIX, '~') . '[^`]+)`~', $paragraph, $m);
+        $sequence = [];
+        foreach ($m[1] as $hook) {
+            if (!isset($types[$hook])) {
+                $this->errors[] = ORDER_FILE . ": the firing order names `{$hook}`, which no call site documents";
+                continue;
+            }
+            $sequence[] = ['hook' => $hook, 'type' => $types[$hook]];
+        }
+        $outside = [];
+        foreach ($rows as $row) {
+            if ($row['file'] === ORDER_FILE && !in_array($row['hook'], $m[1], true) && !in_array(['hook' => $row['hook'], 'type' => $row['type']], $outside, true)) {
+                $outside[] = ['hook' => $row['hook'], 'type' => $row['type']];
+            }
+        }
+        return ['sequence' => $sequence, 'outside' => $outside];
     }
 
     /**
@@ -443,8 +505,9 @@ final class HooksDoc
 
     /**
      * @param list<Row> $rows
+     * @param Order|null $order
      */
-    private static function render(array $rows): string
+    private static function render(array $rows, ?array $order): string
     {
         $lines = [
             '# Hooks',
@@ -456,9 +519,31 @@ final class HooksDoc
             'than one place has a row per site. Params are what a listener receives, in order; for a',
             'filter the first is the value to return.',
             '',
-            '| Hook | Type | Params | Location | Description |',
-            '| --- | --- | --- | --- | --- |',
+            'Not a row, on purpose: `alpaca_bot/usage/cleanup` is the name of a WP-Cron event',
+            '(`UsageMeter::CLEANUP_HOOK`) the plugin schedules and listens to. WordPress fires it, not the',
+            'plugin, so a listener can `add_action` to it but it is not a hook the plugin applies.',
         ];
+        if ($order !== null) {
+            $lines[] = '';
+            $lines[] = '## A chat turn, in firing order';
+            $lines[] = '';
+            $lines[] = 'The table is alphabetical. The order one turn fires its hooks in, from the class docblock of';
+            $lines[] = '`' . ORDER_FILE . '`, where that order is kept:';
+            $lines[] = '';
+            foreach ($order['sequence'] as $n => $step) {
+                $lines[] = sprintf('%d. `%s` (%s)', $n + 1, $step['hook'], $step['type']);
+            }
+            if ($order['outside'] !== []) {
+                $lines[] = '';
+                $lines[] = 'Also fired by the pipeline, outside that sequence: ' . implode(', ', array_map(
+                    static fn(array $step): string => "`{$step['hook']}` ({$step['type']})",
+                    $order['outside'],
+                )) . '; its rows say when.';
+            }
+        }
+        $lines[] = '';
+        $lines[] = '| Hook | Type | Params | Location | Description |';
+        $lines[] = '| --- | --- | --- | --- | --- |';
         foreach ($rows as $row) {
             $params = array_map(
                 static fn(array $p): string => "`{$p['type']} {$p['name']}`" . ($p['description'] === '' ? '' : ' — ' . $p['description']),

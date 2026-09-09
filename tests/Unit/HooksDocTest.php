@@ -320,6 +320,82 @@ it('lists problems in file order, not in the order the filesystem returns the fi
     expect($m[1])->toBe($sorted);
 });
 
+it('renders the firing order of a turn from the Pipeline class docblock, ahead of the table', function (): void {
+    $root = hooksDocTree(['Chat/Pipeline.php' => <<<'PHP'
+    <?php
+    /**
+     * Runs a turn.
+     *
+     * Hooks, in firing order: filter `alpaca_bot/fixture/zzz` (string) -> action
+     * `alpaca_bot/fixture/aaa` (int) -> the deltas.
+     *
+     * A failure fires `alpaca_bot/fixture/failed` instead.
+     */
+    final class Pipeline
+    {
+        public function run(string $s, int $v): void
+        {
+            /**
+             * Filters zzz.
+             *
+             * @since 0.5.0
+             * @param string $s value
+             */
+            $s = apply_filters('alpaca_bot/fixture/zzz', $s);
+            /**
+             * Fires aaa.
+             *
+             * @since 0.5.0
+             * @param int $v value
+             */
+            do_action('alpaca_bot/fixture/aaa', $v);
+            /**
+             * Fires on failure.
+             *
+             * @since 0.5.0
+             */
+            do_action('alpaca_bot/fixture/failed');
+        }
+    }
+    PHP]);
+
+    $run = hooksDoc($root);
+
+    expect($run['code'])->toBe(0, $run['stderr'])
+        ->and($run['stdout'])->toContain("1. `alpaca_bot/fixture/zzz` (filter)\n2. `alpaca_bot/fixture/aaa` (action)\n")
+        ->and($run['stdout'])->toContain('outside that sequence: `alpaca_bot/fixture/failed`')
+        ->and((int) strpos($run['stdout'], '1. `alpaca_bot/fixture/zzz`'))->toBeLessThan((int) strpos($run['stdout'], '| `alpaca_bot/fixture/aaa` |'));
+});
+
+it('fails when the firing order names a hook no call site documents', function (): void {
+    $root = hooksDocTree(['Chat/Pipeline.php' => <<<'PHP'
+    <?php
+    /**
+     * Hooks, in firing order: filter `alpaca_bot/fixture/ghost` (string).
+     */
+    final class Pipeline
+    {
+    }
+    PHP]);
+
+    $run = hooksDoc($root);
+
+    expect($run['code'])->toBe(1)
+        ->and($run['stderr'])->toContain('src/Chat/Pipeline.php')->toContain('alpaca_bot/fixture/ghost');
+});
+
+it('lists before_send ahead of system_prompt for a real turn, and names the cron event that is not a row', function (): void {
+    $run = hooksDoc(dirname(__DIR__, 2));
+
+    expect($run['code'])->toBe(0, $run['stderr']);
+    preg_match_all('~^\d+\. `(alpaca_bot/[^`]+)`~m', $run['stdout'], $m);
+    $order = $m[1];
+    expect($order)->toContain('alpaca_bot/message/before_send')->toContain('alpaca_bot/system_prompt')
+        ->and((int) array_search('alpaca_bot/message/before_send', $order, true))->toBeLessThan((int) array_search('alpaca_bot/system_prompt', $order, true))
+        ->and($run['stdout'])->toContain('outside that sequence: `alpaca_bot/chat/failed`')
+        ->and($run['stdout'])->toContain('`alpaca_bot/usage/cleanup`')->toContain('WP-Cron');
+});
+
 it('documents exactly the twenty hooks the plugin ships, the two built through Capability::filtered() included', function (): void {
     $run = hooksDoc(dirname(__DIR__, 2));
 

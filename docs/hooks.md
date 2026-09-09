@@ -7,6 +7,23 @@ is stale. Location is the call site, relative to the plugin root; a hook fired f
 than one place has a row per site. Params are what a listener receives, in order; for a
 filter the first is the value to return.
 
+Not a row, on purpose: `alpaca_bot/usage/cleanup` is the name of a WP-Cron event
+(`UsageMeter::CLEANUP_HOOK`) the plugin schedules and listens to. WordPress fires it, not the
+plugin, so a listener can `add_action` to it but it is not a hook the plugin applies.
+
+## A chat turn, in firing order
+
+The table is alphabetical. The order one turn fires its hooks in, from the class docblock of
+`src/Chat/Pipeline.php`, where that order is kept:
+
+1. `alpaca_bot/message/before_send` (filter)
+2. `alpaca_bot/system_prompt` (filter)
+3. `alpaca_bot/chat/started` (action)
+4. `alpaca_bot/message/after_receive` (filter)
+5. `alpaca_bot/chat/completed` (action)
+
+Also fired by the pipeline, outside that sequence: `alpaca_bot/chat/failed` (action); its rows say when.
+
 | Hook | Type | Params | Location | Description |
 | --- | --- | --- | --- | --- |
 | `alpaca_bot/abilities` | filter | `array<string, array<string, mixed>> $abilities` — ability id => the wp_register_ability() arguments | `src/Abilities/Register.php:170` | Filters the abilities the plugin registers with the WordPress Abilities API, keyed by ability id. Drop an entry to keep that ability off every surface the API feeds (WP-CLI, MCP servers, other plugins) without touching the REST routes, or add one of your own under any namespace. An entry whose key is not a string or whose value is not an array is dropped before core sees it, which would otherwise refuse it with a notice. |
