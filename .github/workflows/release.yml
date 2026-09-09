@@ -80,8 +80,9 @@ jobs:
 
   # The only job besides the deploy itself that references the wordpress.org credentials, and all
   # it ever asks is whether they are there. It declares no `needs:`, so it starts alongside the
-  # two gates: if bin/release-secrets-wizard.sh was never run, an armed tag fails on this
-  # one-step job instead of after the full CI matrix, a build, and a published GitHub release.
+  # two gates: if bin/release-secrets-wizard.sh was never run, a tag that will reach the deploy
+  # fails on this one-step job instead of after the full CI matrix, a build, and a published
+  # GitHub release.
   #
   # A job of its own rather than a step in `build` for one reason: `build` is where `composer
   # install` and `pnpm install` execute third-party code, and the note on that job -- that it is
@@ -105,24 +106,35 @@ jobs:
       # the failure line interpolates is `$missing`, built from the two names as string literals
       # in this script and never from a value; there is no `set -x`; and this `run:` block is
       # the whole of what the step executes.
-      - name: The wordpress.org credentials exist if this tag will publish
+      - name: The wordpress.org credentials exist if this tag will deploy
         env:
-          # "Armed" is both halves: the pre-release rule the `wordpress-org` job below applies to
-          # itself, and SVN_DRY_RUN spelling `false`. A step's `env:` may read `github`, `vars`
-          # and `secrets` alike -- unlike a job-level `if:`, which is why this is a step.
-          ARMED: ${{ !contains(github.ref_name, '-') && vars.SVN_DRY_RUN == 'false' }}
+          # The condition the `wordpress-org` job below puts on itself, and only that condition
+          # -- deliberately not `&& vars.SVN_DRY_RUN == 'false'`. The upstream deploy action
+          # needs both credentials for a dry run exactly as much as for a real commit: at the
+          # pinned SHA, deploy.sh exits 1 on an empty SVN_USERNAME at :39-42 and on an empty
+          # SVN_PASSWORD at :44-47, and only reaches `if $INPUT_DRY_RUN` at :49 afterwards. So
+          # keying this check on SVN_DRY_RUN would have left the failure it exists to prevent
+          # wide open in the configuration bin/release-secrets-wizard.sh recommends as the
+          # starting point -- SVN_DRY_RUN=true with the secrets not yet written -- where the
+          # GitHub release publishes and the deploy then dies at deploy.sh:40.
+          #
+          # A step's `env:` may read `secrets`; a job-level `if:` may not, per the context
+          # availability table cited above, which is why this is a step and not a job condition.
+          WILL_DEPLOY: ${{ !contains(github.ref_name, '-') }}
           SVN_USERNAME: ${{ secrets.SVN_USERNAME }}
           SVN_PASSWORD: ${{ secrets.SVN_PASSWORD }}
         run: |
-          if [[ "$ARMED" != 'true' ]]; then
-            echo "This tag does not publish: it is a pre-release, or SVN_DRY_RUN is not false."
+          if [[ "$WILL_DEPLOY" != 'true' ]]; then
+            echo "This tag is a pre-release, so the wordpress.org deploy job is skipped."
+            echo "The GitHub release is still published; only wordpress.org is untouched."
             exit 0
           fi
           missing=''
           [[ -n "$SVN_USERNAME" ]] || missing="$missing SVN_USERNAME"
           [[ -n "$SVN_PASSWORD" ]] || missing="$missing SVN_PASSWORD"
           if [[ -n "$missing" ]]; then
-            echo "SVN_DRY_RUN is false, so this tag would commit to wordpress.org for real."
+            echo "The wordpress.org deploy job runs for this tag. The deploy action rejects an"
+            echo "empty credential before it reads dry-run, so a dry run needs them too."
             echo "These repository secrets are unset or empty:$missing"
             echo "Run bin/release-secrets-wizard.sh, then re-run this workflow."
             exit 1
@@ -211,8 +223,14 @@ jobs:
   # can write to this repository.
   github-release:
     name: GitHub release
-    # `preflight` as well as `build`: nothing is published until the credentials the last job
-    # will need are known to exist, because a release published ahead of a failed SVN deploy is
+    # `preflight` as well as `build`: whenever this tag will reach the wordpress.org deploy at
+    # all, nothing is published here until that job's two credentials are known to exist. That
+    # holds in both dry-run configurations, because `preflight` gates on the same pre-release
+    # condition `wordpress-org` gates itself on and not on SVN_DRY_RUN -- the deploy action
+    # rejects an empty credential before it reads its dry-run input. For a pre-release tag there
+    # is no deploy job to hold credentials for, and `preflight` says so and passes.
+    #
+    # A GitHub release published ahead of an SVN deploy that then died on a missing secret is
     # the half-done state this ordering is for.
     needs: [build, preflight]
     runs-on: ubuntu-latest
