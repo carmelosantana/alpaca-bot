@@ -670,6 +670,67 @@ it('keeps every byte of a segment that holds a marker-less faked call beside an 
         ->and($r->reply->content)->toContain("\n    if (\$x) {");
 });
 
+it('recovers a marker-less call that a stray marker stands against, and takes the marker with it', function (): void {
+    // The recorded leak's own shape with a sentence in front of it: a call the template left no
+    // marker around, and the stray closing marker its opening half never came with. The call
+    // stands on its own line — only the marker beside it is adjacent — so a marker that touches
+    // a call the second pass found is part of the same run and goes out with it. Leaving it
+    // refuses the recovery outright and the user reads the raw JSON: the exact failure this
+    // whole method exists to remove.
+    $done = "{\"name\": \"done\", \"arguments\": {\"response\": \"An alpaca is a camelid.\"}}";
+    $fetch = "{\"name\": \"web_fetch\", \"arguments\": {\"url\": \"https://example.com\"}}";
+    foreach ([
+        ["Let me check.\n\n{$done}\n</tool_call>", "Let me check.\n\nAn alpaca is a camelid."],
+        // The marker on the call's own line, which is the shape the leak takes when the
+        // template emits no newline before the half of the marker pair it did write.
+        ["Let me check.\n\n{$done}</tool_call>", "Let me check.\n\nAn alpaca is a camelid."],
+        // The recorded leak entire, one iteration's prose joined to it: both marker-less calls
+        // are in the one segment, and every one of them is found, not merely the first.
+        ["Let me check.\n\n{$fetch}\n\n{$done}\n</tool_call>", "Let me check.\n\nAn alpaca is a camelid."],
+        // A "blank" line a model left spaces on is still the blank line that separates them,
+        // and the spaces are on the prose's own line, so they stay there.
+        ["Let me check.\n   \n{$done}\n</tool_call>", "Let me check.\n   \nAn alpaca is a camelid."],
+    ] as [$leak, $expected]) {
+        $provider = agentProvider([[new Response($leak, ProviderFinishReason::Stop, usage: new Usage(2, 2, 4))]]);
+        $h = pipelineWith($provider, [], [], TOOL_MODEL, null, registryWith(['echo' => echoToolkit('echo_tool')]));
+
+        expect($h->pipeline->complete(3, 'what is an alpaca?')->reply->content)->toBe($expected);
+    }
+});
+
+it('leaves a marker with prose between it and the nearest call in the prose it was written into', function (): void {
+    // The other edge of the same rule: "stands against" is whitespace and nothing else. Prose
+    // between a marker and a call is the model writing the marker into its answer, and a
+    // sentence the user is reading is not markup because a call turned up two paragraphs later.
+    $done = "{\"name\": \"done\", \"arguments\": {\"response\": \"An alpaca is a camelid.\"}}";
+    foreach ([
+        ["<tool_call>\n\nSome prose.\n\n{$done}", "<tool_call>\n\nSome prose.\n\nAn alpaca is a camelid."],
+        ["{$done}\n\nSome prose.\n\n</tool_call>", "An alpaca is a camelid.\n\nSome prose.\n\n</tool_call>"],
+    ] as [$leak, $expected]) {
+        $provider = agentProvider([[new Response($leak, ProviderFinishReason::Stop, usage: new Usage(2, 2, 4))]]);
+        $h = pipelineWith($provider, [], [], TOOL_MODEL, null, registryWith(['echo' => echoToolkit('echo_tool')]));
+
+        expect($h->pipeline->complete(3, 'what is an alpaca?')->reply->content)->toBe($expected);
+    }
+});
+
+it('leaves no orphan marker in the stored reply where a recovered call sat under one', function (): void {
+    // The rendered bubble strips the tags, so an orphan marker is invisible there — but the
+    // stored content is also the CLI's `--json`, the export and the next turn's history, and
+    // the markup is supposed to be gone from all of them. Nothing but the blank line separates
+    // this marker from the call it opened, so the two are one removal.
+    $done = "{\"name\": \"done\", \"arguments\": {\"response\": \"An alpaca is a camelid.\"}}";
+    $leak = "<tool_call>\n\n{$done}\n\nHere is more prose.";
+    $provider = agentProvider([[new Response($leak, ProviderFinishReason::Stop, usage: new Usage(2, 2, 4))]]);
+    $h = pipelineWith($provider, [], [], TOOL_MODEL, null, registryWith(['echo' => echoToolkit('echo_tool')]));
+
+    $r = $h->pipeline->complete(3, 'what is an alpaca?');
+
+    expect($r->reply->content)->toBe("An alpaca is a camelid.\n\nHere is more prose.")
+        ->not->toContain('tool_call')
+        ->and($h->writes[1][2][1]['content'])->toBe($r->reply->content);
+});
+
 it('leaves an answer about tool calls whole, fenced JSON example and all, on the tools branch', function (): void {
     // A reply explaining tool-call syntax carries a marker and a JSON object with a name, which
     // is every trigger this has. Nothing may be rewritten: not the sentence the marker sits in,
@@ -681,6 +742,32 @@ it('leaves an answer about tool calls whole, fenced JSON example and all, on the
     $h = pipelineWith($provider, [], [], TOOL_MODEL, null, registryWith(['echo' => echoToolkit('echo_tool')]));
 
     expect($h->pipeline->complete(3, 'how do tool calls work?')->reply->content)->toBe($prose);
+});
+
+it('refuses a fenced example that is the whole of a reply\'s head or tail, marker elsewhere or not', function (): void {
+    // A fence is how a model *shows* a call; only a marker says it is making one. Outside the
+    // markers that holds however much of the reply the fence is: an answer whose head is
+    // nothing but a fenced example, with a stray marker further down, must keep the example.
+    // Deleting it is the wrong direction twice over — it loses the user's text, and it loses it
+    // to a rule written to protect exactly this reply.
+    $fence = "```json\n{\"name\": \"done\", \"arguments\": {\"response\": \"An alpaca is a camelid.\"}}\n```";
+    foreach (["{$fence}\n\n<tool_call>", "</tool_call>\n\n{$fence}"] as $prose) {
+        $provider = agentProvider([[new Response($prose, ProviderFinishReason::Stop, usage: new Usage(2, 2, 4))]]);
+        $h = pipelineWith($provider, [], [], TOOL_MODEL, null, registryWith(['echo' => echoToolkit('echo_tool')]));
+
+        expect($h->pipeline->complete(3, 'how do tool calls work?')->reply->content)->toBe($prose);
+    }
+});
+
+it('reads a fenced call between the markers as the call it is', function (): void {
+    // The other side of the same rule, and why the refusal is not simply global: between an
+    // opening and a closing marker a fence is the call's own formatting, and the answer inside
+    // it is still the user's answer.
+    $leak = "<tool_call>\n```json\n{\"name\": \"done\", \"arguments\": {\"response\": \"An alpaca is a camelid.\"}}\n```\n</tool_call>";
+    $provider = agentProvider([[new Response($leak, ProviderFinishReason::Stop, usage: new Usage(2, 2, 4))]]);
+    $h = pipelineWith($provider, [], [], TOOL_MODEL, null, registryWith(['echo' => echoToolkit('echo_tool')]));
+
+    expect($h->pipeline->complete(3, 'what is an alpaca?')->reply->content)->toBe('An alpaca is a camelid.');
 });
 
 it('leaves the plain-turn prose whole on the tools branch too', function (): void {
@@ -703,6 +790,27 @@ it('gives back a done answer that is itself indented with its indentation on', f
     $h = pipelineWith($provider, [], [], TOOL_MODEL, null, registryWith(['echo' => echoToolkit('echo_tool')]));
 
     expect($h->pipeline->complete(3, 'how do I indent?')->reply->content)->toBe("Here:\n\n{$answer}");
+});
+
+it('leaves the indentation of the first line to survive a removal exactly where the model put it', function (): void {
+    // Closing the hole a removal leaves takes the blank line after it and nothing else. The
+    // next line's leading spaces belong to the answer: shaving them off the *first* line of a
+    // four-space block while every other line keeps its four is worse than losing indentation
+    // — the block stops being a block and the code renders as a paragraph.
+    $block = "    if (\$x) {\n        run();\n    }";
+    $fetch = "<tool_call>{\"name\": \"web_fetch\", \"arguments\": {\"url\": \"https://example.com\"}}</tool_call>";
+    $done = "{\"name\": \"done\", \"arguments\": {\"response\": \"Indent it by four spaces.\"}}";
+    foreach ([
+        // The removal is the whole head of the reply, and the block is the first thing left.
+        ["{$fetch}\n\n{$block}\n\nThat is all.", "{$block}\n\nThat is all."],
+        // The removal is in the middle, and a marker-less `done` closes the reply.
+        ["Here:\n\n{$fetch}\n\n{$block}\n\n{$done}", "Here:\n\n{$block}\n\nIndent it by four spaces."],
+    ] as [$leak, $expected]) {
+        $provider = agentProvider([[new Response($leak, ProviderFinishReason::Stop, usage: new Usage(2, 2, 4))]]);
+        $h = pipelineWith($provider, [], [], TOOL_MODEL, null, registryWith(['echo' => echoToolkit('echo_tool')]));
+
+        expect($h->pipeline->complete(3, 'how do I indent?')->reply->content)->toBe($expected);
+    }
 });
 
 it('leaves a payload that names no call where the model put it', function (): void {

@@ -621,9 +621,13 @@ final class Pipeline
      * at least shows the user what happened and an empty bubble shows them nothing).
      *
      * The only whitespace this writes is at a seam. Markup taken out of the middle of a reply
-     * leaves the blank line that preceded it against the one that followed it, so the one after
-     * goes with it; and blank lines a removal leaves at the very top, along with trailing space,
-     * go at the end. Indentation on the first line that survives is the model's and stays.
+     * leaves the blank line that preceded it against whatever followed it, so what followed
+     * goes with it: the rest of the markup's own line and every blank line after it, stopping
+     * at the first line with anything on it. That line's own indentation is never touched — it
+     * is the model's, and shaving it off the first line of a four-space code block while the
+     * rest of the block keeps its four does not merely lose indentation, it stops the block
+     * being a block. Blank lines a removal leaves at the very top, along with trailing space,
+     * go at the end.
      *
      * The deltas already streamed still carry the markup; suppressing it live is separate. The
      * front end replaces the assistant bubble wholesale when the turn ends (`POST /view/bubble`
@@ -651,11 +655,13 @@ final class Pipeline
                 $reply .= $answer;
                 continue;
             }
-            // The blank line before the hole belongs to the text that is staying; the one after
-            // it went with the markup. Only where a line had already ended, though — never after
-            // an answer just written in the markup's place, and never inside a line of prose.
+            // The blank line before the hole belongs to the text that is staying; the blank
+            // lines after it went with the markup, to the first line with anything on it, whose
+            // own indentation is not whitespace this may write and is left alone. Only where a
+            // line had already ended, though — never after an answer just written in the
+            // markup's place, and never inside a line of prose.
             if (($reply === '' || preg_match('~\R[^\S\r\n]*\z~', $reply) === 1)
-                && preg_match('~\A[^\S\r\n]*\R\s*~', substr($content, $cursor), $seam) === 1
+                && preg_match('~\A[^\S\r\n]*\R(?:[^\S\r\n]*\R)*~', substr($content, $cursor), $seam) === 1
             ) {
                 $cursor += strlen($seam[0]);
             }
@@ -680,29 +686,52 @@ final class Pipeline
      * segment that holds a call costs the answer around it nothing — not the indentation of a
      * code block in it, not the blank line inside that block.
      *
-     * A marker is named only when the segment on one side of it is a call. A marker that bounds
-     * no call is a marker the model wrote into its prose, and stays in it.
+     * A marker is named only when a call stands against it: the whole segment on one side of it
+     * is a call, or the nearest call the second pass found in that segment has nothing but
+     * whitespace between itself and the marker. Both halves are needed. Without the first, the
+     * markers around a marked call stay in the reply; without the second, the recorded leak's
+     * own shape — a call with no opening marker and the stray closing one its template left
+     * behind — is refused outright by excisions(), because the run it offers ends against a `<`
+     * rather than a line break, and the user reads the raw JSON. A marker with prose between it
+     * and the nearest call, or none near it at all, is a marker the model wrote into its prose
+     * and stays in it.
      *
      * A fenced block outside the markers is refused: the vendored parser strips a Markdown code
      * fence and `arguments` is optional, so any fenced JSON object with a name would otherwise
      * read as a call, and an answer explaining tool-call syntax would lose its own example. A
-     * fence is how a model *shows* a call; only a marker says it is making one, which is why
-     * the refusal is scoped to the second pass — inside the markers a fence is the call's own
-     * formatting and is read as one.
+     * fence is how a model *shows* a call; only a marker says it is making one. "Outside" is
+     * every second-pass piece, and the whole of the head and tail segments too — an answer
+     * opening on a fenced example with a stray marker further down is the head segment entire,
+     * and the first pass would otherwise read it as a call and delete the example. Between an
+     * opening and a closing marker a fence is the call's own formatting and is read as one.
      *
      * @return list<array{0: int, 1: int, 2: list<ToolCall>|null}>
      */
     private static function markup(string $content): array
     {
         $segments = preg_split('~</?tool_call>~', $content, -1, PREG_SPLIT_OFFSET_CAPTURE) ?: [];
+        $last = count($segments) - 1;
         $calls = [];
-        foreach ($segments as [$text, $offset]) {
-            $calls[] = self::fakedCalls(trim($text));
+        $pieces = [];
+        $against = [];
+        foreach ($segments as $i => [$text, $offset]) {
+            $end = $offset + strlen($text);
+            $whole = trim($text);
+            // Between two markers a fence is the call's own formatting; head and tail are
+            // outside them, where a fence is an example the answer is entitled to keep.
+            $calls[$i] = $i > 0 && $i < $last ? self::fakedCalls($whole) : self::unfenced($whole);
+            $pieces[$i] = $calls[$i] === null ? self::fakedPieces($text, $offset) : [];
+            $first = $pieces[$i][0] ?? null;
+            $final = $pieces[$i] === [] ? null : $pieces[$i][count($pieces[$i]) - 1];
+            $against[$i] = [
+                $calls[$i] !== null || ($first !== null && trim(substr($content, $offset, $first[0] - $offset)) === ''),
+                $calls[$i] !== null || ($final !== null && trim(substr($content, $final[1], $end - $final[1])) === ''),
+            ];
         }
         $found = [];
         $after = 0;
         foreach ($segments as $i => [$text, $offset]) {
-            if ($i > 0 && ($calls[$i - 1] !== null || $calls[$i] !== null)) {
+            if ($i > 0 && ($against[$i - 1][1] || $against[$i][0])) {
                 $found[] = [$after, $offset, null];
             }
             $after = $offset + strlen($text);
@@ -711,18 +740,43 @@ final class Pipeline
                 $found[] = [$offset, $after, $whole];
                 continue;
             }
-            foreach (preg_split('~\R[ \t]*\R~', $text, -1, PREG_SPLIT_OFFSET_CAPTURE) ?: [] as [$piece, $at]) {
-                $block = trim($piece);
-                if (preg_match('~^```(?:json)?\s*.*?\s*```$~si', $block) === 1) {
-                    continue;
-                }
-                $inside = self::fakedCalls($block);
-                if ($inside !== null) {
-                    $found[] = [$offset + $at, $offset + $at + strlen($piece), $inside];
-                }
+            foreach ($pieces[$i] as $piece) {
+                $found[] = $piece;
             }
         }
         return $found;
+    }
+
+    /**
+     * The faked calls in each blank-line-separated piece of one segment that is not itself a
+     * call, as byte ranges of the whole reply. The cut is what finds a call the template left
+     * no marker around; only the pieces that parse are named, so the answer around them is
+     * never read out and never rewritten.
+     *
+     * @return list<array{0: int, 1: int, 2: list<ToolCall>}>
+     */
+    private static function fakedPieces(string $text, int $offset): array
+    {
+        $found = [];
+        foreach (preg_split('~\R[ \t]*\R~', $text, -1, PREG_SPLIT_OFFSET_CAPTURE) ?: [] as [$piece, $at]) {
+            $inside = self::unfenced(trim($piece));
+            if ($inside !== null) {
+                $found[] = [$offset + $at, $offset + $at + strlen($piece), $inside];
+            }
+        }
+        return $found;
+    }
+
+    /**
+     * The faked calls a block holds when it is not a Markdown code fence, and null when it is.
+     * A fence is how a model shows a call rather than makes one, and outside the markers this
+     * refusal is what keeps an answer explaining tool-call syntax in possession of its example.
+     *
+     * @return non-empty-list<ToolCall>|null
+     */
+    private static function unfenced(string $block): ?array
+    {
+        return preg_match('~^```(?:json)?\s*.*?\s*```$~si', $block) === 1 ? null : self::fakedCalls($block);
     }
 
     /**
