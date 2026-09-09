@@ -84,7 +84,7 @@ final class WebFetchToolkit implements ToolkitInterface
     private const TEXT_TYPES = ['application/json', 'application/xml', 'application/xhtml+xml', 'application/rss+xml', 'application/atom+xml', 'application/ld+json'];
 
     /**
-     * @param null|\Closure(string): list<string> $resolver every address a host name answers with, A and AAAA, or [] when it does not resolve; the default asks the system resolver, a test hands in its own
+     * @param null|\Closure(string): list<string> $resolver every address a host name answers with, A and AAAA, or [] when it does not resolve or a lookup failed; the default is resolve() over the system resolver, a test hands in its own
      */
     public function __construct(private Store $store, private ?\Closure $resolver = null) {}
 
@@ -164,7 +164,8 @@ final class WebFetchToolkit implements ToolkitInterface
      * Whether the URL's host is somewhere a model-chosen fetch may go: an address in none of
      * SpecialPurposeAddress::RANGES, or a name every one of whose A and AAAA answers is. A name
      * that does not resolve is refused (the fetch would fail anyway, and core below 7.1 lets it
-     * through). The site's own host is exempt, as it is in core: a local site resolves to a
+     * through), and so is one whose lookup failed (resolve() says why that is not the same
+     * thing). The site's own host is exempt, as it is in core: a local site resolves to a
      * private address and can still read its own pages. The cost of the exemption is core's
      * too: whatever else listens on that host on 80, 443 or 8080 is reachable. A special-purpose
      * address a site has opted in through core's `http_request_host_is_external` filter is
@@ -200,16 +201,38 @@ final class WebFetchToolkit implements ToolkitInterface
      * gethostbynamel(), AAAA through dns_get_record(). The connection will use whichever the
      * transport prefers, so both have to be looked at. Cost: two lookups on top of the one
      * wp_http_validate_url() already made, normally answered from the resolver's cache since it
-     * just made the first; a resolver that times out costs its timeout. dns_get_record() warns on
-     * a failed query rather than returning false, and a warning here is a refused fetch, not an
-     * error worth logging, hence the suppression.
+     * just made the first; a resolver that times out costs its timeout. dns_get_record() warns
+     * as well as returning false on a failed query, and a warning here is a refused fetch, not
+     * an error worth logging, hence the suppression.
      *
-     * @return list<string>
+     * A lookup that failed is not a lookup that answered "none". Either function returns false
+     * when the query could not be made (a timeout, a nameserver that drops the question), and
+     * that is answered with an empty list, which hostIsPublic() refuses as it refuses a name that
+     * does not resolve. Read as "no records" instead, a false from the AAAA half let a name whose
+     * nameserver answers A with a public address and drops AAAA queries past the table on the A
+     * alone, and the transport's own lookup, which does read AAAA, then chose the address on a
+     * dual-stack host; this class is the one AAAA check in the path (the class docblock), so it
+     * is the one that has to hold. What the refusal costs: a legitimate host behind a resolver
+     * that fails one of the two queries cannot be fetched until the resolver answers, where it
+     * was fetched before on whichever half had answered. The A half costs nothing beyond that,
+     * since wp_http_validate_url() already refused a host gethostbyname() could not answer.
+     *
+     * @param null|\Closure(string): (list<string>|false) $a    the A lookup; gethostbynamel() by default
+     * @param null|\Closure(string): (array<mixed>|false) $aaaa the AAAA lookup; dns_get_record($host, DNS_AAAA) by default
+     * @return list<string> every address, or [] when the name has none or either lookup failed
+     * @internal Public only so the tests can hand in the two lookups; not part of the plugin's API.
      */
-    private static function resolve(string $host): array
+    public static function resolve(string $host, ?\Closure $a = null, ?\Closure $aaaa = null): array
     {
-        $addresses = gethostbynamel($host) ?: [];
-        foreach ((array) @dns_get_record($host, DNS_AAAA) as $record) {
+        $a ??= static fn(string $host): array|false => gethostbynamel($host);
+        $aaaa ??= static fn(string $host): array|false => @dns_get_record($host, DNS_AAAA);
+        $v4 = $a($host);
+        $v6 = $aaaa($host);
+        if ($v4 === false || $v6 === false) {
+            return [];
+        }
+        $addresses = array_values(array_filter($v4, 'is_string'));
+        foreach ($v6 as $record) {
             if (is_array($record) && is_string($record['ipv6'] ?? null)) {
                 $addresses[] = $record['ipv6'];
             }

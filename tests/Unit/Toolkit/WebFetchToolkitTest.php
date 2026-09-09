@@ -274,6 +274,34 @@ it('lets a public address through, resolves a name once for both families, and e
         ->and($asked)->toBe(['public.test']);
 });
 
+// The default resolver's two lookups conflated a failed AAAA query with "this name has no AAAA
+// records": dns_get_record() returns false when the query fails, and `(array) false` is `[]`.
+// A nameserver that answers A with a public address and drops AAAA questions therefore got past
+// the table on the A alone, and the transport's own lookup (which does read AAAA) then chose
+// the address on a dual-stack host. A lookup that could not be made is refused, as a name that
+// does not resolve is; a lookup that answered "none" is accepted for what it said.
+it('refuses a name whose AAAA lookup failed, and accepts one whose AAAA lookup answered that there are none', function (): void {
+    $a = static fn(string $host): array|false => ['93.184.216.34'];
+    $failed = static fn(string $host): array|false => false;
+    $none = static fn(string $host): array|false => [];
+    $some = static fn(string $host): array|false => [['host' => $host, 'type' => 'AAAA', 'ipv6' => '2606:4700::1']];
+    expect(WebFetchToolkit::resolve('dropped.test', $a, $failed))->toBe([])
+        ->and(WebFetchToolkit::resolve('v4only.test', $a, $none))->toBe(['93.184.216.34'])
+        ->and(WebFetchToolkit::resolve('dual.test', $a, $some))->toBe(['93.184.216.34', '2606:4700::1'])
+        // The A half the same way: core already refused a host gethostbyname() cannot answer, so
+        // a false here is a lookup that failed between the two checks, not a v6-only host.
+        ->and(WebFetchToolkit::resolve('v6only.test', $failed, $some))->toBe([]);
+    // Through the tool: the failed lookup is the refusal a special-purpose address gets, and the
+    // empty one is fetched.
+    Functions\when('wp_http_validate_url')->returnArg();
+    Functions\expect('wp_safe_remote_get')->once()->withArgs(static fn(string $url): bool => $url === 'https://v4only.test/')->andReturn(webFetchResponse('<p>ok</p>'));
+    $tool = webFetchTool(resolver: static fn(string $host): array => WebFetchToolkit::resolve($host, $a, $host === 'dropped.test' ? $failed : $none));
+    $res = $tool->execute(['url' => 'https://dropped.test/']);
+    expect($res->status)->toBe(ToolResultStatus::Error)
+        ->and($res->content)->toContain('not allowed')
+        ->and($tool->execute(['url' => 'https://v4only.test/'])->content)->toBe('ok');
+});
+
 it('honours core\'s http_request_host_is_external opt-in for a special-purpose address, as the docblock promises', function (): void {
     Functions\when('wp_http_validate_url')->returnArg();
     Filters\expectApplied('http_request_host_is_external')->once()->with(false, '169.254.169.254', 'http://169.254.169.254/')->andReturn(true);
