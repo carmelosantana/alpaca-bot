@@ -1,0 +1,246 @@
+<?php
+
+declare(strict_types=1);
+
+namespace AlpacaBot\Tests\Integration;
+
+use AlpacaBot\Plugin;
+use AlpacaBot\Provider\ModelCatalog;
+use AlpacaBot\Shortcodes\AgentShim;
+use AlpacaBot\Shortcodes\Chat;
+use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Config\ModelDefinition;
+use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Contract\ProviderInterface;
+use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Enum\ProviderFinishReason;
+use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Provider\Response;
+use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Provider\Usage;
+
+/**
+ * The two shortcodes over real WordPress: do_shortcode() finds them, the capability map
+ * decides who may generate, the transient lands in the options table, the front-end bundle is
+ * enqueued for the shell, and `_doing_it_wrong()` reaches core's handler. The provider is the
+ * fake one; a fetch is served by `pre_http_request`, so nothing reaches the network.
+ */
+final class ShortcodesTest extends TestCase
+{
+    public function set_up(): void
+    {
+        parent::set_up();
+        // The handlers live on the Plugin singleton for the whole process, and each keeps a
+        // per-request memo (what this request generated; whether the deprecation was said):
+        // one process is one request to them, so a test starts each afresh, as Pest.php
+        // resets the singleton itself.
+        (new \ReflectionProperty(Chat::class, 'served'))->setValue(Plugin::instance()->get(Chat::class), []);
+        (new \ReflectionProperty(AgentShim::class, 'warned'))->setValue(Plugin::instance()->get(AgentShim::class), false);
+    }
+
+    public function tear_down(): void
+    {
+        // The shell's render enqueues into the process-wide $wp_scripts/$wp_styles; a later test
+        // asserting "nothing enqueued" must start clean.
+        unset($GLOBALS['wp_scripts'], $GLOBALS['wp_styles']);
+        parent::tear_down();
+    }
+
+    /**
+     * How many turns ran this test: every generation builds one provider, a cached render none.
+     * The catalog is discovered first, through the fake provider (install it before calling
+     * this), so the one build discovery makes is not counted as a turn.
+     */
+    private function countProviders(): \Closure
+    {
+        Plugin::instance()->get(ModelCatalog::class)->all();
+        $count = 0;
+        add_filter('alpaca_bot/provider', static function (mixed $provider) use (&$count): mixed {
+            $count++;
+            return $provider;
+        }, 20);
+        return static function () use (&$count): int {
+            return $count;
+        };
+    }
+
+    public function test_both_shortcodes_are_registered(): void
+    {
+        $this->assertTrue(shortcode_exists('alpacabot'));
+        $this->assertTrue(shortcode_exists('alpacabot_agent'));
+    }
+
+    public function test_an_admin_gets_a_rendered_answer_once_and_the_cache_after(): void
+    {
+        $this->asAdmin();
+        $this->fakeProvider();
+        $built = $this->countProviders();
+        $post = self::factory()->post->create(['post_content' => '[alpacabot prompt="x"]']);
+        $this->go_to(get_permalink($post));
+        $this->assertSame($post, get_the_ID());
+
+        $html = do_shortcode('[alpacabot prompt="x"]');
+        $this->assertStringContainsString('fake reply', $html);
+        $this->assertStringContainsString('class="alpaca-bot-answer"', $html);
+        $this->assertSame(1, $built());
+        // The receipt was written (an ephemeral turn is billed) and no conversation was.
+        $this->assertCount(1, get_posts(['post_type' => 'chat_log', 'post_status' => 'any', 'numberposts' => -1]));
+        $this->assertCount(0, get_posts(['post_type' => 'chat_history', 'post_status' => 'any', 'numberposts' => -1]));
+
+        // The second render, a new handler instance or not, is the transient: no provider built.
+        // (The memo would answer it too; the transient is asserted on directly, under the key
+        // the unit tests pin, since a timed transient is not autoloaded.)
+        $this->assertStringContainsString('fake reply', do_shortcode('[alpacabot prompt="x"]'));
+        $this->assertSame(1, $built());
+        $this->assertSame('fake reply', get_transient(Chat::cacheKey('alpacabot', ['prompt' => 'x', 'model' => '', 'system' => '', 'temperature' => null], $post)));
+        $this->assertSame(1, $this->shortcodeTransients());
+    }
+
+    public function test_a_visitor_gets_the_login_notice_and_the_cached_answer_only_when_the_filter_allows(): void
+    {
+        $this->asAdmin();
+        $this->fakeProvider();
+        $built = $this->countProviders();
+        $post = self::factory()->post->create(['post_content' => '[alpacabot prompt="x"]']);
+        $this->go_to(get_permalink($post));
+        do_shortcode('[alpacabot prompt="x"]');
+        $this->assertSame(1, $built());
+
+        wp_set_current_user(0);
+        $html = do_shortcode('[alpacabot prompt="x"]');
+        $this->assertStringContainsString('class="alpaca-bot-notice"', $html);
+        $this->assertStringContainsString('Log in', $html);
+        $this->assertStringContainsString(wp_login_url(get_permalink($post)), $html);
+        $this->assertStringNotContainsString('fake reply', $html);
+        // A prompt nothing has cached: still the notice, and still no provider, filter or no filter.
+        add_filter('alpaca_bot/shortcode/allow_guests', '__return_true');
+        $this->assertStringContainsString('Log in', do_shortcode('[alpacabot prompt="never generated"]'));
+        $this->assertSame(1, $built());
+        // The cached one is served to a guest once the filter says so.
+        $this->assertStringContainsString('fake reply', do_shortcode('[alpacabot prompt="x"]'));
+        $this->assertSame(1, $built());
+
+        // A subscriber is logged in but may not edit posts: the permission notice, no login link.
+        wp_set_current_user(self::factory()->user->create(['role' => 'subscriber']));
+        remove_filter('alpaca_bot/shortcode/allow_guests', '__return_true');
+        $html = do_shortcode('[alpacabot prompt="x"]');
+        $this->assertStringContainsString('class="alpaca-bot-notice"', $html);
+        $this->assertStringNotContainsString('wp-login.php', $html);
+        $this->assertStringNotContainsString('fake reply', $html);
+        $this->assertSame(1, $built());
+    }
+
+    public function test_the_shell_renders_for_an_admin_and_enqueues_the_bundle(): void
+    {
+        $this->asAdmin();
+        $html = do_shortcode('[alpacabot]');
+        $this->assertStringContainsString('id="ab-chat"', $html);
+        $this->assertStringContainsString('id="ab-form"', $html);
+        $this->assertTrue(wp_script_is('alpaca-bot-chat', 'enqueued'));
+        $this->assertTrue(wp_script_is('alpaca-bot-htmx', 'enqueued'));
+        $this->assertTrue(wp_style_is('alpaca-bot', 'enqueued'));
+        $this->assertTrue(wp_script_is('media-editor', 'enqueued'));
+        $data = (string) wp_scripts()->get_data('alpaca-bot-chat', 'data');
+        $this->assertStringContainsString('"rest":"' . rest_url('alpaca-bot/v1') . '"', $data);
+        $this->assertStringContainsString('"nonce":"', $data);
+    }
+
+    public function test_the_shell_is_a_notice_for_a_visitor_with_nothing_enqueued(): void
+    {
+        wp_set_current_user(0);
+        $html = do_shortcode('[alpacabot]');
+        $this->assertStringContainsString('class="alpaca-bot-notice"', $html);
+        $this->assertStringNotContainsString('id="ab-chat"', $html);
+        $this->assertFalse(wp_script_is('alpaca-bot-chat', 'enqueued'));
+        $this->assertFalse(wp_style_is('alpaca-bot', 'enqueued'));
+    }
+
+    public function test_the_agent_shim_summarizes_a_fetched_page_with_a_prompt_beginning_summarize_and_is_doing_it_wrong(): void
+    {
+        $this->setExpectedIncorrectUsage('alpacabot_agent');
+        $this->asAdmin();
+        $prompts = [];
+        add_filter('alpaca_bot/provider', static function () use (&$prompts): ProviderInterface {
+            return new class ($prompts) implements ProviderInterface {
+            /** @param list<string> $prompts */
+            public function __construct(private array &$prompts) {}
+
+            public function chat(array $messages, array $tools = [], array $options = []): Response
+            {
+                return new Response('fake reply', ProviderFinishReason::Stop, usage: new Usage(3, 2, 5));
+            }
+
+            public function stream(array $messages, array $tools = [], array $options = []): iterable
+            {
+                $this->prompts[] = end($messages)->content();
+                yield new Response('fake summary', ProviderFinishReason::Stop, usage: new Usage(3, 2, 5));
+            }
+
+            public function structured(array $messages, string $schema, array $options = []): mixed
+            {
+                return [];
+            }
+
+            public function models(): array
+            {
+                return [new ModelDefinition('fake-model', 'Fake model', 'fake')];
+            }
+
+            public function isAvailable(): bool
+            {
+                return true;
+            }
+
+            public function getModel(): string
+            {
+                return 'fake-model';
+            }
+
+            public function withModel(string $model): static
+            {
+                return $this;
+            }
+            };
+        });
+        $requests = 0;
+        add_filter('pre_http_request', static function () use (&$requests): array {
+            $requests++;
+            return ['headers' => ['content-type' => 'text/html; charset=utf-8'], 'body' => '<html><body><h1>Hi</h1><p>there</p></body></html>', 'response' => ['code' => 200, 'message' => 'OK'], 'cookies' => [], 'filename' => null];
+        });
+        // The site's own host is the one core's guard passes without DNS (ToolkitsTest says why).
+        $url = home_url('/a-page/');
+        $html = do_shortcode('[alpacabot_agent name="summarize" url="' . $url . '" length="one line"]');
+        $this->assertStringContainsString('fake summary', $html);
+        $this->assertSame(1, $requests);
+        $this->assertCount(1, $prompts);
+        $this->assertStringStartsWith('Summarize', $prompts[0]);
+        $this->assertStringContainsString($url, $prompts[0]);
+        $this->assertStringContainsString('one line', $prompts[0]);
+        $this->assertStringContainsString("Hi\n\nthere", $prompts[0]);
+        // Cached under its own tag: the second render fetches and generates nothing.
+        $this->assertStringContainsString('fake summary', do_shortcode('[alpacabot_agent name="summarize" url="' . $url . '" length="one line"]'));
+        $this->assertSame(1, $requests);
+        $this->assertCount(1, $prompts);
+    }
+
+    public function test_the_agent_shim_refuses_a_private_address_through_core_and_caches_nothing(): void
+    {
+        $this->setExpectedIncorrectUsage('alpacabot_agent');
+        $this->asAdmin();
+        $this->fakeProvider();
+        $built = $this->countProviders();
+        $requests = 0;
+        add_filter('pre_http_request', static function () use (&$requests): \WP_Error {
+            $requests++;
+            return new \WP_Error('unexpected', 'no request was expected');
+        });
+        $html = do_shortcode('[alpacabot_agent name="summarize" url="http://127.0.0.1/"]');
+        $this->assertStringContainsString('class="alpaca-bot-notice"', $html);
+        $this->assertStringContainsString('not allowed', $html);
+        $this->assertSame(0, $requests);
+        $this->assertSame(0, $built());
+        $this->assertSame(0, $this->shortcodeTransients());
+    }
+
+    /** The shortcode transients in the options table (a timed transient is not autoloaded, so alloptions would not show one). */
+    private function shortcodeTransients(): int
+    {
+        global $wpdb;
+        return (int) $wpdb->get_var("SELECT COUNT(*) FROM {$wpdb->options} WHERE option_name LIKE '_transient_" . Chat::TRANSIENT_PREFIX . "%'");
+    }
+}

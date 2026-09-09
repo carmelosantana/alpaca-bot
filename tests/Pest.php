@@ -309,6 +309,10 @@ function pipelineWith(mixed $provider, array $settings = [], array $contexts = [
         public array $transients = [];
         /** @var array<int, array<string, mixed>> */
         public array $meta = [];
+        /** @var list<string> every transient read, once shortcodeChat() records them */
+        public array $reads = [];
+        /** @var list<array{0: string, 1: mixed, 2: int}> every transient write as [key, value, ttl], once shortcodeChat() records them */
+        public array $stored = [];
     };
     $h->post = conversationChatPost();
     if ($catalog !== null) {
@@ -556,4 +560,49 @@ function chatShell(?AlpacaBot\Chat\Conversation $conversation, array $history, ?
     Functions\when('admin_url')->alias(fn(string $p) => '/wp-admin/' . $p);
     $store = new Store(['models.default' => 'llama3.2', 'chat.history_limit' => 15]);
     return new AlpacaBot\View\Chat\Shell($store, new ModelCatalog(new Factory($store)), $conversation, $history, $postId, $sprite);
+}
+
+/**
+ * Shortcodes\ChatTest and AgentShimTest: a `[alpacabot]` handler over a pipelineWith() harness
+ * `$h`, sharing its pipeline, store and catalog, with the WordPress a front-end render meets
+ * stubbed: the post being rendered is `$postId` (get_the_ID()), shortcode_atts() is core's
+ * merge (the pairs' keys only), and the transients are the harness's own `$h->transients`, so
+ * set_transient() writes where get_transient() reads and a test can seed a cache entry or read
+ * what was written. Every transient read is recorded in `$h->reads` and every write in
+ * `$h->stored` as [key, value, ttl], for the tests about the cache. wp_kses() is the strip_tags
+ * stand-in MarkdownTest uses, so the markdown path keeps its allowed tags and drops the rest.
+ */
+function shortcodeChat(object $h, int $postId = 7): AlpacaBot\Shortcodes\Chat
+{
+    $h->reads = [];
+    $h->stored = [];
+    Functions\when('get_the_ID')->justReturn($postId > 0 ? $postId : false);
+    Functions\when('shortcode_atts')->alias(static fn(array $pairs, array $atts): array => array_merge($pairs, array_intersect_key($atts, $pairs)));
+    Functions\when('get_transient')->alias(static function (string $key) use ($h): mixed {
+        $h->reads[] = $key;
+        return $h->transients[$key] ?? false;
+    });
+    Functions\when('set_transient')->alias(static function (string $key, mixed $value, int $ttl = 0) use ($h): bool {
+        $h->stored[] = [$key, $value, $ttl];
+        $h->transients[$key] = $value;
+        return true;
+    });
+    Functions\when('wp_login_url')->alias(static fn(string $redirect = ''): string => '/wp-login.php?redirect_to=' . rawurlencode($redirect));
+    Functions\when('get_permalink')->justReturn('https://site.test/?p=' . $postId);
+    Functions\when('wp_kses')->alias(static fn(string $html, array $allowed): string => strip_tags($html, array_map(static fn(string $t): string => "<$t>", array_keys($allowed))));
+    Functions\when('get_user_meta')->justReturn('');
+    return new AlpacaBot\Shortcodes\Chat($h->store, $h->catalog, new ConversationStore($h->store), new AlpacaBot\Chat\UserPrefs(), $h->pipeline, new AlpacaBot\View\Markdown(), new AlpacaBot\Admin\Assets());
+}
+
+/**
+ * Shortcodes tests: the viewer of the page. `$id` 0 is a visitor (is_user_logged_in() false);
+ * a logged-in viewer holds exactly `$caps`.
+ *
+ * @param list<string> $caps
+ */
+function shortcodeViewer(int $id, array $caps = ['edit_posts']): void
+{
+    Functions\when('is_user_logged_in')->justReturn($id > 0);
+    Functions\when('get_current_user_id')->justReturn($id);
+    Functions\when('current_user_can')->alias(static fn(string $cap): bool => $id > 0 && in_array($cap, $caps, true));
 }

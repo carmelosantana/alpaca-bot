@@ -128,6 +128,8 @@ it('Plugin registers every controller the alpaca_bot/rest/controllers filter han
         $onRestInit = $cb;
         return $cb instanceof Closure;
     }));
+    // register() also adds the two shortcodes, which Brain Monkey does not know as a hook function.
+    Functions\when('add_shortcode')->justReturn();
     Plugin::boot()->register();
     expect($onRestInit)->toBeInstanceOf(Closure::class);
 

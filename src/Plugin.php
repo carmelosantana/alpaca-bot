@@ -77,7 +77,8 @@ final class Plugin
         // act as a user take get_current_user_id as a closure and ask it when a tool runs, not
         // here: an id read now would be 0 for every turn. The registry decides what is enabled
         // when a turn asks (Toolkit\Registry), so nothing about the setting is read here either.
-        $registry->register('web_fetch', new Toolkit\WebFetchToolkit($store));
+        $webFetch = new Toolkit\WebFetchToolkit($store);
+        $registry->register('web_fetch', $webFetch);
         $registry->register('summarize', new Toolkit\SummarizeToolkit($this->get(Chat\Pipeline::class), get_current_user_id(...)));
         $registry->register('draft_post', new Toolkit\DraftPostToolkit(get_current_user_id(...)));
         $this->set(Toolkit\Registry::class, $registry);
@@ -117,6 +118,16 @@ final class Plugin
         add_filter('heartbeat_received', [$assets, 'heartbeat'], 10, 2);
         // The help tabs of the chat screen and the settings page; HelpTabs gates on the screen id.
         add_action('current_screen', [new Admin\HelpTabs(), 'add']);
+        // The two shortcodes, registered now rather than on init: `$shortcode_tags` exists from
+        // shortcodes.php's load, and a shortcode registered on plugins_loaded is there for
+        // whatever renders content first. The shim runs the same web_fetch instance the
+        // registry holds, so the two fetch under one guard and one user agent.
+        $shortcode = new Shortcodes\Chat($store, $this->get(Provider\ModelCatalog::class), $conversations, $prefs, $this->get(Chat\Pipeline::class), new View\Markdown(), $assets);
+        $this->set(Shortcodes\Chat::class, $shortcode);
+        $shortcode->register();
+        $shim = new Shortcodes\AgentShim($shortcode, $this->get(Chat\Pipeline::class), $webFetch);
+        $this->set(Shortcodes\AgentShim::class, $shim);
+        $shim->register();
         // WP-CLI is not a dependency: the command is only registered when WP-CLI is the
         // process running us, and the class itself never references WP_CLI until then.
         if (defined('WP_CLI') && constant('WP_CLI')) {

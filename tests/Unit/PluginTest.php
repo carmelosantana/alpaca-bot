@@ -21,6 +21,7 @@ use AlpacaBot\Rest\StreamController;
 use AlpacaBot\Rest\ViewController;
 use AlpacaBot\Settings\Migrate04;
 use AlpacaBot\Settings\Store;
+use AlpacaBot\Shortcodes;
 use AlpacaBot\Toolkit\DraftPostToolkit;
 use AlpacaBot\Toolkit\Registry;
 use AlpacaBot\Toolkit\SummarizeToolkit;
@@ -89,8 +90,19 @@ it('registers the settings store, provider factory, model catalog, conversation 
     // plugins_loaded runs before the current user is resolved, so a toolkit that read the id at
     // construction would get 0 for every turn: the id must not be asked for here at all.
     Functions\expect('get_current_user_id')->never();
+    // Both shortcodes, registered here rather than on init: `$shortcode_tags` exists from
+    // shortcodes.php's load, and a shortcode registered on plugins_loaded is there for
+    // whatever renders content first, WP-CLI included.
+    Functions\expect('add_shortcode')->once()->with('alpacabot', Mockery::on(
+        static fn (mixed $cb): bool => is_array($cb) && ($cb[0] ?? null) instanceof Shortcodes\Chat && ($cb[1] ?? null) === 'render'
+    ));
+    Functions\expect('add_shortcode')->once()->with('alpacabot_agent', Mockery::on(
+        static fn (mixed $cb): bool => is_array($cb) && ($cb[0] ?? null) instanceof Shortcodes\AgentShim && ($cb[1] ?? null) === 'render'
+    ));
     $plugin = Plugin::boot();
     $plugin->register();
+    expect($plugin->get(Shortcodes\Chat::class))->toBeInstanceOf(Shortcodes\Chat::class)
+        ->and($plugin->get(Shortcodes\AgentShim::class))->toBeInstanceOf(Shortcodes\AgentShim::class);
     expect($plugin->get(SettingsPage::class))->toBeInstanceOf(SettingsPage::class);
     expect($plugin->get(Store::class))->toBeInstanceOf(Store::class)
         ->and($plugin->get(Factory::class))->toBeInstanceOf(Factory::class)
@@ -156,6 +168,7 @@ it('registers the wp alpaca-bot command when WP-CLI is the running process, and 
     }), 20);
     Actions\expectAdded('init')->times(3)->with(Mockery::type('array'));
     Actions\expectAdded('admin_init')->once()->with(Mockery::type('array'));
+    Functions\when('add_shortcode')->justReturn();
     $plugin = Plugin::boot();
     $plugin->register();
     expect(\WP_CLI::$commands)->toHaveCount(1)
@@ -186,6 +199,7 @@ it('renders the chat screen, enqueues its assets, hands the pipeline the user pr
         $menuRenderer = $args[4];
     });
     Functions\when('add_submenu_page')->justReturn(false);
+    Functions\when('add_shortcode')->justReturn();
     Filters\expectApplied('alpaca_bot/admin/menu_capability')->once()->andReturn('edit_posts');
     Actions\expectAdded('admin_enqueue_scripts')->once()->with(Mockery::on(
         static fn (mixed $cb): bool => is_array($cb) && ($cb[0] ?? null) instanceof Assets && ($cb[1] ?? null) === 'enqueue'
