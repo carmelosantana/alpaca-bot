@@ -1,0 +1,13 @@
+{
+  // The e2e specs and the Playwright config, type-checked with `pnpm typecheck` alongside
+  // resources/ts. They need their own project because they are Node code, not browser code:
+  // `types: []` and the DOM-only lib in the root config are deliberate there and would reject
+  // Playwright's own declarations here. @types/node was already in the tree (a transitive
+  // dependency of @wordpress/env); declaring it direct adds no package, only visibility.
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "lib": ["esnext", "dom", "dom.iterable"],
+    "types": ["node"]
+  },
+  "include": ["**/*.ts", "../../playwright.config.ts"]
+}

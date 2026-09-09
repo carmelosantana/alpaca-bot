@@ -1,19 +1,36 @@
-# The unit job the spec's sequencing step 1 asks for: PHPStan level 6 and Pest through the same
-# `composer check` every task ends on, plus the runtime-autoload guard. Third-party actions are
-# pinned to full commit SHAs (tags are mutable). No pull_request_target, no cache, no secrets.
+# Everything that has to hold before a release, in three jobs. `check` is the PHP side: PHPCS,
+# PHPStan level 6 and Pest, all through the one `composer check` every task ends on, plus the
+# runtime-autoload guard. `assets` is the browser side: TypeScript, the Node test suite and the
+# esbuild bundle, whose output is gitignored and so has to be built here and handed on. And
+# `integration` puts the two together on real WordPress, one leg per supported core version:
+# the PHPUnit integration suite inside wp-env, then one turn through the chat screen in a browser.
+#
+# Third-party actions are pinned to full commit SHAs (tags are mutable). No pull_request_target,
+# no cache, no secrets: nothing here needs any of the three, and each is a way a fork's pull
+# request could reach into this repository.
+#
+# `workflow_call` is here so the release workflow can require this file rather than restate it.
 name: CI
 
 on:
   push:
     branches: [main, develop]
   pull_request:
+  workflow_call:
 
 permissions:
   contents: read
 
+# A pull request's superseded runs are cancelled; a push and a release (workflow_call, where
+# github.workflow is the caller's) are never cancelled, because those are the runs someone is
+# waiting on to decide something.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   check:
-    name: PHPStan + Pest on PHP 8.4
+    name: PHPCS, PHPStan and Pest on PHP 8.4
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
@@ -33,3 +50,136 @@ jobs:
       - run: composer check
 
       - run: php bin/check-bootstrap.php
+
+  assets:
+    name: TypeScript, Node tests and the asset build on Node 22
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+
+      # No version input: the action reads package.json's `packageManager`, so the pnpm running
+      # here is the exact one on the machine the lockfile was written on.
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+
+      - run: pnpm install --frozen-lockfile
+
+      # typecheck && test && build. The build is the part that matters to the next job.
+      - run: pnpm check
+
+      # `pnpm check` fails on a broken build, so this is not that guard. It is the guard against
+      # a build that succeeds and produces nothing: assets/ also holds committed PNGs, so the
+      # directory is never empty and upload-artifact's own if-no-files-found could not tell the
+      # difference. These five paths are the gitignored build outputs the plugin loads at runtime.
+      - name: The build outputs the plugin loads are present and non-empty
+        run: |
+          for f in assets/js/chat.js assets/js/htmx.min.js assets/css/alpaca-bot.css assets/css/alpaca-bot-shortcode.css assets/img/icons.svg; do
+            if [ ! -s "$f" ]; then
+              echo "::error file=$f::missing or empty after pnpm build"
+              exit 1
+            fi
+          done
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: assets
+          path: assets
+          retention-days: 7
+          if-no-files-found: error
+
+  integration:
+    name: WordPress ${{ matrix.wp }}
+    needs: [check, assets]
+    runs-on: ubuntu-latest
+    strategy:
+      # One core version failing is a fact worth having about the other, so both legs finish.
+      fail-fast: false
+      matrix:
+        # The core version is carried as a value rather than derived in an expression: in GitHub
+        # expressions an empty string is falsy, so `wp == 'latest' && '' || format(...)` would
+        # hand the latest leg the other leg's URL. `core: ''` leaves WP_ENV_CORE empty, which
+        # wp-env reads as "not set" and falls back to .wp-env.json's `"core": null`, ie latest.
+        #
+        # 7.0 is the floor this suite can run on, not the plugin's: tests/Integration/
+        # WpAiClientTest.php declares a subclass of core's WordPress\AiClient\Providers\
+        # AbstractProvider, which arrived in 7.0, and on 6.9 the file fatals as PHPUnit loads it.
+        # The plugin header still says "Requires at least: 6.9" and Provider\Factory has a
+        # documented fallback for a WordPress without the AI client; that gap is a decision for
+        # the board, not something this matrix should paper over by pretending to test 6.9.
+        include:
+          - wp: latest
+            core: ''
+          - wp: '7.0'
+            core: https://wordpress.org/wordpress-7.0.zip
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+
+      - uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # 2.37.2
+        with:
+          php-version: '8.4'
+          coverage: none
+          tools: composer:v2
+
+      # vendor-prefixed/, which the plugin requires at runtime, and tools/integration's PHPUnit 9,
+      # which bin/test-integration.sh installs itself.
+      - run: composer install --no-interaction --no-progress
+
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+
+      - run: pnpm install --frozen-lockfile
+
+      # The bundle, the stylesheets and the icon sprite as the assets job built them. Nothing
+      # here rebuilds them: if the two jobs could disagree, the e2e would not be testing the
+      # artifact the release zip ships.
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: assets
+          path: assets
+
+      - name: The downloaded assets carry the build outputs
+        run: |
+          for f in assets/js/chat.js assets/css/alpaca-bot.css assets/img/icons.svg; do
+            if [ ! -s "$f" ]; then
+              echo "::error file=$f::missing or empty in the assets artifact"
+              exit 1
+            fi
+          done
+
+      # Both environments: tests (port 8889) for the PHPUnit suite, development (8888) for the
+      # browser. --update so a changed .wp-env.json or core version is picked up rather than a
+      # previously built environment reused.
+      - name: Start wp-env
+        run: pnpm exec wp-env start --update
+        env:
+          WP_ENV_CORE: ${{ matrix.core }}
+
+      - name: WordPress integration suite
+        run: WPH_MODE=wp-env bash bin/test-integration.sh
+
+      - run: pnpm exec playwright install --with-deps chromium
+
+      - name: Chat end-to-end smoke test
+        run: pnpm e2e
+        env:
+          WP_BASE_URL: http://localhost:8888
+
+      - if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: playwright-report-wp-${{ matrix.wp }}
+          path: |
+            playwright-report
+            test-results
+          retention-days: 7
+          if-no-files-found: ignore

@@ -62,6 +62,8 @@
 /phpunit.integration.xml
 /playwright.config.ts
 /.wp-env.json
+/playwright-report
+/test-results
 
 # Developer-facing entry points (readme.txt is the user-facing one and ships)
 /bin

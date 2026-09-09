@@ -3,15 +3,20 @@
   "version": "0.5.0-dev",
   "private": true,
   "type": "module",
+  "packageManager": "pnpm@11.15.1",
   "scripts": {
     "build": "node build.mjs",
     "watch": "node build.mjs --watch",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tests/e2e",
     "check": "pnpm typecheck && pnpm test && pnpm build",
     "test": "node --test \"tests/ts/**/*.test.ts\"",
-    "release:dry": "bash bin/build-zip.sh"
+    "release:dry": "bash bin/build-zip.sh",
+    "e2e": "playwright test"
   },
   "devDependencies": {
+    "@playwright/test": "1.63.0",
+    "@types/node": "~26.5.0",
+    "@wordpress/env": "11.14.0",
     "esbuild": "~0.28.2",
     "htmx.org": "2.0.10",
     "lucide-static": "~1.41.0",

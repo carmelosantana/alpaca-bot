@@ -9,6 +9,9 @@ node_modules/
 tools/strauss/vendor/
 .phpunit.cache/
 tools/integration/vendor/
+# Playwright's own output: the HTML report and the traces/screenshots kept from a failed run.
+playwright-report/
+test-results/
 assets/js/*.js
 assets/js/*.map
 assets/css/*.css

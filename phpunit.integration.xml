@@ -3,8 +3,9 @@
     The WordPress integration suite: run through `composer test:integration`, which executes it
     inside a container on tools/integration's PHPUnit 9, the newest WordPress core's test library
     supports. bin/test-integration.sh picks the container: the harness site's cli service locally,
-    wp-env's tests-cli in CI. Both run as an unprivileged user and cannot write into the
-    bind-mounted checkout, so PHPUnit's result cache lives under /tmp.
+    wp-env's tests-cli in CI. The harness's runs as uid 33 and cannot write into the bind-mounted
+    checkout, so PHPUnit's result cache lives under /tmp; wp-env's runs as the host user and could
+    write, but a cache under /tmp is right there too, being per run and per container.
 
     failOnEmptyTestSuite: a run that discovers no tests is a failure, not a pass. CI runs this
     inside a container whose working directory is derived from the checkout's own directory name
