@@ -114,9 +114,11 @@ jobs:
           # pinned SHA, deploy.sh exits 1 on an empty SVN_USERNAME at :39-42 and on an empty
           # SVN_PASSWORD at :44-47, and only reaches `if $INPUT_DRY_RUN` at :49 afterwards. So
           # keying this check on SVN_DRY_RUN would have left the failure it exists to prevent
-          # wide open in the configuration bin/release-secrets-wizard.sh recommends as the
-          # starting point -- SVN_DRY_RUN=true with the secrets not yet written -- where the
-          # GitHub release publishes and the deploy then dies at deploy.sh:40.
+          # wide open in the state this repository is actually in until someone runs
+          # bin/release-secrets-wizard.sh -- no secrets written and SVN_DRY_RUN unset, so the
+          # `!= 'false'` at the deploy step reads as a dry run -- where the GitHub release
+          # publishes and the deploy then dies at deploy.sh:41. (The wizard cannot leave you
+          # there: it writes both secrets at :216 and :225 before it offers SVN_DRY_RUN at :235.)
           #
           # A step's `env:` may read `secrets`; a job-level `if:` may not, per the context
           # availability table cited above, which is why this is a step and not a job condition.
@@ -126,7 +128,8 @@ jobs:
         run: |
           if [[ "$WILL_DEPLOY" != 'true' ]]; then
             echo "This tag is a pre-release, so the wordpress.org deploy job is skipped."
-            echo "The GitHub release is still published; only wordpress.org is untouched."
+            echo "Nothing else here is gated on these credentials; if the rest of the run"
+            echo "passes, the GitHub release publishes and only wordpress.org is untouched."
             exit 0
           fi
           missing=''
@@ -268,6 +271,11 @@ jobs:
   # continue", and names `always()` as how such an expression is written. The condition here is
   # `!contains(...)` over `github.ref_name` -- no `always()`, `failure()` or `cancelled()` in it
   # -- so a `github-release` that failed still skips this job.
+  #
+  # This `if:` is character-for-character the `WILL_DEPLOY` expression in `preflight` above, and
+  # that identity is the whole of preflight's claim to check the right runs. Actions has no YAML
+  # anchor to tie them together and `env` is not available in a job `if:`, so if you edit either
+  # one, edit both.
   wordpress-org:
     name: wordpress.org SVN deploy
     needs: [github-release]
