@@ -617,3 +617,25 @@ function shortcodeViewer(int $id, array $caps = ['edit_posts']): void
     Functions\when('get_current_user_id')->justReturn($id);
     Functions\when('current_user_can')->alias(static fn(string $cap): bool => $id > 0 && in_array($cap, $caps, true));
 }
+
+/**
+ * Abilities\RegisterTest: a Register over a pipelineWith() harness `$h`, sharing its pipeline,
+ * and over a registry holding the real summarize and draft_post toolkits (both resolving the
+ * acting user through the same closure the Register is given) with exactly `$enabled`
+ * switched on. The acting user is `$userId` (0 is nobody). `$exists` stands in for
+ * function_exists(); null is the real one, which Brain Monkey cannot stub, so a test about
+ * the API being absent passes its own.
+ *
+ * @param list<string> $enabled
+ * @param (callable(string): bool)|null $exists
+ */
+function abilitiesRegister(object $h, array $enabled = ['summarize', 'draft_post'], int $userId = 3, ?callable $exists = null): AlpacaBot\Abilities\Register
+{
+    $user = static fn(): int => $userId;
+    $registry = new AlpacaBot\Toolkit\Registry(new Store(['toolkits.enabled' => $enabled]));
+    $summarize = new AlpacaBot\Toolkit\SummarizeToolkit($h->pipeline, $user);
+    $registry->register('summarize', $summarize);
+    $draft = new AlpacaBot\Toolkit\DraftPostToolkit($user);
+    $registry->register('draft_post', $draft);
+    return new AlpacaBot\Abilities\Register($h->pipeline, $registry, $summarize, $draft, $user, $exists);
+}

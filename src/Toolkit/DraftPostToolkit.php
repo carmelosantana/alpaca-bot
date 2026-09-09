@@ -41,8 +41,8 @@ use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Tool\ToolResult;
  */
 final class DraftPostToolkit implements ToolkitInterface
 {
-    /** The post types the tool may create, and the capability each needs. Anything else is refused by the parameter's enum before the callback runs. */
-    private const TYPES = ['post' => 'edit_posts', 'page' => 'edit_pages'];
+    /** The post types the tool may create, and the capability each needs. Anything else is refused by the parameter's enum before the callback runs. Public so Abilities\Register asks the same map, and the two cannot drift. */
+    public const TYPES = ['post' => 'edit_posts', 'page' => 'edit_pages'];
 
     /** @param \Closure(): int $userId the acting user's id, resolved when the tool runs (see the class docblock) */
     public function __construct(private \Closure $userId) {}

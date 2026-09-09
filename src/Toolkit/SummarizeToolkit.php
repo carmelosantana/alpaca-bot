@@ -68,7 +68,16 @@ final class SummarizeToolkit implements ToolkitInterface
         return 'Use summarize when the user asks for the gist of something long, or when a page you fetched is too long to reason about in full. Pass the text itself, not a description of it.';
     }
 
-    private function summarize(string $text, string $length): ToolResult
+    /**
+     * The turn itself. Public for Abilities\Register, which calls it directly instead of through
+     * the Tool above: Tool::execute() turns every throw into a text error for the model, and the
+     * ability needs the throw (a spent cap, a provider failure) to keep its type so it can be
+     * refused with the same code the REST route uses and without the provider's message. What
+     * the model gets is unchanged. `$length` is one of LENGTHS; anything else reads as medium.
+     *
+     * @throws \AlpacaBot\Chat\CapExceeded|\InvalidArgumentException|\RuntimeException as Pipeline::complete()
+     */
+    public function summarize(string $text, string $length): ToolResult
     {
         $result = $this->pipeline->complete(($this->userId)(), $text, [
             'system' => 'Summarize the text the user sends ' . (self::LENGTHS[$length] ?? self::LENGTHS['medium']) . '. Return only the summary: no preamble, no commentary, and nothing that is not in the text.',

@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use AlpacaBot\Abilities;
 use AlpacaBot\Admin\Assets;
 use AlpacaBot\Admin\ChatScreen;
 use AlpacaBot\Admin\HelpTabs;
@@ -248,4 +249,27 @@ it('renders the chat screen, enqueues its assets, hands the pipeline the user pr
     $onRestInit();
     expect($registered)->toContain('/view/history')->toContain('/view/messages/(?P<id>\d+)')->toContain('/chat')
         ->and($servers)->toBe([StreamController::class, ViewController::class]);
+});
+
+it('registers the abilities on the two hooks core fires when its registries are first used, over the container\'s own pipeline and registry', function (): void {
+    Functions\when('add_shortcode')->justReturn();
+    // The category first: core refuses an ability whose category is not registered, and its
+    // categories registry is built (and this hook fired) before wp_abilities_api_init.
+    Actions\expectAdded('wp_abilities_api_categories_init')->once()->with(Mockery::on(
+        static fn (mixed $cb): bool => is_array($cb) && ($cb[0] ?? null) instanceof Abilities\Register && ($cb[1] ?? null) === 'registerCategory'
+    ));
+    Actions\expectAdded('wp_abilities_api_init')->once()->with(Mockery::on(
+        static fn (mixed $cb): bool => is_array($cb) && ($cb[0] ?? null) instanceof Abilities\Register && ($cb[1] ?? null) === 'register'
+    ));
+    // No init fallback: wp_register_ability() refuses any call outside its own action, and the
+    // plugin's floor (6.9) has the API in core, so a fallback could only fire a notice. These
+    // two are every init listener there is; one more is a call Mockery has no handler for.
+    Actions\expectAdded('init')->times(3)->with(Mockery::type('array'));
+    Actions\expectAdded('init')->once()->with(Mockery::type(Closure::class), 20);
+    $plugin = Plugin::boot();
+    $plugin->register();
+    $register = $plugin->get(Abilities\Register::class);
+    expect($register)->toBeInstanceOf(Abilities\Register::class)
+        ->and((new ReflectionProperty(Abilities\Register::class, 'pipeline'))->getValue($register))->toBe($plugin->get(Pipeline::class))
+        ->and((new ReflectionProperty(Abilities\Register::class, 'registry'))->getValue($register))->toBe($plugin->get(Registry::class));
 });

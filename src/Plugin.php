@@ -79,9 +79,19 @@ final class Plugin
         // when a turn asks (Toolkit\Registry), so nothing about the setting is read here either.
         $webFetch = new Toolkit\WebFetchToolkit($store);
         $registry->register('web_fetch', $webFetch);
-        $registry->register('summarize', new Toolkit\SummarizeToolkit($this->get(Chat\Pipeline::class), get_current_user_id(...)));
-        $registry->register('draft_post', new Toolkit\DraftPostToolkit(get_current_user_id(...)));
+        $summarize = new Toolkit\SummarizeToolkit($this->get(Chat\Pipeline::class), get_current_user_id(...));
+        $registry->register('summarize', $summarize);
+        $draftPost = new Toolkit\DraftPostToolkit(get_current_user_id(...));
+        $registry->register('draft_post', $draftPost);
         $this->set(Toolkit\Registry::class, $registry);
+        // The abilities, on core's two hooks and no other (Abilities\Register says why there is
+        // no init fallback), the category's hook first because core fires it first and refuses
+        // an ability whose category it does not know. The same toolkit instances the registry
+        // holds, and the same user closure, so an ability and a chat turn act as one user.
+        $abilities = new Abilities\Register($this->get(Chat\Pipeline::class), $registry, $summarize, $draftPost, get_current_user_id(...));
+        $this->set(Abilities\Register::class, $abilities);
+        add_action('wp_abilities_api_categories_init', [$abilities, 'registerCategory']);
+        add_action('wp_abilities_api_init', [$abilities, 'register']);
         // On init, after the post types (priority 10), not on admin_init: WP-CLI loads WordPress
         // and fires init but never admin_init, and in P1 the CLI is the whole user surface, so an
         // upgraded 0.4 site's first `wp alpaca-bot chat` must already see its configured
