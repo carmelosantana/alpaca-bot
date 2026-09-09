@@ -2,8 +2,11 @@
 # PHPStan level 6 and Pest, all through the one `composer check` every task ends on, plus the
 # runtime-autoload guard. `assets` is the browser side: TypeScript, the Node test suite and the
 # esbuild bundle, whose output is gitignored and so has to be built here and handed on. And
-# `integration` puts the two together on real WordPress, one leg per supported core version:
-# the PHPUnit integration suite inside wp-env, then one turn through the chat screen in a browser.
+# `integration` puts the two together on real WordPress, twice: the latest release and 7.0, the
+# floor this *suite* can run on, which is not the floor the plugin header claims -- the matrix
+# comment below says why, and that gap is a board decision rather than something CI covers. Each
+# leg runs the PHPUnit integration suite inside wp-env, then one turn through the chat screen in
+# a browser.
 #
 # Third-party actions are pinned to full commit SHAs (tags are mutable). No pull_request_target,
 # no cache, no secrets: nothing here needs any of the three, and each is a way a fork's pull
@@ -43,13 +46,31 @@ jobs:
           coverage: none
           tools: composer:v2
 
+      # Before install, so a manifest that disagrees with composer.lock fails as the manifest
+      # error it is rather than as a puzzling resolution afterwards. --strict makes a warning
+      # (no license, no description, a non-canonical constraint) an error too.
+      - run: composer validate --strict
+
       # post-install-cmd runs @prefix: installs strauss from its own manifest (tools/strauss,
       # lockfile committed) and builds vendor-prefixed/, which PHPStan and Pest both need.
       - run: composer install --no-interaction --no-progress
 
+      # The dependency-hygiene gate the release-and-quality-gates spec names: fail the build when
+      # anything in the installed tree carries a published advisory. Clean on this tree today; the
+      # day it fires, the answer is the dependency, never deleting the step.
+      - run: composer audit
+
       - run: composer check
 
       - run: php bin/check-bootstrap.php
+
+      # docs/hooks.md is generated from the hook call sites, so it can only ever be stale.
+      # Regenerating it and demanding no diff turns "someone added a hook and did not run the
+      # generator" into a red build instead of documentation that quietly stops being true.
+      - name: docs/hooks.md is what the call sites generate
+        run: |
+          composer docs:hooks
+          git diff --exit-code docs/hooks.md
 
   assets:
     name: TypeScript, Node tests and the asset build on Node 22
@@ -111,11 +132,21 @@ jobs:
         # The plugin header still says "Requires at least: 6.9" and Provider\Factory has a
         # documented fallback for a WordPress without the AI client; that gap is a decision for
         # the board, not something this matrix should paper over by pretending to test 6.9.
+        #
+        # `expect` and `reject` are what the "Assert the running WordPress" step below compares
+        # the live install against; a leg that sets neither fails that step on purpose, so a leg
+        # cannot be added without saying what it covers. `latest` has no number to pin to, so it
+        # asserts the property that actually matters instead: it must not be the other leg's
+        # floor. WordPress has shipped 7.1, so `latest` can never resolve back to 7.0.
         include:
           - wp: latest
             core: ''
+            expect: ''
+            reject: '7.0'
           - wp: '7.0'
             core: https://wordpress.org/wordpress-7.0.zip
+            expect: '7.0'
+            reject: ''
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
@@ -163,6 +194,52 @@ jobs:
         run: pnpm exec wp-env start --update
         env:
           WP_ENV_CORE: ${{ matrix.core }}
+
+      # The only reason this job is a matrix is that the legs run different WordPress versions,
+      # and nothing else in the run says which one ran: both legs otherwise emit byte-identical
+      # PHPUnit and Playwright output. So if WP_ENV_CORE were renamed upstream, misspelled, or
+      # its zip 404'd, wp-env would fall back to .wp-env.json's `"core": null` -- latest -- and
+      # the 7.0 leg would go green having tested the same thing as the other leg. This compares;
+      # printing the version and trusting a human to read it is the same hole one level up.
+      #
+      # Both containers, because they are two installs: tests-cli serves the PHPUnit suite and
+      # cli serves the browser, and a version claim that covers only half the job is half true.
+      # `wp-env run` prints its own two lines around the command's output, hence the extraction;
+      # sed reads all of its input, so there is no early-exit consumer to take a SIGPIPE.
+      - name: Assert the running WordPress is the version this leg exists to cover
+        env:
+          WP_LEG: ${{ matrix.wp }}
+          EXPECT: ${{ matrix.expect }}
+          REJECT: ${{ matrix.reject }}
+        run: |
+          if [ -z "$EXPECT" ] && [ -z "$REJECT" ]; then
+            echo "::error::the WordPress $WP_LEG leg asserts nothing about its core version"
+            exit 1
+          fi
+          status=0
+          for container in tests-cli cli; do
+            if ! raw=$(pnpm exec wp-env run "$container" -- wp core version 2>&1); then
+              echo "::error::wp core version failed in the $container container"
+              printf '%s\n' "$raw"
+              exit 1
+            fi
+            version=$(sed -n -E 's/^[[:space:]]*([0-9]+\.[0-9]+(\.[0-9]+)?)[[:space:]]*$/\1/p' <<<"$raw")
+            if [[ ! "$version" =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ ]]; then
+              echo "::error::no WordPress version in the $container container's reply"
+              printf '%s\n' "$raw"
+              exit 1
+            fi
+            echo "$container is running WordPress $version"
+            if [ -n "$EXPECT" ] && [[ "$version" != "$EXPECT" && "$version" != "$EXPECT".* ]]; then
+              echo "::error::the WordPress $WP_LEG leg must run $EXPECT, but $container is on $version"
+              status=1
+            fi
+            if [ -n "$REJECT" ] && [[ "$version" == "$REJECT" || "$version" == "$REJECT".* ]]; then
+              echo "::error::the WordPress $WP_LEG leg must not run $REJECT, but $container is on $version"
+              status=1
+            fi
+          done
+          exit $status
 
       - name: WordPress integration suite
         run: WPH_MODE=wp-env bash bin/test-integration.sh
