@@ -46,18 +46,19 @@ it('adds nothing to any other screen', function (): void {
     }
 });
 
-it('tells a site that upgraded from 0.4 that both shortcodes are gone, print as text now, and what to do', function (): void {
-    // A 0.4 post with [alpacabot] in its content renders the literal shortcode once nothing
-    // registers it; the tab is where a user is told, so it must name both, say they are
-    // removed, say what the front end shows, and say what to do about it.
+it('says what both shortcodes do now, that an answer costs tokens and is cached, and who sees one; never that they are removed', function (): void {
+    // P3 shipped no shortcodes and this tab said so. They are back on the new pipeline, and a
+    // tab that still said "removed" would be the product's own documentation lying. What a
+    // site owner needs from it: the two forms of [alpacabot], that a prompt spends provider
+    // tokens when it is generated and is cached (the default hour) so it is not generated on
+    // every view, that a visitor only ever sees a cached answer, and that [alpacabot_agent]
+    // is the deprecated 0.4 form.
     Functions\when('esc_url')->returnArg();
     $content = helpTabContent('alpaca-bot-shortcodes');
-    expect($content)->toContain('[alpacabot]')->toContain('[alpacabot_agent]')
-        ->toContain('removed')
-        ->toContain('later 0.x release')
-        ->toMatch('/as (plain )?text/i')
-        ->toContain('Search')
-        ->not->toContain('1.0');
+    expect($content)->toContain('[alpacabot]')->toContain('[alpacabot_agent]')->toContain('prompt=')
+        ->toContain('token')->toContain('cache')->toContain('edit posts')->toContain('deprecated')
+        ->toContain('alpaca_bot/shortcode/allow_guests')
+        ->not->toContain('removed')->not->toContain('registers no shortcodes')->not->toContain('1.0');
 });
 
 it('describes what the chat screen does now, and points support at Discord, Patreon and the issue tracker', function (): void {

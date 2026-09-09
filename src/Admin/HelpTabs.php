@@ -7,14 +7,14 @@ namespace AlpacaBot\Admin;
 /**
  * The help tabs (core's "Help" pull-down at the top right of a screen) of the chat screen and the
  * settings page, added on `current_screen`, the action core fires once the WP_Screen is built and
- * its id is known. Three tabs: what the chat screen does now, what became of 0.4's shortcodes,
+ * its id is known. Three tabs: what the chat screen does now, what the shortcodes do (and cost),
  * and where to get help.
  *
  * 0.4's Help ran README.md through a markdown parser and made a tab of every heading. Nothing of
  * that is kept: the parser is gone with the 0.4 tree, and the tabs are written for what the
- * screens actually do. The Shortcodes tab is not a placeholder for a feature that is not here: a
- * site that upgraded from 0.4 with `[alpacabot]` in a post now shows that text to its visitors,
- * because WordPress prints a shortcode nobody registers, and the tab is where that site is told.
+ * screens actually do. The Shortcodes tab said, while P3 registered none, that they were gone and
+ * a 0.4 page printed them as text; it says what they do now that Shortcodes\Chat has them back,
+ * because a help tab that lags the product is the product lying about itself.
  *
  * Every string is escaped as it is built (esc_html__() for text, esc_url() for a link), so the
  * content is handed to add_help_tab() ready to print.
@@ -59,20 +59,44 @@ final class HelpTabs
             ]);
     }
 
-    /** The 0.4 shortcodes are gone; a post that still carries one prints it as text, and this is where the site is told what to do about it. */
+    /**
+     * The two shortcodes as Shortcodes\Chat and Shortcodes\AgentShim have them. What a site owner
+     * needs from this tab, in order: that a prompt spends tokens when it is generated and is
+     * cached so it is not generated on every view, who triggers a generation and who only ever
+     * sees the cache, the chat form, and that the 0.4 agent form is deprecated.
+     */
     private function shortcodes(): string
     {
         return self::p(sprintf(
-            /* translators: 1: [alpacabot], 2: [alpacabot_agent] */
-            esc_html__('This version registers no shortcodes. The %1$s and %2$s shortcodes from 0.4 were removed in the rewrite; they return with the toolkits in a later 0.x release.', 'alpaca-bot'),
+            /* translators: 1: [alpacabot prompt="…"], 2: [alpacabot] */
+            esc_html__('%1$s puts the model\'s answer to the prompt in a post or page; %2$s with no prompt puts this chat screen there. Both are for logged-in users who can edit posts.', 'alpaca-bot'),
+            '<code>[alpacabot prompt="…"]</code>',
             '<code>[alpacabot]</code>',
-            '<code>[alpacabot_agent]</code>',
         ))
-            . self::p('<strong>' . esc_html__('If you upgraded from 0.4, check your content.', 'alpaca-bot') . '</strong> ' . esc_html__('WordPress prints a shortcode nothing registers exactly as written, so a post or page that still contains one now shows the shortcode itself to visitors, as plain text, where the generated content used to be.', 'alpaca-bot'))
+            . self::p('<strong>' . esc_html__('Generating an answer costs provider tokens', 'alpaca-bot') . '</strong> ' . sprintf(
+                /* translators: 1: cache="off", 2: cache="2d" */
+                esc_html__('and counts against the monthly cap of the user viewing the page, so the answer is cached for an hour and served from the cache until then. %1$s generates on every view; %2$s keeps an answer for two days (s, m, h and d are the units).', 'alpaca-bot'),
+                '<code>cache="off"</code>',
+                '<code>cache="2d"</code>',
+            ))
             . self::p(sprintf(
-                /* translators: %s: the search term "[alpacabot", with no closing bracket on purpose so that it finds both shortcodes */
-                esc_html__('Search your posts and pages for %s (the search box on the Posts and Pages lists searches content) and, in each one, either remove the shortcode or replace it with the text you want shown. The chat screen is the place to draft that text.', 'alpaca-bot'),
-                '<code>[alpacabot</code>',
+                /* translators: %s: the filter name alpaca_bot/shortcode/allow_guests */
+                esc_html__('A visitor, or a logged-in user who cannot edit posts, sees a notice instead of the answer. A site that wants visitors to see it returns true from the %s filter, and they then see the cached answer and nothing else: a visitor never triggers a generation, so a page nobody with the capability opens spends nothing.', 'alpaca-bot'),
+                '<code>alpaca_bot/shortcode/allow_guests</code>',
+            ))
+            . self::p(sprintf(
+                /* translators: 1: model="…", 2: system="…", 3: temperature="…", 4: format="text" */
+                esc_html__('The other attributes: %1$s picks the model where users may change it, %2$s replaces the system prompt for this answer, %3$s the temperature, and %4$s shows the answer as plain text instead of rendering its markdown.', 'alpaca-bot'),
+                '<code>model="…"</code>',
+                '<code>system="…"</code>',
+                '<code>temperature="…"</code>',
+                '<code>format="text"</code>',
+            ))
+            . self::p(sprintf(
+                /* translators: 1: [alpacabot_agent], 2: name="get|summarize" url="…" */
+                esc_html__('%1$s, the 0.4 form (%2$s), is deprecated: it still fetches the page and, for summarize, asks the model, under the same rules, and it logs a notice under WP_DEBUG. It goes away in a later 0.x release; put the text to summarize in a prompt instead, or open the URL in this chat, where the fetch and summarize tools read it for you.', 'alpaca-bot'),
+                '<code>[alpacabot_agent]</code>',
+                '<code>name="get|summarize" url="…"</code>',
             ));
     }
 

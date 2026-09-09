@@ -118,7 +118,7 @@ Click **Alpaca Bot** in the admin menu, below Dashboard and above Posts. The scr
 - Type in the box at the foot of the screen. **Enter** sends, **Shift+Enter** adds a line, **Escape** clears the box.
 - The image button attaches a picture from the media library to your next message, for a model that can see. The largest image the screen takes is set by the site's PHP `post_max_size`, not its upload limit: the image travels inside the message, not as an upload.
 - Replies stream in as they are written. Every message has a **Copy** button, your own have **Edit and resend**, and a code block has its own copy button. Under a reply is its receipt: the model, the tokens it used and how long it took.
-- The **Help** tab at the top right of the screen repeats this, and says what became of 0.4's shortcodes.
+- The **Help** tab at the top right of the screen repeats this, and documents the shortcodes.
 
 ### Settings
 
@@ -130,9 +130,36 @@ Everything the screen does is a route under `alpaca-bot/v1`: a turn (`POST /chat
 
 ## Shortcodes
 
-0.5 registers no shortcodes. 0.4's `[alpacabot]` and `[alpacabot_agent]` were removed in the rewrite and return with the toolkits in a later 0.x release.
+Both 0.4 shortcodes are back on the new pipeline. Both are for logged-in users who can edit posts (`edit_posts`); anyone else sees a notice.
 
-**If you upgrade a 0.4 site, check your content.** WordPress prints a shortcode nothing registers exactly as written, so a post or page that still contains one shows the shortcode itself to visitors, as plain text, where the generated content used to be. Search your posts and pages for `[alpacabot` and, in each, remove the shortcode or replace it with the text you want shown.
+### `[alpacabot prompt="…"]`
+
+Puts the model's answer to the prompt in a post or page.
+
+| Attribute | Default | What it does |
+| --- | --- | --- |
+| `prompt` | | The message sent to the model. Without it, the shortcode is the chat screen (below). |
+| `model` | the viewer's default | The model, where the site lets users change it (Settings › Chat); it must be one the provider lists. |
+| `system` | the site's system prompt | The system prompt for this answer. |
+| `temperature` | the model's setting | The temperature for this answer, 0 to 2. |
+| `format` | `markdown` | `markdown` renders the answer (raw HTML stripped, links kept); `text` shows it as plain, escaped text. |
+| `cache` | `1h` | How long the answer is kept: a number with a unit (`45s`, `30m`, `1h`, `2d`). `off` generates on every view. Anything else keeps the default. |
+
+**Generating an answer costs provider tokens** and counts against the monthly cap of the user viewing the page, so it is cached (a transient, per shortcode and per post) and served from the cache until it expires. Two identical shortcodes on two pages are two answers.
+
+**A visitor never triggers a generation.** A visitor, or a logged-in user who cannot edit posts, sees a notice in place of the answer. A site that wants visitors to see the answer returns `true` from the `alpaca_bot/shortcode/allow_guests` filter (`(bool $allow, int $postId, string $tag)`); they then see the cached answer and nothing else. When the cache has expired, visitors see the notice again until someone who can edit posts opens the page. That is the point: a page nobody with the capability opens spends nothing, whatever the model costs.
+
+```php
+add_filter('alpaca_bot/shortcode/allow_guests', '__return_true');
+```
+
+### `[alpacabot]`
+
+With no `prompt`, the chat screen on a page, for logged-in users who can edit posts, with the same bundle and stylesheet as in wp-admin (a front-end design of its own is a later 0.x release). A visitor sees a login notice and loads nothing.
+
+### `[alpacabot_agent name="get|summarize" url="…" length="…"]` (deprecated)
+
+The 0.4 form still works, under the same rules and cache: `get` shows the page's readable text, `summarize` fetches it and asks the model for a summary (`length` is free text, "2 sentences"; `model` and `cache` as above). The fetch goes through the same address guard as the chat's `web_fetch` tool: a private, local or non-http(s) address is refused. It logs a deprecation notice once per request under `WP_DEBUG` and goes away in a later 0.x release. Put the text to summarize in a `prompt` instead, or open the URL in the chat, where the fetch and summarize tools read it for you: `[alpacabot prompt="Summarize https://…"]` would **not** work, since a shortcode's turn runs no tools and the model cannot open the URL.
 
 ## Support
 
