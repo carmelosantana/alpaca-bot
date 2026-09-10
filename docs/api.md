@@ -266,6 +266,7 @@ you received it. The route answers a refusal as JSON before any frame is written
 | No `token` parameter | 400 `rest_missing_callback_param` (core) |
 | Token unknown, expired, another user's, for another conversation, or already redeemed | 403 `rest_forbidden` "Invalid or expired stream token." |
 | Not logged in | 401 `rest_forbidden` |
+| This user already has the most streams the site allows running at once (3; filter `alpaca_bot/stream/concurrent`) | 429 `alpaca_bot_rate_limited`, `Retry-After` header and `data.retry_after` in seconds. **The ticket is not spent**: retry it while it lives. The wait is a ceiling — the soonest running stream's lease — so it can be longer than the 120 s the ticket has left, and then the turn has to be posted again |
 | `HEAD` | 405 `alpaca_bot_method_not_allowed` with `Allow: GET` (core routes a HEAD to the GET handler; the handler refuses it before the ticket is touched, so a probe neither runs nor spends the turn) |
 | Any other method | 404 `rest_no_route` (core: no such route for that method) |
 
@@ -589,7 +590,7 @@ data: {"conversation_id":169,"message":{"role":"assistant","content":"orange","m
 | `start` | `{conversation_id, model}` | Once the conversation exists (created on the spot for a ticket that named 0), before any text. This is where a new conversation's id arrives. |
 | `delta` | `{text, reasoning}` | One per fragment, and both fields may be empty (see below). A thinking model sends its reasoning as `reasoning` deltas with empty `text` first, then the answer as `text`. |
 | `done` | The exact body a direct `POST /chat` answers with: `{conversation_id, message, receipt, contexts}` | The turn finished. The connection closes after it. |
-| `error` | `{code, message, data}`, the same JSON body a non-streaming error would carry | The turn was refused or failed. A refusal (cap exceeded, bad request) is an `error` frame alone with no `start`; a provider that fails mid-reply sends its deltas first, then `error`. The connection closes after it. |
+| `error` | `{code, message, data}`, the same JSON body a non-streaming error would carry | The turn was refused or failed. A refusal (cap exceeded, bad request) is an `error` frame alone with no `start`; a provider that fails mid-reply sends its deltas first, then `error`; a turn that outran the site's stream budget ends the same way, with `alpaca_bot_stream_timeout` after the deltas that had arrived. The connection closes after it. |
 
 A `delta` frame may be wholly empty — `{"text":"","reasoning":""}` — and an empty one may
 arrive before any text at all, including as the very first `delta` of a turn. That is not a bug
@@ -679,8 +680,9 @@ route the same object is the `error` frame's data.
 | 404 | `alpaca_bot_not_found` | A conversation that does not exist or is not yours | |
 | 404 | `rest_no_route` | Core: no such route for that method (e.g. `POST` on the stream route) | |
 | 405 | `alpaca_bot_method_not_allowed` | `HEAD` on the stream route (`Allow: GET`) | |
-| 429 | `alpaca_bot_rate_limited` | The `chat` bucket is spent for this minute; `Retry-After` header holds the seconds until it turns over | `retry_after` (same number as the header) |
+| 429 | `alpaca_bot_rate_limited` | Two different causes, one code: the `chat` bucket is spent for this minute (`Retry-After` holds the seconds until it turns over); or a stream redemption found this user already at the concurrent-stream cap, where `Retry-After` is a ceiling on the wait for a slot — up to the site's whole stream budget, 720 s at the defaults — and the ticket is left unspent | `retry_after` (same number as the header) |
 | 502 | `alpaca_bot_provider_error` | The model provider failed or could not be built | `detail` (the raw provider error, administrators only) |
+| 504 | `alpaca_bot_stream_timeout` | A streamed turn ran past the site's wall-clock budget for one turn and was stopped; what had arrived is saved as a partial reply. Only ever an `error` frame — the response's status was already sent — so this is a code to key on, not a status a client will read | `limit` (the budget in seconds, 720 at the defaults) |
 
 The 402, with the per-user cap set to 1 token for the run:
 
@@ -725,6 +727,14 @@ anyway. A failed first turn leaves no empty conversation behind.
 user per UTC calendar minute by default, kept in a transient. A refused hit still counts, so
 hammering past the limit does not refill the bucket. `GET /chat/{id}/stream` is deliberately
 not limited: the POST that issued its ticket was, and the ticket can be redeemed once.
+
+What bounds that route instead is a concurrency cap, because one ticket holds a PHP worker for
+the length of a turn whether or not anyone is still reading: one person may have 3 streams
+running at once (filter `alpaca_bot/stream/concurrent`), and a redemption over that is the 429
+in the table above with its ticket left unspent. A turn is also bounded in wall-clock time —
+`provider.timeout × 6 × 2`, 720 s at the defaults, filter `alpaca_bot/stream/budget` — after
+which the stream ends with a 504 `alpaca_bot_stream_timeout` frame and the partial reply is
+saved.
 
 A user without the capability is refused before a bucket is touched. A route a site has opened
 to visitors through its capability filter is limited per client address (a salted hash of
