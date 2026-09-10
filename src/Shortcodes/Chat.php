@@ -427,7 +427,15 @@ final class Chat
         }
         $userId = get_current_user_id();
         $history = $this->conversations->listFor($userId, max(1, (int) $this->store->get('chat.history_limit')));
-        $shell = new Shell($this->store, $this->catalog, null, $history, 0, null, $this->prefs->modelFor($userId, $this->catalog, $this->store));
+        // The page itself is where "New chat" goes, and passing it is also what tells the Shell
+        // it is not on the admin screen (Shell's docblock). Without it the shell's "New chat"
+        // link and the history select's matching option both carried admin_url(), so a visitor
+        // of a front-end `[alpacabot]` page was navigated out of the site into wp-admin. The
+        // permalink is the same URL refused() sends a visitor back to after logging in; the
+        // home page stands in for a render with no post behind it, where there is no permalink
+        // to return to.
+        $home = (string) get_permalink();
+        $shell = new Shell($this->store, $this->catalog, null, $history, 0, null, $this->prefs->modelFor($userId, $this->catalog, $this->store), $home !== '' ? $home : home_url('/'));
         $this->assets->enqueueFront();
         return $shell->render();
     }

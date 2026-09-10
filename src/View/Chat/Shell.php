@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace AlpacaBot\View\Chat;
 
+use AlpacaBot\Admin\Menu;
 use AlpacaBot\Chat\Conversation;
 use AlpacaBot\Provider\ModelCatalog;
 use AlpacaBot\Settings\Store;
@@ -22,6 +23,15 @@ use AlpacaBot\View\Markdown;
  *
  * The sprite is a build output (pnpm build) and gitignored, so a checkout without it must
  * still render: the icons are missing then, and nothing else is.
+ *
+ * `$home` says where the shell is, and is one parameter because it answers one question. Null
+ * is the wp-admin screen: "New chat" goes to `admin.php?page=alpaca-bot` and the wrapper keeps
+ * core's `.wrap`, whose margins the screen is laid out inside. A URL is a front-end page
+ * (Shortcodes\Chat passes the page's own permalink): "New chat" goes back to that page rather
+ * than out of the site into wp-admin, and the wrapper is `ab-wrap--front` without `.wrap` —
+ * which is an admin class the front end does not style, and a class name themes use for their
+ * own layout. The stylesheet's front-end block is what that modifier selects; it undoes the
+ * viewport arithmetic .ab-wrap does against wp-admin's chrome.
  */
 final class Shell extends Component
 {
@@ -30,8 +40,9 @@ final class Shell extends Component
      * @param int $postId the post being edited when the screen was opened from one, else 0
      * @param string|null $sprite path to the icon sprite; null means the plugin's own assets/img/icons.svg
      * @param string|null $model the model the select and the composer start on (the user's effective model, UserPrefs::modelFor()); null means the catalog's default
+     * @param string|null $home where "New chat" returns to, and the mark that this shell is not on the admin screen; null is the admin screen (the class docblock)
      */
-    public function __construct(private Store $store, private ModelCatalog $catalog, private ?Conversation $conversation, private array $history, private int $postId = 0, private ?string $sprite = null, private ?string $model = null) {}
+    public function __construct(private Store $store, private ModelCatalog $catalog, private ?Conversation $conversation, private array $history, private int $postId = 0, private ?string $sprite = null, private ?string $model = null, private ?string $home = null) {}
 
     public function render(): string
     {
@@ -45,13 +56,15 @@ final class Shell extends Component
             __('Alpaca Bot', 'alpaca-bot'),
             new ModelSelect($this->catalog->all(), $model, (bool) $this->store->get('chat.user_can_change_model')),
             new HistorySelect($this->history, $id, $title),
+            $this->home ?? admin_url('admin.php?page=' . Menu::SLUG),
         );
         $list = new MessageList($messages, new Markdown(), $this->store, $who->userName, $who->userAvatar, $who->assistantAvatar, $id);
         $chat = $this->tag('div', ['id' => 'ab-chat', 'data-conversation' => (string) $id],
             $this->tag('div', ['id' => 'ab-status', 'class' => 'ab-status', 'role' => 'status', 'aria-live' => 'polite'], '') . $list->render());
         $composer = new Composer($this->store, $id, $model, $this->postId);
 
-        return $this->tag('div', ['class' => 'wrap ab-wrap'], $this->sprite() . $header->render() . $chat . $composer->render());
+        $class = $this->home === null ? 'wrap ab-wrap' : 'ab-wrap ab-wrap--front';
+        return $this->tag('div', ['class' => $class], $this->sprite() . $header->render() . $chat . $composer->render());
     }
 
     private function sprite(): string

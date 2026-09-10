@@ -112,30 +112,43 @@ function boot(cfg: Settings, form: HTMLFormElement): void {
     textarea.focus();
     const restore = (): void => { textarea.value = text; grow(); setImage(image); };
     let user: HTMLElement | null = null;
+    // Whether the turn reached the model. Until it does, what was typed still belongs to the
+    // composer: every exit before that point has to take the user's bubble back out of the
+    // transcript and put the text and the image back in the box, or they are gone with no
+    // record of the turn anywhere. Done once in the finally rather than at each `return`,
+    // because one of the three exits forgot -- the stream redemption that comes back as
+    // something other than an event stream (StreamBudget's 429, an expired or replayed ticket)
+    // removed the empty assistant bubble and left the typed message and any attached image
+    // nowhere, while the ticket stayed valid for a retry the user could no longer make.
+    let sent = false;
     try {
       const [userRes, emptyRes] = await Promise.all([
         request('POST', api('/view/bubble'), { role: 'user', content: text, images }),
         request('GET', api('/view/bubble', { role: 'assistant', streaming: '1' })),
       ]);
       const bad = userRes.ok ? (emptyRes.ok ? null : emptyRes) : userRes;
-      if (bad) { restore(); return refused(bad.status, await restError(bad)); }
+      if (bad) return refused(bad.status, await restError(bad));
       user = fromHtml(await userRes.text());
       if (user) append(user);
       const ticketRes = await request('POST', api('/chat'), {
         message: text, conversation_id: asId(field('conversation_id').value) ?? 0, model: field('model').value, images, context: { post_id: asId(field('context[post_id]').value) ?? 0 }, stream: true,
       });
-      if (!ticketRes.ok) { user?.remove(); restore(); return refused(ticketRes.status, await restError(ticketRes)); }
+      if (!ticketRes.ok) return refused(ticketRes.status, await restError(ticketRes));
       const ticket = await ticketRes.json() as { stream_url: string };
       const bubble = fromHtml(await emptyRes.text());
       if (!bubble) throw new Error('No streaming bubble.');
       append(bubble);
       const stream = await fetch(ticket.stream_url, { credentials: 'same-origin', headers: { 'X-WP-Nonce': cfg.nonce } });
       if (!stream.headers.get('content-type')?.startsWith('text/event-stream')) { bubble.remove(); return refused(stream.status, await restError(stream)); }
+      // From here the turn is the server's: a stream that then drops mid-reply is stored as a
+      // partial reply, and the composer must not offer the message back as if nothing ran.
+      sent = true;
       await consume(stream, bubble);
     } catch (e) {
       console.error(e);
       notice('error', t('failed'));
     } finally {
+      if (!sent) { user?.remove(); restore(); }
       busy = false;
       if (!expired && navigator.onLine) sendButton.disabled = false;
       textarea.focus();

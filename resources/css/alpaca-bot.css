@@ -1,11 +1,23 @@
 /*
- * Alpaca Bot admin chat screen (0.5). Every selector here is emitted by src/View/Chat/*,
+ * Alpaca Bot chat shell (0.5). Every selector here is emitted by src/View/Chat/*,
  * src/View/Icon.php, or resources/ts/{chat,dom,highlight}.ts; the markdown elements are
  * Markdown::allowedTags(). The accent comes from core's --wp-admin-theme-color and its
  * derivatives, set on <body> for every admin colour scheme, so the screen follows whichever
  * one the user picked; the Default scheme's values stand behind them as fallbacks so a missing
- * variable cannot blank a control. The surfaces, text and borders are core's fixed greys,
+ * variable cannot blank a control -- which is also what makes the file usable off wp-admin,
+ * where none of those variables exist. The surfaces, text and borders are core's fixed greys,
  * which do not change between schemes.
+ *
+ * Two places load this, and one of them is not wp-admin: the admin chat screen
+ * (Admin\Assets::enqueue()) and a front-end page carrying `[alpacabot]` with no prompt
+ * (Admin\Assets::enqueueFront()). Everything below is shared but one block, the height
+ * arithmetic on .ab-wrap, which subtracts wp-admin's chrome from the viewport; the front end
+ * has no #wpfooter and the shell there is a block inside a page rather than the whole screen,
+ * so .ab-wrap--front (near the foot of this file) replaces it. View\Chat\Shell puts that
+ * modifier on, and leaves core's .wrap off, for a shell it was told is not on the admin screen.
+ * Rules naming core's own classes (.notice, .wp-header-end) stay in the shared part on purpose:
+ * .notice is what dom.ts's notice() writes into #ab-status on either surface, and
+ * .wp-header-end is Header's own <hr>.
  */
 
 .ab-wrap {
@@ -274,6 +286,24 @@ pre > .ab-code__copy[aria-label]:hover::after {
     bottom: auto;
     left: auto;
     transform: translateY(-50%);
+}
+
+/* ---- the same shell on a front-end page -------------------------------------------------- */
+
+/*
+ * What .ab-wrap assumes and a `[alpacabot]` page does not have. #wpfooter is wp-admin's and is
+ * not on the page at all, so its 65px comes off the subtraction; the admin bar is still there
+ * for the logged-in editor the shell renders for, so --ab-admin-bar is left as it is and the
+ * narrow-screen block below still applies to both. The height is a bounded box rather than the
+ * rest of the viewport: this is a block in the middle of a page's content, and a shell sized to
+ * the screen would push everything after it out of reach.
+ */
+.ab-wrap--front {
+    --ab-footer: 0px;
+    height: min(70vh, 640px);
+    /* .wrap's margins are not here to be undone (Shell leaves that class off a front-end shell);
+       the page's own content width holds the shell instead. */
+    max-width: 100%;
 }
 
 /* ---- narrow screens (core's own admin breakpoint) --------------------------------------- */

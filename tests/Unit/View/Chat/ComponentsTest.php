@@ -122,10 +122,18 @@ it('history select lists conversations with data-id, marks the current one, and 
 });
 
 it('header renders the heading, the new-chat action, and both selects in WP admin chrome', function (): void {
-    Functions\when('admin_url')->alias(fn(string $p) => '/wp-admin/' . $p);
-    $html = (new Header('Alpaca Bot', new ModelSelect([new Model('a', 'a')], 'a', true), new HistorySelect([], 0)))->render();
+    $html = (new Header('Alpaca Bot', new ModelSelect([new Model('a', 'a')], 'a', true), new HistorySelect([], 0), '/wp-admin/admin.php?page=alpaca-bot'))->render();
     expect($html)->toContain('<h1 class="wp-heading-inline">Alpaca Bot</h1>')->toContain('class="page-title-action"')->toContain('href="/wp-admin/admin.php?page=alpaca-bot"')
         ->toContain('id="ab-model"')->toContain('id="ab-history"')->toContain('<hr class="wp-header-end">');
+});
+
+// The "New chat" link is the caller's to name, because the shell is not only the admin screen:
+// a front-end `[alpacabot]` shell that carried admin_url() here navigated a visitor of the page
+// out of the site into wp-admin, and chat.ts reads this same href for the history select's
+// "New chat" option, so both went there.
+it('header sends new-chat wherever the caller says, so a front-end shell stays on its page', function (): void {
+    $html = (new Header('Alpaca Bot', new ModelSelect([], 'a', true), new HistorySelect([], 0), 'https://example.test/chat-page/'))->render();
+    expect($html)->toContain('href="https://example.test/chat-page/"')->not->toContain('wp-admin');
 });
 
 it('notice renders WP admin notice markup and refuses an unknown kind', function (): void {
@@ -210,7 +218,7 @@ it('passes every URL-valued attribute through esc_url', function (): void {
     expect((new MessageBubble(new Message('user', 'hi'), new Markdown(), 'C', '/u.png', '/a.png'))->render())->toContain('src="URL(/u.png)"')
         ->and((new MessageBubble(new Message('assistant', 'hi'), new Markdown(), 'C', '/u.png', '/a.png'))->render())->toContain('src="URL(/a.png)"')
         ->and((new MessageList([], new Markdown(), new Store(), 'C', '/u.png', '/a.png'))->render())->toContain('src="URL(/a.png)"')
-        ->and((new Header('T', new ModelSelect([], 'a', true), new HistorySelect([], 0)))->render())->toContain('href="URL(/wp-admin/admin.php?page=alpaca-bot)"')
+        ->and((new Header('T', new ModelSelect([], 'a', true), new HistorySelect([], 0), '/wp-admin/admin.php?page=alpaca-bot'))->render())->toContain('href="URL(/wp-admin/admin.php?page=alpaca-bot)"')
         ->and(chatShell(null, [], sys_get_temp_dir() . '/ab-missing-' . getmypid() . '.svg')->render())->toContain('href="URL(/wp-admin/admin.php?page=alpaca-bot)"')->toContain('src="URL(/plugins/alpaca-bot/assets/img/icon-80.png)"');
 });
 

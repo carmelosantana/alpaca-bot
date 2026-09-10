@@ -466,6 +466,39 @@ it('renders the chat shell for an editor with no prompt, on their model, and enq
         ->and($h->writes)->toBe([]);
 });
 
+// The shell was built for wp-admin and the shortcode reuses it, which leaked twice: "New chat"
+// carried admin_url() -- in the link and, through chat.ts reading that link's href, in the
+// history select's matching option -- so it navigated a visitor of the page out of the site;
+// and the wrapper carried core's `.wrap`, an admin class the front end does not style and one
+// themes use for their own layout. The stylesheet ships whole either way (it is one file), so
+// the modifier class is what selects the front-end block in it.
+it('keeps a front-end shell on its own page: new-chat is the permalink, and the wrapper is the front-end one, not core\'s .wrap', function (): void {
+    $h = pipelineWith(null);
+    $chat = shortcodeChat($h, 7);
+    shortcodeViewer(3);
+    Functions\when('get_posts')->justReturn([]);
+    Functions\when('wp_get_current_user')->justReturn((object) ['display_name' => 'Carmelo', 'ID' => 3]);
+    Functions\when('get_avatar_url')->justReturn('/u.png');
+    Functions\when('get_permalink')->justReturn('https://example.test/ask-us/');
+    Functions\when('home_url')->alias(static fn(string $p = '/'): string => 'https://example.test' . $p);
+    Functions\when('admin_url')->alias(static fn(string $p): string => '/wp-admin/' . $p);
+    Functions\when('rest_url')->alias(static fn(string $p): string => '/wp-json/' . $p);
+    Functions\when('wp_create_nonce')->justReturn('n');
+    Functions\when('wp_convert_hr_to_bytes')->justReturn(8 * 1024 * 1024);
+    Functions\when('get_user_meta')->justReturn('llama3.2');
+    Functions\when('selected')->alias(static fn(mixed $a, mixed $b, bool $echo = true): string => $a == $b ? ' selected' : '');
+    Functions\when('number_format_i18n')->alias(static fn(mixed $n): string => (string) $n);
+    Functions\when('wp_enqueue_script')->justReturn();
+    Functions\when('wp_localize_script')->justReturn();
+
+    $html = $chat->render('', null, 'alpacabot');
+
+    expect($html)->toContain('class="ab-wrap ab-wrap--front"')
+        ->toContain('href="https://example.test/ask-us/" class="page-title-action"')
+        ->not->toContain('"wrap ab-wrap"')
+        ->not->toContain('wp-admin');
+});
+
 it('never renders the shell inside a REST request: an editor gets a notice, no history query, no nonce, no bundle', function (): void {
     // Final review F8: render() branched to shell() before answer()'s wp_is_rest_endpoint()
     // guard, so `GET /wp/v2/posts?per_page=100` as an editor was up to a hundred shells in
