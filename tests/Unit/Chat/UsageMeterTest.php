@@ -16,6 +16,11 @@ use Brain\Monkey\Functions;
 beforeEach(function (): void {
     Functions\when('get_option')->justReturn([]);
     Functions\when('current_time')->justReturn(1_725_000_000);
+    // The month walk primes the receipts' meta in one call before reading it. There is no meta
+    // cache here, so the stand-in only has to exist; the test below expects the call and the
+    // ids, and the query count it saves is measured against a real database in
+    // tests/Integration/UsageSummaryQueriesTest.php.
+    Functions\when('update_meta_cache')->justReturn([]);
 });
 
 // ---------------------------------------------------------------- record()
@@ -160,10 +165,20 @@ it('sums this month\'s tokens per user via a single query and caches it until th
             ['after' => '2024-08-01 00:00:00', 'inclusive' => true, 'column' => 'post_date_gmt'],
             ['before' => '2024-09-01 00:00:00', 'inclusive' => false, 'column' => 'post_date_gmt'],
         ])->andReturn([1, 2]);
+    // One prime for the whole month, ahead of the meta reads: without it every get_post_meta()
+    // is its own query (UsageSummaryQueriesTest measures what that costs against a real
+    // database). Recorded rather than expected, because beforeEach already stands the function
+    // in for every test in this file and Brain Monkey takes one definition per function.
+    $primed = [];
+    Functions\when('update_meta_cache')->alias(function (string $type, array $ids) use (&$primed): array {
+        $primed[] = [$type, $ids];
+        return [];
+    });
     Functions\expect('get_post_meta')->once()->with(1, 'total_tokens', true)->andReturn('30');
     Functions\expect('get_post_meta')->once()->with(2, 'total_tokens', true)->andReturn('12');
     Functions\expect('set_transient')->once()->with('alpaca_bot_usage_3_2024-08', ['tokens' => 42, 'requests' => 2], 1200)->andReturn(true);
-    expect((new UsageMeter(new Store()))->monthTotal(3))->toBe(42);
+    expect((new UsageMeter(new Store()))->monthTotal(3))->toBe(42)
+        ->and($primed)->toBe([['post', [1, 2]]]);
 });
 
 it('sums site-wide with no author clause under the site key', function (): void {

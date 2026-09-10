@@ -147,3 +147,19 @@ it('registers itself as [alpacabot_agent]', function (): void {
     $shim->register();
     expect(AgentShim::TAG)->toBe('alpacabot_agent');
 });
+
+// The shim's own docblock leans on this: it runs web_fetch itself because the turn behind it
+// runs no tools. With a tool-capable model and a toolkit enabled -- everything a chat turn needs
+// to get tools -- the summarize turn is still offered none.
+it('offers the model no toolkit on the summarize turn, even with a tool-capable model and a toolkit switched on', function (): void {
+    $provider = pipelineProvider([new Response('A summary.', ProviderFinishReason::Stop), new Response('', ProviderFinishReason::Stop, usage: new Usage(5, 2, 7))], $call);
+    $h = pipelineWith($provider, [], [], [['id' => 'llama3.2', 'tools' => true]], null, registryWith(['echo' => echoToolkit('echo_tool')]));
+    $shim = agentShim($h);
+    shortcodeViewer(3);
+    agentShimPage('https://example.test/a', '<html><body><p>Body text</p></body></html>');
+    Functions\when('_doing_it_wrong')->justReturn(null);
+
+    $html = $shim->render(['name' => 'summarize', 'url' => 'https://example.test/a'], null, 'alpacabot_agent');
+
+    expect($html)->toContain('A summary.')->and($call['tools'])->toBe([]);
+});

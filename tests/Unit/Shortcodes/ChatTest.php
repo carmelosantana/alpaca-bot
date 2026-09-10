@@ -464,3 +464,19 @@ it('registers itself as [alpacabot]', function (): void {
     $chat->register();
     expect(Chat::TAG)->toBe('alpacabot')->and(Chat::CAPABILITY)->toBe('edit_posts');
 });
+
+// Pipeline's class docblock: an ephemeral turn runs no tools, and for the shortcode that is a
+// decision, not a side effect of the flag. The prompt is written by anyone who can write the
+// post and the turn runs as whichever editor views the page, so a tool turn here would let that
+// prompt reach web_fetch or draft_post once per cache miss, unread. The model is catalogued as
+// tool-capable and a toolkit is enabled, which is everything a chat turn needs to get tools.
+it('offers the model no toolkit on a shortcode turn, even with a tool-capable model and a toolkit switched on', function (): void {
+    $provider = pipelineProvider(shortcodeReply('Answer'), $call);
+    $h = pipelineWith($provider, [], [], [['id' => 'llama3.2', 'tools' => true]], null, registryWith(['echo' => echoToolkit('echo_tool')]));
+    $chat = shortcodeChat($h, 7);
+    shortcodeViewer(3);
+
+    $html = $chat->render(['prompt' => 'Say hi'], null, 'alpacabot');
+
+    expect($html)->toContain('Answer')->and($call['tools'])->toBe([]);
+});

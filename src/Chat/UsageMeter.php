@@ -187,6 +187,16 @@ final class UsageMeter
             $query['author'] = $userId;
         }
         $ids = get_posts($query);
+        // One query for the whole month's meta instead of one per receipt. `fields => 'ids'`
+        // leaves WP_Query::get_posts() at both of its exits -- the cached one and the fresh
+        // query -- before it reaches _prime_post_caches() (WP 7.1 class-wp-query.php:3286 and
+        // :3319 return; :3311 is the prime, on the branch that builds WP_Post objects), so
+        // every get_post_meta() below would otherwise miss the cache and go to the database on
+        // its own -- and this walk runs synchronously ahead of the model call on a capped site
+        // whenever the hourly transient has expired. Measured on the integration site: 4
+        // receipts cost 9 queries and 20 cost 25 without this line, and 6 each with it
+        // (UsageSummaryQueriesTest holds the two counts equal).
+        update_meta_cache('post', array_map('intval', $ids));
         $tokens = 0;
         foreach ($ids as $id) {
             $tokens += (int) get_post_meta((int) $id, 'total_tokens', true);

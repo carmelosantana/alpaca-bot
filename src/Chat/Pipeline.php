@@ -90,9 +90,19 @@ use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Tool\ToolCall;
  * is the whole run: Output::$usage is the sum over every provider call the agent made, so a
  * turn that took three calls is billed three calls' tokens against the cap; a turn the
  * consumer abandons is billed the calls it had completed by then (the provider decorator's
- * running tally). An ephemeral turn runs plainly, tools or no tools: its one caller is a tool
- * wanting a text condensed, and an agent inside a tool inside an agent would be a recursion
- * with no bound but each level's iteration budget.
+ * running tally). An ephemeral turn runs plainly, tools or no tools, and that is a decision
+ * about each of the three callers that pass the flag, not only the first. Toolkit\
+ * SummarizeToolkit's inner call is a tool inside an agent, and an agent inside it would be a
+ * recursion with no bound but each level's iteration budget. Shortcodes\Chat's `prompt=` form
+ * and Shortcodes\AgentShim's `summarize` are a page rendering itself: the prompt is written by
+ * whoever could write the post (a Contributor, at least) and the turn runs as whichever viewer
+ * with `edit_posts` opened the page, so a tool turn there would let that prompt make the
+ * server fetch addresses of the model's choosing (web_fetch), or author drafts under the
+ * viewer's name that nobody asked for (draft_post), once per cache miss. AgentShim wants a
+ * fetch and runs the web_fetch tool itself instead, on the URL its author wrote (its docblock
+ * says why that loses nothing). So `ephemeral` carries two decisions — this turn is in nobody's
+ * history, and it runs no tools — and a caller that wants one without the other cannot ask;
+ * splitting the flag belongs to the release that has such a caller.
  */
 final class Pipeline
 {
