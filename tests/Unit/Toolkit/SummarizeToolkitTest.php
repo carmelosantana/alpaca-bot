@@ -10,6 +10,7 @@ use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Message\UserMessage;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Provider\Response;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Provider\Usage;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Tool\Tool;
+use Brain\Monkey\Functions;
 
 // Pipeline is final, so the toolkit runs over pipelineWith() (tests/Pest.php): the real pipeline
 // with WordPress stubbed and the provider handed in. The harness records every persisted write,
@@ -71,13 +72,36 @@ it('is refused for a length outside short, medium, long, or an empty text, befor
         ->and($h->writes)->toBe([]);
 });
 
-it('passes a pipeline failure back as an error rather than an exception, with nothing left behind', function (): void {
-    $h = pipelineWith(pipelineProvider([new \RuntimeException('connection refused')]));
+// A tool result is text the model reads and may repeat, and on a front-end [alpacabot] turn the
+// model's output is on its way to a visitor. Tool::execute()'s own catch reports the raw
+// message, and what a provider throws quotes its endpoint -- the text Rest\Errors::provider()
+// withholds from anyone but an administrator. The toolkit catches first and applies the same
+// policy the REST routes and the shortcodes do.
+it('answers a provider failure with the fixed message, never the provider\'s own text or its endpoint', function (): void {
+    $h = pipelineWith(pipelineProvider([new \RuntimeException('cURL error 7: Failed to connect for "http://ollama.internal:11434/v1/chat/completions"')]));
+    Functions\when('current_user_can')->justReturn(false);
     $asked = 0;
     $res = summarizeTool($h, $asked)->execute(['text' => 'x y z']);
     expect($res->status)->toBe(ToolResultStatus::Error)
-        ->and($res->content)->toContain('connection refused')
+        ->and($res->content)->toBe('The model provider could not complete the request.')
+        ->and($res->content)->not->toContain('ollama.internal')
+        ->and($res->content)->not->toContain('cURL')
         ->and($h->writes)->toBe([]);
+});
+
+// The other two arms of the same policy: those messages are the pipeline's own, written for a
+// person and naming nothing the caller may not see, so they reach the model as they are.
+it('keeps the pipeline\'s own words for the caller\'s mistake and for a spent cap', function (): void {
+    $h = pipelineWith(null);
+    $asked = 0;
+    expect(summarizeTool($h, $asked)->execute(['text' => '  '])->content)->toBe('The message is empty.');
+
+    $h = pipelineWith(null, ['governance.user_monthly_tokens' => 10]);
+    $h->transients['alpaca_bot_usage_3_2024-08'] = ['tokens' => 12, 'requests' => 1];
+    $asked = 0;
+    $res = summarizeTool($h, $asked)->execute(['text' => 'x y z']);
+    expect($res->status)->toBe(ToolResultStatus::Error)
+        ->and($res->content)->toContain('monthly token cap');
 });
 
 it('carries guidelines', function (): void {

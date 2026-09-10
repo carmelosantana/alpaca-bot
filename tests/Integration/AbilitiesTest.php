@@ -161,12 +161,20 @@ final class AbilitiesTest extends TestCase
         $response = $this->abilities('POST', '/abilities/alpaca-bot/summarize/run', ['text' => 'A long text.']);
         $this->assertSame(403, $response->get_status());
         $this->assertSame('alpaca_bot_toolkit_disabled', $response->get_data()['code']);
-        // Direct execution: core folds a permission callback's WP_Error into its own refusal, and
-        // logs the reason through _doing_it_wrong(), which is what this expects.
+        // The reason survives on this path, and only on this path: core's run controller calls
+        // check_permissions() from its own REST permission callback and returns our WP_Error, so
+        // the operator is told which switch and where to flip it.
+        $this->assertStringContainsString('switched off on this site', $response->get_data()['message']);
+        $this->assertStringContainsString('Settings > Tools', $response->get_data()['message']);
+        // Direct execution -- the MCP and WP-AI-Client path -- is the other half: core withholds
+        // the message on purpose and answers a fixed code, passing our text to _doing_it_wrong()
+        // instead, so a WP_DEBUG site gets a "doing it wrong" notice on every call to a
+        // switched-off tool. The class docblock's account of the split is these two assertions.
         $this->setExpectedIncorrectUsage('WP_Ability::execute');
         $out = wp_get_ability('alpaca-bot/summarize')->execute(['text' => 'A long text.']);
         $this->assertWPError($out);
         $this->assertSame('ability_invalid_permissions', $out->get_error_code());
+        $this->assertStringNotContainsString('switched off on this site', $out->get_error_message());
         $this->assertCount(1, $this->posts(UsageMeter::POST_TYPE, $admin));
         // Still registered and still listed: the switch is the administrator's to flip back, and a client is told why, not shown a 404.
         $this->assertNotNull(wp_get_ability('alpaca-bot/summarize'));

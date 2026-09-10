@@ -78,8 +78,20 @@ use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Enum\ToolResultStatus;
  * once, on a hook that fires before any particular caller is known, so it would freeze one
  * moment's setting and one user's filter answer for the whole process (a test run, a
  * long-lived worker), and a client would see a 404 it cannot tell from a typo. The cost of
- * staying registered is that MCP's discovery lists a tool that then answers 403 with a
- * reason; the alternative was a tool that silently vanished. Chat is not gated by the
+ * staying registered is a listed tool that then refuses, and **what the caller is told depends
+ * on the path**. On `wp-abilities/v1/run` the reason survives: core's run controller calls
+ * check_permissions() from its own REST permission callback and returns the WP_Error, restamping
+ * its status (403 for a logged-in user, 401 for a visitor) — WP 7.1
+ * class-wp-rest-abilities-v1-run-controller.php:171-174. Through WP_Ability::execute(), which is
+ * the MCP and WP-AI-Client path, core withholds the message deliberately ("Don't leak the
+ * permission check error to someone without the correct perms"): it answers a fixed
+ * `ability_invalid_permissions` and hands our text to _doing_it_wrong() instead, so on a
+ * WP_DEBUG site every call to a switched-off tool also writes a "doing it wrong" notice —
+ * WP 7.1 class-wp-ability.php:824-839, the same code at WP 7.0 :619-632. Returning `false`
+ * instead of a WP_Error would silence that notice, and was rejected: it takes the reason off the
+ * one path that can carry it, which is the path an operator asking "why does summarize refuse"
+ * is on, and the notice is core's own decision about a permission callback that explains
+ * itself. AbilitiesTest holds both halves. Chat is not gated by the
  * setting: it is not a toolkit, and what its turn may run is the pipeline's own decision
  * through the same registry.
  *

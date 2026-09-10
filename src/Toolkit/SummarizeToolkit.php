@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace AlpacaBot\Toolkit;
 
 use AlpacaBot\Chat\Pipeline;
+use AlpacaBot\Rest\Errors;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Contract\ToolkitInterface;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Tool\Parameter\EnumParameter;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Tool\Parameter\StringParameter;
@@ -29,9 +30,10 @@ use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Tool\ToolResult;
  * paragraph is; the words are mapped to an instruction here, so a change of wording never
  * changes the tool's schema.
  *
- * The pipeline refuses an empty text and throws for a cap or a provider failure; Tool::execute()
- * turns any throw into an error result, so the agent loop sees a tool error, not an exception
- * out of the turn it was running.
+ * The pipeline refuses an empty text and throws for a cap or a provider failure, and tool()
+ * turns that into an error result, so the agent loop sees a tool error and not an exception out
+ * of the turn it was running. Not left to Tool::execute()'s own catch: that one reports the
+ * raw message, and a provider's quotes its endpoint (tool() says what that would cost).
  *
  * The description and guidelines are English on purpose (see WebFetchToolkit); the pipeline's
  * own errors are already translated.
@@ -59,8 +61,35 @@ final class SummarizeToolkit implements ToolkitInterface
                 new StringParameter('text', 'The text to summarize.'),
                 new EnumParameter('length', 'How long the summary should be: short (a sentence or two), medium (a paragraph, the default), or long (several paragraphs).', array_keys(self::LENGTHS), false),
             ],
-            fn(array $args): ToolResult => $this->summarize((string) $args['text'], (string) ($args['length'] ?? 'medium')),
+            fn(array $args): ToolResult => $this->tool((string) $args['text'], (string) ($args['length'] ?? 'medium')),
         )];
+    }
+
+    /**
+     * The tool as the model calls it: summarize(), with a throw turned into a tool error whose
+     * words are fit to be read.
+     *
+     * Tool::execute() would turn the throw into a result too, but with the raw message
+     * (`catch (\Throwable $e) { return ToolResult::error($e->getMessage()); }`), and what the
+     * provider throws quotes its endpoint — the text Rest\Errors::provider() withholds from
+     * anyone who is not an administrator. A tool result is text the model reads and may repeat,
+     * and on a front-end `[alpacabot]` turn the model's output is on its way to a page. So the
+     * same policy every other caller of a pipeline turn applies is applied here:
+     * Errors::fromPipeline() keeps the cap's and the caller's-mistake messages, which are
+     * already written for a person, replaces a provider failure with the fixed one, and puts
+     * the raw text in the debug log where an operator can read it. Only the message is taken;
+     * the status and the data are the REST wire contract and mean nothing to a model.
+     *
+     * Abilities\Register calls summarize() directly rather than going through this, because it
+     * needs the throw's class to keep the refusal's code (its docblock says so).
+     */
+    private function tool(string $text, string $length): ToolResult
+    {
+        try {
+            return $this->summarize($text, $length);
+        } catch (\Throwable $e) {
+            return ToolResult::error(Errors::fromPipeline($e)->get_error_message());
+        }
     }
 
     public function guidelines(): string
