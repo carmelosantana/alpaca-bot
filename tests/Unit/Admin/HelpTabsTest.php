@@ -80,28 +80,27 @@ it('says what both shortcodes do now, that an answer costs tokens and is cached,
         ->not->toContain('removed')->not->toContain('registers no shortcodes')->not->toMatch('/(?<![\d.])1\.\d/');
 });
 
-it('describes what the chat screen does now, and points support at Discord, the wordpress.org forum, Patreon and a GitHub star, in that order, not the issue tracker', function (): void {
+it('describes what the chat screen does now, and points support at the wordpress.org forum, a booked call and a GitHub star, in that order, not Discord, Patreon or the issue tracker', function (): void {
     Functions\when('esc_url')->returnArg();
     $chat = helpTabContent('alpaca-bot-chat');
     expect($chat)->toContain('New chat')->toContain('Enter')->toContain('Shift')->toContain('image')->toContain('Copy')->toContain('Edit and resend')
         // The image cap is Assets::maxImageBytes(), which reads post_max_size alone; the tab must name that setting, not the upload limit that has no say.
         ->toContain('post_max_size')->not->toMatch('/is the site.s own upload limit/');
-    // A question goes to Discord or the wordpress.org forum, and the GitHub link is an ask for a
-    // star, not a place to file issues: the tab must carry both new hrefs and no longer point at /issues.
+    // A question goes to the wordpress.org forum, premium help is a call booked on
+    // carmelosantana.com, and the GitHub link is an ask for a star, not a place to file issues.
+    // Discord and Patreon's premium support were retired before 0.5.0 shipped.
     $support = helpTabContent('alpaca-bot-support');
-    expect($support)->toContain('href="https://discord.gg/vWQTHphkVt"')
-        ->toContain('href="https://wordpress.org/support/plugin/alpaca-bot/"')
+    expect($support)->toContain('href="https://wordpress.org/support/plugin/alpaca-bot/"')
+        ->toContain('href="https://carmelosantana.com/alpaca-bot"')
         ->toContain('href="https://github.com/carmelosantana/alpaca-bot"')
-        ->toContain('href="https://www.patreon.com/carmelosantana"')
         ->toContain('rel="noopener"')
         ->not->toContain('/issues')->not->toContain('issue tracker');
-    // The two places a question goes come first and the two give-backs last, together, so the
-    // intro can split the list honestly; a star between two support channels read as a place to
-    // take a bug report.
+    expect(strtolower($support))->not->toContain('discord')->not->toContain('patreon');
+    // The free channel first, the paid call second and the give-back last, so a star never reads
+    // as a place to take a bug report.
     $order = array_map(static fn(string $needle): int => strpos($support, $needle), [
-        'href="https://discord.gg/vWQTHphkVt"',
         'href="https://wordpress.org/support/plugin/alpaca-bot/"',
-        'href="https://www.patreon.com/carmelosantana"',
+        'href="https://carmelosantana.com/alpaca-bot"',
         'href="https://github.com/carmelosantana/alpaca-bot"',
     ]);
     $sorted = $order;

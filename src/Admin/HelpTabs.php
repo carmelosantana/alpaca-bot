@@ -155,20 +155,19 @@ final class HelpTabs
     }
 
     /**
-     * Where to get help, as 0.4's Define::support() listed it (Discord and Patreon), plus the
-     * wordpress.org support forum and a request for a GitHub star. Discord and the forum are where
-     * a question or a bug report goes, and Patreon's premium support takes a question too; the
-     * GitHub link is an ask, not a tracker, so the tab never sends anyone to file an issue. The
-     * two give-backs are listed last, together, so the intro can name which links are which
-     * without a star sitting between two support channels as if it were a third.
+     * Where to get help. A question or a bug report goes to the wordpress.org support forum;
+     * premium help -- a video call, setting up a provider, onsite setup -- is a call booked on
+     * carmelosantana.com; and the GitHub link is an ask for a star, not a tracker, so the tab never
+     * sends anyone to file an issue. 0.4's Discord and Patreon's premium support were retired
+     * before 0.5.0 shipped. The free channel comes first and the give-back last, so a star never
+     * reads as a place to take a bug report.
      */
     private function support(): string
     {
-        return self::p(esc_html__('Questions and bug reports go to Discord or the WordPress.org forum. Patreon and a GitHub star are the two ways to give something back, and Patreon carries premium support too.', 'alpaca-bot'))
+        return self::p(esc_html__('Questions and bug reports go to the WordPress.org forum. For premium support, book a call. A GitHub star is the way to give something back.', 'alpaca-bot'))
             . self::list([
-                self::link('https://discord.gg/vWQTHphkVt', __('Join the Discord community', 'alpaca-bot')) . ' — ' . esc_html__('the quickest way to get an answer.', 'alpaca-bot'),
                 self::link('https://wordpress.org/support/plugin/alpaca-bot/', __('Ask on the WordPress.org support forum', 'alpaca-bot')) . ' — ' . esc_html__('for a question or a bug report. Say which plugin, WordPress and PHP versions you run.', 'alpaca-bot'),
-                self::link('https://www.patreon.com/carmelosantana', __('Become a Patreon', 'alpaca-bot')) . ' — ' . esc_html__('premium support, video calls and help setting up your provider, and it funds the plugin\'s development.', 'alpaca-bot'),
+                self::link('https://carmelosantana.com/alpaca-bot', __('Book a call', 'alpaca-bot')) . ' — ' . esc_html__('premium support: video calls, help setting up your provider, troubleshooting and onsite setup assistance.', 'alpaca-bot'),
                 self::link('https://github.com/carmelosantana/alpaca-bot', __('Star Alpaca Bot on GitHub', 'alpaca-bot')) . ' — ' . esc_html__('if the plugin has been useful, a star helps other site owners find it.', 'alpaca-bot'),
             ]);
     }
