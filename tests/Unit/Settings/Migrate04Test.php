@@ -313,3 +313,45 @@ it('repairs the autoload of flags a pre-release 0.5 already wrote, exactly once'
     expect($again->needed())->toBeFalse()
         ->and($GLOBALS['abAutoloadSet'])->toHaveCount(1);
 });
+
+// The order of repairFlagAutoload()'s two lines is load-bearing and was held by nothing: swapping
+// them survived both suites. Its own docblock says why — "Its own flag is written after the call,
+// not before, so a request that dies mid-repair runs it again rather than skipping it" — and the
+// flag is what makes the repair once-only, so a flag written first turns a crash into a
+// permanent skip on exactly the pre-release-0.5 sites the repair exists for.
+//
+// This is a unit test and not an integration one because the interruption has to happen inside
+// wp_set_options_autoload(), which is a plain function with no hook in it: standing in for it is
+// the only way to stop it part-way, and standing in for it is what this suite already does.
+it('leaves the autoload-repair flag unwritten when the repair dies part-way, so the next request retries it', function (): void {
+    $stored = [Migrate04::FLAG => '1', Migrate04::FLAG_RETENTION => '1', Migrate04::FLAG_CONVERSATIONS => '1'];
+    Functions\when('get_option')->alias(function (string $k, mixed $d = false) use (&$stored): mixed {
+        return $stored[$k] ?? ($k === 'alpaca_bot_settings' ? [] : $d);
+    });
+    Functions\when('update_option')->alias(function (string $k, mixed $v) use (&$stored): bool { $stored[$k] = $v; return true; });
+    Functions\when('get_posts')->justReturn([]);
+
+    // Request 1 ends inside the repair. The throw stands in for the request ending there by any
+    // means — a fatal, the execution time limit, a killed worker: what is being modelled is only
+    // that nothing written after the call runs.
+    $calls = 0;
+    Functions\when('wp_set_options_autoload')->alias(function (array $options, mixed $autoload) use (&$calls): array {
+        $calls++;
+        throw new \RuntimeException('the request ended here');
+    });
+    expect(fn() => (new Migrate04(new Store()))->run())->toThrow(\RuntimeException::class)
+        ->and($calls)->toBe(1)
+        ->and($stored)->not->toHaveKey(Migrate04::FLAG_AUTOLOAD);
+
+    // Request 2 finds the repair still pending and finishes it.
+    Functions\when('wp_set_options_autoload')->alias(function (array $options, mixed $autoload) use (&$calls): array {
+        $calls++;
+        return array_fill_keys($options, true);
+    });
+    $m = new Migrate04(new Store());
+    expect($m->needed())->toBeTrue();
+    $m->run();
+    expect($calls)->toBe(2)
+        ->and($stored[Migrate04::FLAG_AUTOLOAD])->toBe('1')
+        ->and((new Migrate04(new Store()))->needed())->toBeFalse();
+});

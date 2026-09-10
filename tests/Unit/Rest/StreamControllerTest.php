@@ -121,6 +121,7 @@ it('refuses a token another request claimed first: a delete that removed nothing
     // the store then reports that this delete removed no row (the other request's did). Without
     // this the same ticket would run one billed turn per concurrent request.
     $h = pipelineWith(null);
+    $table = slotRowsIn();
     $h->transients[ChatController::STREAM_TRANSIENT . 'tok'] = streamTicket();
     Functions\when('delete_transient')->justReturn(false);
     $prepared = 0;
@@ -132,6 +133,14 @@ it('refuses a token another request claimed first: a delete that removed nothing
     expect($res)->toBeInstanceOf(WP_Error::class)
         ->and($res->get_error_code())->toBe('rest_forbidden')
         ->and($res->get_error_data())->toBe(['status' => 403]);
+    // The slot is claimed before the deletion, so the loser of the race is holding one when it
+    // finds out — and it gives that one back. Left behind, the row would hold a lease for the
+    // whole budget (720 s by default) with no stream behind it, and a client racing itself would
+    // spend its own concurrency cap on turns that never ran. Asserted as claimed-then-released,
+    // not merely "no rows": an empty table is also what never claiming looks like.
+    expect(array_filter($table->queries, static fn(string $q): bool => str_starts_with($q, 'INSERT IGNORE') && str_contains($q, StreamBudget::OPTION)))->toHaveCount(1)
+        ->and(array_filter($table->queries, static fn(string $q): bool => str_starts_with($q, 'DELETE FROM') && str_contains($q, StreamBudget::OPTION)))->toHaveCount(1)
+        ->and($table->rows)->toBe([]);
     // ... and the loser is not streamed either: nothing was held for serve().
     $server = new WP_REST_Server();
     expect($controller->serve(false, new WP_REST_Response(), $request, $server))->toBeFalse()
@@ -441,6 +450,36 @@ it('hands prepareOutput a wall-clock budget derived from provider.timeout and th
     $controller->serve(false, new WP_REST_Response(), $request, new WP_REST_Server());
     ob_get_clean();
     expect($seconds)->toBe(60);
+});
+
+it('says nothing more to a client that has already gone, even when the budget ran out in the same breath', function (): void {
+    // The order of the two checks, which is what separates them: both are true here — the client
+    // is gone and the deadline is past. The abort check is asked first, so the turn ends silently
+    // with what it had. Asked second, a stream_timeout frame would be written into a closed
+    // connection, and that write is the thing that discovers the connection is closed
+    // (connection_aborted() only learns of it from a failed write, which is why the checks sit
+    // where they do). Both orders end the turn; only one of them stops talking to nobody.
+    $h = pipelineWith(pipelineProvider([
+        new Response('a', ProviderFinishReason::Stop),
+        new Response('b', ProviderFinishReason::Stop),
+    ]));
+    actionRuns('alpaca_bot/chat/started');
+    Actions\expectRemoved('alpaca_bot/chat/started')->once();
+    Actions\expectDone('alpaca_bot/chat/failed')->once()->with(Mockery::type(\RuntimeException::class), Mockery::type(Conversation::class));
+    $frames = [];
+    (new StreamController($h->pipeline, $h->store))->stream(
+        streamTicket(),
+        function (string $f) use (&$frames): void {
+            $frames[] = $f;
+        },
+        static fn(): bool => true,
+        microtime(true) - 1,
+    );
+    expect(array_map(static fn(string $f): string => strtok($f, "\n"), $frames))->toBe(['event: start', 'event: delta'])
+        // The partial reply is still stored and the turn still settles as an abandoned one: this
+        // is about what is written to the wire, not about what the turn leaves behind.
+        ->and($h->meta[42]['ab_messages'][1])->toMatchArray(['role' => 'assistant', 'content' => 'a'])
+        ->and($h->meta[42]['ab_messages'][1]['meta']->partial)->toBeTrue();
 });
 
 it('ends a turn that has outrun its budget with a stream_timeout frame, keeping what had arrived', function (): void {

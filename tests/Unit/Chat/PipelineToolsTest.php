@@ -713,11 +713,49 @@ it('keeps the whole leak when the faked done call carries no answer, rather than
         $provider = agentProvider([[new Response($leak, ProviderFinishReason::Stop, usage: new Usage(2, 2, 4))]]);
         $h = pipelineWith($provider, [], [], TOOL_MODEL, null, registryWith(['echo' => echoToolkit('echo_tool')]));
 
-        // There is no answer to recover, so recovery is off: whatever the model sent survives
-        // verbatim and the user can at least see what happened. Losing text is the one outcome
-        // this must never have.
+        // Whatever the model sent survives verbatim and the user can at least see what happened.
+        // Losing text is the one outcome this must never have.
+        //
+        // Which of the two exits carried it out is not visible from here: the leak is the whole
+        // reply, so "answer() refused and called the recovery off" and "the recovery ran and
+        // came to nothing" both end at the same string. The two tests below separate them, one
+        // exit each; this one holds the outcome they share.
         expect($h->pipeline->complete(3, 'answer')->reply->content)->toBe($leak);
     }
+});
+
+it('gives back the raw JSON when a recovery leaves nothing at all, rather than an empty bubble', function (): void {
+    // The third documented "return $content byte for byte" exit: a faked call that is not `done`
+    // is dropped and never run, and here it is the entire reply, so what recovery produces is
+    // the empty string. The raw JSON at least shows the user what happened; an empty bubble
+    // shows them nothing, and the turn reads as one that never ran.
+    $leak = '<tool_call>{"name": "draft_post", "arguments": {"text": "Hello"}}</tool_call>';
+    $provider = agentProvider([[new Response($leak, ProviderFinishReason::Stop, usage: new Usage(2, 2, 4))]]);
+    $h = pipelineWith($provider, [], [], TOOL_MODEL, null, registryWith(['draft' => echoToolkit('draft_post')]));
+
+    $r = $h->pipeline->complete(3, 'draft it');
+
+    // Stored as well as returned: the front end replaces the bubble from what was stored, so an
+    // empty string reaching the row is the user's turn gone. The stored copy is slashed, the way
+    // core hands a value to wp_update_post().
+    expect($r->reply->content)->toBe($leak)
+        ->and($h->writes[1][2][1]['content'])->toBe(wpSlashLikeCore($leak));
+});
+
+it('calls the recovery off entirely when a faked done carries no answer, keeping the prose and the markup', function (): void {
+    // The exit above cannot show this one, because a blank `done` recovers to the empty string
+    // and lands there instead. With prose in front of the call the two part company: calling the
+    // recovery off leaves the reply exactly as the model wrote it, markers and all, while
+    // recovering an empty answer would keep the prose and silently drop the markup — which reads
+    // as a finished turn and hides that a blank `done` was ever sent.
+    $leak = "Hello there.\n\n<tool_call>{\"name\": \"done\", \"arguments\": {\"response\": \"\"}}</tool_call>";
+    $provider = agentProvider([[new Response($leak, ProviderFinishReason::Stop, usage: new Usage(2, 2, 4))]]);
+    $h = pipelineWith($provider, [], [], TOOL_MODEL, null, registryWith(['echo' => echoToolkit('echo_tool')]));
+
+    $r = $h->pipeline->complete(3, 'answer');
+
+    expect($r->reply->content)->toBe($leak)
+        ->and($r->reply->content)->toContain('<tool_call>');
 });
 
 it('recovers the answer without reflowing the answer around it: an indented code block keeps its indentation', function (): void {
