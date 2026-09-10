@@ -122,7 +122,28 @@ Click **Alpaca Bot** in the admin menu, below Dashboard and above Posts. The scr
 
 ### Settings
 
-`Alpaca Bot > Settings` (administrators) is one page in six tabs: **Provider** (the endpoint, its key, the timeout), **Models** (the default, temperature, context window, keep-alive, and per-model overrides), **Chat** (system prompt, welcome text, what users may change), **Privacy** (whether conversations and the usage log are stored, and for how long), **Limits** (monthly token caps for the site and per user) and **Tools**. Every field is also readable and writable over the REST API (`GET`/`PUT /settings`).
+`Alpaca Bot > Settings` (administrators) is one page in six tabs: **Provider** (the endpoint, its key, the timeout), **Models** (the default, temperature, context window, keep-alive, and per-model overrides), **Chat** (system prompt, welcome text, what users may change), **Privacy** (whether conversations and the usage log are stored, and for how long), **Limits** (monthly token caps for the site and per user) and **Tools** (what the model may do besides answer — read the next section before you leave those as they come). Every field is also readable and writable over the REST API (`GET`/`PUT /settings`).
+
+### Tools, and what they let the model reach
+
+`Settings > Tools` switches the model's tools on and off. Three ship, **all three on by default**: `web_fetch` reads one public web page as text, `summarize` condenses text through the model, and `draft_post` writes a draft. Read this section before you leave `web_fetch` on, and before you open the chat to a role.
+
+**`web_fetch` makes the web server send a request, and hands the reply back.** Every URL is checked twice before the fetch — WordPress's own `wp_http_validate_url()`, then the plugin's own check over every address the name resolves to, on the first URL and on every redirect — and http(s) only, ports 80/443/8080 only, no private, loopback, link-local or other special-purpose address. What no check of that shape can cover is a name whose answer *changes* between the check and the connection: each is a separate DNS lookup, so a host under someone else's control, with a short TTL, can answer the checks with a public address and the connection with `127.0.0.1` or a cloud metadata address. The response body then comes back as text. Closing that means pinning the resolved address into the transport, which is a compatibility project and is planned for a later 0.x release.
+
+Who can reach it, today, with no model involved: **anyone who can edit posts** — a Contributor included, since core grants Contributors `edit_posts` — can put `[alpacabot_agent name="get" url="…"]` in their own draft and preview it. So treat `web_fetch` as a capability you are granting your authors, not as something only the model uses.
+
+**An egress policy is the supported mitigation**, and it is the one that holds for every plugin on the site at once: stop the web server's host from opening outbound connections to your private ranges and to `169.254.169.254`, at the network or the host firewall. On a cloud instance, require IMDSv2. If you cannot do that and do not need the tool, leave `web_fetch` off — the chat, the drafts and the summaries all work without it.
+
+**Opening a route to a role opens the tools to that role too.** `alpaca_bot/capability/chat` (and `chat/stream`) can name any capability, `read` and `exist` included, and that is deliberate — it is how a site builds a subscriber-facing or public chat. But the toolkits a turn may call are chosen by the `toolkits.enabled` setting alone: there is no second capability check between a role that may chat and the tools that are switched on. So a role you admit only to converse gets `web_fetch` with it. Only `draft_post` checks a capability of its own (`edit_posts`/`edit_pages`) and refuses a role that lacks it. Until a later 0.x release adds a floor of its own, use the `alpaca_bot/toolkits` filter to take `web_fetch` away from the users you are opening the chat to:
+
+```php
+add_filter( 'alpaca_bot/toolkits', function ( array $toolkits, int $user_id ): array {
+    if ( ! user_can( $user_id, 'edit_posts' ) ) {
+        unset( $toolkits['web_fetch'] );
+    }
+    return $toolkits;
+}, 10, 2 );
+```
 
 ### REST API and WP-CLI
 

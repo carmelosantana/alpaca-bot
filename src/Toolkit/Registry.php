@@ -73,6 +73,13 @@ final class Registry
          * key is not a string or whose value is not a ToolkitInterface is dropped, and a return that
          * is not an array enables nothing.
          *
+         * This filter is also, today, the only capability gate over the tools. enabled() has none
+         * of its own, so a site that opens `alpaca_bot/capability/chat` to a role hands that role
+         * every enabled toolkit — `web_fetch`, an outbound-request primitive, included; only
+         * `draft_post` re-checks a capability. `user_can($userId, …)` here is how a site keeps a
+         * tool away from the users it admitted only to converse. A floor of enabled()'s own is a
+         * later 0.x release.
+         *
          * @since 0.5.0
          * @param array<string, ToolkitInterface> $toolkits the enabled built-ins, by id
          * @param int                             $userId   the user whose turn it is

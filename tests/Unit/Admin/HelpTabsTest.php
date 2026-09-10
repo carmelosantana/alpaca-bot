@@ -21,17 +21,17 @@ it('names the chat screen and the settings page as the two screens that get the 
         ->and(HelpTabs::SCREENS)->toBe(['toplevel_page_alpaca-bot', 'alpaca-bot_page_alpaca-bot-settings']);
 });
 
-it('adds the Chat, Shortcodes and Support tabs, in that order, to the chat screen and to the settings page', function (): void {
+it('adds the Chat, Shortcodes, Tools and Support tabs, in that order, to the chat screen and to the settings page', function (): void {
     Functions\when('esc_url')->returnArg();
     foreach (HelpTabs::SCREENS as $id) {
         $added = [];
         $screen = helpScreen($id);
-        $screen->shouldReceive('add_help_tab')->times(3)->andReturnUsing(static function (array $tab) use (&$added): void {
+        $screen->shouldReceive('add_help_tab')->times(4)->andReturnUsing(static function (array $tab) use (&$added): void {
             $added[] = $tab;
         });
         (new HelpTabs())->add($screen);
-        expect(array_column($added, 'id'))->toBe(['alpaca-bot-chat', 'alpaca-bot-shortcodes', 'alpaca-bot-support'], $id)
-            ->and(array_column($added, 'title'))->toBe(['Chat', 'Shortcodes', 'Support'], $id);
+        expect(array_column($added, 'id'))->toBe(['alpaca-bot-chat', 'alpaca-bot-shortcodes', 'alpaca-bot-tools', 'alpaca-bot-support'], $id)
+            ->and(array_column($added, 'title'))->toBe(['Chat', 'Shortcodes', 'Tools', 'Support'], $id);
         foreach ($added as $tab) {
             expect($tab['content'])->toBeString()->toContain('<p>');
         }
@@ -80,6 +80,24 @@ it('describes what the chat screen does now, and points support at Discord, Patr
         ->toContain('rel="noopener"');
 });
 
+it('tells a site owner what the tools grant: the fetch is an outbound request, the rebinding window is open, an egress policy is the mitigation, and opening the chat opens the tools', function (): void {
+    // H-1 and M-3 of the 0.5.0 security audit, both accepted for this release and both argued
+    // until now only in a source docblock, where the only person who can act on them will never
+    // read it. What must be here: what web_fetch does, that the DNS-rebinding window between the
+    // address check and the connection is open, who can reach it with no model involved, that an
+    // egress policy is the supported mitigation, and that opening a capability filter to a role
+    // hands that role every enabled tool.
+    Functions\when('esc_url')->returnArg();
+    $tools = helpTabContent('alpaca-bot-tools');
+    expect($tools)->toContain('web_fetch')->toContain('draft_post')
+        ->toContain('outbound')->toContain('DNS')->toContain('redirect')
+        ->toContain('egress policy')->toContain('IMDSv2')
+        ->toContain('Contributor')->toContain('[alpacabot_agent name="get" url="…"]')
+        ->toContain('alpaca_bot/capability/chat')->toContain('alpaca_bot/toolkits')
+        // Not overstated into a scare, and not dated with a version that is not this line's.
+        ->not->toContain('vulnerab')->not->toMatch('/(?<![\\d.])1\\.\\d/');
+});
+
 it('escapes every URL it prints through esc_url', function (): void {
     $urls = [];
     Functions\when('esc_url')->alias(static function (string $url) use (&$urls): string {
@@ -95,7 +113,7 @@ function helpTabContent(string $tabId): string
 {
     $screen = helpScreen(Assets::HOOK);
     $content = null;
-    $screen->shouldReceive('add_help_tab')->times(3)->andReturnUsing(static function (array $tab) use (&$content, $tabId): void {
+    $screen->shouldReceive('add_help_tab')->times(4)->andReturnUsing(static function (array $tab) use (&$content, $tabId): void {
         if ($tab['id'] === $tabId) {
             $content = $tab['content'];
         }

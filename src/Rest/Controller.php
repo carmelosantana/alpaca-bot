@@ -71,6 +71,17 @@ abstract class Controller
              * a non-empty, non-numeric string is honoured (Capability::filtered()): a bool or a number
              * would become a legacy user-level check, so it is ignored and the default stands.
              *
+             * Opening `chat` or `chat/stream` opens every enabled tool to that role as well.
+             * Toolkit\Registry::enabled() chooses a turn's toolkits from the `toolkits.enabled`
+             * setting and the `alpaca_bot/toolkits` filter, and has no capability check of its own,
+             * so there is nothing between "may chat" and "may call the tools that are switched on" —
+             * including `web_fetch`, which makes the web server send an outbound request and hands
+             * the reply back. Only `draft_post` re-checks a capability and refuses a role that lacks
+             * it. `read` and `exist` are honoured strings, so `read` is every Subscriber and `exist`
+             * is every visitor, logged out included. Use `alpaca_bot/toolkits` to take a tool away
+             * from the users a loosened route admits; README's "Tools, and what they let the model
+             * reach" is the operator-facing version of this, with the egress policy that mitigates it.
+             *
              * @since 0.5.0
              * @param string           $capability the route's default capability
              * @param \WP_REST_Request $request    the request being authorised

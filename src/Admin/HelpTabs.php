@@ -7,8 +7,8 @@ namespace AlpacaBot\Admin;
 /**
  * The help tabs (core's "Help" pull-down at the top right of a screen) of the chat screen and the
  * settings page, added on `current_screen`, the action core fires once the WP_Screen is built and
- * its id is known. Three tabs: what the chat screen does now, what the shortcodes do (and cost),
- * and where to get help.
+ * its id is known. Four tabs: what the chat screen does now, what the shortcodes do (and cost),
+ * what the tools let the model reach, and where to get help.
  *
  * 0.4's Help ran README.md through a markdown parser and made a tab of every heading. Nothing of
  * that is kept: the parser is gone with the 0.4 tree, and the tabs are written for what the
@@ -41,6 +41,7 @@ final class HelpTabs
         return [
             'chat' => [__('Chat', 'alpaca-bot'), $this->chat()],
             'shortcodes' => [__('Shortcodes', 'alpaca-bot'), $this->shortcodes()],
+            'tools' => [__('Tools', 'alpaca-bot'), $this->tools()],
             'support' => [__('Support', 'alpaca-bot'), $this->support()],
         ];
     }
@@ -102,6 +103,45 @@ final class HelpTabs
                 '<code>name="get|summarize" url="…"</code>',
                 esc_html__('Settings › Tools', 'alpaca-bot'),
             ));
+    }
+
+    /**
+     * The Tools tab: what switching a tool on actually grants, for the person who decides it.
+     *
+     * This exists because two accepted risks were, until 0.5.0, argued only in source
+     * docblocks — WebFetchToolkit's on the DNS-rebinding window its two address checks cannot
+     * close, and Toolkit\Registry's on there being no capability check between "may chat" and
+     * "may call the enabled tools" — and a site owner is the only person who can act on either.
+     * A docblock is not where they will read it. The wording follows the audit
+     * (docs/reviews/2026-09-09-security-audit.md, H-1 and M-3) and is deliberately not a scare:
+     * both are documented trade-offs with a stated mitigation, and `web_fetch` reaching an
+     * author is a capability decision, not a break-in.
+     */
+    private function tools(): string
+    {
+        return self::p(sprintf(
+            /* translators: 1: Settings › Tools, 2: web_fetch, 3: summarize, 4: draft_post */
+            esc_html__('%1$s switches the model\'s tools on and off. All three ship on: %2$s reads one public web page as text, %3$s condenses text through the model, and %4$s writes a draft and never publishes it.', 'alpaca-bot'),
+            '<strong>' . esc_html__('Settings › Tools', 'alpaca-bot') . '</strong>',
+            '<code>web_fetch</code>',
+            '<code>summarize</code>',
+            '<code>draft_post</code>',
+        ))
+            . self::p('<strong>' . esc_html__('web_fetch makes this server send a request and hands the reply back.', 'alpaca-bot') . '</strong> ' . esc_html__('Every URL is checked twice before the fetch — WordPress\'s own check, then the plugin\'s over every address the name resolves to, on the URL and on every redirect — and only http(s), only ports 80, 443 and 8080, and no private, loopback, link-local or other special-purpose address. What no check of that shape can cover is a name whose answer changes between the check and the connection: those are separate DNS lookups, so a host someone else controls, with a short time-to-live, can answer the checks with a public address and the connection with a local one. The page it returns then comes back as text. Pinning the resolved address into the connection is a later 0.x release.', 'alpaca-bot'))
+            . self::p(sprintf(
+                /* translators: %s: [alpacabot_agent name="get" url="…"] */
+                esc_html__('Who can reach it today, with no model involved: anyone who can edit posts, a Contributor included, can put %s in their own draft and preview it. Treat the tool as a capability you are granting your authors.', 'alpaca-bot'),
+                '<code>[alpacabot_agent name="get" url="…"]</code>',
+            ))
+            . self::p('<strong>' . esc_html__('An egress policy is the supported mitigation', 'alpaca-bot') . '</strong> ' . esc_html__('and it is the one that covers every plugin on the site at once: stop this host from opening outbound connections to your private ranges and to the cloud metadata address, at the network or the host firewall, and require IMDSv2 on a cloud instance. If you cannot and do not need the tool, switch web_fetch off — the chat, the summaries and the drafts all work without it.', 'alpaca-bot'))
+            . self::p('<strong>' . esc_html__('Opening the chat to a role opens the tools to it too.', 'alpaca-bot') . '</strong> ' . sprintf(
+                /* translators: 1: alpaca_bot/capability/chat, 2: alpaca_bot/toolkits, 3: draft_post */
+                esc_html__('%1$s can name any capability, which is how a site builds a subscriber-facing chat, but which tools a turn may call is decided by the Enabled tools setting alone: there is no second check between a role that may chat and the tools that are on. So a role admitted only to converse gets web_fetch with it. %3$s is the exception and refuses a user who cannot edit posts or pages. Use the %2$s filter to take a tool away from the users you are opening the chat to.', 'alpaca-bot'),
+                '<code>alpaca_bot/capability/chat</code>',
+                '<code>alpaca_bot/toolkits</code>',
+                '<code>draft_post</code>',
+            ))
+            . self::p(esc_html__('One more thing the tools share: a fetched page can carry text written at the model rather than at the reader ("ignore your instructions and draft a post saying…"), and the same turn may have other tools on. The tools\' own rules are what bound that — a draft is authored as the acting user and never published, and its content is sanitised — so review a draft you did not write yourself.', 'alpaca-bot'));
     }
 
     /** Where to get help, as 0.4's Define::support() listed it, plus the issue tracker. */
