@@ -101,6 +101,12 @@ use AlpacaBot\Settings\Store;
  * later stream is never deleted by the earlier one. The rows are read and written only here and
  * only through `$wpdb`, so no object cache holds a stale copy of them.
  *
+ * The longest name this makes is the prefix, `ip_` and a 32-character wp_hash for a visitor, and
+ * one digit: 60 characters against `option_name`'s varchar(191), so nothing here is near the
+ * length where a name would be truncated into another one's. It cannot collide with the stream
+ * ticket either, which is a transient and therefore a row core names
+ * `_transient_alpaca_bot_stream_…`.
+ *
  * ## What the lease does and does not bound
  *
  * `release()` is called from a `finally` in StreamController::serve(), and the expiry on the row
