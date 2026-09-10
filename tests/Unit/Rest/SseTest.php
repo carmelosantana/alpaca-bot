@@ -38,7 +38,7 @@ function timeLimitInFreshProcess(int $seconds): string
 it('caps the streaming process at the budget it was handed, never lifting the limit', function (): void {
     // The M-1 fix, and the only assertion on it. `set_time_limit(0)` is what this replaced: a
     // lifted limit let one redeemed ticket hold a PHP worker with no end, and the
-    // ignore_user_abort(true) two lines above it means closing the browser does not end it
+    // ignore_user_abort(true) on the line above it means closing the browser does not end it
     // either -- the worker-exhaustion bug StreamBudget was written to close. A mutation back to
     // set_time_limit(0) leaves every other test in both suites green, so this is where it dies.
     expect(timeLimitInFreshProcess(720))->toBe('720')

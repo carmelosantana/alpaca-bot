@@ -63,10 +63,11 @@ const SHELL = `<!doctype html>
 
 /**
  * Serves the fixture and the bundle, answers the two /view/bubble renders and POST /chat, and
- * gives the stream redemption whatever `stream` says. `seen` collects the paths that were asked
- * for, so a test can say what did and did not happen.
+ * gives the stream redemption whatever `stream` says -- a response, or 'abort' for a connection
+ * that drops. `seen` collects the paths that were asked for, so a test can say what did and did
+ * not happen.
  */
-async function shell(page: import('@playwright/test').Page, stream: { status: number; contentType: string; body: string }): Promise<string[]> {
+async function shell(page: import('@playwright/test').Page, stream: { status: number; contentType: string; body: string } | 'abort'): Promise<string[]> {
   const bundle = await readFile(fileURLToPath(new URL('../../assets/js/chat.js', import.meta.url)), 'utf8');
   const seen: string[] = [];
   await page.route(`${ORIGIN}/**`, async (route) => {
@@ -83,6 +84,9 @@ async function shell(page: import('@playwright/test').Page, stream: { status: nu
       return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ stream_url: `${ORIGIN}/wp-json/alpaca-bot/v1/chat/1/stream?token=t` }) });
     }
     if (path.startsWith('/wp-json/alpaca-bot/v1/chat/')) {
+      // 'abort' makes the page's fetch() reject rather than answer, which is a dropped
+      // connection: the one exit that runs after the streaming bubble is already in the DOM.
+      if (stream === 'abort') return route.abort('connectionfailed');
       return route.fulfill({ status: stream.status, contentType: stream.contentType, body: stream.body });
     }
     return route.fulfill({ status: 404, body: '' });
@@ -118,6 +122,25 @@ test('a stream redemption that is not an event stream gives the message and the 
   // The redemption really was attempted, so this is the refusal path and not an earlier exit.
   expect(seen.filter((p) => p.startsWith('/wp-json/alpaca-bot/v1/chat/'))).toHaveLength(1);
   // The composer is usable again for the retry the still-valid ticket allows.
+  await expect(page.locator('[data-action="send"]')).toBeEnabled();
+});
+
+test('a stream connection that drops leaves no orphaned bubble, and still gives the message back', async ({ page }) => {
+  const seen = await shell(page, 'abort');
+
+  await send(page, 'the message that must survive a dropped connection');
+
+  // fetch() rejects rather than answering, so this lands in the catch, not the refusal path.
+  await expect(page.locator('#ab-status')).toContainText('The request failed');
+  // The composer has both halves back...
+  await expect(page.locator('#ab-message')).toHaveValue('the message that must survive a dropped connection');
+  await expect(page.locator('#ab-form input[name="images"]')).toHaveValue(IMAGE);
+  // ...and neither bubble is left behind. Before the fix the assistant bubble was appended just
+  // before the fetch, and only the user's was taken back out, so an empty streaming bubble sat
+  // in the transcript for a turn that never reached the model.
+  await expect(page.locator('#ab-messages article')).toHaveCount(0);
+  // The redemption was attempted, so this is the post-append exit and not an earlier one.
+  expect(seen.filter((p) => p.startsWith('/wp-json/alpaca-bot/v1/chat/'))).toHaveLength(1);
   await expect(page.locator('[data-action="send"]')).toBeEnabled();
 });
 

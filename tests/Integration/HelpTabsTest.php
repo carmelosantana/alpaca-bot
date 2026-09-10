@@ -48,7 +48,7 @@ final class HelpTabsTest extends TestCase
      *
      * `add_menu_page()` writes `sanitize_title($menu_title)` to `$admin_page_hooks[$slug]`
      * (wp-admin/includes/plugin.php:1397) and that value is the prefix of every *submenu*
-     * screen id under it (`get_plugin_page_hookname()`, :2152-2158). The top-level page's own
+     * screen id under it (`get_plugin_page_hookname()`, :2145-2158). The top-level page's own
      * slug is a key of that array, which sends it down the `toplevel` branch instead, so its id
      * never sees the title.
      *

@@ -112,14 +112,17 @@ function boot(cfg: Settings, form: HTMLFormElement): void {
     textarea.focus();
     const restore = (): void => { textarea.value = text; grow(); setImage(image); };
     let user: HTMLElement | null = null;
+    let assistant: HTMLElement | null = null;
     // Whether the turn reached the model. Until it does, what was typed still belongs to the
-    // composer: every exit before that point has to take the user's bubble back out of the
+    // composer: every exit before that point has to take both bubbles back out of the
     // transcript and put the text and the image back in the box, or they are gone with no
     // record of the turn anywhere. Done once in the finally rather than at each `return`,
-    // because one of the three exits forgot -- the stream redemption that comes back as
-    // something other than an event stream (StreamBudget's 429, an expired or replayed ticket)
-    // removed the empty assistant bubble and left the typed message and any attached image
-    // nowhere, while the ticket stayed valid for a retry the user could no longer make.
+    // because the exits kept forgetting one of the two -- the stream redemption that comes
+    // back as something other than an event stream (StreamBudget's 429, an expired or replayed
+    // ticket) took the assistant bubble out and left the typed message nowhere, while a
+    // fetch() that rejects after the assistant bubble is appended did the opposite and left an
+    // empty streaming bubble in the transcript. One place that runs on every exit is the only
+    // shape that cannot forget half of it.
     let sent = false;
     try {
       const [userRes, emptyRes] = await Promise.all([
@@ -138,8 +141,9 @@ function boot(cfg: Settings, form: HTMLFormElement): void {
       const bubble = fromHtml(await emptyRes.text());
       if (!bubble) throw new Error('No streaming bubble.');
       append(bubble);
+      assistant = bubble;
       const stream = await fetch(ticket.stream_url, { credentials: 'same-origin', headers: { 'X-WP-Nonce': cfg.nonce } });
-      if (!stream.headers.get('content-type')?.startsWith('text/event-stream')) { bubble.remove(); return refused(stream.status, await restError(stream)); }
+      if (!stream.headers.get('content-type')?.startsWith('text/event-stream')) { return refused(stream.status, await restError(stream)); }
       // From here the turn is the server's: a stream that then drops mid-reply is stored as a
       // partial reply, and the composer must not offer the message back as if nothing ran.
       sent = true;
@@ -148,7 +152,7 @@ function boot(cfg: Settings, form: HTMLFormElement): void {
       console.error(e);
       notice('error', t('failed'));
     } finally {
-      if (!sent) { user?.remove(); restore(); }
+      if (!sent) { assistant?.remove(); user?.remove(); restore(); }
       busy = false;
       if (!expired && navigator.onLine) sendButton.disabled = false;
       textarea.focus();
