@@ -1,0 +1,725 @@
+<?php
+
+declare(strict_types=1);
+
+use AlpacaBot\Chat\CapPolicy;
+use AlpacaBot\Chat\ConversationStore;
+use AlpacaBot\Chat\Pipeline;
+use AlpacaBot\Chat\UsageMeter;
+use AlpacaBot\Cli\ChatCommand;
+use AlpacaBot\Context\Collector;
+use AlpacaBot\Context\ContextSourceInterface;
+use AlpacaBot\Plugin;
+use AlpacaBot\Provider\Factory;
+use AlpacaBot\Provider\ModelCatalog;
+use AlpacaBot\Rest\Controller;
+use AlpacaBot\Settings\Store;
+use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Agent\AbstractAgent;
+use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Contract\ProviderInterface;
+use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Contract\ToolkitInterface;
+use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Tool\Parameter\StringParameter;
+use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Tool\Tool;
+use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Tool\ToolResult;
+use Brain\Monkey;
+use Brain\Monkey\Actions;
+use Brain\Monkey\Filters;
+use Brain\Monkey\Functions;
+
+uses()->beforeEach(function (): void {
+    Monkey\setUp();
+    // Schema labels run through __(); pass the strings through untouched.
+    Functions\stubTranslationFunctions();
+    // Schema::sanitizeUrl() runs through esc_url_raw(). Brain Monkey's stand-in keeps
+    // the value as is (adding http:// when there is no scheme); tests that care about
+    // rejection alias esc_url_raw themselves.
+    Functions\stubEscapeFunctions();
+    // Rest\Sse frames are wp_json_encode()d, which is json_encode() plus a non-UTF-8 fallback
+    // no test needs; the plain function stands in.
+    Functions\when('wp_json_encode')->alias('json_encode');
+    // wp_parse_url() is parse_url() plus a shim for PHP < 5.4.7, which this plugin's 8.4
+    // floor is far past; the plain function is the same thing on every version we run on.
+    Functions\when('wp_parse_url')->alias('parse_url');
+    // Every write that WordPress unslashes is wrapped in wp_slash(). The real thing stands in,
+    // not a pass-through: a test that asserts on what a write was handed should see the value
+    // the site's database would (wpSlashLikeCore() does what core's does).
+    Functions\when('wp_slash')->alias('wpSlashLikeCore');
+    // Settings\Migrate04's one-time flag repair calls wp_set_options_autoload(), which moves rows
+    // in a table this suite does not have. The stand-in records what it was handed in
+    // $GLOBALS['abAutoloadSet'] so a test can assert the call without a mock expectation; what it
+    // actually does to a row is asserted against a real WordPress in
+    // tests/Integration/Migrate04AutoloadTest.php, which is the only place that can see it.
+    $GLOBALS['abAutoloadSet'] = [];
+    Functions\when('wp_set_options_autoload')->alias(function (array $options, mixed $autoload): array {
+        $GLOBALS['abAutoloadSet'][] = ['options' => $options, 'autoload' => $autoload];
+        return array_fill_keys($options, true);
+    });
+    // Plugin is a process-wide singleton and Pest runs the suite in one process:
+    // reset it so every test's boot() starts from a cold state.
+    $instance = new ReflectionProperty(Plugin::class, 'instance');
+    $instance->setValue(null, null);
+})->afterEach(function (): void {
+    // Mockery expectations are the only assertions in some tests; count them
+    // before tearDown() closes the container so those tests are not "risky".
+    $this->addToAssertionCount(Mockery::getContainer()->mockery_getExpectationCount());
+    Monkey\tearDown();
+    Mockery::close();
+})->in('Unit');
+
+if (!defined('ABSPATH')) {
+    define('ABSPATH', __DIR__ . '/../');
+}
+if (!defined('ALPACA_BOT_FILE')) {
+    define('ALPACA_BOT_FILE', dirname(__DIR__) . '/alpaca-bot.php');
+}
+require_once dirname(__DIR__) . '/vendor/autoload.php';
+require_once dirname(__DIR__) . '/vendor-prefixed/autoload.php';
+// WP_Error, WP_REST_Request and WP_REST_Response are classes, which Brain Monkey cannot stub,
+// and wordpress-stubs is PHPStan-only. Load the stand-ins unless a real WordPress is present.
+if (!class_exists('WP_Error', false)) {
+    require_once __DIR__ . '/stubs/wp-rest.php';
+}
+if (!class_exists(\WpOrg\Requests\Exception::class, false)) {
+    require_once __DIR__ . '/stubs/wp-requests.php';
+}
+require_once __DIR__ . '/stubs/wp-options-table.php';
+
+// ---------------------------------------------------------------- test helpers
+// Pest loads every test file into one process, so a helper declared at the root of a test
+// file is a global: a second file declaring the same name is a fatal redeclare, not a test
+// failure. Helpers live here instead, one declaration each, prefixed by the suite they serve.
+
+/**
+ * What core's wp_slash() does: addslashes() over every string, recursively through arrays,
+ * everything else (an int, an object) untouched. Brain Monkey stands in for the real function
+ * with this one, so a unit test sees a write's argument exactly as WordPress would hand it to
+ * the database, and a stray double-slash shows up as a failure rather than passing unnoticed.
+ */
+function wpSlashLikeCore(mixed $value): mixed
+{
+    if (is_array($value)) {
+        return array_map('wpSlashLikeCore', $value);
+    }
+    return is_string($value) ? addslashes($value) : $value;
+}
+
+/**
+ * Rest\ControllerTest (and every later REST test): a Controller over exactly the given route
+ * list, so a test declares the one route it is about inline instead of a named subclass.
+ * Controller is abstract and Pest.php is one process, so a named subclass per test file would
+ * be the redeclare trap described above; an anonymous class has no name to collide on.
+ *
+ * @param list<array{path: string, methods: string, callback: callable, capability: string, args?: array<string, array<string, mixed>>, rate_limit?: bool}> $routes
+ */
+function restController(array $routes): Controller
+{
+    return new class ($routes) extends Controller {
+        public function __construct(private array $routes) {}
+
+        public function routes(): array
+        {
+            return $this->routes;
+        }
+    };
+}
+
+/**
+ * FactoryTest and FieldsTest: runs `$script` (PHP source, fed on stdin) in a fresh PHP process
+ * with `$args` following `$argv[0]`, and returns its stdout.
+ *
+ * OLLAMA_API_URL is a process-wide constant and Pest runs the whole suite in one process, so a
+ * define() anywhere would silently retarget every other test that reads it. The suite never
+ * defines it; the two places that must see it defined — Factory::baseUrl() preferring it, and
+ * the Fields note that warns the administrator it is preferred — are probed out here instead,
+ * which keeps the suite order-independent.
+ *
+ * @param list<string> $args
+ */
+function freshProcess(string $script, array $args): string
+{
+    $process = proc_open(
+        [PHP_BINARY, '--', ...$args],
+        [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
+        $pipes,
+    );
+    expect($process)->toBeResource();
+    fwrite($pipes[0], $script);
+    fclose($pipes[0]);
+    $stdout = (string) stream_get_contents($pipes[1]);
+    $stderr = (string) stream_get_contents($pipes[2]);
+    fclose($pipes[1]);
+    fclose($pipes[2]);
+    expect(proc_close($process))->toBe(0, "probe failed: {$stderr}{$stdout}")->and($stderr)->toBe('');
+
+    return $stdout;
+}
+
+/**
+ * Admin\SettingsPageTest: a page over a pre-seeded Store and a catalog that is never asked
+ * (do_settings_sections() is stubbed there, so the overrides table never renders).
+ *
+ * @param array<string, mixed> $settings
+ */
+function settingsPage(array $settings = []): AlpacaBot\Admin\SettingsPage
+{
+    $store = new Store($settings);
+    return new AlpacaBot\Admin\SettingsPage($store, new ModelCatalog(new Factory($store)));
+}
+
+/**
+ * ChatControllerTest and ConversationsControllerTest: a request with its parameters already set.
+ * The stub's constructor takes route attributes as its third argument, as core's does, so
+ * parameters go in through set_param(), the way core sets URL, query and body values.
+ *
+ * @param array<string, mixed> $params
+ */
+function restRequest(string $method, string $route, array $params = []): WP_REST_Request
+{
+    $request = new WP_REST_Request($method, $route);
+    foreach ($params as $key => $value) {
+        $request->set_param($key, $value);
+    }
+    return $request;
+}
+
+/**
+ * ControllerTest and StreamControllerTest: rest_convert_error_to_response() as core does it, a
+ * {code, message, data} body under the error's status, for a route that answers a refusal as a
+ * WP_REST_Response because it has a header to carry (Retry-After on a 429, Allow on a 405).
+ */
+function restConvertsErrors(): void
+{
+    Functions\when('rest_convert_error_to_response')->alias(static fn(WP_Error $e): WP_REST_Response => new WP_REST_Response(['code' => $e->get_error_code(), 'message' => $e->get_error_message(), 'data' => $e->get_error_data()], (int) $e->get_error_data()['status']));
+}
+
+/** ConversationStoreTest: a chat_history post as get_post() hands it back (stdClass: WP_Post is not loaded here). */
+function conversationChatPost(int $id = 42, string $author = '3', string $type = 'chat_history', string $date = '2024-01-01 00:00:00'): object
+{
+    return (object) ['ID' => $id, 'post_author' => $author, 'post_title' => 'T', 'post_type' => $type, 'post_date_gmt' => $date];
+}
+
+/**
+ * ConversationStoreTest and pipelineWith(): the database as ConversationStore::storageBudget()
+ * reads it. Installs the OptionsTable double (tests/stubs, shared with the stream budget's slot
+ * rows) with `$raw` as its answer to `SELECT @@max_allowed_packet` (wpdb is a class Brain Monkey
+ * cannot stub, and the real one is not loaded here), which records every query in `->queries`,
+ * and stubs maybe_serialize() as serialize(), which is
+ * what core's does for an array. The store caches the figure for the request in a private
+ * static, and Pest runs the suite in one process, so the cache is reset here the way Pest.php
+ * resets Plugin::$instance; a test that wants a different figure calls this again. The reset
+ * names the property outright: guarded by property_exists() it would go quiet the day the
+ * property is renamed, and the first figure read would then leak into every later test.
+ *
+ * The default packet is MySQL's documented default, 16 MiB; a budget test passes something
+ * smaller so a transcript of a few hundred bytes is over it.
+ */
+function conversationStoreDb(mixed $raw = '16777216'): OptionsTable
+{
+    $db = new OptionsTable($raw);
+    $GLOBALS['wpdb'] = $db;
+    Functions\when('maybe_serialize')->alias(static fn(mixed $v): mixed => is_array($v) || is_object($v) ? serialize($v) : $v);
+    (new ReflectionProperty(ConversationStore::class, 'maxAllowedPacket'))->setValue(null, null);
+    return $db;
+}
+
+/** ConversationStoreTest: `$n` space-separated words. */
+function conversationWords(int $n, string $prefix = 'w'): string
+{
+    return implode(' ', array_map(static fn(int $i): string => $prefix . $i, range(1, $n)));
+}
+
+/** Migrate04Test: a tiny options table: get_option()/update_option() read and write $stored, so flags persist across calls. */
+function migrate04Options(array &$stored): void
+{
+    Functions\when('get_option')->alias(function (string $k, mixed $d = false) use (&$stored): mixed {
+        return $stored[$k] ?? ($k === 'alpaca_bot_settings' ? [] : $d);
+    });
+    Functions\when('update_option')->alias(function (string $k, mixed $v) use (&$stored): bool {
+        $stored[$k] = $v;
+        return true;
+    });
+}
+
+/** Migrate04Test: a legacy chat_history row as get_posts() hands it back. */
+function migrate04LegacyRow(int $id, string $author = '0'): object
+{
+    return (object) ['ID' => $id, 'post_author' => $author, 'post_type' => 'chat_history', 'post_status' => 'publish'];
+}
+
+/** CapPolicyTest: serves the cached August 2024 month summaries the meter would find, keyed by scope. */
+function capPolicyUsageCache(int $user, int $site): void
+{
+    Functions\when('get_transient')->alias(fn(string $key): array|false => match ($key) {
+        'alpaca_bot_usage_3_2024-08' => ['tokens' => $user, 'requests' => 1],
+        'alpaca_bot_usage_site_2024-08' => ['tokens' => $site, 'requests' => 1],
+        default => false,
+    });
+}
+
+/** CapPolicyTest: a policy over a real meter, both reading the given settings. */
+function capPolicyWith(array $settings): CapPolicy
+{
+    Functions\when('get_option')->justReturn($settings);
+    $store = new Store();
+    return new CapPolicy($store, new UsageMeter($store));
+}
+
+/** CollectorTest: a source with a fixed id that returns the given contexts whatever the request. */
+function collectorSource(string $id, array $contexts): ContextSourceInterface
+{
+    return new class ($id, $contexts) implements ContextSourceInterface {
+        public function __construct(private string $id, private array $contexts) {}
+
+        public function id(): string
+        {
+            return $this->id;
+        }
+
+        public function collect(int $userId, array $request): array
+        {
+            return $this->contexts;
+        }
+    };
+}
+
+/** CurrentScreenSourceTest: a post as get_post() hands it back (stdClass: WP_Post is not loaded here). */
+function currentScreenPost(int $id, string $title, string $content, string $type = 'post', string $status = 'draft'): object
+{
+    return (object) ['ID' => $id, 'post_title' => $title, 'post_content' => $content, 'post_type' => $type, 'post_status' => $status];
+}
+
+/**
+ * PipelineTest: a Pipeline over its real collaborators (every one of them is final, so nothing
+ * is mocked) with WordPress stubbed. The provider is handed in through the alpaca_bot/provider
+ * filter, Factory's documented seam; null means no provider may be built at all, and anything
+ * that is not a provider is handed back as is (a broken third-party filter).
+ *
+ * The clock is 1_725_000_000 (2024-08-30 06:40:00 UTC). The conversation post is 42, owned by
+ * user 3 unless a test swaps `$h->post`; a chat_log insert is post 9. Transients are served from
+ * `$h->transients` (pre-seeded with the model catalog). The harness records every persisted
+ * write in `$h->writes` as [function, post type or meta key, payload] in order (a
+ * wp_delete_post as [function, post id, force]), and the model the factory was asked for in
+ * `$h->model`. Post meta written through update_post_meta is readable back through
+ * get_post_meta (`$h->meta[post id][key]`), so a store method that checks what a turn has
+ * persisted before acting sees the turn's own writes; a test that needs a pre-existing
+ * transcript stubs get_post_meta itself, after this. The Store, ModelCatalog and UsageMeter the pipeline
+ * was built over are `$h->store`, `$h->catalog` and `$h->meter`, for a caller (cliCommand())
+ * that must share them the way Plugin::register() shares one container's instances.
+ *
+ * @param array<string, mixed> $settings seeded into the shared Store
+ * @param \AlpacaBot\Context\Context[] $contexts what the one registered source returns
+ * @param list<string|array<string, mixed>>|null $catalog what the cached catalog lists: a model id alone (a transient
+ *   row carrying no flags at all, which Model::fromArray() reads as tools, vision and thinking all false), or a whole
+ *   Model::toArray() row for a test that needs a flag (`['id' => 'llama3.2', 'tools' => true]` is tool-capable); null leaves
+ *   the catalog transient expired, so the catalog is discovered from `$provider` (its models() is called) and the
+ *   provider filter fires twice
+ * @param \AlpacaBot\Chat\UserPrefs|null $prefs the per-user preferences the pipeline consults; null is the CLI's case (none)
+ * @param \AlpacaBot\Toolkit\Registry|null $toolkits the toolkits a turn may use; null is a pipeline that never runs tools
+ * @param int $turns how many turns the test sends: the provider is built, and its filter applied, once per turn
+ */
+function pipelineWith(mixed $provider, array $settings = [], array $contexts = [], ?array $catalog = ['llama3.2'], ?AlpacaBot\Chat\UserPrefs $prefs = null, ?AlpacaBot\Toolkit\Registry $toolkits = null, int $turns = 1): object
+{
+    $h = new class {
+        public Pipeline $pipeline;
+        public Store $store;
+        public ModelCatalog $catalog;
+        public UsageMeter $meter;
+        /** @var list<array{0: string, 1: int|string, 2: mixed}> */
+        public array $writes = [];
+        public ?string $model = null;
+        public object $post;
+        /** @var array<string, mixed> */
+        public array $transients = [];
+        /** @var array<int, array<string, mixed>> */
+        public array $meta = [];
+        /** @var list<string> every transient read, once shortcodeChat() records them */
+        public array $reads = [];
+        /** @var list<array{0: string, 1: mixed, 2: int}> every transient write but the limiter's as [key, value, ttl], once shortcodeChat() records them */
+        public array $stored = [];
+        /** @var list<array{0: string, 1: int}> every write of the rate limiter's counter as [key, count], once shortcodeChat() records them */
+        public array $limited = [];
+        /** @var list<array{0: string, 1: string}> every stylesheet enqueued as [handle, src], once shortcodeChat() records them */
+        public array $styles = [];
+    };
+    $h->post = conversationChatPost();
+    if ($catalog !== null) {
+        $h->transients[ModelCatalog::TRANSIENT] = array_map(static fn(string|array $m): array => is_string($m) ? ['id' => $m, 'label' => $m] : $m + ['label' => (string) $m['id']], $catalog);
+    }
+    Functions\when('current_time')->justReturn(1_725_000_000);
+    Functions\when('wp_generate_uuid4')->justReturn('uuid');
+    Functions\when('sanitize_text_field')->returnArg();
+    Functions\when('wp_trim_words')->alias(static fn(string $text): string => $text);
+    // A stock 8M post_max_size, as AssetsTest reads it: Pipeline::images() holds a turn's images
+    // to Assets::maxImageBytes(), 6242304 decoded bytes here. A test about the cap itself stubs
+    // this again with its own figure (Brain Monkey takes the later when()).
+    Functions\when('wp_convert_hr_to_bytes')->justReturn(8 * 1024 * 1024);
+    // ConversationStore::save() fits the transcript to the packet limit before writing; the stock 16 MiB here.
+    conversationStoreDb();
+    Functions\when('get_post')->alias(static fn(int $id): ?object => $id === (int) $h->post->ID ? $h->post : null);
+    Functions\when('wp_insert_post')->alias(static function (array $post) use ($h): int {
+        $h->writes[] = ['wp_insert_post', $post['post_type'], $post];
+        return $post['post_type'] === ConversationStore::POST_TYPE ? 42 : 9;
+    });
+    Functions\when('update_post_meta')->alias(static function (int $id, string $key, mixed $value) use ($h): bool {
+        $h->writes[] = ['update_post_meta', $key, $value];
+        $h->meta[$id][$key] = $value;
+        return true;
+    });
+    Functions\when('get_post_meta')->alias(static fn(int $id, string $key = '', bool $single = false): mixed => $h->meta[$id][$key] ?? '');
+    Functions\when('wp_delete_post')->alias(static function (int $id, bool $force = false) use ($h): object {
+        $h->writes[] = ['wp_delete_post', $id, $force];
+        unset($h->meta[$id]);
+        return (object) ['ID' => $id];
+    });
+    Functions\when('wp_update_post')->alias(static function (array $post) use ($h): int {
+        $h->writes[] = ['wp_update_post', (int) $post['ID'], $post];
+        return (int) $post['ID'];
+    });
+    Functions\when('get_transient')->alias(static fn(string $key): mixed => $h->transients[$key] ?? false);
+    Functions\when('set_transient')->justReturn(true);
+    Functions\when('delete_transient')->justReturn(true);
+    if ($provider === null) {
+        Filters\expectApplied('alpaca_bot/provider')->never();
+    } else {
+        Filters\expectApplied('alpaca_bot/provider')->times($turns + ($catalog === null ? 1 : 0))->andReturnUsing(static function (object $built, string $model) use ($h, $provider): mixed {
+            $h->model = $model;
+            return $provider;
+        });
+    }
+    $h->store = new Store($settings + ['models.default' => 'llama3.2']);
+    $factory = new Factory($h->store);
+    $h->catalog = new ModelCatalog($factory);
+    $h->meter = new UsageMeter($h->store);
+    $h->pipeline = new Pipeline(
+        $h->store,
+        $factory,
+        $h->catalog,
+        new ConversationStore($h->store),
+        $h->meter,
+        new CapPolicy($h->store, $h->meter),
+        new Collector([collectorSource('test', $contexts)]),
+        $prefs,
+        $toolkits,
+    );
+    return $h;
+}
+
+/**
+ * StreamControllerTest: upgrades pipelineWith()'s transients from read-only to a real store, so
+ * a test about something the code under test *writes* and reads back (Rest\StreamBudget's slot
+ * set) sees its own writes. pipelineWith() leaves set_transient() and delete_transient() as
+ * flat returns because most of its callers only seed a cache entry and assert on the writes
+ * elsewhere; call this after it when the round trip is the point. delete_transient() reports
+ * whether it removed anything, which is what StreamController's ticket redemption claims a
+ * token with.
+ */
+function transientsPersistIn(object $h): void
+{
+    Functions\when('set_transient')->alias(static function (string $key, mixed $value) use ($h): bool {
+        $h->transients[$key] = $value;
+        return true;
+    });
+    Functions\when('delete_transient')->alias(static function (string $key) use ($h): bool {
+        if (!array_key_exists($key, $h->transients)) {
+            return false;
+        }
+        unset($h->transients[$key]);
+        return true;
+    });
+}
+
+/**
+ * StreamControllerTest and StreamBudgetTest: gives the test an options table for Rest\StreamBudget
+ * to claim slots in. The budget's claim is `$wpdb`'s and not the options API's — the class
+ * docblock says why — so a test of it needs the table, not a transient array.
+ *
+ * The double is returned as well as installed: `->rows` is the slot state to assert on, and
+ * `->frozen` is how a test makes a batch of claims read the same instant.
+ */
+function slotRowsIn(): OptionsTable
+{
+    $GLOBALS['wpdb'] = new OptionsTable();
+    return $GLOBALS['wpdb'];
+}
+
+/**
+ * StreamControllerTest: makes `$hook` behave as core's do_action() does for the duration of a
+ * test. Brain Monkey records what add_action() registers and what do_action() fires but never
+ * runs the one for the other, so code under test that listens to a pipeline action (the stream
+ * route's `start` frame rides on `alpaca_bot/chat/started`) would never hear it. Wiring the two
+ * expectations together here calls every listener added so far with do_action()'s arguments,
+ * in the order they were added; priorities are ignored, which no caller relies on.
+ */
+function actionRuns(string $hook): void
+{
+    $listeners = [];
+    Actions\expectAdded($hook)->zeroOrMoreTimes()->whenHappen(static function (callable $callback) use (&$listeners): void {
+        $listeners[] = $callback;
+    });
+    Actions\expectDone($hook)->zeroOrMoreTimes()->whenHappen(static function (mixed ...$args) use (&$listeners): void {
+        foreach ($listeners as $listener) {
+            $listener(...$args);
+        }
+    });
+}
+
+/**
+ * StreamControllerTest: a stream ticket as ChatController::ticket() stores it, for user 3 and
+ * the harness's conversation 42, with `$changes` merged over it.
+ *
+ * @param array<string, mixed> $changes
+ * @return array<string, mixed>
+ */
+function streamTicket(array $changes = []): array
+{
+    return array_replace_recursive([
+        'user_id' => 3,
+        'conversation_id' => 42,
+        'message' => 'hi',
+        'options' => ['conversation_id' => 42, 'model' => '', 'images' => [], 'context' => []],
+    ], $changes);
+}
+
+/** PipelineTest: a provider mock whose one stream() call yields the given chunks and captures its arguments into `$call`. */
+function pipelineProvider(array $chunks, ?array &$call = null): ProviderInterface
+{
+    $provider = Mockery::mock(ProviderInterface::class);
+    $provider->shouldReceive('stream')->once()->andReturnUsing(static function (array $messages, array $tools, array $options) use ($chunks, &$call): \Generator {
+        $call = ['messages' => $messages, 'tools' => $tools, 'options' => $options];
+        foreach ($chunks as $chunk) {
+            if ($chunk instanceof \Throwable) {
+                throw $chunk;
+            }
+            yield $chunk;
+        }
+    });
+    return $provider;
+}
+
+/**
+ * PipelineToolsTest: a provider mock for an agent run, which streams once per iteration. Each
+ * entry of `$turns` is the chunk list one stream() call yields, in call order (a Throwable
+ * entry is thrown from that call), and every call's arguments are appended to `$calls` as
+ * `['messages' => ..., 'tools' => ..., 'options' => ...]`. A call past the last turn fails the
+ * test: the agent looped once more than the test allowed for.
+ *
+ * @param list<list<\AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Provider\Response|\Throwable>> $turns
+ * @param list<array{messages: array<mixed>, tools: array<mixed>, options: array<string, mixed>}>|null $calls
+ */
+function agentProvider(array $turns, ?array &$calls = null): ProviderInterface
+{
+    $calls = [];
+    $provider = Mockery::mock(ProviderInterface::class);
+    $provider->shouldReceive('stream')->times(count($turns))->andReturnUsing(static function (array $messages, array $tools = [], array $options = []) use ($turns, &$calls): \Generator {
+        $turn = $turns[count($calls)] ?? [];
+        $calls[] = ['messages' => $messages, 'tools' => $tools, 'options' => $options];
+        foreach ($turn as $chunk) {
+            if ($chunk instanceof \Throwable) {
+                throw $chunk;
+            }
+            yield $chunk;
+        }
+    });
+    return $provider;
+}
+
+/**
+ * PipelineToolsTest and AssistantTest: a toolkit of one tool that answers `echo:` plus its
+ * `text` argument through `$callback` (default: a success result), with the given guidelines.
+ *
+ * @param (callable(array<string, mixed>): \AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Tool\ToolResult)|null $callback
+ */
+function echoToolkit(string $name, string $guidelines = 'Use it.', ?callable $callback = null): ToolkitInterface
+{
+    $callback ??= static fn(array $a): ToolResult => ToolResult::success('echo:' . $a['text']);
+    return new class ($name, $guidelines, $callback) implements ToolkitInterface {
+        public function __construct(private string $name, private string $guidelines, private mixed $callback) {}
+
+        public function tools(): array
+        {
+            return [new Tool($this->name, 'echoes its text', [new StringParameter('text', 'the text')], $this->callback)];
+        }
+
+        public function guidelines(): string
+        {
+            return $this->guidelines;
+        }
+    };
+}
+
+/**
+ * PipelineToolsTest: a registry that enables exactly the given toolkits, keyed by id, over its
+ * own Store (the setting names the ids; the `alpaca_bot/toolkits` filter is Brain Monkey's
+ * pass-through unless a test expects it).
+ *
+ * @param array<string, ToolkitInterface> $toolkits
+ */
+function registryWith(array $toolkits): AlpacaBot\Toolkit\Registry
+{
+    $registry = new AlpacaBot\Toolkit\Registry(new Store(['toolkits.enabled' => array_keys($toolkits)]));
+    foreach ($toolkits as $id => $toolkit) {
+        $registry->register($id, $toolkit);
+    }
+    return $registry;
+}
+
+/** AgentStreamObserverTest: an agent that only exists to notify(): instructions() is abstract and the provider is never called. */
+function agentSubject(): AbstractAgent
+{
+    return new class (Mockery::mock(ProviderInterface::class)) extends AbstractAgent {
+        public function instructions(): string
+        {
+            return '';
+        }
+    };
+}
+
+/**
+ * ChatCommandTest: a ChatCommand over a pipelineWith() harness `$h`, sharing its pipeline,
+ * catalog, meter and store: the same four instances, as Plugin::register() hands the command
+ * the container's. Stdout lands in `$c->out` and failures in `$c->errors` instead of going
+ * through WP_CLI::error().
+ */
+function cliCommand(object $h): object
+{
+    $c = new class {
+        public ChatCommand $command;
+        public string $out = '';
+        /** @var list<string> */
+        public array $errors = [];
+    };
+    $c->command = new ChatCommand(
+        $h->pipeline,
+        $h->catalog,
+        $h->meter,
+        $h->store,
+        static function (string $s) use ($c): void {
+            $c->out .= $s;
+        },
+        static function (string $message) use ($c): void {
+            $c->errors[] = $message;
+        },
+    );
+    return $c;
+}
+
+/**
+ * ChatCommandTest: the WordPress user table as the command sees it: `$existing` ids resolve
+ * through get_userdata(), `$current` is who get_current_user_id() starts on.
+ *
+ * The current user is a variable, not a fixed return: `wp alpaca-bot chat` calls
+ * wp_set_current_user() to become the user it resolved, and the toolkits read the acting user
+ * from get_current_user_id() when a tool runs, so a test that asks who the turn ran as has to
+ * see the same move WordPress would make. The stand-in does only what this needs — record the
+ * id — where core's also loads the WP_User; nothing here reads one.
+ */
+function cliUsers(array $existing = [3], int $current = 0): void
+{
+    $GLOBALS['abCliCurrentUser'] = $current;
+    Functions\when('get_userdata')->alias(static fn(int $id): object|false => in_array($id, $existing, true) ? (object) ['ID' => $id] : false);
+    Functions\when('get_current_user_id')->alias(static fn(): int => (int) $GLOBALS['abCliCurrentUser']);
+    Functions\when('wp_set_current_user')->alias(static function (int $id): int {
+        $GLOBALS['abCliCurrentUser'] = $id;
+        return $id;
+    });
+}
+
+/**
+ * View\Chat\ComponentsTest: a Shell over a one-model catalog (served from the transient), the
+ * given conversation and history, user 3 "Carmelo", and the given sprite path.
+ *
+ * @param list<array{id: int, title: string, created: int}> $history
+ */
+function chatShell(?AlpacaBot\Chat\Conversation $conversation, array $history, ?string $sprite, int $postId = 0): AlpacaBot\View\Chat\Shell
+{
+    Functions\when('get_transient')->justReturn([['id' => 'llama3.2', 'label' => 'llama3.2']]);
+    Functions\when('wp_get_current_user')->justReturn((object) ['display_name' => 'Carmelo', 'ID' => 3]);
+    Functions\when('get_avatar_url')->justReturn('/u.png');
+    Functions\when('plugins_url')->alias(fn(string $p) => '/plugins/alpaca-bot/' . $p);
+    Functions\when('admin_url')->alias(fn(string $p) => '/wp-admin/' . $p);
+    $store = new Store(['models.default' => 'llama3.2', 'chat.history_limit' => 15]);
+    return new AlpacaBot\View\Chat\Shell($store, new ModelCatalog(new Factory($store)), $conversation, $history, $postId, $sprite);
+}
+
+/**
+ * Shortcodes\ChatTest and AgentShimTest: a `[alpacabot]` handler over a pipelineWith() harness
+ * `$h`, sharing its pipeline, store and catalog, with the WordPress a front-end render meets
+ * stubbed: the post being rendered is `$postId` (get_the_ID()), shortcode_atts() is core's
+ * merge (the pairs' keys only), and the transients are the harness's own `$h->transients`, so
+ * set_transient() writes where get_transient() reads and a test can seed a cache entry or read
+ * what was written. Every transient read is recorded in `$h->reads` and every write in
+ * `$h->stored` as [key, value, ttl], for the tests about the cache, except the rate limiter's
+ * counter (`alpaca_bot_rl_*`), which goes to `$h->limited` as [key, count] so a test about the
+ * cache reads the cache alone and a test about the limiter reads its hits. wp_kses() is the
+ * strip_tags stand-in MarkdownTest uses, so the markdown path keeps its allowed tags and drops
+ * the rest.
+ */
+function shortcodeChat(object $h, int $postId = 7): AlpacaBot\Shortcodes\Chat
+{
+    $h->reads = [];
+    $h->stored = [];
+    $h->limited = [];
+    Functions\when('get_the_ID')->justReturn($postId > 0 ? $postId : false);
+    Functions\when('shortcode_atts')->alias(static fn(array $pairs, array $atts): array => array_merge($pairs, array_intersect_key($atts, $pairs)));
+    Functions\when('get_transient')->alias(static function (string $key) use ($h): mixed {
+        $h->reads[] = $key;
+        return $h->transients[$key] ?? false;
+    });
+    Functions\when('set_transient')->alias(static function (string $key, mixed $value, int $ttl = 0) use ($h): bool {
+        if (str_starts_with($key, 'alpaca_bot_rl_')) {
+            $h->limited[] = [$key, (int) $value];
+        } else {
+            $h->stored[] = [$key, $value, $ttl];
+        }
+        $h->transients[$key] = $value;
+        return true;
+    });
+    Functions\when('wp_login_url')->alias(static fn(string $redirect = ''): string => '/wp-login.php?redirect_to=' . rawurlencode($redirect));
+    Functions\when('get_permalink')->justReturn('https://site.test/?p=' . $postId);
+    Functions\when('wp_kses')->alias(static fn(string $html, array $allowed): string => strip_tags($html, array_map(static fn(string $t): string => "<$t>", array_keys($allowed))));
+    Functions\when('get_user_meta')->justReturn('');
+    // A page render, not a REST one; a test about REST says otherwise. Stylesheets are recorded
+    // rather than expect()ed: Brain Monkey routes a function to its mock only when no stub
+    // exists yet, so a when() here would swallow a test's later expect() on the same name.
+    Functions\when('wp_is_rest_endpoint')->justReturn(false);
+    Functions\when('plugins_url')->alias(static fn(string $p): string => '/plugins/alpaca-bot/' . $p);
+    $h->styles = [];
+    Functions\when('wp_enqueue_style')->alias(static function (string $handle, string $src = '', array $deps = [], mixed $ver = false) use ($h): void {
+        $h->styles[] = [$handle, $src];
+    });
+    return new AlpacaBot\Shortcodes\Chat($h->store, $h->catalog, new ConversationStore($h->store), new AlpacaBot\Chat\UserPrefs(), $h->pipeline, new AlpacaBot\View\Markdown(), new AlpacaBot\Admin\Assets());
+}
+
+/**
+ * Shortcodes tests: the viewer of the page. `$id` 0 is a visitor (is_user_logged_in() false);
+ * a logged-in viewer holds exactly `$caps`.
+ *
+ * @param list<string> $caps
+ */
+function shortcodeViewer(int $id, array $caps = ['edit_posts']): void
+{
+    Functions\when('is_user_logged_in')->justReturn($id > 0);
+    Functions\when('get_current_user_id')->justReturn($id);
+    Functions\when('current_user_can')->alias(static fn(string $cap): bool => $id > 0 && in_array($cap, $caps, true));
+}
+
+/**
+ * Abilities\RegisterTest: a Register over a pipelineWith() harness `$h`, sharing its pipeline,
+ * and over a registry holding the real summarize and draft_post toolkits (both resolving the
+ * acting user through the same closure the Register is given) with exactly `$enabled`
+ * switched on. The acting user is `$userId` (0 is nobody). `$exists` stands in for
+ * function_exists(); null is the real one, which Brain Monkey cannot stub, so a test about
+ * the API being absent passes its own.
+ *
+ * @param list<string> $enabled
+ * @param (callable(string): bool)|null $exists
+ */
+function abilitiesRegister(object $h, array $enabled = ['summarize', 'draft_post'], int $userId = 3, ?callable $exists = null): AlpacaBot\Abilities\Register
+{
+    $user = static fn(): int => $userId;
+    $registry = new AlpacaBot\Toolkit\Registry(new Store(['toolkits.enabled' => $enabled]));
+    $summarize = new AlpacaBot\Toolkit\SummarizeToolkit($h->pipeline, $user);
+    $registry->register('summarize', $summarize);
+    $draft = new AlpacaBot\Toolkit\DraftPostToolkit($user);
+    $registry->register('draft_post', $draft);
+    return new AlpacaBot\Abilities\Register($h->pipeline, $registry, $user, $exists);
+}

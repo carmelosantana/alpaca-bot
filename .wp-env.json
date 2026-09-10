@@ -1,0 +1,19 @@
+{
+	"core": null,
+	"phpVersion": "8.4",
+	"plugins": ["."],
+	"config": {
+		"WP_DEBUG": true,
+		"WP_DEBUG_DISPLAY": false
+	},
+	"env": {
+		"development": {
+			"config": {
+				"ALPACA_BOT_E2E": true
+			},
+			"mappings": {
+				"wp-content/mu-plugins": "./tests/e2e/mu-plugins"
+			}
+		}
+	}
+}

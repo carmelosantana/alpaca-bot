@@ -1,0 +1,4 @@
+{"name": "web_fetch", "arguments": {"url": "https://en.wikipedia.org/wiki/Alpaca"}}
+</tool_call>
+
+{"name": "done", "arguments": {"response": "An alpaca (Lama pacos) is a domesticated species of South American camelid, traditionally bred for their valuable fiber in the textile industry."}}

@@ -1,0 +1,31 @@
+/*
+ * What the [alpacabot] and [alpacabot_agent] shortcodes print on a page: the answer block and
+ * the notice line (src/Shortcodes/Chat.php). Enqueued by Admin\Assets::enqueueShortcode() for
+ * any shortcode output, the chat screen's stylesheet only for the shell. Theme-neutral on
+ * purpose: the theme's type, colour and measure are inherited, the answer only keeps a long
+ * word or a code block inside its column, and the notice is a quiet box a theme can restyle
+ * by the same two classes.
+ */
+
+.alpaca-bot-answer {
+    overflow-wrap: anywhere;
+}
+
+.alpaca-bot-answer pre {
+    overflow-x: auto;
+}
+
+.alpaca-bot-answer img {
+    max-width: 100%;
+    height: auto;
+}
+
+.alpaca-bot-notice {
+    margin: 1em 0;
+    padding: 0.75em 1em;
+    border: 1px solid;
+    border-color: color-mix(in srgb, currentColor 30%, transparent);
+    border-radius: 4px;
+    font-size: 0.9375em;
+    opacity: 0.85;
+}

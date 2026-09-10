@@ -1,0 +1,326 @@
+/*
+ * Alpaca Bot chat shell (0.5). Every selector here is emitted by src/View/Chat/*,
+ * src/View/Icon.php, or resources/ts/{chat,dom,highlight}.ts; the markdown elements are
+ * Markdown::allowedTags(). The accent comes from core's --wp-admin-theme-color and its
+ * derivatives, set on <body> for every admin colour scheme, so the screen follows whichever
+ * one the user picked; the Default scheme's values stand behind them as fallbacks so a missing
+ * variable cannot blank a control -- which is also what makes the file usable off wp-admin,
+ * where none of those variables exist. The surfaces, text and borders are core's fixed greys,
+ * which do not change between schemes.
+ *
+ * Two places load this, and one of them is not wp-admin: the admin chat screen
+ * (Admin\Assets::enqueue()) and a front-end page carrying `[alpacabot]` with no prompt
+ * (Admin\Assets::enqueueFront()). Everything below is shared but one block, the height
+ * arithmetic on .ab-wrap, which subtracts wp-admin's chrome from the viewport; the front end
+ * has no #wpfooter and the shell there is a block inside a page rather than the whole screen,
+ * so .ab-wrap--front (near the foot of this file) replaces it. View\Chat\Shell puts that
+ * modifier on, and leaves core's .wrap off, for a shell it was told is not on the admin screen.
+ */
+
+.ab-wrap {
+    /* The fallbacks are core's Default scheme; without one a missing variable would blank the send button. */
+    --ab-accent: var(--wp-admin-theme-color, #2271b1);
+    --ab-accent-dark: var(--wp-admin-theme-color-darker-10, #135e96);
+    --ab-accent-rgb: var(--wp-admin-theme-color--rgb, 34, 113, 177);
+    --ab-focus-width: var(--wp-admin-border-width-focus, 2px);
+    --ab-surface: #f0f0f1;
+    --ab-panel: #fff;
+    --ab-text: #1d2327;
+    --ab-muted: #646970;
+    --ab-border: #c3c4c7;
+    --ab-code-bg: #1d2327;
+    --ab-code-text: #f0f0f1;
+    --ab-max: 800px;
+    --ab-admin-bar: 32px;
+    /* #wpbody-content's padding-bottom, where core parks #wpfooter. */
+    --ab-footer: 65px;
+    display: flex;
+    flex-direction: column;
+    box-sizing: border-box;
+    height: calc(100vh - var(--ab-admin-bar) - var(--ab-footer));
+    /* .wrap's own 10px top margin, moved inside so the height above is the whole space. */
+    margin-top: 0;
+    padding-top: 10px;
+    color: var(--ab-text);
+}
+
+/* ---- header: title, "New chat", model + history selects -------------------------------- */
+.ab-header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 12px;
+    margin-bottom: 8px;
+}
+.ab-header__controls { display: flex; flex-wrap: wrap; gap: 8px; margin-left: auto; }
+
+/* Core's notice mover (common.js) inserts page notices after this rule; keep them on their own row. */
+.ab-header .wp-header-end, .ab-header > .notice { flex-basis: 100%; margin: 0; }
+.ab-select { width: 240px; max-width: 100%; }
+.ab-select:focus-visible {
+    border-color: var(--ab-accent);
+    box-shadow: 0 0 0 1px var(--ab-accent);
+    outline: var(--ab-focus-width) solid transparent;
+}
+
+/* ---- transcript ------------------------------------------------------------------------ */
+#ab-chat { display: flex; flex: 1; flex-direction: column; min-height: 0; }
+.ab-status .notice { max-width: var(--ab-max); margin: 8px auto; }
+.ab-messages { flex: 1; min-height: 0; overflow-y: auto; padding: 4px 4px 12px; }
+.ab-welcome {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    text-align: center;
+}
+.ab-welcome__avatar { width: 128px; height: 128px; margin: 2em auto; border-radius: 50%; }
+.ab-welcome__text { margin: 0; color: var(--ab-muted); font-size: 1.5rem; }
+.ab-msg {
+    display: grid;
+    grid-template-columns: 36px 1fr;
+    gap: 12px;
+    max-width: var(--ab-max);
+    margin: 0 auto 20px;
+}
+.ab-msg__avatar { width: 36px; height: 36px; border-radius: 50%; }
+/* Wrap anywhere on the whole body, so a long model id in the name or receipt cannot widen the column. */
+.ab-msg__body { min-width: 0; overflow-wrap: anywhere; }
+.ab-msg__meta {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 24px;
+    margin-bottom: 4px;
+}
+.ab-msg__name { font-weight: 600; }
+
+/* The assistant's name is its model id. */
+.ab-msg--assistant .ab-msg__name { font-family: Consolas, Monaco, monospace; font-size: 13px; }
+.ab-msg__actions { display: flex; gap: 2px; opacity: 0; transition: opacity 0.15s ease-out; }
+.ab-msg:hover .ab-msg__actions, .ab-msg:focus-within .ab-msg__actions { opacity: 1; }
+
+@media (hover: none) {
+    .ab-msg__actions { opacity: 1; }
+}
+
+.ab-msg__images { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
+.ab-msg__image { max-width: 200px; max-height: 200px; border: 1px solid var(--ab-border); border-radius: 4px; }
+/* An image the store let go (MessageBubble's evicted marker): a dashed, muted note in the images row, not a broken image. */
+.ab-msg__evicted { display: inline-flex; align-items: center; padding: 8px 12px; border: 1px dashed var(--ab-border); border-radius: 4px; color: var(--ab-muted); font-size: 12px; }
+.ab-receipt { margin-top: 4px; color: var(--ab-muted); font-size: 12px; }
+
+/* ---- message content: the markdown allowlist, the highlighter, the stream ----------- */
+.ab-msg__content { font-size: 14px; line-height: 1.5; }
+.ab-msg__content > :first-child { margin-top: 0; }
+.ab-msg__content > :last-child { margin-bottom: 0; }
+.ab-msg__content p, .ab-msg__content ul, .ab-msg__content ol, .ab-msg__content blockquote, .ab-msg__content pre, .ab-msg__content table {
+    margin: 0 0 0.75em;
+}
+.ab-msg__content :is(h1, h2, h3, h4, h5, h6) { margin: 1em 0 0.5em; padding: 0; font-weight: 600; line-height: 1.3; }
+.ab-msg__content h1 { font-size: 1.4em; }
+.ab-msg__content h2 { font-size: 1.25em; }
+.ab-msg__content h3 { font-size: 1.1em; }
+.ab-msg__content :is(h4, h5, h6) { font-size: 1em; }
+.ab-msg__content ul, .ab-msg__content ol { padding-left: 1.5em; }
+.ab-msg__content ul { list-style: disc; }
+.ab-msg__content ol { list-style: decimal; }
+.ab-msg__content blockquote { padding-left: 12px; border-left: 4px solid var(--ab-border); color: var(--ab-muted); }
+.ab-msg__content hr { margin: 1em 0; border: 0; border-top: 1px solid var(--ab-border); }
+.ab-msg__content img { max-width: 100%; height: auto; border-radius: 4px; }
+.ab-msg__content table { display: block; max-width: 100%; overflow-x: auto; border-collapse: collapse; }
+.ab-msg__content th, .ab-msg__content td { padding: 4px 8px; border: 1px solid var(--ab-border); text-align: left; }
+.ab-msg__content th { background: var(--ab-surface); }
+.ab-msg__content code {
+    padding: 2px 4px;
+    margin: 0;
+    background: rgba(0, 0, 0, 0.06);
+    border-radius: 3px;
+    font-size: 13px;
+}
+.ab-msg__content pre {
+    position: relative;
+    padding: 12px 44px 12px 12px;
+    background: var(--ab-code-bg);
+    color: var(--ab-code-text);
+    overflow: auto;
+    border-radius: 4px;
+    font-size: 13px;
+    line-height: 1.5;
+}
+.ab-msg__content pre code { display: block; padding: 0; background: none; color: inherit; }
+pre > .ab-code__copy { position: absolute; top: 6px; right: 6px; color: var(--ab-border); }
+pre > .ab-code__copy:hover { color: var(--ab-code-text); background: rgba(255, 255, 255, 0.12); }
+pre > .ab-code__copy:focus-visible { outline-color: var(--ab-code-text); }
+
+/* Highlighter tokens (resources/ts/highlight.ts) on the dark block, from core's palette. */
+.tok-cmt { color: #a7aaad; font-style: italic; }
+.tok-str { color: #68de7c; }
+.tok-kw { color: #72aee6; }
+.tok-num { color: #f2d675; }
+.tok-fn { color: #ff8085; }
+
+/* Streamed deltas are raw text until the server's rendering replaces the bubble; a reply the
+   stream left partial (chat.ts settle()) keeps them as they are, without the caret. */
+[data-streaming="1"] .ab-msg__content,
+[data-partial="1"] .ab-msg__content { white-space: pre-wrap; }
+[data-streaming="1"] .ab-msg__content::after {
+    content: "";
+    display: inline-block;
+    width: 2px;
+    height: 1em;
+    margin-left: 2px;
+    vertical-align: -0.15em;
+    background: currentColor;
+    animation: ab-blink 1s steps(2, start) infinite;
+}
+
+@keyframes ab-blink {
+    to { visibility: hidden; }
+}
+
+.ab-msg__reasoning { margin-bottom: 8px; color: var(--ab-muted); font-size: 13px; }
+.ab-msg__reasoning summary { cursor: pointer; }
+.ab-msg__reasoning-text { max-height: 12em; margin-top: 4px; overflow-y: auto; }
+
+/* ---- composer -------------------------------------------------------------------------- */
+
+/* Sticky is for iOS, where 100vh overshoots the visible viewport: the row stays in view as the page scrolls. */
+.ab-composer { position: sticky; bottom: 0; padding-top: 8px; }
+.ab-composer__row {
+    display: flex;
+    align-items: flex-end;
+    gap: 6px;
+    max-width: var(--ab-max);
+    margin: 0 auto;
+    padding: 4px;
+    background: var(--ab-panel);
+    border: 1px solid var(--ab-border);
+    border-radius: 4px;
+}
+.ab-composer__row:focus-within { border-color: var(--ab-accent); box-shadow: 0 0 0 1px var(--ab-accent); }
+.ab-composer textarea {
+    flex: 1;
+    box-sizing: border-box;
+    min-height: 36px;
+    max-height: 250px;
+    margin: 0;
+    padding: 8px;
+    border: 0;
+    background: transparent;
+    box-shadow: none;
+    color: var(--ab-text);
+    font-size: 14px;
+    line-height: 1.4;
+    resize: none;
+}
+
+/* The row's ring is the focus indicator; core's own textarea ring would double it. */
+.ab-composer textarea:focus { outline: 0; box-shadow: none; }
+.ab-composer__buttons { display: flex; align-items: center; gap: 4px; }
+.ab-composer__preview { height: 40px; width: auto; border-radius: 4px; }
+
+/* ---- buttons and icons ----------------------------------------------------------------- */
+.ab-icon { width: 1.25em; height: 1.25em; vertical-align: -0.25em; }
+.ab-btn, .ab-msg__action {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    border-radius: 4px;
+    background: none;
+    color: var(--ab-muted);
+    font-size: 16px;
+    line-height: 1;
+    cursor: pointer;
+}
+.ab-btn[hidden] { display: none; }
+.ab-msg__action { width: 28px; height: 28px; font-size: 14px; }
+.ab-btn--icon:hover, .ab-msg__action:hover { color: var(--ab-accent); background: rgba(var(--ab-accent-rgb), 0.1); }
+.ab-btn:focus-visible, .ab-msg__action:focus-visible, .ab-msg__reasoning summary:focus-visible {
+    outline: var(--ab-focus-width) solid var(--ab-accent);
+    outline-offset: 2px;
+}
+
+/* Send (Kanboard #566): resting, hover, focus and disabled each read differently. */
+.ab-btn--send { background: var(--ab-accent); color: #fff; }
+.ab-btn--send:hover { background: var(--ab-accent-dark); }
+.ab-btn--send:focus-visible { background: var(--ab-accent-dark); box-shadow: 0 0 0 2px var(--ab-panel); }
+.ab-btn--send:disabled { background: var(--ab-border); color: var(--ab-panel); cursor: not-allowed; }
+
+/* Tooltips: the aria-label of an icon-only button, on hover, for sighted mouse users. */
+.ab-btn--icon[aria-label]:hover::after, .ab-btn--send[aria-label]:hover::after, .ab-msg__action[aria-label]:hover::after {
+    content: attr(aria-label);
+    position: absolute;
+    bottom: calc(100% + 6px);
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 10;
+    padding: 4px 8px;
+    border-radius: 3px;
+    background: var(--ab-text);
+    color: var(--ab-panel);
+    font-size: 12px;
+    line-height: 1.4;
+    white-space: nowrap;
+    pointer-events: none;
+}
+
+/* A turn's actions sit at the top of its bubble, and the first bubble at the scroller's edge, so the
+   tooltip goes below the button, as 0.4's tooltips did. */
+.ab-msg__action[aria-label]:hover::after { top: calc(100% + 6px); bottom: auto; }
+
+/* Inside a scrolling <pre> a tooltip above the button would be clipped; put it to the left. */
+pre > .ab-code__copy[aria-label]:hover::after {
+    top: 50%;
+    right: calc(100% + 6px);
+    bottom: auto;
+    left: auto;
+    transform: translateY(-50%);
+}
+
+/* ---- the same shell on a front-end page -------------------------------------------------- */
+
+/*
+ * One rule, because one rule is all .ab-wrap assumes that a `[alpacabot]` page does not have:
+ * that the shell owns the viewport, less wp-admin's admin bar and #wpfooter. On a page the shell
+ * is a block in the middle of the content, and neither the subtraction nor the intent survives
+ * -- a shell sized to the screen pushes everything after it out of reach, and #wpfooter is not
+ * on the page to subtract. A bounded box instead. This replaces the height outright rather than
+ * zeroing --ab-footer, so the narrow-screen block below, which retunes those variables for
+ * wp-admin, has nothing to say here either. Everything else in this file works on both: the
+ * variables all carry fallbacks for the admin colour scheme that is not there, `.ab-status
+ * .notice` is what dom.ts writes on either surface, `.wp-header-end` is Header's own <hr>, and
+ * `.ab-header > .notice` is the one rule that only wp-admin can trigger -- core's notice mover
+ * -- which costs a front-end page a selector that matches nothing. What this file does *not*
+ * carry is core's own admin chrome: `.page-title-action` is styled by wp-admin's stylesheet, so
+ * "New chat" is a plain link on a front-end shell.
+ */
+.ab-wrap--front {
+    height: min(70vh, 640px);
+}
+
+/* ---- narrow screens (core's own admin breakpoint) --------------------------------------- */
+
+@media screen and (max-width: 782px) {
+    /* Core's narrow layout: a taller admin bar, and 100px under #wpbody-content in place of the footer. */
+    .ab-wrap { --ab-admin-bar: 46px; --ab-footer: 100px; }
+    .ab-header__controls { flex-basis: 100%; flex-direction: column; margin-left: 0; }
+    .ab-select { width: 100%; }
+    .ab-msg { grid-template-columns: 32px 1fr; gap: 8px; }
+    .ab-msg__avatar { width: 32px; height: 32px; }
+
+    /* 16px keeps iOS from zooming the page when the box takes focus, as core does for its inputs. */
+    .ab-composer textarea { font-size: 16px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .ab-msg__actions { transition: none; }
+    [data-streaming="1"] .ab-msg__content::after { animation: none; }
+}

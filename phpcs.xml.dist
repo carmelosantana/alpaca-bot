@@ -1,0 +1,142 @@
+<?xml version="1.0"?>
+<ruleset name="Alpaca Bot">
+    <description>WordPress Coding Standards for Alpaca Bot 0.5 (PSR-4, strict types).</description>
+
+    <file>alpaca-bot.php</file>
+    <file>src</file>
+    <exclude-pattern>vendor/*</exclude-pattern>
+    <exclude-pattern>vendor-prefixed/*</exclude-pattern>
+
+    <arg name="extensions" value="php"/>
+    <arg name="colors"/>
+    <arg value="sp"/>
+
+    <config name="minimum_wp_version" value="6.9"/>
+    <config name="testVersion" value="8.4-"/>
+
+    <rule ref="WordPress-Extra">
+        <!-- src/ is PSR-4: the file name matches the class name, not WP's class-my-thing.php. -->
+        <exclude name="WordPress.Files.FileName"/>
+        <!-- Namespaced OO code with camelCase locals, properties and methods, not WP core style. -->
+        <exclude name="WordPress.NamingConventions.ValidVariableName"/>
+        <exclude name="WordPress.NamingConventions.ValidFunctionName.MethodNameInvalid"/>
+        <!-- Short array syntax throughout. -->
+        <exclude name="Universal.Arrays.DisallowShortArraySyntax"/>
+        <exclude name="Generic.Arrays.DisallowShortArraySyntax"/>
+        <!-- Yoda conditions buy nothing under declare(strict_types=1) with typed signatures. -->
+        <exclude name="WordPress.PHP.YodaConditions"/>
+        <!--
+            Docblocks here are written to carry the argument for a piece of code, and are omitted
+            where there is no argument to make. These sniffs require a docblock on every symbol
+            and a @param line per parameter, which under native parameter and return types only
+            restates the signature and pushes toward filler. PHPStan level 6 already enforces the
+            type information they would duplicate.
+        -->
+        <exclude name="Squiz.Commenting"/>
+        <exclude name="Generic.Commenting"/>
+
+        <!--
+            Formatting: this codebase is formatted PSR-12 (4-space indentation, no space inside
+            parentheses, brace on the next line for declarations), which is what .editorconfig
+            records and what the whole 10k-line src/ tree already follows consistently. The
+            sniffs below only enforce WP core's different house style; enabling them would mean
+            reformatting every file for no semantic gain. Excluded as a whole-codebase decision
+            rather than per line. What is kept from WordPress-Extra is the part that carries
+            meaning: security, i18n, DB, naming/prefixing, and code analysis.
+        -->
+        <exclude name="Generic.WhiteSpace.DisallowSpaceIndent"/>
+        <exclude name="Generic.WhiteSpace.ArbitraryParenthesesSpacing"/>
+        <exclude name="Generic.Formatting.MultipleStatementAlignment"/>
+        <exclude name="Generic.Functions.OpeningFunctionBraceKernighanRitchie"/>
+        <exclude name="Generic.Classes.OpeningBraceSameLine"/>
+        <exclude name="PEAR.Functions.FunctionCallSignature"/>
+        <exclude name="Squiz.Functions.FunctionDeclarationArgumentSpacing"/>
+        <exclude name="Squiz.Functions.MultiLineFunctionDeclaration"/>
+        <exclude name="NormalizedArrays.Arrays.ArrayBraceSpacing"/>
+        <exclude name="NormalizedArrays.Arrays.CommaAfterLast"/>
+        <exclude name="WordPress.WhiteSpace"/>
+        <exclude name="WordPress.Arrays"/>
+
+        <!--
+            `throw` is not an output context in this plugin. An exception message reaches a
+            WP_Error (Rest\Errors, JSON-encoded by the REST server), the debug log behind
+            WP_DEBUG, WP_CLI::error() on a terminal, or View\Chat\Notice, which runs it through
+            esc_html() when it builds the markup. Nothing echoes getMessage() into a page. Running
+            esc_html() at the throw site instead would put HTML entities into log files, CLI
+            output and JSON bodies, where they are noise rather than safety.
+        -->
+        <exclude name="WordPress.Security.EscapeOutput.ExceptionNotEscaped"/>
+
+        <!--
+            Hooks are named `alpaca_bot/scope/event` on purpose. That slash convention is the
+            plugin's documented public extension API (bin/hooks-doc.php generates the reference
+            from it), so renaming the 19 hooks to underscores would break every site filtering
+            them for a cosmetic gain.
+        -->
+        <exclude name="WordPress.NamingConventions.ValidHookName.UseUnderscores"/>
+
+        <!--
+            `$class`, `$default` and `$new` are legal PHP parameter names, read correctly at the
+            call sites, and `$class` in particular is the conventional name in an
+            spl_autoload_register() callback. Renaming them would make the code read worse.
+        -->
+        <exclude name="Universal.NamingConventions.NoReservedKeywordParameterNames"/>
+
+        <!--
+            The unused parameters are all in callbacks whose signature the caller fixes: shortcode
+            handlers ($atts, $content, $tag), WP-CLI commands ($args, $assoc) and ability
+            callbacks ($input). A trailing parameter cannot be dropped without breaking the
+            contract, and PHPStan already reports genuinely dead locals.
+        -->
+        <exclude name="Generic.CodeAnalysis.UnusedFunctionParameter"/>
+
+        <!--
+            Every hit is a `/* translators: */` comment that has to quote the shortcode or
+            attribute it documents (`[alpacabot prompt="…"]`, `cache="off"`), which the heuristic
+            scores as commented-out code. Those comments are required for the strings to be
+            translatable, so the sniff is wrong on all of them.
+        -->
+        <exclude name="Squiz.PHP.CommentedOutCode"/>
+
+        <!--
+            `current_time('timestamp', true)` is this codebase's injectable clock, not an oversight.
+            The unit suite freezes time by stubbing `current_time` through Brain Monkey
+            (tests/Unit/Chat/UsageMeterTest.php, Rest/RateLimitTest.php and others); `time()`, which
+            the sniff asks for, is a PHP internal that cannot be stubbed, so taking its advice would
+            delete the seam every time-dependent test depends on.
+        -->
+        <exclude name="WordPress.DateTime.CurrentTimeTimestamp"/>
+
+        <!--
+            All three hits are final classes implementing a third-party contract that declares
+            `: static` (php-agents' ProviderInterface::withModel(), Symfony's
+            HttpClientInterface::withOptions()). PHP treats `static` as narrower than `self`, so
+            taking the sniff's advice is a fatal "declaration must be compatible" error, not a
+            cleanup — phpcbf's automatic fix was reverted for exactly that reason.
+        -->
+        <exclude name="Universal.CodeAnalysis.StaticInFinalClass.ReturnType"/>
+    </rule>
+
+    <rule ref="WordPress.Security"/>
+    <rule ref="WordPress.DB"/>
+
+    <rule ref="WordPress.WP.I18n">
+        <properties>
+            <property name="text_domain" type="array">
+                <element value="alpaca-bot"/>
+            </property>
+        </properties>
+    </rule>
+
+    <rule ref="WordPress.NamingConventions.PrefixAllGlobals">
+        <properties>
+            <property name="prefixes" type="array">
+                <element value="alpaca_bot"/>
+                <element value="AlpacaBot"/>
+                <element value="ALPACA_BOT"/>
+            </property>
+        </properties>
+    </rule>
+
+    <rule ref="PHPCompatibilityWP"/>
+</ruleset>

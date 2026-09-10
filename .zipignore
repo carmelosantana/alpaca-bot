@@ -1,7 +1,0 @@
-*_org/*
-/_org/*
-.github/*
-/.github/*
-*.env
-*.zipignore
-*/.*

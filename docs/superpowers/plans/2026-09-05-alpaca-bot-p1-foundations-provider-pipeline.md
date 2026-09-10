@@ -348,7 +348,7 @@ gh pr create --draft --base main --head 1.0 --title "Alpaca Bot 1.0" --body "Tra
       public function run(): array;                             // returns the migrated settings
   }
   ```
-- Settings keys (dotted): `provider.kind` (`ollama`|`wp-ai`, default `ollama`), `provider.base_url` (default `http://localhost:11434/v1`), `provider.api_key` (string, default ''), `provider.timeout` (int, 60), `models.default` (string, ''), `models.temperature` (number, 0.7), `models.num_ctx` (int, 8192), `models.keep_alive` (string, `5m`), `models.overrides` (array: model => {temperature?, num_ctx?, keep_alive?, system?}), `chat.system_prompt` (string), `chat.welcome` (string), `chat.placeholder` (string), `chat.user_can_change_model` (bool, true), `chat.history_limit` (int, 20), `chat.spellcheck` (bool, true), `chat.assistant_avatar` (string URL), `privacy.save_history` (bool, true), `privacy.usage_log` (bool, true), `governance.site_monthly_tokens` (int, 0 = unlimited), `governance.user_monthly_tokens` (int, 0), `toolkits.user_agent` (string, `AlpacaBot/1.0 (+https://github.com/carmelosantana/alpaca-bot)`).
+- Settings keys (dotted): `provider.kind` (`ollama`|`wp-ai`, default `ollama`), `provider.base_url` (default `http://localhost:11434/v1`), `provider.api_key` (string, default ''), `provider.timeout` (int, 60), `models.default` (string, ''), `models.temperature` (number, 0.7), `models.num_ctx` (int, 8192), `models.keep_alive` (string, `5m`), `models.overrides` (array: model => {temperature?, num_ctx?, keep_alive?, system?}), `chat.system_prompt` (string), `chat.welcome` (string), `chat.placeholder` (string), `chat.user_can_change_model` (bool, true), `chat.history_limit` (int, 20), `chat.spellcheck` (bool, true), `chat.assistant_avatar` (string URL), `privacy.save_history` (bool, true), `privacy.usage_log` (bool, true), `governance.site_monthly_tokens` (int, 0 = unlimited), `governance.user_monthly_tokens` (int, 0), `toolkits.user_agent` (string, `AlpacaBot/0.5 (+https://github.com/carmelosantana/alpaca-bot)`).
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -528,7 +528,7 @@ final class Schema
             'privacy.usage_log' => ['type' => 'boolean', 'default' => true, 'section' => 'privacy', 'label' => __('Keep a usage log (tokens, model, duration)', 'alpaca-bot')],
             'governance.site_monthly_tokens' => ['type' => 'integer', 'default' => 0, 'section' => 'governance', 'label' => __('Site-wide monthly token cap', 'alpaca-bot'), 'min' => 0, 'max' => PHP_INT_MAX],
             'governance.user_monthly_tokens' => ['type' => 'integer', 'default' => 0, 'section' => 'governance', 'label' => __('Per-user monthly token cap', 'alpaca-bot'), 'min' => 0, 'max' => PHP_INT_MAX],
-            'toolkits.user_agent' => ['type' => 'string', 'default' => 'AlpacaBot/1.0 (+https://github.com/carmelosantana/alpaca-bot)', 'section' => 'toolkits', 'label' => __('User agent for fetch tools', 'alpaca-bot')],
+            'toolkits.user_agent' => ['type' => 'string', 'default' => 'AlpacaBot/0.5 (+https://github.com/carmelosantana/alpaca-bot)', 'section' => 'toolkits', 'label' => __('User agent for fetch tools', 'alpaca-bot')],
         ];
     }
 
