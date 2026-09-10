@@ -22,13 +22,11 @@ use AlpacaBot\View\Markdown;
  * Images ConversationStore::save() evicted to fit the transcript into the database's packet
  * limit leave a count under `meta['images_evicted']`; the row then ends with one line saying
  * how many are no longer stored, so the turn reads as it was, not as a turn that never had
- * them and not as a broken image. The assistant's avatar carries `ab-avatar--default` when it
- * is the plugin's own logo (Participants says which), the class the stylesheet's disc is
- * scoped to; a site's configured avatar, and the user's, never carry it.
+ * them and not as a broken image.
  */
 final class MessageBubble extends Component
 {
-    public function __construct(private Message $m, private Markdown $md, private string $userName, private string $userAvatar, private string $assistantAvatar, private bool $streaming = false, private bool $defaultAssistantAvatar = false) {}
+    public function __construct(private Message $m, private Markdown $md, private string $userName, private string $userAvatar, private string $assistantAvatar, private bool $streaming = false) {}
 
     public function render(): string
     {
@@ -45,8 +43,7 @@ final class MessageBubble extends Component
             'duration_ms' => (int) ($this->m->meta['duration_ms'] ?? 0),
             'tool_calls' => is_array($this->m->meta['tool_calls'] ?? null) ? count($this->m->meta['tool_calls']) : 0,
         ]))->render() : '';
-        $avatarClass = 'ab-msg__avatar' . ($assistant && $this->defaultAssistantAvatar ? ' ab-avatar--default' : '');
-        $inner = $this->tag('img', ['class' => $avatarClass, 'src' => $this->u($assistant ? $this->assistantAvatar : $this->userAvatar), 'alt' => ''])
+        $inner = $this->tag('img', ['class' => 'ab-msg__avatar', 'src' => $this->u($assistant ? $this->assistantAvatar : $this->userAvatar), 'alt' => ''])
             . $this->tag('div', ['class' => 'ab-msg__body'],
                 $this->tag('header', ['class' => 'ab-msg__meta'], $this->tag('span', ['class' => 'ab-msg__name'], $this->e($name)) . $this->tag('span', ['class' => 'ab-msg__actions'], $actions))
                 . ($assistant ? '' : $this->images())

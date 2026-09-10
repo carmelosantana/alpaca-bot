@@ -58,7 +58,7 @@ final class Shell extends Component
             new HistorySelect($this->history, $id, $title),
             $this->home ?? admin_url('admin.php?page=' . Menu::SLUG),
         );
-        $list = new MessageList($messages, new Markdown(), $this->store, $who->userName, $who->userAvatar, $who->assistantAvatar, $id, $who->assistantAvatarIsDefault);
+        $list = new MessageList($messages, new Markdown(), $this->store, $who->userName, $who->userAvatar, $who->assistantAvatar, $id);
         $chat = $this->tag('div', ['id' => 'ab-chat', 'data-conversation' => (string) $id],
             $this->tag('div', ['id' => 'ab-status', 'class' => 'ab-status', 'role' => 'status', 'aria-live' => 'polite'], '') . $list->render());
         $composer = new Composer($this->store, $id, $model, $this->postId);
