@@ -153,8 +153,9 @@ final class SettingsPage
      * So the id is asked of the function core built it with, rather than spelled again here.
      * Both callers run after menu.php has filled `$admin_page_hooks` (wp-admin/admin.php:163):
      * `current_screen` fires from set_current_screen() at admin.php:217, and
-     * `admin_enqueue_scripts` from admin-header.php:123, which a plugin page requires at
-     * admin.php:292; wp-admin/includes/plugin.php is loaded by then. The guard is for a caller
+     * `admin_enqueue_scripts` from admin-header.php:123, which admin.php requires at :244 for a
+     * page registered with a callback, as this one is (Menu), and at :292 for one backed by a
+     * plugin file; wp-admin/includes/plugin.php is loaded by then. The guard is for a caller
      * that is not an admin request (a test), where the untranslated form is the right answer
      * anyway.
      */

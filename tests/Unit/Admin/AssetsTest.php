@@ -39,6 +39,9 @@ it('adds the overrides table rules inline to core forms stylesheet on the settin
     expect($css)->toContain('.form-table .ab-overrides th')->toContain('.form-table .ab-overrides td')
         // Core's own widefat cell padding (common.css), restored over forms.css's form-table rules.
         ->toContain('padding: 8px 10px')
+        // widefat's own `tbody th` is top-aligned (common.css), so the model name sat some 11px above
+        // the centre of its row's inputs; the scoped rule centres it.
+        ->toContain('vertical-align: middle')
         // Under 782px forms.css makes every form-table cell a block; the nested ones stay cells,
         // and the wrapper, sized by the row there rather than by the table, scrolls them.
         ->toContain('display: table-cell')

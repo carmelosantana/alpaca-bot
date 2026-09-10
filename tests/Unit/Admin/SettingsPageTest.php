@@ -127,8 +127,12 @@ it('renders the overrides table with every model id and stored value escaped, la
 // Core derives a submenu page's screen id (and its admin_enqueue_scripts hook suffix) from the
 // parent's *translated* menu title, so the id is asked of core rather than spelled; HelpTabs and
 // Assets both gate on it. The derivation runs against real core, in a translated locale, in
-// tests/Integration/HelpTabsTest.php.
-it('names its screen as core derives it, and in the untranslated form where core is not loaded', function (): void {
+// tests/Integration/HelpTabsTest.php. The `function_exists()` fallback in screen() has no
+// coverage: Brain Monkey declares a stubbed function with eval() (FunctionStub.php:51) and PHP
+// cannot undeclare it, so whether an unstubbed call here would take that branch depends on which
+// tests ran first, and the integration suite runs against real core, where the function is
+// defined.
+it('names its screen as core derives it from the page slug and its parent, and follows a new answer rather than caching one', function (): void {
     Functions\when('get_plugin_page_hookname')->alias(static fn(string $page, string $parent): string => 'robot-alpaca_page_' . $page . '_under_' . $parent);
     expect(SettingsPage::screen())->toBe('robot-alpaca_page_alpaca-bot-settings_under_alpaca-bot');
     Functions\when('get_plugin_page_hookname')->alias(static fn(string $page, string $parent): string => 'alpaca-bot_page_' . $page);

@@ -42,28 +42,32 @@ final class Assets
      * 200px, `.form-table td` pads 15px, and under 782px both are `display: block`, which stacks
      * the table into one column of labels. No core class undoes that. Core's one nested table,
      * `.form-table .color-palette`, gets a scoped rule of its own in forms.css, and this is the
-     * same answer: the cells back to widefat's, and the wrapper scrolling sideways where the
-     * table is wider than the row.
+     * same answer. What the rule restores is widefat's padding, `display: table-cell` and
+     * `width: auto`; forms.css's 14px font and 600-weight `th` are left as they are. The
+     * `vertical-align: middle` restores nothing: widefat's own `tbody th` is top-aligned
+     * (common.css:504), which put each model name some 11px above the centre of its row's inputs, so
+     * both cells are centred instead. And the wrapper scrolls sideways where the table is wider
+     * than the row.
      *
      * That scrolling is only possible under 782px, core's breakpoint, where the row is blocks and
      * the wrapper can be sized by the row rather than by the table (`contain: inline-size`; the
      * block `td` still sits in an anonymous table cell, whose minimum is its content's, so
      * without that the table widens the whole page instead). The system prompt keeps its desktop
      * width there, since core's narrow-screen `width: 100%` on a text input inside an auto-width
-     * cell collapses it to nothing. Above the breakpoint the row is a table cell, which cannot be
+     * cell collapses it to about 74px. Above the breakpoint the row is a table cell, which cannot be
      * narrower than the table it holds: at 1440px the six columns fit; on a laptop with the menu
      * open they widen the page, as they always did. Sizing the wrapper by the row there too
      * would fix that at the cost of a scrollbar at 1440px, where the label column would reclaim
      * the 200px the table now takes from it.
      *
      * Inline on core's `forms` handle rather than in a stylesheet of the plugin's: the settings
-     * page loads no plugin stylesheet, the chat shell's is fourteen kilobytes of another screen,
+     * page loads no plugin stylesheet, the chat shell's is some sixteen kilobytes of another screen,
      * and a rule attached to forms.css prints after the rules it answers by construction, and
      * prints in a checkout that has not run `pnpm build`.
      */
     private const OVERRIDES_CSS = <<<'CSS'
         .form-table .ab-overrides { overflow-x: auto; }
-        .form-table .ab-overrides th, .form-table .ab-overrides td { display: table-cell; width: auto; padding: 8px 10px; }
+        .form-table .ab-overrides th, .form-table .ab-overrides td { display: table-cell; width: auto; padding: 8px 10px; vertical-align: middle; }
         .form-table .ab-overrides .regular-text { min-width: 25em; }
         @media screen and (max-width: 782px) { .form-table .ab-overrides { contain: inline-size; } }
         CSS;
@@ -117,7 +121,7 @@ final class Assets
      * The few rules for what a shortcode prints on a page that is not the chat screen: the
      * `.alpaca-bot-answer` block and the `.alpaca-bot-notice` line. Its own small file (900
      * bytes) rather than the shell's stylesheet, since a visitor's login notice must not cost
-     * that file's fourteen kilobytes, and theme-neutral (the theme's type and colour, a quiet box
+     * that file's sixteen-odd kilobytes, and theme-neutral (the theme's type and colour, a quiet box
      * for the notice) so a theme's own rules over the two classes win without a fight. The
      * shortcode runs after `wp_head`, so it prints from the footer through print_late_styles():
      * the markup is unstyled for the moment between its position and the footer, which for a
