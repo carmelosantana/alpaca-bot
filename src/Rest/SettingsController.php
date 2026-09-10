@@ -24,6 +24,16 @@ use AlpacaBot\Settings\Store;
  * only the flag is on the URL, and the secret is in the body. A PUT never reveals, whatever its
  * body says.
  *
+ * `reveal` asks `manage_options` in show(), a second check the route's own gate has already
+ * passed. The gate is filtered — `alpaca_bot/capability/settings` (below) — and the filter
+ * decides the route, so without this check a site that loosened the filter for a custom role
+ * would be handing that role the provider credential in cleartext. A caller the filter admitted
+ * without `manage_options` is not refused the route, only the secret: the reply is the masked
+ * read, the same one they get without the flag. Nothing else on the route has a floor, because
+ * nothing else on it is a credential; the write verb is the other half of that argument and is
+ * a 0.6 ticket (splitting the filter into read and write keys), not a check that can be added
+ * here without deciding what a "read-only settings" role means.
+ *
  * The reveal response sets `Cache-Control: no-store` itself even though core normally supplies
  * it. WP_REST_Server::serve_request() sends a response's own headers first and then, when
  * `rest_send_nocache_headers` holds (by default, for any logged-in user, which every caller of
@@ -57,6 +67,12 @@ use AlpacaBot\Settings\Store;
  * both verbs on `/settings`, and `/settings/schema` has its own, `alpaca_bot/capability/settings/schema`.
  * A site that loosens the first for a custom role has not loosened the second; a client of that
  * role reads the settings and gets a 403 on the schema until the site names it too.
+ *
+ * One key over both verbs is worth saying plainly: loosening `alpaca_bot/capability/settings`
+ * to admit a role to the GET admits it to the PUT as well, and `provider.base_url` is a
+ * settable field — so that role can point every turn the site takes at a server of its
+ * choosing. Tighten per request off the WP_REST_Request the filter is handed
+ * (`$request->get_method()`) until 0.6 separates the keys.
  */
 final class SettingsController extends Controller
 {
@@ -73,7 +89,7 @@ final class SettingsController extends Controller
 
     public function show(\WP_REST_Request $request): \WP_REST_Response
     {
-        if ((bool) $request->get_param('reveal')) {
+        if ((bool) $request->get_param('reveal') && current_user_can('manage_options')) {
             $response = new \WP_REST_Response($this->store->all());
             $response->header('Cache-Control', 'no-store');
             return $response;

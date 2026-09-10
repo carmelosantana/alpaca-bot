@@ -15,6 +15,9 @@ use Brain\Monkey\Functions;
 
 beforeEach(function (): void {
     Functions\when('is_user_logged_in')->justReturn(true);
+    // An administrator unless a test says otherwise: the route's own gate is manage_options, and
+    // `reveal` asks for it a second time, on its own account rather than the filtered gate's.
+    Functions\when('current_user_can')->justReturn(true);
     $this->stored = ['provider.api_key' => 'secret', 'models.temperature' => 0.5, 'models.overrides' => ['a' => ['temperature' => 0.1], 'b' => ['num_ctx' => 1024]]];
     Functions\when('get_option')->alias(fn(): array => $this->stored);
     $this->written = null;
@@ -54,6 +57,26 @@ it('reveals the raw key on request, and marks that response no-store', function 
     $revealed = $this->controller->show(restRequest('GET', '/alpaca-bot/v1/settings', ['reveal' => true]));
     expect($revealed->get_data()['provider.api_key'])->toBe('secret')
         ->and($revealed->get_headers())->toBe(['Cache-Control' => 'no-store']);
+});
+
+it('answers the masked settings, not the raw key, to a caller the capability filter admitted without manage_options', function (): void {
+    // `alpaca_bot/capability/settings` can name any capability, and the same key covers the PUT,
+    // so a site that loosens it for a custom role would otherwise hand that role both the
+    // provider credential and provider.base_url. The route's gate has already passed by the time
+    // show() runs; reveal asks manage_options itself so the filter cannot answer for it.
+    Functions\when('current_user_can')->alias(static fn(string $cap): bool => $cap !== 'manage_options');
+    $res = $this->controller->show(restRequest('GET', '/alpaca-bot/v1/settings', ['reveal' => true]));
+    expect($res->get_data()['provider.api_key'])->toBe(Schema::MASK)
+        // Refused the secret, not the route: the rest of the settings are what the gate admitted them to.
+        ->and($res->get_data()['models.temperature'])->toBe(0.5)
+        ->and(array_keys($res->get_data()))->toBe(array_keys(Schema::fields()))
+        // no-store is the revealed response's header; this one was never revealed.
+        ->and($res->get_headers())->toBe([]);
+
+    Functions\when('current_user_can')->alias(static fn(string $cap): bool => $cap === 'manage_options');
+    $res = $this->controller->show(restRequest('GET', '/alpaca-bot/v1/settings', ['reveal' => true]));
+    expect($res->get_data()['provider.api_key'])->toBe('secret')
+        ->and($res->get_headers())->toBe(['Cache-Control' => 'no-store']);
 });
 
 it('keeps the stored key when a write echoes the mask back, and merges the other keys', function (): void {
