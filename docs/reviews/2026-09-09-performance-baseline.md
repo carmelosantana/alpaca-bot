@@ -208,10 +208,21 @@ not share a transport, and saying so is the point:
   Symfony HttpClient, so no `http_api_debug` fires on this side and an HTTP-hook bracket alone
   would have measured one of the two legs, not both. The filter is the equivalent seam.
 
-Both therefore measure the same thing — wall time the plugin spent inside its provider call — with
-the instrument each version admits. Total is the probe's own request wall time on `shutdown`, so
-total and provider come off the same clock in the same process and **plugin time is total minus
-provider**, not a third measurement.
+Both measure wall time the plugin spent inside its provider call, with the instrument each version
+admits — but they are **not cut at the same point**, and the difference runs one way. The 0.4.17
+bracket starts after its request headers and body are built and stops before `json_decode`; the 0.5
+bracket is outside php-agents' own request construction, `formatTools()`, and SSE parsing. So a few
+milliseconds of 0.5's plugin work are counted as provider time, and the residual bias flatters the
+"identical plugin halves" result rather than causing it. The gap being measured is 14 ms, so this
+would have to be an order of magnitude larger than it plausibly is to change the conclusion — but it
+is a bias, not a wash, and the number to distrust first if this is ever re-run.
+
+Total is the probe's own request wall time on `shutdown`, so total and provider come off the same
+clock in the same process and **plugin time is total minus provider**, not a third measurement.
+
+The probe itself was a throwaway mu-plugin and is not in this repository, so the one link in this
+chain a reader cannot check is exactly what the decorator bracketed. Anyone re-running this should
+write the probe into the repo first.
 
 Protocol: the same prompt every turn ("Reply with the single word: hi") against a warm Ollama
 prompt cache, model `qwen2.5-coder:0.5b` on both, four interleaved passes per version
@@ -355,12 +366,14 @@ the same 28 as before it, with plugin option reads at 7 instead of 6.
 `tests/Integration/Migrate04AutoloadTest.php` asserts the effect against a real options table
 rather than the argument handed to a mock — the `autoload` column WordPress actually wrote, read
 against `wp_autoload_values_to_autoload()` — on a fresh install and on a seeded pre-release site.
-Both cases fail without the repair (`Failed asserting that an array contains 'off'`).
+Both cases fail without the repair: the seeded pre-release site with `Failed asserting that an array
+contains 'off'`, the fresh install with `contains null`, on a different row.
 
 ### 2. Not a regression — 0.5 reads far fewer settings, and the transient once instead of four times
 
 0.4.17 has no single settings option: the throwaway site ended up with 34 separate `alpaca_bot_*`
-rows, 28 of them non-autoloaded. On its chat screen it reads 20 of them (`alpaca_bot_api_url` alone seven times);
+rows, 28 of them non-autoloaded. On its chat screen it makes 20 reads against 6 distinct options (`alpaca_bot_api_url` alone seven
+times), plus 8 reads of the model transient's two rows;
 on one chat turn it reads 37, across 27 distinct options. 0.5 reads its one settings option
 **once** on the chat screen and **once** on a turn, which is the target this task was asked to
 check, and it holds. It also asks the model-list transient once per request against 0.4.17's
