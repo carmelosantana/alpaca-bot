@@ -40,14 +40,16 @@ final class Assets
      * cell of the nested table at the specificity of common.css's `.widefat td, .widefat th
      * { padding: 8px 10px }`: `.form-table th` zeroes the left padding and fixes the width at
      * 200px, `.form-table td` pads 15px, and under 782px both are `display: block`, which stacks
-     * the table into one column of labels. No core class undoes that. Core's one nested table,
-     * `.form-table .color-palette`, gets a scoped rule of its own in forms.css, and this is the
-     * same answer. What the rule restores is widefat's padding, `display: table-cell` and
-     * `width: auto`; forms.css's 14px font and 600-weight `th` are left as they are. The
-     * `vertical-align: middle` restores nothing: widefat's own `tbody th` is top-aligned
-     * (common.css:504), which put each model name some 11px above the centre of its row's inputs, so
-     * both cells are centred instead. And the wrapper scrolls sideways where the table is wider
-     * than the row.
+     * the table into one column of labels. No core class undoes that. The one nested table
+     * forms.css scopes rules for, `.form-table .color-palette`, gets them under that same
+     * breakpoint (forms.css:1691-1699, WP 7.1), and this is the same answer. What the rule
+     * restores is widefat's padding, `display: table-cell` and `width: auto`; forms.css's 14px
+     * font and 600-weight `th` are left as they are. The `vertical-align: middle` restores
+     * nothing: the `th` is top-aligned under widefat (common.css:504) and under `.form-table th`
+     * (forms.css:931) alike, which put each model name some 11px above the centre of its row's
+     * inputs, while the `td` was already centred by `.form-table td` (forms.css:916-920); so the
+     * rule changes the `th` and only restates the `td`. And the wrapper scrolls sideways where
+     * the table is wider than the row.
      *
      * That scrolling is only possible under 782px, core's breakpoint, where the row is blocks and
      * the wrapper can be sized by the row rather than by the table (`contain: inline-size`; the
@@ -61,9 +63,9 @@ final class Assets
      * the 200px the table now takes from it.
      *
      * Inline on core's `forms` handle rather than in a stylesheet of the plugin's: the settings
-     * page loads no plugin stylesheet, the chat shell's is some sixteen kilobytes of another screen,
-     * and a rule attached to forms.css prints after the rules it answers by construction, and
-     * prints in a checkout that has not run `pnpm build`.
+     * page loads no plugin stylesheet, the chat shell's is another screen's stylesheet, and a
+     * rule attached to forms.css prints after the rules it answers by construction, and prints
+     * in a checkout that has not run `pnpm build`.
      */
     private const OVERRIDES_CSS = <<<'CSS'
         .form-table .ab-overrides { overflow-x: auto; }
@@ -121,8 +123,8 @@ final class Assets
      * The few rules for what a shortcode prints on a page that is not the chat screen: the
      * `.alpaca-bot-answer` block and the `.alpaca-bot-notice` line. Its own small file (900
      * bytes) rather than the shell's stylesheet, since a visitor's login notice must not cost
-     * that file's sixteen-odd kilobytes, and theme-neutral (the theme's type and colour, a quiet box
-     * for the notice) so a theme's own rules over the two classes win without a fight. The
+     * the whole of that file, and theme-neutral (the theme's type and colour, a quiet box for
+     * the notice) so a theme's own rules over the two classes win without a fight. The
      * shortcode runs after `wp_head`, so it prints from the footer through print_late_styles():
      * the markup is unstyled for the moment between its position and the footer, which for a
      * paragraph is a reflow, not a flash of the shell.

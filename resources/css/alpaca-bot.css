@@ -35,7 +35,7 @@
     --ab-admin-bar: 32px;
     /* #wpbody-content's padding-bottom, where core parks #wpfooter. */
     --ab-footer: 65px;
-    /* What sits between the admin bar and the wrap's top edge besides the margin moved inside below: nothing, until narrow screens put the tab row there. */
+    /* What sits between the admin bar and the wrap's top edge besides the margin moved inside below: nothing, until narrow screens put the Help tab's row there (#screen-meta-links, which core prints only for a screen with help tabs or screen options; here that is the tabs HelpTabs registers). */
     --ab-cleared: 0px;
     display: flex;
     flex-direction: column;

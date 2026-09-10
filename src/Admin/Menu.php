@@ -49,12 +49,13 @@ final class Menu
      * file as delivered, where an SVG loaded as an image has no `color` to inherit and
      * `currentColor` is black (this data URI drawn onto a canvas reads 0,0,0 at the bubble).
      *
-     * Embedded rather than read at registration: admin_menu fires on every admin request, and a
-     * value fixed at release time is not worth a file read whose `false` return would, under
-     * strict_types, make base64_encode() a TypeError on every admin page, the Plugins screen
-     * included. tests/Unit/Admin/MenuTest.php decodes this constant against the file's bytes, so
-     * the file stays the source of truth and the whole edit when the mark changes is
-     * `base64 -w0 assets/img/menu-icon.svg` pasted here.
+     * Embedded rather than read at registration: admin_menu fires on every screen of the site's
+     * admin (wp-admin/admin.php loads menu.php, which ends by loading includes/menu.php, where it
+     * fires; the network and user admins fire their own action there instead, and admin-ajax.php
+     * and admin-post.php load no menu at all), and a value fixed at release time is not worth
+     * reading and base64-encoding the file on each of those screens. tests/Unit/Admin/MenuTest.php
+     * decodes this constant against the file's bytes, so the file stays the source of truth and
+     * the whole edit when the mark changes is `base64 -w0 assets/img/menu-icon.svg` pasted here.
      */
     public const ICON = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMDAgMTAwIiB3aWR0aD0iMjAiIGhlaWdodD0iMjAiIGZpbGw9ImN1cnJlbnRDb2xvciI+PHBhdGggZD0iTTIyIDZDMTkuOCA1IDE4LjIgNi42IDE5IDlDMTggMTkgMjIgMzQgMzEgNDRDMzUuNSA0MSAzOSA0MC41IDQzIDQxQzM3IDMxIDI5IDE2IDIyIDZaIi8+PHBhdGggZD0iTTc2IDVDNzguMiA0IDc5LjggNS42IDc5IDhDODAgMTggNzYgMzMgNjcgNDRDNjIuNSA0MSA1OSA0MC41IDU1IDQxQzYxIDMxIDY5IDE1IDc2IDVaIi8+PHBhdGggZD0iTTQwIDQwIDQzIDMxIDQ2IDM2IDQ5IDI4IDUyIDM1IDU1IDI5IDU4IDM2IDYwIDQwWiIvPjxwYXRoIGZpbGwtcnVsZT0iZXZlbm9kZCIgZD0iTTI2IDM0aDQ4YTE2IDE2IDAgMCAxIDE2IDE2djE4YTE2IDE2IDAgMCAxLTE2IDE2SDQ2bC0xNiAxNFY4NGgtNGExNiAxNiAwIDAgMS0xNi0xNlY1MGExNiAxNiAwIDAgMSAxNi0xNlpNMzQuNSA1OGE1LjUgNS41IDAgMSAwIDExIDBhNS41IDUuNSAwIDEgMC0xMSAwWk01Ni41IDU4YTUuNSA1LjUgMCAxIDAgMTEgMGE1LjUgNS41IDAgMSAwLTExIDBaIi8+PC9zdmc+Cg==';
 
