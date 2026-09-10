@@ -12,7 +12,7 @@ use AlpacaBot\View\Component;
 use AlpacaBot\View\Markdown;
 
 /**
- * The whole chat screen inside core's `.wrap`: the icon sprite (inlined once, so every
+ * The whole chat screen inside one wrapper (`$home` below says which): the icon sprite (inlined once, so every
  * Icon::svg() reference on the page resolves), the header, #ab-chat holding the status region
  * and the transcript, and the composer. The markup carries one figure for chat.ts: the open
  * conversation's id, on #ab-chat and #ab-messages, which it keeps current as turns start and

@@ -76,9 +76,9 @@ final class Assets
 
     /**
      * The few rules for what a shortcode prints on a page that is not the chat screen: the
-     * `.alpaca-bot-answer` block and the `.alpaca-bot-notice` line. Its own small file rather
-     * than the chat screen's stylesheet, since a visitor's login notice must not cost the
-     * screen's twelve kilobytes, and theme-neutral (the theme's type and colour, a quiet box
+     * `.alpaca-bot-answer` block and the `.alpaca-bot-notice` line. Its own small file (900
+     * bytes) rather than the shell's stylesheet, since a visitor's login notice must not cost
+     * that file's fourteen kilobytes, and theme-neutral (the theme's type and colour, a quiet box
      * for the notice) so a theme's own rules over the two classes win without a fight. The
      * shortcode runs after `wp_head`, so it prints from the footer through print_late_styles():
      * the markup is unstyled for the moment between its position and the footer, which for a

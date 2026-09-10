@@ -15,9 +15,6 @@
  * has no #wpfooter and the shell there is a block inside a page rather than the whole screen,
  * so .ab-wrap--front (near the foot of this file) replaces it. View\Chat\Shell puts that
  * modifier on, and leaves core's .wrap off, for a shell it was told is not on the admin screen.
- * Rules naming core's own classes (.notice, .wp-header-end) stay in the shared part on purpose:
- * .notice is what dom.ts's notice() writes into #ab-status on either surface, and
- * .wp-header-end is Header's own <hr>.
  */
 
 .ab-wrap {
@@ -291,19 +288,22 @@ pre > .ab-code__copy[aria-label]:hover::after {
 /* ---- the same shell on a front-end page -------------------------------------------------- */
 
 /*
- * What .ab-wrap assumes and a `[alpacabot]` page does not have. #wpfooter is wp-admin's and is
- * not on the page at all, so its 65px comes off the subtraction; the admin bar is still there
- * for the logged-in editor the shell renders for, so --ab-admin-bar is left as it is and the
- * narrow-screen block below still applies to both. The height is a bounded box rather than the
- * rest of the viewport: this is a block in the middle of a page's content, and a shell sized to
- * the screen would push everything after it out of reach.
+ * One rule, because one rule is all .ab-wrap assumes that a `[alpacabot]` page does not have:
+ * that the shell owns the viewport, less wp-admin's admin bar and #wpfooter. On a page the shell
+ * is a block in the middle of the content, and neither the subtraction nor the intent survives
+ * -- a shell sized to the screen pushes everything after it out of reach, and #wpfooter is not
+ * on the page to subtract. A bounded box instead. This replaces the height outright rather than
+ * zeroing --ab-footer, so the narrow-screen block below, which retunes those variables for
+ * wp-admin, has nothing to say here either. Everything else in this file works on both: the
+ * variables all carry fallbacks for the admin colour scheme that is not there, `.ab-status
+ * .notice` is what dom.ts writes on either surface, `.wp-header-end` is Header's own <hr>, and
+ * `.ab-header > .notice` is the one rule that only wp-admin can trigger -- core's notice mover
+ * -- which costs a front-end page a selector that matches nothing. What this file does *not*
+ * carry is core's own admin chrome: `.page-title-action` is styled by wp-admin's stylesheet, so
+ * "New chat" is a plain link on a front-end shell.
  */
 .ab-wrap--front {
-    --ab-footer: 0px;
     height: min(70vh, 640px);
-    /* .wrap's margins are not here to be undone (Shell leaves that class off a front-end shell);
-       the page's own content width holds the shell instead. */
-    max-width: 100%;
 }
 
 /* ---- narrow screens (core's own admin breakpoint) --------------------------------------- */
