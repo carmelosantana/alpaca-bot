@@ -14,9 +14,15 @@ use AlpacaBot\Plugin;
  * upgraded site gets when it differs from a fresh install's default (migrateRetention()).
  *
  * The options move and the retention step are one request each and flag themselves at once;
- * the conversation pass handles BATCH rows per admin request and flags itself when a batch
- * comes back short, so a large history is spread over several requests instead of timing out
- * one and restarting from the top. Legacy options are left in place (P3 removes them).
+ * the conversation pass handles BATCH rows per request and flags itself when a batch comes
+ * back short, so a large history is spread over several requests instead of timing out one
+ * and restarting from the top. Legacy options are left in place (P3 removes them).
+ *
+ * "Per request" is literal, and not "per admin request": Plugin::register() hooks the run on
+ * `init` priority 20 (Plugin.php, which says why — WP-CLI fires init and never admin_init), so
+ * every request the site serves runs it while any flag is unset, an anonymous front-end page
+ * view included. BATCH is therefore a bound on what a visitor's page view can be made to pay
+ * for, not only on what an administrator waits through.
  */
 final class Migrate04
 {
@@ -26,7 +32,7 @@ final class Migrate04
 
     private const LEGACY_PREFIX = 'alpaca_bot_';
 
-    /** Rows per admin request: one wp_update_post() and its hook chain each. */
+    /** Rows per request: one wp_update_post() and its hook chain each. */
     private const BATCH = 100;
 
     /**
@@ -110,9 +116,11 @@ final class Migrate04
      * install has neither row and keeps the default. The receipts query runs only on a site
      * without a settings row, once, under the flag.
      *
-     * The option is read with an explicit default: on an admin request register_setting()'s
-     * default stands in for a missing row otherwise, and a fresh install would look like a row
-     * that has the field.
+     * The option is read with an explicit default, and core honours a caller's own default over
+     * a registered one (filter_default_option() returns $default_value when $passed_default).
+     * Without it, `Schema::defaults()` — which SettingsPage::register() registers as the option's
+     * default — would stand in for a missing row wherever this runs with that registration in
+     * place, and a fresh install would look like a row that already has the field.
      */
     private function migrateRetention(): void
     {
@@ -141,7 +149,8 @@ final class Migrate04
      * True when 0.4 options exist and the move has not run yet.
      *
      * On a site that never had 0.4 the flag is written here, so the detection
-     * (three non-autoloaded option reads) happens once instead of on every admin request.
+     * (three non-autoloaded option reads) happens once instead of on every request the site
+     * serves — which, hooked on `init`, is what this would otherwise be.
      */
     private function optionsPending(): bool
     {
