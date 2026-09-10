@@ -63,11 +63,13 @@ jobs:
   # Required rather than advisory, and that is a deliberate choice about a workflow that is red
   # on this branch today. plugin-check.yml's own note records why it is red: readme.txt's frozen
   # `Stable tag: 0.4.17`, `Tested up to`, `Requires at least` and `Requires PHP` are four ERROR
-  # rows. bin/version-check.sh, run in `build` below, covers exactly one of those four -- its
-  # line 19 compares `Stable tag` against the release version -- so this job is what covers the
-  # other three. It also fails on findings the version guard knows nothing about, in the
-  # security, performance and accessibility categories, which is the reason to make it a gate
-  # instead of reading it after the fact.
+  # rows. bin/version-check.sh, run in `build` below, covers three of those four for a release
+  # version: `Stable tag` against the release version, and `Requires PHP` and `Requires at least`
+  # against alpaca-bot.php's own headers. `Tested up to` is this job's alone -- nothing else in
+  # the repo knows what version of WordPress the plugin was tested against. It also fails on
+  # findings the version guard knows nothing about, in the security, performance and
+  # accessibility categories, which is the reason to make it a gate instead of reading it after
+  # the fact.
   #
   # The consequence to be aware of: until the readme header is rewritten for the release, no tag
   # can get past this job. That is the intended order -- the header rewrite is part of deciding
@@ -189,12 +191,15 @@ jobs:
       # the tag text is a shell variable and never becomes part of the script text. `#v` is the
       # strip bin/version-check.sh expects: it compares its argument against alpaca-bot.php's
       # `Version:`, package.json's `version` and Plugin::VERSION, and -- only for a version with
-      # no `-` in it -- readme.txt's `Stable tag`.
+      # no `-` in it -- readme.txt's `Stable tag`, `Requires PHP` and `Requires at least`, the
+      # last two against alpaca-bot.php's headers rather than against the version.
       #
-      # Run against this branch as it stands, `bash bin/version-check.sh 0.5.0` exits 1 with four
-      # MISMATCH lines: the tree carries 0.5.0-dev in all three of the first group and readme.txt
-      # carries `Stable tag: 0.4.17`. That is correct behaviour, and it means cutting v0.5.0
-      # requires writing 0.5.0 into all four files first.
+      # Run against this branch as it stands, `bash bin/version-check.sh 0.5.0` exits 1 with six
+      # MISMATCH lines: the tree carries 0.5.0-dev in all three of the first group, and readme.txt
+      # still describes the shipped 0.4.17 (`Stable tag: 0.4.17`, `Requires PHP: 8.1`, `Requires
+      # at least: 6.4`) against a header that says 8.4 and 6.9. That is correct behaviour, and it
+      # means cutting v0.5.0 requires rewriting the readme header block -- all four of its rows
+      # are one decision -- as well as the three version markers.
       - name: The tag and the tree agree on the version
         run: bash bin/version-check.sh "${GITHUB_REF_NAME#v}"
 
