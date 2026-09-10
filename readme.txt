@@ -175,7 +175,7 @@ There is a price as well as a symptom. All three tools are on by default, and th
 
 1. The chat screen: two turns, each reply streamed as the model writes it, and under each the receipt -- the model, the tokens it spent and how long it took.
 2. Settings > Models: the default model, temperature, context window and keep-alive, with the per-model overrides table under them.
-3. A turn that used the draft_post tool. The reply names the draft it created, and the receipt ends with the number of tools the turn ran.
+3. A turn that used the draft_post tool. The reply confirms the draft, and the receipt ends with the number of tools the turn ran.
 
 == Changelog ==
 
