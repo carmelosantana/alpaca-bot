@@ -1,18 +1,19 @@
 #!/usr/bin/env bash
 # Fail unless every version marker agrees with $1 (or the plugin header when $1 is omitted).
 #
-# readme.txt's headers are compared only for a release version. A pre-release ("0.5.0-dev",
-# anything with a `-`) leaves them alone on purpose: readme.txt still describes the shipped
-# 0.4.17 — `Stable tag: 0.4.17`, `Requires PHP: 8.1`, `Requires at least: 6.4` — so the PHP 8.1
-# audience keeps getting 0.4.x updates while the branch carries 0.5.0-dev.
+# readme.txt's headers are compared only for a release version. A pre-release ("0.6.0-dev",
+# anything with a `-`) leaves them alone on purpose: while a line is in development readme.txt
+# goes on describing the release wordpress.org is actually serving, so the floors its update API
+# filters by keep matching that release rather than the tree.
 #
 # The support headers are checked against the plugin header rather than against $1, and they are
 # checked here rather than left to Plugin Check because they are the release step easiest to
-# forget: alpaca-bot.php refuses to run below PHP 8.4 and blocks activation, but wordpress.org's
-# listing and its update API read readme.txt, so a release whose readme still says 8.1 offers
-# itself to sites that cannot run it. The four readme headers are one decision — moving `Requires
-# PHP` alone would tell the update API that *0.4.17* needs 8.4 and cut off the audience it was
-# frozen for — so this fires for the release version and says nothing before it.
+# forget: alpaca-bot.php refuses to run below its own floor and blocks activation, but
+# wordpress.org's listing and its update API read readme.txt, so a release whose readme still
+# carries the previous floor offers itself to sites that cannot run it. The four readme headers
+# are one decision — moving `Requires PHP` ahead of `Stable tag` would tell the update API that
+# the *published* release needs the new floor and cut off the audience it was frozen for — so
+# this fires for the release version and says nothing before it.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 hdr=$(grep -m1 '^Version:' alpaca-bot.php | awk '{print $2}')

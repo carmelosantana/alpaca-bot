@@ -61,12 +61,14 @@ jobs:
       contents: read
 
   # Required rather than advisory, and that is a deliberate choice about a workflow that is red
-  # on this branch today. plugin-check.yml's own note records why it is red: readme.txt's frozen
-  # `Stable tag: 0.4.17`, `Tested up to`, `Requires at least` and `Requires PHP` are four ERROR
-  # rows. bin/version-check.sh, run in `build` below, covers three of those four for a release
-  # version: `Stable tag` against the release version, and `Requires PHP` and `Requires at least`
-  # against alpaca-bot.php's own headers. `Tested up to` is this job's alone -- nothing else in
-  # the repo knows what version of WordPress the plugin was tested against. It also fails on
+  # for most of a development line's life. plugin-check.yml's own note records why: while
+  # readme.txt's header block goes on describing the published release, its `Stable tag`,
+  # `Tested up to`, `Requires at least` and `Requires PHP` are four ERROR rows, and they clear
+  # only when the release decision rewrites them. bin/version-check.sh, run in `build` below,
+  # covers three of those four for a release version: `Stable tag` against the release version,
+  # and `Requires PHP` and `Requires at least` against alpaca-bot.php's own headers. That leaves
+  # `Tested up to` to this job alone -- nothing else in the repo knows what version of WordPress
+  # the plugin was tested against. It also fails on
   # findings the version guard knows nothing about, in the security, performance and
   # accessibility categories, which is the reason to make it a gate instead of reading it after
   # the fact.
@@ -156,11 +158,11 @@ jobs:
   build:
     name: Build the release zip
     # Both are hard gates. Nothing downstream of this job exists until they are green, and
-    # `plugin-check` is red on this branch today: readme.txt's `Stable tag`, `Tested up to`,
-    # `Requires at least` and `Requires PHP` are the four ERROR rows named above. Stated plainly
-    # so nobody has to rediscover it at the tag -- a `v*` tag cannot complete a release until
-    # those four headers are reconciled. That is the intended order, not an obstacle: the header
-    # rewrite is part of deciding to release.
+    # `plugin-check` is red whenever readme.txt's header block still describes the previously
+    # published release: its `Stable tag`, `Tested up to`, `Requires at least` and `Requires PHP`
+    # are the four ERROR rows named above. Stated plainly so nobody has to rediscover it at the
+    # tag -- a `v*` tag cannot complete a release until those four headers are reconciled. That
+    # is the intended order, not an obstacle: the header rewrite is part of deciding to release.
     needs: [checks, plugin-check]
     runs-on: ubuntu-latest
     permissions:
@@ -198,12 +200,14 @@ jobs:
       # no `-` in it -- readme.txt's `Stable tag`, `Requires PHP` and `Requires at least`, the
       # last two against alpaca-bot.php's headers rather than against the version.
       #
-      # Run against this branch as it stands, `bash bin/version-check.sh 0.5.0` exits 1 with six
-      # MISMATCH lines: the tree carries 0.5.0-dev in all three of the first group, and readme.txt
-      # still describes the shipped 0.4.17 (`Stable tag: 0.4.17`, `Requires PHP: 8.1`, `Requires
-      # at least: 6.4`) against a header that says 8.4 and 6.9. That is correct behaviour, and it
-      # means cutting v0.5.0 requires rewriting the readme header block -- all four of its rows
-      # are one decision -- as well as the three version markers.
+      # The consequence, stated once rather than left to be rediscovered at a tag: a release
+      # version cannot be tagged until readme.txt's header block has been rewritten for it, and
+      # that is deliberate rather than an obstacle. While a line is in development the tree
+      # carries a `-dev` version and readme.txt goes on describing the previous stable release,
+      # so the PHP floor the update API filters by keeps matching the release wordpress.org is
+      # actually serving. Moving `Requires PHP` on its own would say that *that* release needs
+      # the new floor and cut off the audience it was published for, so the four rows are one
+      # decision, taken when the release is taken.
       - name: The tag and the tree agree on the version
         run: bash bin/version-check.sh "${GITHUB_REF_NAME#v}"
 

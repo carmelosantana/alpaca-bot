@@ -214,12 +214,12 @@ jobs:
       # `skipped` in run 34405747111 while `check` was red. As written the canary runs whenever
       # `check` reached a conclusion of its own, passed or failed, and is skipped only if the job
       # was cancelled or `check` never ran (a failed build), where a second error would only
-      # confuse. "The canary ran while the job was red" is the normal state of this file, not an
-      # exception to it: what makes `check` red on this branch is readme.txt's four frozen header
-      # errors - outdated_tested_upto_header, stable_tag_mismatch, readme_mismatched_header_requires
-      # and readme_mismatched_header_requires_php. As of this commit they are the only ERROR rows
-      # the gate reports; everything else it finds is a WARNING, which annotates without failing.
-      # Task 7 rewriting that header is what turns the step green.
+      # confuse. It is written that way because "the canary ran while the job was red" was the
+      # normal state of this file for the whole of 0.5's development: readme.txt's header block
+      # described the shipped 0.4.17 on purpose, and that was four ERROR rows -
+      # outdated_tested_upto_header, stable_tag_mismatch, readme_mismatched_header_requires and
+      # readme_mismatched_header_requires_php. Rewriting that header for the release cleared all
+      # four; the condition stays as it is because the next line in development puts them back.
       - name: The gate is real - a planted error is reported as an error
         if: ${{ !cancelled() && (steps.check.conclusion == 'success' || steps.check.conclusion == 'failure') }}
         run: |

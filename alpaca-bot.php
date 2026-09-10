@@ -3,7 +3,7 @@
 Plugin Name: Alpaca Bot
 Plugin URI: https://github.com/carmelosantana/alpaca-bot
 Description: A privately hosted WordPress AI chatbot. Chat with your own models, ground answers in your site, and keep control of cost.
-Version: 0.5.0-dev
+Version: 0.5.0
 Author: Carmelo Santana
 Author URI: https://carmelosantana.com/
 License: GPL-2.0-or-later

@@ -36,12 +36,12 @@ this section describes the 0.5 code on this branch.
 - **P5 — hardening and release** (in progress): CI and Plugin Check, the tag-driven release
   workflow, the security and performance reviews, and this readme.
 
-`readme.txt` (the wordpress.org listing) intentionally keeps describing the shipped 0.4.x release
-(`Requires at least: 6.4`, `Requires PHP: 8.1`, `Stable tag: 0.4.17`) until 0.5.0 is tagged. The
-plugin file header in `alpaca-bot.php` is what gates the running code and already says PHP 8.4 /
-WordPress 6.9. Do not "fix" `readme.txt` on this branch: on wordpress.org, `Requires PHP: 8.4`
-next to `Stable tag: 0.4.17` would stop offering 0.4.x updates to exactly the PHP 8.1 sites that
-release stays published for.
+`readme.txt`'s header block described the shipped 0.4.x release for the whole of development, so
+that `Requires PHP: 8.1` next to `Stable tag: 0.4.17` kept 0.4.x updates reaching the PHP 8.1
+sites that release was published for. It now describes 0.5.0 -- `Stable tag: 0.5.0`,
+`Requires PHP: 8.4`, `Requires at least: 6.9`, `Tested up to: 7.1` -- which is the release
+decision, taken on all four rows at once. Its Description, FAQ and Changelog are generated from
+this file by `composer docs:readme`; the header block is not, and cannot be.
 
 Spec: [0.5 core refactor](docs/superpowers/specs/2026-09-05-alpaca-bot-1-0-core-refactor.md).
 Plans: [P1](docs/superpowers/plans/2026-09-05-alpaca-bot-p1-foundations-provider-pipeline.md),
