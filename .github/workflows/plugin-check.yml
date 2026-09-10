@@ -142,8 +142,9 @@ jobs:
       # generates carries only the one plugin mapping and no mu-plugin mapping, so there is
       # nowhere to hang the filter without stopping and reconfiguring wp-env ourselves.
       #
-      # One code is ignored, and it is the only one: `ExceptionNotEscaped`, which fires 36 times
-      # on `throw new RuntimeException(__('...'))`.
+      # One code is ignored, and it is the only one: `ExceptionNotEscaped`, which fires 37 times
+      # on `throw new SomeException(__('...'))`, across eleven files in src/ (counted with
+      # `wp plugin check` at 0.5.0; the figure is illustrative and nothing asserts it).
       # phpcs.xml.dist excludes the same sniff, with the same argument, and the argument was
       # checked against the code rather than assumed: every consumer of an exception message in
       # src/ is one of `WP_Error` (Rest\Errors, which the REST server JSON-encodes),
