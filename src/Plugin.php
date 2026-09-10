@@ -84,6 +84,19 @@ final class Plugin
             }
             delete_transient(Provider\ModelCatalog::TRANSIENT);
         }, 10, 2);
+        // And on the add, which is what a site's *first* save fires. update_option() creates the
+        // row rather than updating it when the current value is the registered default — with no
+        // row, get_option() returns that default, the `default_option_alpaca_bot_settings ===
+        // $old_value` branch is taken, and add_option() runs instead (core option.php:928-930,
+        // firing `add_option_{$option}` at :1176). So the settings screen's first Save fired
+        // neither this hook nor the one above, and an operator who picked their provider in that
+        // save kept the previous one's models for the transient's five minutes — which, by the
+        // argument above, means every turn in that window refused by name on `wp-ai`.
+        // Unconditional: an add has no old value to compare the three keys against, and the one
+        // deleted transient it can cost is on the first settings save a site ever makes.
+        add_action('add_option_' . self::OPTION, function (): void {
+            delete_transient(Provider\ModelCatalog::TRANSIENT);
+        });
         $conversations = new Chat\ConversationStore($store);
         $this->set(Chat\ConversationStore::class, $conversations);
         add_action('init', [$conversations, 'registerPostType']);

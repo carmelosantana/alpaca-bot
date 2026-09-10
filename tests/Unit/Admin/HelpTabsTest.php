@@ -16,14 +16,27 @@ function helpScreen(string $id): Mockery\MockInterface
     return $screen;
 }
 
-it('names the chat screen and the settings page as the two screens that get the tabs', function (): void {
-    expect(HelpTabs::SCREENS)->toBe([Assets::HOOK, 'alpaca-bot_page_' . SettingsPage::SLUG])
-        ->and(HelpTabs::SCREENS)->toBe(['toplevel_page_alpaca-bot', 'alpaca-bot_page_alpaca-bot-settings']);
+// Core derives a submenu screen's id from the *parent's translated menu title*, so the settings
+// page's id is not a constant. These stand in for get_plugin_page_hookname() rather than spell
+// the id out: what a hard-coded string cost was all four tabs on every translated locale, and a
+// test that names the string again cannot notice. The derivation itself is exercised against
+// real core, in a translated locale, in tests/Integration/HelpTabsTest.php.
+beforeEach(function (): void {
+    Functions\when('get_plugin_page_hookname')->alias(static fn(string $page, string $parent): string => 'alpaca-bot_page_' . $page);
+});
+
+it('names the chat screen and the settings page as the two screens that get the tabs, asking core for the submenu id', function (): void {
+    expect(HelpTabs::screens())->toBe(['toplevel_page_alpaca-bot', 'alpaca-bot_page_alpaca-bot-settings']);
+
+    // A locale that translates "Alpaca Bot": the top-level page keeps its id (its own slug is in
+    // $admin_page_hooks, which takes the `toplevel` branch), the settings page does not.
+    Functions\when('get_plugin_page_hookname')->alias(static fn(string $page, string $parent): string => 'robot-alpaca_page_' . $page);
+    expect(HelpTabs::screens())->toBe([Assets::HOOK, 'robot-alpaca_page_' . SettingsPage::SLUG]);
 });
 
 it('adds the Chat, Shortcodes, Tools and Support tabs, in that order, to the chat screen and to the settings page', function (): void {
     Functions\when('esc_url')->returnArg();
-    foreach (HelpTabs::SCREENS as $id) {
+    foreach (HelpTabs::screens() as $id) {
         $added = [];
         $screen = helpScreen($id);
         $screen->shouldReceive('add_help_tab')->times(4)->andReturnUsing(static function (array $tab) use (&$added): void {

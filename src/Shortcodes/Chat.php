@@ -53,11 +53,14 @@ use AlpacaBot\View\Markdown;
  * and a `cache="off"` twin is never served from, or stands in for, its cached sibling; the
  * default is an hour, only the word `off` switches it off, and a year is the most an author
  * can ask for (cacheSeconds() says what else a value can be, and that a mistyped one keeps the
- * default rather than reading as "off"). Within one request the same shortcode is generated
- * once whatever the cache says (`$served`): a theme that runs `the_content` twice must not
- * spend twice. A failed turn is shown to the editor as a notice and cached as nothing, so the
- * next view tries again; that costs the provider's timeout per view while it is down, and
- * caching a failure would cost showing a stale one after it is back. What the notice says is
+ * default rather than reading as "off"). Within one request the same shortcode runs once
+ * whatever the cache says: an answer is memoised in `$served` and a failure in `$failures`, so
+ * a theme that runs `the_content` twice, or a page carrying two copies of the shortcode, spends
+ * one turn either way. Both memos are needed, because the expensive case is the failing one: a
+ * turn that ends in the provider's timeout costs that timeout, and paying it twice for one
+ * render was the bug `$served` alone left open. Across requests a failure is still cached as
+ * nothing, so the next view tries again -- that costs the provider's timeout per view while it
+ * is down, and caching a failure would cost showing a stale one after it is back. What the notice says is
  * Rest\Errors::fromPipeline()'s decision, made once for every caller that runs a turn: the cap
  * and a refused model in their own words, and for a provider failure the fixed message, since
  * what the provider threw quotes its endpoint and the raw text is the debug log's.
@@ -70,7 +73,7 @@ use AlpacaBot\View\Markdown;
  * Contributor can write, and the memo dedupes identical shortcodes only, so fifty distinct
  * prompts on one page were fifty turns per editor view. The hit is recorded where the REST
  * wrapper records one, on a request that will run: after the capability, the cache and the
- * REST rule, so a cached answer, a visitor and a listing cost nothing; and the shim's `get`,
+ * REST rule, so a cached answer, a memoised failure, a visitor and a listing cost nothing; and the shim's `get`,
  * an outbound fetch on a page's say-so, is in the bucket with the rest. A page past the
  * minute shows the refused shortcodes as the notice the routes' 429 carries, in the frame the
  * cap and the provider failure use (failed()), caches nothing, and memoises nothing, so the
@@ -118,6 +121,14 @@ final class Chat
 
     /** @var array<string, string> the text this request already produced, by cache key */
     private array $served = [];
+
+    /**
+     * @var array<string, string> the rendered notice for each turn this request already tried
+     *   and lost, by cache key. Rendered, not raw: a failure is never cached across requests
+     *   (the class docblock says why), so unlike `$served` there is nothing here for output()
+     *   to format later.
+     */
+    private array $failures = [];
 
     public function __construct(
         private Store $store,
@@ -216,16 +227,28 @@ final class Chat
             // hundred-turns-in-one-request case.
             return $this->notice(__('Alpaca Bot answers here when the page is viewed on the site; there is no cached answer yet.', 'alpaca-bot'));
         }
+        // This turn already failed in this request. Before the limiter, because showing the
+        // notice again is not a generation and must not count as one, and because the point of
+        // the memo is the cost it saves: a turn that ends in the provider's timeout is the most
+        // expensive thing on this path, and a theme that runs `the_content` twice would pay it
+        // twice. Nothing is written to the transient, so the next request tries again.
+        if (isset($this->failures[$key])) {
+            return $this->failures[$key];
+        }
         // Only a generation is a hit: the limiter the REST routes and the abilities share, in
         // their bucket, as the class docblock says.
         $hit = (new RateLimit())->hit(get_current_user_id(), 'chat');
         if (!$hit['allowed']) {
+            // Not memoised: the class docblock's rule for the 429 is that every refused
+            // shortcode on the page is counted, as the routes count one, so a second copy has
+            // to reach the limiter rather than be answered from here.
             return $this->failed(Errors::tooMany($hit['retry_after'])->get_error_message());
         }
         try {
             $text = $generate(get_current_user_id());
         } catch (\Throwable $e) {
-            return $this->failed(Errors::fromPipeline($e)->get_error_message());
+            $this->failures[$key] = $this->failed(Errors::fromPipeline($e)->get_error_message());
+            return $this->failures[$key];
         }
         $this->served[$key] = $text;
         if ($cacheSeconds > 0) {

@@ -10,6 +10,7 @@ use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Message\SystemMessage;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Message\UserMessage;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Provider\Response;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Provider\Usage;
+use Brain\Monkey\Actions;
 use Brain\Monkey\Filters;
 use Brain\Monkey\Functions;
 
@@ -299,6 +300,47 @@ it('shows an editor the fixed provider message when the turn fails, never the pr
     expect($html)->toContain('class="alpaca-bot-notice"')->toContain('could not answer')->toContain('The model provider could not complete the request.')
         ->not->toContain('11434')->not->toContain('localhost')->not->toContain('Provider error')
         ->and($h->stored)->toBe([]);
+});
+
+// A failed turn is cached as nothing across requests, on purpose. Within one request it has to
+// be remembered anyway, and this is the case where that matters most: the provider's timeout is
+// the most expensive thing on this path, and `$served` alone -- written only after a *successful*
+// turn -- had a theme that runs `the_content` twice, or a page carrying two copies of the
+// shortcode, pay it twice for one render. The provider mock is stream()->once() and the harness
+// allows one provider build, so a second generation fails this on the count as well as on the
+// chat/failed tally.
+it('runs a failing turn once per request, however many times the same shortcode is rendered', function (): void {
+    $h = pipelineWith(pipelineProvider([new \RuntimeException('connection refused')]));
+    $chat = shortcodeChat($h, 7);
+    shortcodeViewer(3);
+    Actions\expectDone('alpaca_bot/chat/failed')->once();
+
+    $first = $chat->render(['prompt' => 'Say hi'], null, 'alpacabot');
+    $second = $chat->render(['prompt' => 'Say hi'], null, 'alpacabot');
+
+    expect($first)->toContain('could not answer')
+        ->and($second)->toBe($first)
+        // Still nothing cached across requests: the next view tries again.
+        ->and($h->stored)->toBe([]);
+});
+
+// The 429 is the other refusal, and it is deliberately not memoised: the class docblock's rule
+// is that every refused shortcode on the page is counted, as the REST routes count one, so a
+// second copy reaches the limiter rather than being answered from the memo.
+it('counts a second copy of a rate-limited shortcode against the limiter rather than answering it from the memo', function (): void {
+    // The minute is already spent, so neither render generates and nothing reaches a provider.
+    $h = pipelineWith(null);
+    $chat = shortcodeChat($h, 7);
+    shortcodeViewer(3);
+    $key = 'alpaca_bot_rl_chat_3_' . gmdate('YmdHi', 1_725_000_000);
+    $h->transients[$key] = 30;
+
+    $first = $chat->render(['prompt' => 'Say hi'], null, 'alpacabot');
+    $second = $chat->render(['prompt' => 'Say hi'], null, 'alpacabot');
+
+    expect($first)->toContain('Too many requests')
+        ->and($second)->toContain('Too many requests')
+        ->and(array_column($h->limited, 1))->toBe([31, 32]);
 });
 
 it('shows an editor the cap and a refused model in their own words, the other two arms of the REST routes\' policy', function (): void {

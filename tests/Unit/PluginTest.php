@@ -210,7 +210,7 @@ it('renders the chat screen, enqueues its assets, hands the pipeline the user pr
     Filters\expectAdded('heartbeat_received')->once()->with(Mockery::on(
         static fn (mixed $cb): bool => is_array($cb) && ($cb[0] ?? null) instanceof Assets && ($cb[1] ?? null) === 'heartbeat'
     ), 10, 2);
-    // The help tabs listen on current_screen and gate on the screen id themselves (HelpTabs::SCREENS).
+    // The help tabs listen on current_screen and gate on the screen id themselves (HelpTabs::screens()).
     Actions\expectAdded('current_screen')->once()->with(Mockery::on(
         static fn (mixed $cb): bool => is_array($cb) && ($cb[0] ?? null) instanceof HelpTabs && ($cb[1] ?? null) === 'add'
     ));

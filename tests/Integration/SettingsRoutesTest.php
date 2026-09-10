@@ -6,6 +6,7 @@ namespace AlpacaBot\Tests\Integration;
 
 use AlpacaBot\Chat\UsageMeter;
 use AlpacaBot\Plugin;
+use AlpacaBot\Provider\ModelCatalog;
 use AlpacaBot\Settings\Schema;
 
 /**
@@ -39,6 +40,30 @@ final class SettingsRoutesTest extends TestCase
         $this->assertSame(Schema::defaults()['models.num_ctx'], $res->get_data()['models.num_ctx']);
         $this->assertSame(array_keys(Schema::fields()), array_keys($res->get_data()));
         $this->assertSame(array_keys(Schema::fields()), array_keys(get_option('alpaca_bot_settings')));
+    }
+
+    /**
+     * The catalog bust on a site's *first* settings save. update_option() creates the row rather
+     * than updating it when the stored value is still the registered default, so that save fires
+     * `add_option_alpaca_bot_settings` and never `update_option_alpaca_bot_settings` (core
+     * option.php:928-930). Hooked only on the update, an operator who chose their provider in
+     * that first save kept the previous provider's model list for the transient's five minutes,
+     * and every turn in the window would be refused by name on `wp-ai`.
+     *
+     * The option row is deleted first because TestCase::set_up() writes one; that is the state a
+     * fresh install is in, and the only state in which this can happen.
+     */
+    public function test_the_first_settings_save_a_site_makes_busts_the_model_catalog(): void
+    {
+        $this->asAdmin();
+        delete_option(Plugin::OPTION);
+        set_transient(ModelCatalog::TRANSIENT, [['id' => 'previous-providers-model']], 300);
+        $this->assertFalse(get_option(Plugin::OPTION));
+
+        // The row is created, by the branch that fires add_option_{$option}, not update_option_{$option}.
+        $this->assertTrue(update_option(Plugin::OPTION, ['provider.kind' => 'wp-ai'] + Schema::defaults()));
+
+        $this->assertFalse(get_transient(ModelCatalog::TRANSIENT));
     }
 
     public function test_settings_accept_a_json_body_and_apply_the_schema(): void

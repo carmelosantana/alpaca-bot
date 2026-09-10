@@ -21,13 +21,44 @@ namespace AlpacaBot\Admin;
  */
 final class HelpTabs
 {
-    /** The two screens that get the tabs: the chat page (its hook suffix is its screen id) and the settings submenu page. */
-    public const SCREENS = [Assets::HOOK, 'alpaca-bot_page_' . SettingsPage::SLUG];
+    /**
+     * The two screens that get the tabs: the chat page and the settings submenu page, as core
+     * names them.
+     *
+     * Only the first is a constant. Core derives a *submenu* screen's id from the parent's menu
+     * *title*, translated — `add_menu_page()` stores `sanitize_title($menu_title)` in
+     * `$admin_page_hooks[$slug]` and `get_plugin_page_hookname()` uses it as the prefix
+     * (wp-admin/includes/plugin.php:1397, :2152-2158) — so on a locale that translates
+     * "Alpaca Bot" the settings screen is not `alpaca-bot_page_alpaca-bot-settings` at all, and
+     * a hard-coded id lost all four tabs there. The top-level page is unaffected: its own slug
+     * is in `$admin_page_hooks`, which takes the `toplevel` branch of the same function and
+     * never reads the title.
+     *
+     * So the id is asked of the function core built it with, rather than spelled again here.
+     * `current_screen` fires from set_current_screen() in wp-admin/admin.php:217, after
+     * menu.php has run at :163, so `$admin_page_hooks` is populated and
+     * wp-admin/includes/plugin.php is loaded by then; the guard is for a caller that is not an
+     * admin request (a test), where the untranslated form is the right answer anyway.
+     *
+     * @return array{string, string}
+     */
+    public static function screens(): array
+    {
+        return [Assets::HOOK, self::settingsScreen()];
+    }
+
+    /** The settings page's screen id, from core's own derivation; the untranslated form off an admin request. */
+    private static function settingsScreen(): string
+    {
+        return function_exists('get_plugin_page_hookname')
+            ? get_plugin_page_hookname(SettingsPage::SLUG, Menu::SLUG)
+            : 'alpaca-bot_page_' . SettingsPage::SLUG;
+    }
 
     /** `current_screen`: the tabs on one of the plugin's two screens; every other screen is left alone. */
     public function add(\WP_Screen $screen): void
     {
-        if (!in_array($screen->id, self::SCREENS, true)) {
+        if (!in_array($screen->id, self::screens(), true)) {
             return;
         }
         foreach ($this->tabs() as $id => [$title, $content]) {
