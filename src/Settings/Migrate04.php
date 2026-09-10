@@ -294,8 +294,9 @@ final class Migrate04
         // The flag on a short batch, and nothing else: there is no progress guard, so the pass
         // terminates only because every row it reads leaves `publish`. That holds for this
         // plugin's own writes -- the post type supports title, excerpt and author but not
-        // `editor` (ConversationStore::registerPostType()), so wp_insert_post()'s empty-content
-        // refusal cannot fire on these rows, and nothing else here can fail the update. What it
+        // `editor` (ConversationStore::registerPostType()), and wp_insert_post()'s empty-content
+        // refusal needs all three of those supports (WP 7.1 post.php:4673-4677), so it cannot
+        // fire on these rows; nothing else on this path can fail the update. What it
         // does not survive is another plugin filtering the write (`wp_insert_post_data` putting
         // the status back, `wp_insert_post_empty_content` returning true) or an UPDATE that
         // keeps failing: the same BATCH rows then come back on every request, forever, front-end

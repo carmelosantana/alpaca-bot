@@ -126,9 +126,10 @@ final class Plugin
         // The built-in toolkits, under the ids Schema's `toolkits.enabled` options name. The two
         // that act as a user take get_current_user_id as a closure and ask it when a tool runs,
         // never here. Not because the id is unreadable here -- this runs on plugins_loaded:9,
-        // and core loaded pluggable.php at wp-settings.php:560 and registered all three
-        // `determine_current_user` filters in default-filters.php:505-507, both before
-        // `do_action('plugins_loaded')` at :578, so a cookie request would resolve. It is that
+        // and core has loaded pluggable.php and registered all three `determine_current_user`
+        // filters before `plugins_loaded` fires (WP 7.1 wp-settings.php:612 and :154 against the
+        // do_action at :630; default-filters.php:520-522), so a cookie request would resolve
+        // here and cache itself for the rest of the request. It is that
         // an id read here is the id for the whole request, and the acting user moves after this
         // point: WP-CLI leaves it at 0 until `wp alpaca-bot chat` calls wp_set_current_user()
         // (Cli\ChatCommand says why it does), and any wp_set_current_user() elsewhere moves it

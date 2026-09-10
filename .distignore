@@ -101,10 +101,11 @@
 #
 # `+ ` lines are rsync include rules and must precede the exclude they override, so this file's
 # syntax is rsync's and not a generic ignore format. That is safe because build-zip.sh:30 is the
-# only thing that reads it. The wordpress.org deploy does not: release.yml sets BUILD_DIR to the
-# unpacked release zip, so what reaches SVN trunk is what build-zip.sh already filtered, and
-# 10up's deploy.sh never falls back to reading this file. A change that unset BUILD_DIR would
-# hand these rules to a second reader, and the `+ ` lines are the part that would not survive.
+# only thing that reads it. The wordpress.org deploy is handed a directory rather than a filter
+# list: release.yml sets BUILD_DIR to the unpacked release zip and deploy.sh rsyncs that into SVN
+# trunk, so what is published is what build-zip.sh already filtered. Whether that action would
+# read this file with BUILD_DIR unset was not checked; keeping BUILD_DIR set is what makes the
+# question moot, and the `+ ` lines are the part that would not survive a second reader.
 tests
 + /vendor-prefixed/symfony/http-client/Test/
 + /vendor-prefixed/symfony/http-client/Test/**

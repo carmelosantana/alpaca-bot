@@ -109,9 +109,9 @@ use AlpacaBot\Settings\Store;
  * id), so at the shipped LIMIT of 3 that is 60 characters against `option_name`'s varchar(191).
  * The index is one digit only because LIMIT is 3, and `alpaca_bot/stream/concurrent` has no
  * ceiling -- claim() floors it at 1 and stops there -- so the bound has to come from the type:
- * the filter's result is cast to int, so the largest index is PHP_INT_MAX - 1, 19 digits, and
- * the longest name any site can produce is 78 characters. Still nothing near the length where a
- * name would be truncated into another one's. It cannot collide with the stream
+ * the filter's result is cast to int, so an index can never be more than 19 digits and this
+ * name can never be more than 78 characters, whatever a filter returns. Still nothing near the
+ * length where a name would be truncated into another one's. It cannot collide with the stream
  * ticket either, which is a transient and therefore a row core names
  * `_transient_alpaca_bot_stream_…`.
  *

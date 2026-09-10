@@ -60,7 +60,7 @@ use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Tool\ToolResult;
  * response that declares no Content-Type at all is not refused -- the gate has nothing to read,
  * so those bytes are treated as text, their charset taken from a `<meta>` in the first 4 KiB or
  * from whether they are valid UTF-8 (utf8()), and what text() makes of them is what the model
- * sees. MAX_BYTES and MAX_CHARS are the whole bound on that case. A page PCRE gives up on is
+ * sees, under the same MAX_BYTES on the wire and MAX_CHARS on the text as any other page. A page PCRE gives up on is
  * refused too, naming the reason, never returned as the part that survived.
  *
  * Nothing here executes what it fetched, and nothing the model sends reaches the shell or
