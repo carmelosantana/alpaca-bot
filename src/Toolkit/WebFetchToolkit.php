@@ -54,9 +54,13 @@ use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Tool\ToolResult;
  * own; and 1 MiB on the wire, which the HTTP API enforces as it reads. What comes back is
  * read in the charset it declares (utf8() says how that is decided), reduced to text in time
  * linear in its size (text() says how, and why not wp_strip_all_tags()), and cut at MAX_CHARS
- * characters (not bytes) with a marker. A response whose Content-Type is not a text type is
- * refused outright: 1 MiB of a PDF or an image stripped of "tags" is noise the model would
- * have to pay for in context, and it would tell the user nothing. A page PCRE gives up on is
+ * characters (not bytes) with a marker. A response that *declares* a Content-Type this class
+ * does not read as text is refused outright: 1 MiB of a PDF or an image stripped of "tags" is
+ * noise the model would have to pay for in context, and it would tell the user nothing. A
+ * response that declares no Content-Type at all is not refused -- the gate has nothing to read,
+ * so those bytes are treated as text, their charset taken from a `<meta>` in the first 4 KiB or
+ * from whether they are valid UTF-8 (utf8()), and what text() makes of them is what the model
+ * sees. MAX_BYTES and MAX_CHARS are the whole bound on that case. A page PCRE gives up on is
  * refused too, naming the reason, never returned as the part that survived.
  *
  * Nothing here executes what it fetched, and nothing the model sends reaches the shell or

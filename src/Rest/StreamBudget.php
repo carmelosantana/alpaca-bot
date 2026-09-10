@@ -103,9 +103,14 @@ use AlpacaBot\Settings\Store;
  * later stream is never deleted by the earlier one. The rows are read and written only here and
  * only through `$wpdb`, so no object cache holds a stale copy of them.
  *
- * The longest name this makes is the prefix, `ip_` and a 32-character wp_hash for a visitor, and
- * one digit: 60 characters against `option_name`'s varchar(191), so nothing here is near the
- * length where a name would be truncated into another one's. It cannot collide with the stream
+ * The longest name this makes is the prefix, then the subject, then `_` and the slot index. The
+ * subject is the longer for a visitor (`ip_` and a 32-character wp_hash, 35) than for a user (an
+ * id), so at the shipped LIMIT of 3 that is 60 characters against `option_name`'s varchar(191).
+ * The index is one digit only because LIMIT is 3, and `alpaca_bot/stream/concurrent` has no
+ * ceiling -- claim() floors it at 1 and stops there -- so the bound has to come from the type:
+ * the filter's result is cast to int, so the largest index is PHP_INT_MAX - 1, 19 digits, and
+ * the longest name any site can produce is 78 characters. Still nothing near the length where a
+ * name would be truncated into another one's. It cannot collide with the stream
  * ticket either, which is a transient and therefore a row core names
  * `_transient_alpaca_bot_stream_…`.
  *
@@ -170,11 +175,16 @@ final class StreamBudget
          * PHP worker pool tighter. Anything below one provider timeout is raised to it, so a
          * filter that forgot to return cannot end every turn before it starts.
          *
-         * Applied wherever the number is needed rather than once per request: one redemption
-         * asks for it up to three times -- the slot lease in claim(), the process time limit in
-         * StreamController::serve(), and the in-band deadline in StreamController::stream().
-         * A filter that only returns a number will not notice; one that counts or logs will see
-         * the repeats.
+         * Applied wherever the number is needed rather than resolved once per request, so one
+         * redemption asks three times: the slot lease in claim(), then StreamController twice.
+         * serve() reads it for both of its uses at once -- the process time limit it hands
+         * prepareOutput(), and the deadline instant it passes into stream(). stream() reads it
+         * again, and on a redemption that copy is *not* the deadline, because serve() already
+         * gave it one: it is only the number the `stream_timeout` frame advertises as the limit.
+         * (stream()'s `??=` default is for a caller that passes no deadline, which is the tests
+         * and the direct-call path, not the route.) So a filter that does not answer the same
+         * number every time will advertise a limit it did not enforce, and a filter that counts
+         * or logs will see three calls where a request looks like one.
          *
          * @since 0.5.0
          * @param int $seconds the default budget

@@ -64,7 +64,7 @@ final class Plugin
         // default (or an eager re-list) to go in with it.
         // On `update_option_*` rather than in Store: every writer (the settings page, the REST
         // route, WP-CLI, a filter) goes through the option, and only one of them through Store.
-        // Neither closure is `static`, for the reason the cleanup hook above gives.
+        // Neither closure is `static`, for the reason the receipt-retention hook below gives.
         add_action('admin_notices', function () use ($factory): void {
             $notice = $factory->fallbackNotice();
             if ($notice === null || !current_user_can('manage_options')) {
@@ -123,10 +123,18 @@ final class Plugin
         // read from the registry until a turn runs, well after plugins_loaded.
         $registry = new Toolkit\Registry($store);
         $this->set(Chat\Pipeline::class, new Chat\Pipeline($store, $factory, $this->get(Provider\ModelCatalog::class), $conversations, $meter, $caps, $collector, $prefs, $registry));
-        // The built-in toolkits, under the ids Schema's `toolkits.enabled` options name. This
-        // runs on plugins_loaded, before the current user is resolved, so the two toolkits that
-        // act as a user take get_current_user_id as a closure and ask it when a tool runs, not
-        // here: an id read now would be 0 for every turn. The registry decides what is enabled
+        // The built-in toolkits, under the ids Schema's `toolkits.enabled` options name. The two
+        // that act as a user take get_current_user_id as a closure and ask it when a tool runs,
+        // never here. Not because the id is unreadable here -- this runs on plugins_loaded:9,
+        // and core loaded pluggable.php at wp-settings.php:560 and registered all three
+        // `determine_current_user` filters in default-filters.php:505-507, both before
+        // `do_action('plugins_loaded')` at :578, so a cookie request would resolve. It is that
+        // an id read here is the id for the whole request, and the acting user moves after this
+        // point: WP-CLI leaves it at 0 until `wp alpaca-bot chat` calls wp_set_current_user()
+        // (Cli\ChatCommand says why it does), and any wp_set_current_user() elsewhere moves it
+        // again. A boot-time read would freeze the wrong one, and would also resolve and cache
+        // $current_user from inside a plugin's boot, ahead of anything that wanted to hook
+        // `determine_current_user` on plugins_loaded itself. The registry decides what is enabled
         // when a turn asks (Toolkit\Registry), so nothing about the setting is read here either.
         $webFetch = new Toolkit\WebFetchToolkit($store);
         $registry->register('web_fetch', $webFetch);

@@ -66,8 +66,9 @@ use AlpacaBot\View\Markdown;
  * what the provider threw quotes its endpoint and the raw text is the debug log's.
  *
  * A generation is a hit on the limiter every other spending surface shares: Rest\RateLimit,
- * the `chat` bucket the REST chat and stream routes and the chat and summarize abilities count
- * against, under the one `alpaca_bot/rate_limit` filter, so a site that moves the limit moves
+ * the `chat` bucket the rate-limited REST routes (the chat POST, `/models`, `/view/models`; not
+ * the stream redemption, whose own route says why) and the chat and summarize abilities
+ * count against, under the one `alpaca_bot/rate_limit` filter, so a site that moves the limit moves
  * it here too and one person on five surfaces is one person. The cache and the monthly caps
  * are not that brake: both caps default to unlimited, `cache="off"` is an attribute any
  * Contributor can write, and the memo dedupes identical shortcodes only, so fifty distinct

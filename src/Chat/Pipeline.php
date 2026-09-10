@@ -921,9 +921,12 @@ final class Pipeline
      * list (an unreachable provider reads as an empty catalogue) is not given tools unless
      * forced, so its turn fails or succeeds the way a plain turn would in the same outage.
      *
-     * Both are read here, on the turn. The registry is asked every turn, never at boot, and the
-     * override is read from settings rather than baked into ModelCatalog's five-minute
-     * transient, so a save applies to the next turn with the cached model list still in place.
+     * Nothing here is read at boot, and the reads are ordered. The registry goes first, on
+     * every turn, and an empty answer ends it: a user with no toolkit enabled never reaches the
+     * override or the catalogue, so forced-on cannot conjure a tool the registry did not offer,
+     * and a site with the toolkits off pays neither read. Past that, the override comes from
+     * settings rather than from ModelCatalog's five-minute transient, so a save applies to the
+     * next turn with the cached model list still in place.
      *
      * @return array<string, ToolkitInterface>
      */

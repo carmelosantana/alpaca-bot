@@ -142,8 +142,11 @@ final class ConversationStore
      * Conversation is plain data anyone can construct, so its id is not trusted on its own.
      *
      * The whole transcript is one meta value, so one row and one packet, and the invariant
-     * here is absolute: what is written always fits storageBudget(), measured as the database
-     * receives it (packetBytes()), escaping included. A few images at the site's allowance are
+     * here holds for every transcript with anything left to drop: what is written fits
+     * storageBudget(), measured as the database receives it (packetBytes()), escaping included.
+     * The one exit is an empty one -- fit()'s loop stops when the last message is gone, and the
+     * six bytes `a:0:{}` serialises to are over a budget of 0, which storageBudget() explains
+     * is a packet no larger than PACKET_MARGIN and is still under any real packet. A few images at the site's allowance are
      * past a stock 16 MiB packet, and past it the UPDATE fails, the false from
      * update_post_meta() went unchecked, and the transcript silently stopped persisting from
      * that turn on. So before the write the transcript is fitted (fit()):

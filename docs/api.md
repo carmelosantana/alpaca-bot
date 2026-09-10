@@ -502,7 +502,9 @@ $ curl -s -u "admin:$PW" "$B/usage&user=7"
 ```
 
 (The harness site has one user, so `me` and `all` agree.) An Editor asking for `user=all` gets a
-403 and sees `caps: {user}` only, per `SettingsRoutesTest::test_usage_route_reports_the_month`.
+403 `rest_forbidden` and no figures at all. On their own row they are answered, with `caps`
+carrying `user` and no `site` key: the site-wide cap is the operator's number, as the site-wide
+total is. Both are `SettingsRoutesTest::test_usage_route_reports_the_month`.
 
 ### The `/view/*` fragments
 
@@ -723,8 +725,11 @@ anyway. A failed first turn leaves no empty conversation behind.
 
 ## 6. Rate limit
 
-`POST /chat` and `GET /models` share one fixed-window counter, the `chat` bucket: 30 hits per
-user per UTC calendar minute by default, kept in a transient. A refused hit still counts, so
+`POST /chat`, `GET /models` and `GET /view/models` -- every route the section 3 table marks
+`chat` bucket, and only those -- share one fixed-window counter: 30 hits per user per UTC
+calendar minute by default, kept in a transient. The same counter is spent outside the REST API
+by the `chat` and `summarize` abilities and by the `[alpacabot]` shortcodes, so one person on any
+of those surfaces is one person to it. A refused hit still counts, so
 hammering past the limit does not refill the bucket. `GET /chat/{id}/stream` is deliberately
 not limited: the POST that issued its ticket was, and the ticket can be redeemed once.
 

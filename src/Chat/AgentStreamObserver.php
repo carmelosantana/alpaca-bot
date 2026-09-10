@@ -105,7 +105,14 @@ final class AgentStreamObserver implements \SplObserver
     /** The text streamed so far, for the paragraph break between iterations. */
     private string $streamedText = '';
 
-    /** Set at the start of every iteration after the first, spent by that iteration's first text delta. */
+    /**
+     * A paragraph break owed to the reader. Set at the start of every iteration after the first
+     * and never cleared at an iteration boundary (update() only ORs it on), so an iteration that
+     * calls tools and writes nothing carries it forward. It is spent by the next *non-empty*
+     * text delta, whichever iteration that turns up in; the empty heartbeat delta pushed before
+     * a tool call does not spend it. So the break lands where text resumes, rather than being
+     * swallowed by a silent iteration and leaving two replies run together.
+     */
     private bool $breakPending = false;
 
     /** @var list<array{id: string, name: string, arguments: array<string, mixed>}> calls announced and not yet answered, oldest first */

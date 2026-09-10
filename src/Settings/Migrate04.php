@@ -37,9 +37,11 @@ use AlpacaBot\Plugin;
  * that completed the migration under a pre-release 0.5 would keep three non-autoloaded rows
  * forever, so a fourth flag (FLAG_AUTOLOAD) carries a one-time wp_set_options_autoload() over
  * the other three; it is itself autoloaded, and once it is set needed() is four alloptions
- * reads and no query at all. 0.4.17 never wrote any of these option names (`git grep
- * migrated_04 v0.4.17` is empty), so a genuine 0.4 site creates all four rows fresh under the
- * new value and the repair is a no-op there.
+ * reads and no query at all. 0.4.17 never wrote any of these four option names -- `git grep -E
+ * 'migrated_04|migrated_retention|migrated_flag_autoload' v0.4.17` is empty, and it has to name
+ * all three stems because `migrated_04` alone misses FLAG_RETENTION and FLAG_AUTOLOAD -- so a
+ * genuine 0.4 site creates all four rows fresh under the new value and the repair is a no-op
+ * there.
  */
 final class Migrate04
 {
@@ -289,6 +291,17 @@ final class Migrate04
             // nothing today; it is here so the rule holds at every write, whatever is added.
             wp_update_post(wp_slash($update));
         }
+        // The flag on a short batch, and nothing else: there is no progress guard, so the pass
+        // terminates only because every row it reads leaves `publish`. That holds for this
+        // plugin's own writes -- the post type supports title, excerpt and author but not
+        // `editor` (ConversationStore::registerPostType()), so wp_insert_post()'s empty-content
+        // refusal cannot fire on these rows, and nothing else here can fail the update. What it
+        // does not survive is another plugin filtering the write (`wp_insert_post_data` putting
+        // the status back, `wp_insert_post_empty_content` returning true) or an UPDATE that
+        // keeps failing: the same BATCH rows then come back on every request, forever, front-end
+        // page views included, which is the one bound BATCH was meant to give. Reachable only
+        // from outside this plugin, so it is left as it is for 0.5 and tracked for 0.6 rather
+        // than guarded here on a release week.
         if (count($posts) < self::BATCH) {
             update_option(self::FLAG_CONVERSATIONS, '1', true);
         }
