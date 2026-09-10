@@ -8,12 +8,13 @@ use AlpacaBot\Plugin;
 
 /**
  * The chat screen's scripts and stylesheet, enqueued on `admin_enqueue_scripts` for that screen
- * only (and, through enqueueFront(), for a front-end page that rendered the shell): htmx, then the chat bundle (which needs it, plus core's heartbeat for the nonce
+ * (and, through enqueueFront(), for a front-end page that rendered the shell): htmx, then the chat bundle (which needs it, plus core's heartbeat for the nonce
  * refresh; it fetches with bare fetch(), so api-fetch is not among its dependencies), the
  * stylesheet, and the media library for the image picker. `alpacaBot` is the bundle's settings
  * object: the REST root (rest_url(), so it is right under either permalink form), the REST
  * nonce it signs requests with, the largest image the site takes (maxImageBytes()), and the
- * strings it shows.
+ * strings it shows. The settings page gets none of that, only OVERRIDES_CSS inline on a core
+ * handle; every other admin screen gets nothing.
  *
  * The files are build outputs (`pnpm build`) and gitignored, enqueued by URL as any asset is:
  * a checkout that has not built them gets a 404 for each, and the screen still renders. Under
@@ -33,8 +34,46 @@ final class Assets
     /** htmx as package.json pins it, exactly (AssetsTest holds the two equal). */
     public const HTMX_VERSION = '2.0.10';
 
+    /**
+     * The rules for the per-model overrides table (SettingsPage::renderOverrides()), a `widefat`
+     * nested in a Settings API row. Core's forms.css loads after its common.css and reaches every
+     * cell of the nested table at the specificity of common.css's `.widefat td, .widefat th
+     * { padding: 8px 10px }`: `.form-table th` zeroes the left padding and fixes the width at
+     * 200px, `.form-table td` pads 15px, and under 782px both are `display: block`, which stacks
+     * the table into one column of labels. No core class undoes that. Core's one nested table,
+     * `.form-table .color-palette`, gets a scoped rule of its own in forms.css, and this is the
+     * same answer: the cells back to widefat's, and the wrapper scrolling sideways where the
+     * table is wider than the row.
+     *
+     * That scrolling is only possible under 782px, core's breakpoint, where the row is blocks and
+     * the wrapper can be sized by the row rather than by the table (`contain: inline-size`; the
+     * block `td` still sits in an anonymous table cell, whose minimum is its content's, so
+     * without that the table widens the whole page instead). The system prompt keeps its desktop
+     * width there, since core's narrow-screen `width: 100%` on a text input inside an auto-width
+     * cell collapses it to nothing. Above the breakpoint the row is a table cell, which cannot be
+     * narrower than the table it holds: at 1440px the six columns fit; on a laptop with the menu
+     * open they widen the page, as they always did. Sizing the wrapper by the row there too
+     * would fix that at the cost of a scrollbar at 1440px, where the label column would reclaim
+     * the 200px the table now takes from it.
+     *
+     * Inline on core's `forms` handle rather than in a stylesheet of the plugin's: the settings
+     * page loads no plugin stylesheet, the chat shell's is fourteen kilobytes of another screen,
+     * and a rule attached to forms.css prints after the rules it answers by construction, and
+     * prints in a checkout that has not run `pnpm build`.
+     */
+    private const OVERRIDES_CSS = <<<'CSS'
+        .form-table .ab-overrides { overflow-x: auto; }
+        .form-table .ab-overrides th, .form-table .ab-overrides td { display: table-cell; width: auto; padding: 8px 10px; }
+        .form-table .ab-overrides .regular-text { min-width: 25em; }
+        @media screen and (max-width: 782px) { .form-table .ab-overrides { contain: inline-size; } }
+        CSS;
+
     public function enqueue(string $hook): void
     {
+        if ($hook === SettingsPage::screen()) {
+            wp_add_inline_style('forms', self::OVERRIDES_CSS);
+            return;
+        }
         if ($hook !== self::HOOK) {
             return;
         }

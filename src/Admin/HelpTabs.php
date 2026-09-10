@@ -23,36 +23,15 @@ final class HelpTabs
 {
     /**
      * The two screens that get the tabs: the chat page and the settings submenu page, as core
-     * names them.
-     *
-     * Only the first is a constant. Core derives a *submenu* screen's id from the parent's menu
-     * *title*, translated — `add_menu_page()` stores `sanitize_title($menu_title)` in
-     * `$admin_page_hooks[$slug]` and `get_plugin_page_hookname()` uses it as the prefix
-     * (wp-admin/includes/plugin.php:1397, :2145-2158) — so on a locale that translates
-     * "Alpaca Bot" the settings screen is not `alpaca-bot_page_alpaca-bot-settings` at all, and
-     * a hard-coded id lost all four tabs there. The top-level page is unaffected: its own slug
-     * is in `$admin_page_hooks`, which takes the `toplevel` branch of the same function and
-     * never reads the title.
-     *
-     * So the id is asked of the function core built it with, rather than spelled again here.
-     * `current_screen` fires from set_current_screen() in wp-admin/admin.php:217, after
-     * menu.php has run at :163, so `$admin_page_hooks` is populated and
-     * wp-admin/includes/plugin.php is loaded by then; the guard is for a caller that is not an
-     * admin request (a test), where the untranslated form is the right answer anyway.
+     * names them. Only the first is a constant: a submenu page's id is derived from the parent's
+     * translated menu title, so it is asked of core (SettingsPage::screen() says why, and what a
+     * hard-coded id cost).
      *
      * @return array{string, string}
      */
     public static function screens(): array
     {
-        return [Assets::HOOK, self::settingsScreen()];
-    }
-
-    /** The settings page's screen id, from core's own derivation; the untranslated form off an admin request. */
-    private static function settingsScreen(): string
-    {
-        return function_exists('get_plugin_page_hookname')
-            ? get_plugin_page_hookname(SettingsPage::SLUG, Menu::SLUG)
-            : 'alpaca-bot_page_' . SettingsPage::SLUG;
+        return [Assets::HOOK, SettingsPage::screen()];
     }
 
     /** `current_screen`: the tabs on one of the plugin's two screens; every other screen is left alone. */

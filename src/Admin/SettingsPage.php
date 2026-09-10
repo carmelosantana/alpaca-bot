@@ -138,11 +138,45 @@ final class SettingsPage
     }
 
     /**
+     * The page's screen id, which is also its `admin_enqueue_scripts` hook suffix: what HelpTabs
+     * and Assets gate on.
+     *
+     * Not a constant. Core derives a *submenu* screen's id from the parent's menu *title*,
+     * translated — `add_menu_page()` stores `sanitize_title($menu_title)` in
+     * `$admin_page_hooks[$slug]` and `get_plugin_page_hookname()` uses it as the prefix
+     * (wp-admin/includes/plugin.php:1397, :2140-2158) — so on a locale that translates
+     * "Alpaca Bot" this page is not `alpaca-bot_page_alpaca-bot-settings` at all, and a
+     * hard-coded id once lost all four help tabs there. The top-level page is unaffected: its
+     * own slug is in `$admin_page_hooks`, which takes the `toplevel` branch of the same function
+     * and never reads the title, which is why Assets::HOOK can be a constant.
+     *
+     * So the id is asked of the function core built it with, rather than spelled again here.
+     * Both callers run after menu.php has filled `$admin_page_hooks` (wp-admin/admin.php:163):
+     * `current_screen` fires from set_current_screen() at admin.php:217, and
+     * `admin_enqueue_scripts` from admin-header.php:123, which a plugin page requires at
+     * admin.php:292; wp-admin/includes/plugin.php is loaded by then. The guard is for a caller
+     * that is not an admin request (a test), where the untranslated form is the right answer
+     * anyway.
+     */
+    public static function screen(): string
+    {
+        return function_exists('get_plugin_page_hookname')
+            ? get_plugin_page_hookname(self::SLUG, Menu::SLUG)
+            : 'alpaca-bot_page_' . self::SLUG;
+    }
+
+    /**
      * The overrides table, its columns labelled as the global fields they override. Placeholders
      * show the global value a blank cell falls back to, except the system prompt's: that global
      * is multi-line and lives on the Chat tab, so the caption names it instead. A model with a
      * stored override that the catalog no longer lists still gets a row, so the override can be
      * seen and cleared rather than carried invisibly.
+     *
+     * The table is a `widefat` inside a Settings API row, where core's forms.css reaches its
+     * cells (Assets::OVERRIDES_CSS says how); `div.ab-overrides` around it is what the rules
+     * Assets adds inline hang off, and it scrolls sideways where the row is narrower than six
+     * columns. The captions stay outside it, so that scrollbar is under the table and not under
+     * two paragraphs.
      *
      * The last column overrides no global field: `tools` overrides the model catalog's
      * capability flag, which is not a setting, so its heading is its own word and its control is
@@ -205,7 +239,7 @@ final class SettingsPage
             $head .= '<th>' . esc_html($fields[$key]['label']) . '</th>';
         }
         $head .= '<th>' . esc_html__('Tools', 'alpaca-bot') . '</th>';
-        return '<table class="widefat striped"><thead><tr>' . $head . '</tr></thead><tbody>' . $rows . '</tbody></table>'
+        return '<div class="ab-overrides"><table class="widefat striped"><thead><tr>' . $head . '</tr></thead><tbody>' . $rows . '</tbody></table></div>'
             . '<p class="description">' . esc_html__('A blank cell uses the global value: the fields above for temperature, context window and keep alive, and the system prompt on the Chat tab. A model-level system prompt replaces the global one for that model.', 'alpaca-bot') . '</p>'
             . '<p class="description">' . esc_html__('Tools decides whether this model is offered the tools enabled on the Tools tab. Leave it on the model default unless the model misbehaves: some models accept tools and then write the tool call out as text in the reply instead of calling it, and turning tools off for that model gives a plain answer instead. Turn them on for a model you know can call tools that is not being offered them; if no tools are enabled on the Tools tab, this model gets none either way.', 'alpaca-bot') . '</p>';
     }

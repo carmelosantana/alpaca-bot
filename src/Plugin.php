@@ -182,8 +182,8 @@ final class Plugin
         $menu = new Admin\Menu($settingsPage, [$chatScreen, 'render']);
         add_action('admin_menu', [$menu, 'register']);
         // Assets::enqueue() gates on the hook suffix itself, so this listens on every admin
-        // screen and enqueues on one. The heartbeat answer runs on admin-ajax, where no
-        // enqueue hook fires, so it is hooked here.
+        // screen and acts on two (the chat screen's assets; the settings page's inline rules).
+        // The heartbeat answer runs on admin-ajax, where no enqueue hook fires, so it is hooked here.
         $assets = new Admin\Assets();
         add_action('admin_enqueue_scripts', [$assets, 'enqueue']);
         add_filter('heartbeat_received', [$assets, 'heartbeat'], 10, 2);

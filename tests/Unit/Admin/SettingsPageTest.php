@@ -106,6 +106,11 @@ it('renders the overrides table with every model id and stored value escaped, la
     $html = (string) ob_get_clean();
     $escapedId = htmlspecialchars($evilId, ENT_QUOTES);
     expect($html)->not->toContain('<script')->not->toContain('<img')
+        // The wrapper is what Assets' inline rules hang off: it scopes them to this table and
+        // scrolls it sideways where the row is narrower than six columns. The captions sit
+        // outside it, so the scrollbar is under the table and not under two paragraphs.
+        ->toContain('<div class="ab-overrides"><table class="widefat striped"><thead>')
+        ->toContain('</table></div><p class="description">')
         ->toContain('<th scope="row">' . $escapedId . '</th>')
         ->toContain('name="alpaca_bot_settings[models.overrides][' . $escapedId . '][temperature]"')
         ->toContain('name="alpaca_bot_settings[models.overrides][llama3.2][system]" value="' . htmlspecialchars($evilValue, ENT_QUOTES) . '"')
@@ -117,6 +122,17 @@ it('renders the overrides table with every model id and stored value escaped, la
         ->not->toContain('<th>num_ctx</th>')
         ->toContain('Chat tab');
     expect(substr_count($html, '<tr><th scope="row">'))->toBe(3);
+});
+
+// Core derives a submenu page's screen id (and its admin_enqueue_scripts hook suffix) from the
+// parent's *translated* menu title, so the id is asked of core rather than spelled; HelpTabs and
+// Assets both gate on it. The derivation runs against real core, in a translated locale, in
+// tests/Integration/HelpTabsTest.php.
+it('names its screen as core derives it, and in the untranslated form where core is not loaded', function (): void {
+    Functions\when('get_plugin_page_hookname')->alias(static fn(string $page, string $parent): string => 'robot-alpaca_page_' . $page . '_under_' . $parent);
+    expect(SettingsPage::screen())->toBe('robot-alpaca_page_alpaca-bot-settings_under_alpaca-bot');
+    Functions\when('get_plugin_page_hookname')->alias(static fn(string $page, string $parent): string => 'alpaca-bot_page_' . $page);
+    expect(SettingsPage::screen())->toBe('alpaca-bot_page_alpaca-bot-settings');
 });
 
 it('renders the active tab and carries every other tab as hidden inputs with the secret masked', function (): void {
