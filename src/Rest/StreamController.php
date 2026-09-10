@@ -6,6 +6,7 @@ namespace AlpacaBot\Rest;
 
 use AlpacaBot\Chat\Conversation;
 use AlpacaBot\Chat\Pipeline;
+use AlpacaBot\Settings\Store;
 
 /**
  * `GET /chat/{conversation}/stream?token=…`: runs the turn a stream ticket describes and writes
@@ -27,23 +28,33 @@ use AlpacaBot\Chat\Pipeline;
  * and streams. Splitting it this way keeps the redemption (the part with an outcome core can
  * render, a 403) inside the permission and schema flow and leaves stream() pure: a ticket in,
  * frames out through a writer, which is what the tests run.
+ *
+ * What a redeemed ticket may consume is StreamBudget's: a wall-clock budget, checked here after
+ * every frame and passed to Sse::prepareOutput() as the process time limit, and a cap on how
+ * many streams one person may hold open at once, claimed in handle() and given back in serve().
+ * That class carries the whole argument — why an unbounded stream is a site-wide availability
+ * problem rather than a plugin one, why the budget is a policy and not a figure read out of the
+ * code, and why each of the three enforcement points is needed.
  */
 final class StreamController extends Controller
 {
-    /** @var array{request: \WP_REST_Request, ticket: array<string, mixed>}|null the ticket handle() redeemed and the request it redeemed it for, until serve() streams it */
+    /** @var array{request: \WP_REST_Request, ticket: array<string, mixed>, user_id: int, slot: string}|null the ticket handle() redeemed, the request it redeemed it for and the budget slot it holds, until serve() streams it */
     private ?array $redeemed = null;
 
-    /** @var \Closure(): void what serve() runs between sending its headers and writing the first frame */
+    /** @var \Closure(int): void what serve() runs between sending its headers and writing the first frame, given the turn's budget in seconds */
     private \Closure $prepareOutput;
+
+    private StreamBudget $budget;
 
     /**
      * `$prepareOutput` defaults to Sse::prepareOutput(), which ends every output buffer in the
      * process; a test runner that owns those buffers hands in something gentler.
      *
-     * @param (callable(): void)|null $prepareOutput
+     * @param (callable(int): void)|null $prepareOutput
      */
-    public function __construct(private Pipeline $pipeline, ?callable $prepareOutput = null)
+    public function __construct(private Pipeline $pipeline, Store $store, ?callable $prepareOutput = null)
     {
+        $this->budget = new StreamBudget($store);
         $this->prepareOutput = $prepareOutput === null ? Sse::prepareOutput(...) : $prepareOutput(...);
     }
 
@@ -52,6 +63,11 @@ final class StreamController extends Controller
      * turn must not cost two hits. The ticket is what stops this route being replayed instead:
      * bound to its user, and redeemable exactly once even when the same token arrives many
      * times at once (handle() says how), so one POST, one hit, one turn.
+     *
+     * One turn per ticket is not one worker per person, though, and this route holds a PHP
+     * worker for the length of a turn whether or not the client is still there. So what limits
+     * it is a concurrency cap rather than a rate: StreamBudget::claim() in handle(), which is
+     * about how many turns are running at once and not about how many were started.
      */
     public function routes(): array
     {
@@ -99,6 +115,12 @@ final class StreamController extends Controller
      * specials, as ChatController makes it); one with anything else in it is refused before it
      * becomes a transient key rather than stripped, so that no other string can be made to
      * name a ticket.
+     *
+     * The budget slot is claimed before the ticket is read, and given back on any refusal after
+     * that. Before, because a caller at their concurrency limit must get their ticket back
+     * unspent: the 429 is "not yet", the ticket lives 120 s, and redeeming-then-refusing would
+     * charge them a turn for being told to wait. The claim is keyed on the user core
+     * authenticated, so a wrong or stolen token can only churn its own sender's slots.
      */
     public function handle(\WP_REST_Request $request): \WP_REST_Response|\WP_Error
     {
@@ -107,18 +129,26 @@ final class StreamController extends Controller
             $response->header('Allow', 'GET');
             return $response;
         }
+        $userId = $this->userId();
+        $claim = $this->budget->claim($userId);
+        if ($claim['slot'] === null) {
+            $response = rest_convert_error_to_response(Errors::tooMany($claim['retry_after']));
+            $response->header('Retry-After', (string) $claim['retry_after']);
+            return $response;
+        }
         $token = (string) $request->get_param('token');
         $key = ChatController::STREAM_TRANSIENT . $token;
         $ticket = preg_match('/^[A-Za-z0-9]+$/', $token) === 1 ? get_transient($key) : false;
         if (
             !is_array($ticket)
-            || (int) ($ticket['user_id'] ?? -1) !== $this->userId()
+            || (int) ($ticket['user_id'] ?? -1) !== $userId
             || (int) ($ticket['conversation_id'] ?? -1) !== (int) $request->get_param('id')
             || !delete_transient($key)
         ) {
+            $this->budget->release($userId, $claim['slot']);
             return Errors::forbidden(__('Invalid or expired stream token.', 'alpaca-bot'));
         }
-        $this->redeemed = ['request' => $request, 'ticket' => $ticket];
+        $this->redeemed = ['request' => $request, 'ticket' => $ticket, 'user_id' => $userId, 'slot' => $claim['slot']];
         return new \WP_REST_Response(null, 200);
     }
 
@@ -137,22 +167,36 @@ final class StreamController extends Controller
      * the client. Returning true tells core the response has been sent. A request something
      * hooked earlier has served (`$served`) is not written over, even though its ticket is
      * spent: two bodies on one response help nobody.
+     *
+     * The budget slot handle() claimed goes back in a `finally` around the stream, and also on
+     * the `$served` path, where the ticket is spent and nothing will run. StreamBudget says why
+     * that is the whole release path and what bounds the case it cannot reach — a redemption
+     * this filter is never called for at all holds its slot until the stamp expires.
      */
     public function serve(bool $served, \WP_HTTP_Response $result, \WP_REST_Request $request, \WP_REST_Server $server): bool
     {
-        if ($served || $this->redeemed === null || $this->redeemed['request'] !== $request) {
+        if ($this->redeemed === null || $this->redeemed['request'] !== $request) {
             return $served;
         }
-        $ticket = $this->redeemed['ticket'];
+        $redeemed = $this->redeemed;
         $this->redeemed = null;
+        if ($served) {
+            $this->budget->release($redeemed['user_id'], $redeemed['slot']);
+            return true;
+        }
+        $seconds = $this->budget->seconds();
         foreach (Sse::headers() as $name => $value) {
             $server->send_header($name, $value);
         }
-        ($this->prepareOutput)();
-        $this->stream($ticket, static function (string $frame): void {
-            echo $frame; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- Not HTML: the body is text/event-stream and Sse::frame() builds every frame with wp_json_encode(), which is the escaping this wire format takes. HTML escaping here would corrupt the JSON the client parses.
-            flush();
-        });
+        ($this->prepareOutput)($seconds);
+        try {
+            $this->stream($redeemed['ticket'], static function (string $frame): void {
+                echo $frame; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- Not HTML: the body is text/event-stream and Sse::frame() builds every frame with wp_json_encode(), which is the escaping this wire format takes. HTML escaping here would corrupt the JSON the client parses.
+                flush();
+            }, null, microtime(true) + $seconds);
+        } finally {
+            $this->budget->release($redeemed['user_id'], $redeemed['slot']);
+        }
         return true;
     }
 
@@ -171,13 +215,24 @@ final class StreamController extends Controller
      * message is fixed and whose raw text reaches administrators only. A provider that fails
      * mid-reply has already had its deltas written; the error frame follows them.
      *
+     * `$deadline` is a microtime(true) instant, and is asked in the same place and for the same
+     * reason as `$aborted`: the only moment this code holds control between provider calls is
+     * just after a frame has gone out. A turn still running then is ended with a
+     * `stream_timeout` error frame and the generator left undrained, so it lands exactly where
+     * an abandoned turn does — the partial reply stored, `chat/failed` fired — with the
+     * difference that this one tells the client why. A turn that has stopped producing frames
+     * altogether is past this check and is the provider timeout's to end (StreamBudget).
+     *
      * @param array<string, mixed> $ticket as ChatController stored it: user_id, conversation_id, message, options
      * @param callable(string): void $write
      * @param (callable(): bool)|null $aborted
+     * @param float|null $deadline when the turn must stop, as microtime(true); null takes the site's whole budget from now
      */
-    public function stream(array $ticket, callable $write, ?callable $aborted = null): void
+    public function stream(array $ticket, callable $write, ?callable $aborted = null, ?float $deadline = null): void
     {
         $aborted ??= static fn(): bool => connection_aborted() !== 0;
+        $seconds = $this->budget->seconds();
+        $deadline ??= microtime(true) + $seconds;
         // Not static: Brain Monkey names a hooked closure by binding it, which a static one refuses.
         $started = function (Conversation $conversation, string $model) use ($write): void {
             $write(Sse::frame('start', ['conversation_id' => $conversation->id, 'model' => $model]));
@@ -188,6 +243,12 @@ final class StreamController extends Controller
             foreach ($turn as $delta) {
                 $write(Sse::frame('delta', ['text' => $delta->text, 'reasoning' => $delta->reasoning]));
                 if ($aborted()) {
+                    return;
+                }
+                // After the abort check, not before: a client that has gone cannot read an
+                // error frame, and writing one would be the frame that tells us it has gone.
+                if (microtime(true) >= $deadline) {
+                    $write(self::error(Errors::streamTimeout($seconds)));
                     return;
                 }
             }

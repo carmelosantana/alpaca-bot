@@ -2,9 +2,11 @@
 
 declare(strict_types=1);
 
+use AlpacaBot\Chat\Assistant;
 use AlpacaBot\Chat\CapExceeded;
 use AlpacaBot\Chat\Conversation;
 use AlpacaBot\Rest\ChatController;
+use AlpacaBot\Rest\StreamBudget;
 use AlpacaBot\Rest\StreamController;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Enum\ProviderFinishReason;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Provider\Response;
@@ -22,7 +24,8 @@ use Brain\Monkey\Functions;
 // other; stream() turns what the pipeline yields, returns or throws into frames, with the same
 // error policy as the JSON route, and stops when the client has gone. Sse::prepareOutput() ends
 // every output buffer, this runner's included, so serve() is built with it replaced; what it
-// really does to a PHP process is the wire check's (curl against the harness site).
+// really does to a PHP process is the wire check's (curl against the harness site) — which is
+// also why the budget is checked by what serve() *passes* it rather than by set_time_limit().
 // The conversation post the harness serves is 42, owned by user 3; the current user is 3.
 
 beforeEach(function (): void {
@@ -32,7 +35,8 @@ beforeEach(function (): void {
 });
 
 it('declares one GET /chat/{id}/stream route for editors, token required, not rate limited', function (): void {
-    $routes = (new StreamController(pipelineWith(null)->pipeline))->routes();
+    $h = pipelineWith(null);
+    $routes = (new StreamController($h->pipeline, $h->store))->routes();
     expect($routes)->toHaveCount(1)
         ->and($routes[0]['path'])->toBe('/chat/(?P<id>\d+)/stream')
         ->and($routes[0]['methods'])->toBe('GET')
@@ -46,7 +50,8 @@ it('declares one GET /chat/{id}/stream route for editors, token required, not ra
 
 it('registers its route and hooks rest_pre_serve_request to serve the stream itself', function (): void {
     Functions\expect('register_rest_route')->once()->withArgs(fn(string $ns, string $path): bool => $ns === 'alpaca-bot/v1' && $path === '/chat/(?P<id>\d+)/stream');
-    $controller = new StreamController(pipelineWith(null)->pipeline);
+    $h = pipelineWith(null);
+    $controller = new StreamController($h->pipeline, $h->store);
     // Last, after core's own handlers and anything else that may want to serve the request or
     // still send a header: once the first frame is out, a header() call would only warn.
     Filters\expectAdded('rest_pre_serve_request')->once()->with([$controller, 'serve'], PHP_INT_MAX, 4);
@@ -62,7 +67,7 @@ it('refuses a token that is missing, unknown, another user\'s, or for another co
         $deleted[] = $key;
         return true;
     });
-    $controller = new StreamController($h->pipeline);
+    $controller = new StreamController($h->pipeline, $h->store);
     foreach ([
         ['id' => '42'],                                  // no token at all
         ['id' => '42', 'token' => ''],
@@ -77,7 +82,10 @@ it('refuses a token that is missing, unknown, another user\'s, or for another co
             ->and($res->get_error_message())->toBe('Invalid or expired stream token.')
             ->and($res->get_error_data())->toBe(['status' => 403]);
     }
-    expect($deleted)->toBe([]);
+    // No ticket was deleted: a refused request spends nothing. The budget slot each attempt
+    // claimed and gave back is the other key that shows up here, which is release() doing its job.
+    expect(array_values(array_filter($deleted, static fn(string $k): bool => str_starts_with($k, ChatController::STREAM_TRANSIENT))))->toBe([])
+        ->and($deleted)->toBe(array_fill(0, 6, StreamBudget::TRANSIENT . '3'));
 });
 
 it('redeems a valid ticket once: the deletion is the claim, and the response carries nothing of the ticket', function (): void {
@@ -92,7 +100,7 @@ it('redeems a valid ticket once: the deletion is the claim, and the response car
         unset($h->transients[$key]);
         return true;
     });
-    $controller = new StreamController($h->pipeline);
+    $controller = new StreamController($h->pipeline, $h->store);
     $res = $controller->handle(restRequest('GET', '/alpaca-bot/v1/chat/42/stream', ['id' => '42', 'token' => 'tok']));
     expect($res)->toBeInstanceOf(WP_REST_Response::class)
         ->and($res->get_status())->toBe(200)
@@ -113,7 +121,7 @@ it('refuses a token another request claimed first: a delete that removed nothing
     $h->transients[ChatController::STREAM_TRANSIENT . 'tok'] = streamTicket();
     Functions\when('delete_transient')->justReturn(false);
     $prepared = 0;
-    $controller = new StreamController($h->pipeline, function () use (&$prepared): void {
+    $controller = new StreamController($h->pipeline, $h->store, function () use (&$prepared): void {
         $prepared++;
     });
     $request = restRequest('GET', '/alpaca-bot/v1/chat/42/stream', ['id' => '42', 'token' => 'tok']);
@@ -144,7 +152,7 @@ it('refuses HEAD with 405 and Allow: GET before the ticket is read, so a probe c
         return true;
     });
     restConvertsErrors();
-    $controller = new StreamController($h->pipeline);
+    $controller = new StreamController($h->pipeline, $h->store);
     $request = restRequest('HEAD', '/alpaca-bot/v1/chat/42/stream', ['id' => '42', 'token' => 'tok']);
     $res = $controller->handle($request);
     expect($res)->toBeInstanceOf(WP_REST_Response::class)
@@ -162,7 +170,7 @@ it('serve() leaves alone a request nothing was redeemed for, one redeemed for a 
     $h = pipelineWith(null);
     $h->transients[ChatController::STREAM_TRANSIENT . 'tok'] = streamTicket();
     $prepared = 0;
-    $controller = new StreamController($h->pipeline, function () use (&$prepared): void {
+    $controller = new StreamController($h->pipeline, $h->store, function () use (&$prepared): void {
         $prepared++;
     });
     $server = new WP_REST_Server();
@@ -196,7 +204,7 @@ it('serve() takes over the redeemed request: SSE headers, then the output prepar
     $h->transients[ChatController::STREAM_TRANSIENT . 'tok'] = streamTicket();
     $server = new WP_REST_Server();
     $sentBeforePrepare = null;
-    $controller = new StreamController($h->pipeline, function () use (&$sentBeforePrepare, $server): void {
+    $controller = new StreamController($h->pipeline, $h->store, function () use (&$sentBeforePrepare, $server): void {
         $sentBeforePrepare = $server->sent;
     });
     $request = restRequest('GET', '/alpaca-bot/v1/chat/42/stream', ['id' => '42', 'token' => 'tok']);
@@ -231,7 +239,7 @@ it('serve() streams a redeemed request whose response core has re-wrapped (?_env
     $h = pipelineWith(null, ['governance.user_monthly_tokens' => 10]);
     $h->transients['alpaca_bot_usage_3_2024-08'] = ['tokens' => 12, 'requests' => 1];
     $h->transients[ChatController::STREAM_TRANSIENT . 'tok'] = streamTicket();
-    $controller = new StreamController($h->pipeline, static function (): void {});
+    $controller = new StreamController($h->pipeline, $h->store, static function (): void {});
     $request = restRequest('GET', '/alpaca-bot/v1/chat/42/stream', ['id' => '42', 'token' => 'tok']);
     $response = $controller->handle($request);
     $enveloped = new WP_REST_Response(['body' => $response->get_data(), 'status' => $response->get_status(), 'headers' => $response->get_headers()], 200);
@@ -256,7 +264,7 @@ it('writes a start frame with the real conversation id, a delta per chunk, then 
     $frames = [];
     // A new conversation: the ticket says 0, the pipeline creates post 42 on its first advance
     // and `start` is where the client first learns the id, before any text arrives.
-    (new StreamController($h->pipeline))->stream(streamTicket(['conversation_id' => 0, 'options' => ['conversation_id' => 0, 'model' => 'qwen3:8b']]), function (string $f) use (&$frames): void {
+    (new StreamController($h->pipeline, $h->store))->stream(streamTicket(['conversation_id' => 0, 'options' => ['conversation_id' => 0, 'model' => 'qwen3:8b']]), function (string $f) use (&$frames): void {
         $frames[] = $f;
     });
     expect($frames)->toHaveCount(5)
@@ -289,7 +297,7 @@ it('stops after the frame the client did not read: no done frame, the listener r
     Actions\expectRemoved('alpaca_bot/chat/started')->once();
     Actions\expectDone('alpaca_bot/chat/failed')->once()->with(Mockery::type(\RuntimeException::class), Mockery::type(Conversation::class));
     $frames = [];
-    (new StreamController($h->pipeline))->stream(
+    (new StreamController($h->pipeline, $h->store))->stream(
         streamTicket(),
         function (string $f) use (&$frames): void {
             $frames[] = $f;
@@ -310,7 +318,7 @@ it('writes one error frame, in the JSON route\'s error shape, when the pipeline 
     $h->transients['alpaca_bot_usage_3_2024-08'] = ['tokens' => 12, 'requests' => 1];
     Actions\expectDone('alpaca_bot/chat/started')->never();
     $frames = [];
-    (new StreamController($h->pipeline))->stream(streamTicket(), function (string $f) use (&$frames): void {
+    (new StreamController($h->pipeline, $h->store))->stream(streamTicket(), function (string $f) use (&$frames): void {
         $frames[] = $f;
     });
     expect($frames)->toBe(["event: error\ndata: {\"code\":\"alpaca_bot_cap_exceeded\",\"message\":\"Your monthly token cap has been reached (12 of 10 tokens).\",\"data\":{\"status\":402,\"scope\":\"user\",\"limit\":10,\"used\":12}}\n\n"]);
@@ -319,7 +327,7 @@ it('writes one error frame, in the JSON route\'s error shape, when the pipeline 
     $h = pipelineWith(null);
     $h->post = conversationChatPost(42, '9');
     $frames = [];
-    (new StreamController($h->pipeline))->stream(streamTicket(), function (string $f) use (&$frames): void {
+    (new StreamController($h->pipeline, $h->store))->stream(streamTicket(), function (string $f) use (&$frames): void {
         $frames[] = $f;
     });
     expect($frames)->toBe(["event: error\ndata: {\"code\":\"alpaca_bot_bad_request\",\"message\":\"Conversation 42 was not found.\",\"data\":{\"status\":400}}\n\n"]);
@@ -332,7 +340,7 @@ it('keeps the provider\'s words out of an editor\'s error frame and hands them t
     $raw = 'Could not resolve host: ollama-gateway.internal for "http://ollama-gateway.internal:11434/v1/chat/completions".';
     $h = pipelineWith(pipelineProvider([new Response('par', ProviderFinishReason::Stop), new \RuntimeException($raw)]));
     $frames = [];
-    (new StreamController($h->pipeline))->stream(streamTicket(), function (string $f) use (&$frames): void {
+    (new StreamController($h->pipeline, $h->store))->stream(streamTicket(), function (string $f) use (&$frames): void {
         $frames[] = $f;
     });
     // The text that had arrived was streamed; the failure follows it, then nothing more.
@@ -344,7 +352,7 @@ it('keeps the provider\'s words out of an editor\'s error frame and hands them t
     Functions\when('current_user_can')->justReturn(true);
     $h = pipelineWith(pipelineProvider([new \RuntimeException($raw)]));
     $frames = [];
-    (new StreamController($h->pipeline))->stream(streamTicket(), function (string $f) use (&$frames): void {
+    (new StreamController($h->pipeline, $h->store))->stream(streamTicket(), function (string $f) use (&$frames): void {
         $frames[] = $f;
     });
     expect($frames)->toHaveCount(1)
@@ -355,4 +363,128 @@ it('keeps the provider\'s words out of an editor\'s error frame and hands them t
         'message' => 'The model provider could not complete the request.',
         'data' => ['status' => 502, 'detail' => 'Provider error: ' . $raw],
     ]);
+});
+
+// --- StreamBudget, as the stream route uses it --------------------------------------------
+// StreamBudgetTest covers the arithmetic and the slot bookkeeping on their own; what is pinned
+// here is that this route actually applies them: the budget reaches the process time limit and
+// the in-band deadline, the cap is claimed before the ticket is read, and the slot comes back.
+
+it('hands prepareOutput a wall-clock budget derived from provider.timeout and the iteration budget, never 0', function (): void {
+    // The default 60 s provider timeout, six agent iterations, and room for one nested tool
+    // call (summarize) per iteration: 60 x 6 x 2 = 720. `set_time_limit(0)` was what made one
+    // redeemed ticket able to hold a PHP worker with no end.
+    $h = pipelineWith(pipelineProvider([new Response('a', ProviderFinishReason::Stop)]));
+    actionRuns('alpaca_bot/chat/started');
+    $h->transients[ChatController::STREAM_TRANSIENT . 'tok'] = streamTicket();
+    $seconds = 0;
+    // A default, so the failure when nothing is passed is the number and not an ArgumentCountError.
+    $controller = new StreamController($h->pipeline, $h->store, function (int $limit = 0) use (&$seconds): void {
+        $seconds = $limit;
+    });
+    $request = restRequest('GET', '/alpaca-bot/v1/chat/42/stream', ['id' => '42', 'token' => 'tok']);
+    $controller->handle($request);
+    ob_start();
+    $controller->serve(false, new WP_REST_Response(), $request, new WP_REST_Server());
+    ob_get_clean();
+    expect($seconds)->toBe(720)
+        ->and($seconds)->toBe(60 * Assistant::MAX_ITERATIONS * 2);
+
+    // It follows the setting: a site that fails a provider call after 5 s gives a turn 60 s.
+    $h = pipelineWith(pipelineProvider([new Response('a', ProviderFinishReason::Stop)]), ['provider.timeout' => 5]);
+    actionRuns('alpaca_bot/chat/started');
+    $h->transients[ChatController::STREAM_TRANSIENT . 'tok'] = streamTicket();
+    $seconds = 0;
+    $controller = new StreamController($h->pipeline, $h->store, function (int $limit = 0) use (&$seconds): void {
+        $seconds = $limit;
+    });
+    $request = restRequest('GET', '/alpaca-bot/v1/chat/42/stream', ['id' => '42', 'token' => 'tok']);
+    $controller->handle($request);
+    ob_start();
+    $controller->serve(false, new WP_REST_Response(), $request, new WP_REST_Server());
+    ob_get_clean();
+    expect($seconds)->toBe(60);
+});
+
+it('ends a turn that has outrun its budget with a stream_timeout frame, keeping what had arrived', function (): void {
+    // The deadline is asked where the abort check is asked — just after a frame went out — and
+    // lands where an abandoned turn lands: generator undrained, partial reply stored,
+    // chat/failed fired. The difference is that this one tells the client why it stopped.
+    $h = pipelineWith(pipelineProvider([
+        new Response('a', ProviderFinishReason::Stop),
+        new Response('b', ProviderFinishReason::Stop),
+    ]));
+    actionRuns('alpaca_bot/chat/started');
+    Actions\expectRemoved('alpaca_bot/chat/started')->once();
+    Actions\expectDone('alpaca_bot/chat/failed')->once()->with(Mockery::type(\RuntimeException::class), Mockery::type(Conversation::class));
+    $frames = [];
+    (new StreamController($h->pipeline, $h->store))->stream(
+        streamTicket(),
+        function (string $f) use (&$frames): void {
+            $frames[] = $f;
+        },
+        static fn(): bool => false,
+        microtime(true) - 1,
+    );
+    expect(array_map(static fn(string $f): string => strtok($f, "\n"), $frames))->toBe(['event: start', 'event: delta', 'event: error']);
+    $error = json_decode(substr($frames[2], strlen("event: error\ndata: ")), true);
+    expect($error['code'])->toBe('alpaca_bot_stream_timeout')
+        // 504, not 408: the request arrived whole and on time; the turn behind it ran out of time.
+        ->and($error['data'])->toBe(['status' => 504, 'limit' => 720])
+        ->and($h->meta[42]['ab_messages'][1])->toMatchArray(['role' => 'assistant', 'content' => 'a'])
+        ->and($h->meta[42]['ab_messages'][1]['meta']->partial)->toBeTrue();
+});
+
+it('refuses a redemption past the concurrent-stream limit with a 429, and leaves that ticket unspent', function (): void {
+    // The stream route is not rate limited, so without this one account's 30 tickets a minute
+    // redeem into 30 PHP workers held for the length of a turn each. The refusal comes before
+    // the ticket is read: a caller told to wait must still have their turn.
+    $h = pipelineWith(null);
+    transientsPersistIn($h);
+    restConvertsErrors();
+    foreach (range(1, StreamBudget::LIMIT + 1) as $n) {
+        $h->transients[ChatController::STREAM_TRANSIENT . "tok{$n}"] = streamTicket();
+    }
+    $controller = new StreamController($h->pipeline, $h->store);
+    foreach (range(1, StreamBudget::LIMIT) as $n) {
+        $res = $controller->handle(restRequest('GET', '/alpaca-bot/v1/chat/42/stream', ['id' => '42', 'token' => "tok{$n}"]));
+        expect($res->get_status())->toBe(200, "redemption {$n}");
+    }
+    expect($h->transients[StreamBudget::TRANSIENT . '3'])->toHaveCount(StreamBudget::LIMIT);
+
+    $over = $controller->handle(restRequest('GET', '/alpaca-bot/v1/chat/42/stream', ['id' => '42', 'token' => 'tok4']));
+    expect($over)->toBeInstanceOf(WP_REST_Response::class)
+        ->and($over->get_status())->toBe(429)
+        ->and($over->get_data()['code'])->toBe('alpaca_bot_rate_limited')
+        // Every slot this person holds has expired by then, so waiting it out always gets through.
+        ->and($over->get_headers())->toBe(['Retry-After' => '720'])
+        ->and($over->get_data()['data']['retry_after'])->toBe(720)
+        // Unspent: the ticket is still there to redeem when a slot frees.
+        ->and($h->transients)->toHaveKey(ChatController::STREAM_TRANSIENT . 'tok4')
+        ->and($h->transients[StreamBudget::TRANSIENT . '3'])->toHaveCount(StreamBudget::LIMIT);
+});
+
+it('gives the slot back when the stream ends, and when something else served the request instead', function (): void {
+    $h = pipelineWith(pipelineProvider([new Response('a', ProviderFinishReason::Stop)]));
+    actionRuns('alpaca_bot/chat/started');
+    transientsPersistIn($h);
+    $h->transients[ChatController::STREAM_TRANSIENT . 'tok'] = streamTicket();
+    $controller = new StreamController($h->pipeline, $h->store, static function (int $seconds): void {});
+    $request = restRequest('GET', '/alpaca-bot/v1/chat/42/stream', ['id' => '42', 'token' => 'tok']);
+    $controller->handle($request);
+    expect($h->transients[StreamBudget::TRANSIENT . '3'])->toHaveCount(1);
+    ob_start();
+    $controller->serve(false, new WP_REST_Response(), $request, new WP_REST_Server());
+    ob_get_clean();
+    // The whole set was the one slot, so the row is gone rather than stored empty.
+    expect($h->transients)->not->toHaveKey(StreamBudget::TRANSIENT . '3');
+
+    // Served by something hooked earlier: nothing streams, the ticket is spent anyway, and
+    // holding the slot until its stamp expires would be a leak for no run.
+    $h->transients[ChatController::STREAM_TRANSIENT . 'two'] = streamTicket();
+    $request = restRequest('GET', '/alpaca-bot/v1/chat/42/stream', ['id' => '42', 'token' => 'two']);
+    $controller->handle($request);
+    expect($h->transients[StreamBudget::TRANSIENT . '3'])->toHaveCount(1)
+        ->and($controller->serve(true, new WP_REST_Response(), $request, new WP_REST_Server()))->toBeTrue()
+        ->and($h->transients)->not->toHaveKey(StreamBudget::TRANSIENT . '3');
 });

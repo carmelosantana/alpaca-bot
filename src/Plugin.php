@@ -222,7 +222,7 @@ final class Plugin
          */
         $controllers = apply_filters('alpaca_bot/rest/controllers', [
             new Rest\ChatController($this->get(Chat\Pipeline::class)),
-            new Rest\StreamController($this->get(Chat\Pipeline::class)),
+            new Rest\StreamController($this->get(Chat\Pipeline::class), $this->get(Store::class)),
             new Rest\ConversationsController($this->get(Chat\ConversationStore::class), $this->get(Store::class)),
             new Rest\ModelsController($this->get(Provider\ModelCatalog::class), $this->get(Store::class)),
             new Rest\SettingsController($this->get(Store::class)),

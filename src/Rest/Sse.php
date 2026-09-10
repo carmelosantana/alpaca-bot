@@ -56,11 +56,19 @@ final class Sse
      * token; on a tool turn it would have been a whole tool's side effect, so the pipeline
      * yields an empty delta before every tool runs (Chat\AgentStreamObserver's heartbeat), a
      * frame whose write is the check, and a disconnected client's run is dropped before the
-     * tool, not after. The window that remains is one provider call.
-     * The time limit is lifted because a slow model can outlast max_execution_time, which on
-     * Linux counts only this process's CPU time but is not guaranteed to.
+     * tool, not after. The window that remains is one provider call. StreamController's
+     * wall-clock deadline is checked in the same places, with the same window.
+     *
+     * `$seconds` replaces the `set_time_limit(0)` this used to do. A lifted limit was for a slow
+     * model outlasting max_execution_time; what it also allowed was one redeemed ticket holding a
+     * PHP worker with no end, and `ignore_user_abort(true)` two lines below means closing the
+     * browser does not end it either. StreamBudget::seconds() sizes the replacement and says how.
+     * It is a backstop and not the bound: on Unix, max_execution_time does not count time spent
+     * blocked in a stream operation, which is where a slow provider's time goes, so this fires
+     * for a run that is burning CPU and StreamController's own deadline check is what ends one
+     * that is waiting. Both are here because they fail in different places.
      */
-    public static function prepareOutput(): void
+    public static function prepareOutput(int $seconds): void
     {
         // phpcs:disable WordPress.PHP.NoSilencedErrors.Discouraged, WordPress.PHP.IniSet.Risky, WordPress.PHP.DiscouragedPHPFunctions.runtime_configuration_apache_setenv -- Turning off buffering and compression for the life of this one request is what makes progressive streaming possible at all; there is no WordPress API for it. Each call is silenced because a host that disables the setting, or runs PHP as something other than an Apache module, makes it emit a warning that would be written into the event stream and corrupt the first frame. Every one is advisory: a failure only means the client sees the reply in larger pieces.
         if (function_exists('apache_setenv')) {
@@ -78,6 +86,6 @@ final class Sse
         }
         // phpcs:enable WordPress.PHP.NoSilencedErrors.Discouraged, WordPress.PHP.IniSet.Risky, WordPress.PHP.DiscouragedPHPFunctions.runtime_configuration_apache_setenv
         ignore_user_abort(true);
-        set_time_limit(0);
+        set_time_limit(max(1, $seconds));
     }
 }

@@ -47,7 +47,18 @@ use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Enum\EmptyResponseHandling;
  */
 final class Assistant extends AbstractAgent
 {
-    public function __construct(ProviderInterface $provider, private string $instructionsText, int $maxIter = 6)
+    /**
+     * The default iteration budget, named because something outside the agent has to size a
+     * turn: Rest\StreamBudget derives an SSE stream's wall-clock budget from it, and the two
+     * would drift if the number were written twice. Pipeline::agentTurn() takes the default.
+     *
+     * One iteration is one `provider->stream()` call (AbstractAgent::run()'s loop). The empty
+     * reply nudges are not extra: they `continue` that same loop and spend iterations from this
+     * budget.
+     */
+    public const MAX_ITERATIONS = 6;
+
+    public function __construct(ProviderInterface $provider, private string $instructionsText, int $maxIter = self::MAX_ITERATIONS)
     {
         parent::__construct($provider, $maxIter, emptyResponseHandling: EmptyResponseHandling::NudgeThenFallback);
     }

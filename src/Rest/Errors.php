@@ -80,6 +80,23 @@ final class Errors
         return new \WP_Error('alpaca_bot_method_not_allowed', __('This route does not answer that method.', 'alpaca-bot'), ['status' => 405]);
     }
 
+    /**
+     * 504 for a streamed turn that outran the site's wall-clock budget for one (StreamBudget
+     * says how the budget is chosen). Gateway Timeout rather than 408: the client's request
+     * arrived whole and on time, and what ran out of time was the turn behind it. It only ever
+     * reaches a client inside an `error` frame — a stream that has already sent its headers has
+     * no status left to set — so the code is what a client keys on, and `limit` is there so it
+     * can say how long the site allows rather than guess.
+     */
+    public static function streamTimeout(int $seconds): \WP_Error
+    {
+        return new \WP_Error(
+            'alpaca_bot_stream_timeout',
+            __('This reply ran longer than the site allows for one streamed turn, so it was stopped. What had arrived is saved.', 'alpaca-bot'),
+            ['status' => 504, 'limit' => $seconds],
+        );
+    }
+
     /** `$what` is the (translated) noun, e.g. "Conversation"; used for another user's resource too, so existence is not leaked. */
     public static function notFound(string $what): \WP_Error
     {

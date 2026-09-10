@@ -403,6 +403,30 @@ function pipelineWith(mixed $provider, array $settings = [], array $contexts = [
 }
 
 /**
+ * StreamControllerTest: upgrades pipelineWith()'s transients from read-only to a real store, so
+ * a test about something the code under test *writes* and reads back (Rest\StreamBudget's slot
+ * set) sees its own writes. pipelineWith() leaves set_transient() and delete_transient() as
+ * flat returns because most of its callers only seed a cache entry and assert on the writes
+ * elsewhere; call this after it when the round trip is the point. delete_transient() reports
+ * whether it removed anything, which is what StreamController's ticket redemption claims a
+ * token with.
+ */
+function transientsPersistIn(object $h): void
+{
+    Functions\when('set_transient')->alias(static function (string $key, mixed $value) use ($h): bool {
+        $h->transients[$key] = $value;
+        return true;
+    });
+    Functions\when('delete_transient')->alias(static function (string $key) use ($h): bool {
+        if (!array_key_exists($key, $h->transients)) {
+            return false;
+        }
+        unset($h->transients[$key]);
+        return true;
+    });
+}
+
+/**
  * StreamControllerTest: makes `$hook` behave as core's do_action() does for the duration of a
  * test. Brain Monkey records what add_action() registers and what do_action() fires but never
  * runs the one for the other, so code under test that listens to a pipeline action (the stream

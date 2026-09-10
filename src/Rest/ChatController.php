@@ -22,7 +22,10 @@ use AlpacaBot\Context\Context;
  * headers, so the message and options have to be handed over some other way: they are stored
  * under the token (transient `alpaca_bot_stream_{token}`, STREAM_TTL seconds) together with
  * the user id that asked, and the stream route runs the turn as that user, for that user only.
- * This POST is where the rate limit is counted for a streamed turn as well as a direct one.
+ * This POST is where the rate limit is counted for a streamed turn as well as a direct one. A
+ * 202 is therefore not a promise that the turn will run: the redemption can still answer 429
+ * when the caller already has StreamBudget::LIMIT streams open, and the ticket stays valid for
+ * the rest of its STREAM_TTL so the client can retry it rather than post again.
  *
  * Every refusal is a WP_Error with Errors' shapes; what the pipeline throws is mapped, not
  * leaked, by Errors::fromPipeline(): CapExceeded is 402, an InvalidArgumentException (the

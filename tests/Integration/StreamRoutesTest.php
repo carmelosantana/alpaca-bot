@@ -7,6 +7,7 @@ namespace AlpacaBot\Tests\Integration;
 use AlpacaBot\Chat\Pipeline;
 use AlpacaBot\Plugin;
 use AlpacaBot\Rest\StreamController;
+use AlpacaBot\Settings\Store;
 
 /**
  * GET /chat/{id}/stream over real core: the ticket POST /chat issued is redeemed through the
@@ -16,6 +17,11 @@ use AlpacaBot\Rest\StreamController;
  * Sse::prepareOutput() would end every output buffer, PHPUnit's included; the unit suite covers
  * it with the output preparation replaced, and the wire itself is the real check's (curl
  * against the harness site, which is also the only place the concurrent claim can be watched).
+ *
+ * A consequence of serve() not running: every redemption below claims a StreamBudget slot that
+ * nothing gives back, so a test holds one slot per ticket it redeems for the life of the test.
+ * No test here redeems more than StreamBudget::LIMIT (3) as one user, which is why they are not
+ * answered 429; a new test that redeems more must release or use another user.
  *
  * @group rest
  */
@@ -49,7 +55,7 @@ final class StreamRoutesTest extends TestCase
     private function frames(array $ticket): array
     {
         $frames = [];
-        $controller = new StreamController(Plugin::instance()->get(Pipeline::class));
+        $controller = new StreamController(Plugin::instance()->get(Pipeline::class), Plugin::instance()->get(Store::class));
         $controller->stream($ticket, static function (string $frame) use (&$frames): void {
             $frames[] = $frame;
         });

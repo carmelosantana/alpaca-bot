@@ -76,8 +76,7 @@ final class RateLimit
          * @param string $bucket    which counter the hit lands in, `chat`
          */
         $limit = max(1, (int) apply_filters('alpaca_bot/rate_limit', self::PER_MINUTE, $userId, $bucket));
-        $subject = $userId > 0 ? (string) $userId : 'ip_' . self::client();
-        $key = sprintf('alpaca_bot_rl_%s_%s_%s', $bucket, $subject, gmdate('YmdHi', $now));
+        $key = sprintf('alpaca_bot_rl_%s_%s_%s', $bucket, self::subject($userId), gmdate('YmdHi', $now));
         $count = (int) get_transient($key) + 1;
         set_transient($key, $count, self::TTL);
         $allowed = $count <= $limit;
@@ -86,6 +85,18 @@ final class RateLimit
             'remaining' => max(0, $limit - $count),
             'retry_after' => $allowed ? 0 : 60 - ($now % 60),
         ];
+    }
+
+    /**
+     * Who a per-person counter is kept for: the user id, or the hashed client address for a
+     * request with no user. Public because StreamBudget keys its own per-person counter the same
+     * way and the two must agree on what "one person" means — a route a site has opened to
+     * visitors through its capability filter is every visitor to get_current_user_id(), and one
+     * shared bucket there would let one script spend everyone's allowance of either counter.
+     */
+    public static function subject(int $userId): string
+    {
+        return $userId > 0 ? (string) $userId : 'ip_' . self::client();
     }
 
     /**
