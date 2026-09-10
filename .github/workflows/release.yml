@@ -308,10 +308,10 @@ jobs:
     steps:
       # Checked out for one directory: .wordpress-org/, which the action's deploy.sh resolves
       # against GITHUB_WORKSPACE and rsyncs into the SVN `assets/` directory (deploy.sh:179-183
-      # at the pinned SHA). The repository tracks four files there -- banner-772x250.jpg,
-      # banner-1544x500.jpg, icon-128x128.png, icon-256x256.png -- and .distignore keeps that
-      # directory out of the plugin zip, which is why it has to come from the checkout rather
-      # than from the artifact.
+      # at the pinned SHA). The repository tracks four listing files there -- banner-772x250.png,
+      # banner-1544x500.png, icon-128x128.png, icon-256x256.png -- plus screenshot-1..3.png, and
+      # .distignore keeps that directory out of the plugin zip, which is why it has to come from
+      # the checkout rather than from the artifact.
       #
       # Those four names are not a style: developer.wordpress.org's plugin-assets page defines
       # exactly `banner-772x250`, `banner-1544x500` (each with `-rtl`/locale variants),
