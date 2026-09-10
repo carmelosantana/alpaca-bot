@@ -30,14 +30,23 @@ use AlpacaBot\Plugin;
  * admin chat screen ran, and being on `init` they ran on every other request too
  * (docs/reviews/2026-09-09-performance-baseline.md).
  * Autoloaded they cost nothing beyond three short rows in the alloptions read WordPress
- * already does. A site that ran a pre-release 0.5 migration keeps whatever autoload value
- * its rows were given, because nothing rewrites a flag once it is set.
+ * already does.
+ *
+ * Writing them autoloaded only fixes rows written from here on, because none of the three
+ * *Pending() checks looks at a flag again once it is set, so nothing ever rewrites one. A site
+ * that completed the migration under a pre-release 0.5 would keep three non-autoloaded rows
+ * forever, so a fourth flag (FLAG_AUTOLOAD) carries a one-time wp_set_options_autoload() over
+ * the other three; it is itself autoloaded, and once it is set needed() is four alloptions
+ * reads and no query at all. 0.4.17 never wrote any of these option names (`git grep
+ * migrated_04 v0.4.17` is empty), so a genuine 0.4 site creates all four rows fresh under the
+ * new value and the repair is a no-op there.
  */
 final class Migrate04
 {
     public const FLAG = 'alpaca_bot_migrated_04';
     public const FLAG_CONVERSATIONS = 'alpaca_bot_migrated_04_conversations';
     public const FLAG_RETENTION = 'alpaca_bot_migrated_retention';
+    public const FLAG_AUTOLOAD = 'alpaca_bot_migrated_flag_autoload';
 
     private const LEGACY_PREFIX = 'alpaca_bot_';
 
@@ -83,7 +92,7 @@ final class Migrate04
     /** True while any step still has work: run() does what is pending and no more. */
     public function needed(): bool
     {
-        return $this->optionsPending() || $this->retentionPending() || $this->conversationsPending();
+        return $this->optionsPending() || $this->retentionPending() || $this->conversationsPending() || $this->autoloadPending();
     }
 
     /**
@@ -106,12 +115,37 @@ final class Migrate04
         if ($this->conversationsPending()) {
             $this->migrateConversations();
         }
+        if ($this->autoloadPending()) {
+            $this->repairFlagAutoload();
+        }
         return $this->store->all();
     }
 
     private function retentionPending(): bool
     {
         return get_option(self::FLAG_RETENTION, false) === false;
+    }
+
+    private function autoloadPending(): bool
+    {
+        return get_option(self::FLAG_AUTOLOAD, false) === false;
+    }
+
+    /**
+     * Puts the three completion flags on autoload once, for a site that completed the migration
+     * under a pre-release 0.5 and so holds them non-autoloaded (class docblock).
+     *
+     * Last in run() so it sees whichever flags this request wrote, and keyed on a flag of its own
+     * so it happens exactly once: `wp_set_options_autoload()` is a SELECT plus at most one UPDATE
+     * and one cache flush, which is fine once and is not fine per request. It ignores names with
+     * no row, so a first request that has not finished the conversation pass leaves
+     * FLAG_CONVERSATIONS to run()'s own autoloaded write later. Its own flag is written after the
+     * call, not before, so a request that dies mid-repair runs it again rather than skipping it.
+     */
+    private function repairFlagAutoload(): void
+    {
+        wp_set_options_autoload([self::FLAG, self::FLAG_RETENTION, self::FLAG_CONVERSATIONS], true);
+        update_option(self::FLAG_AUTOLOAD, '1', true);
     }
 
     /**
@@ -160,10 +194,17 @@ final class Migrate04
     /**
      * True when 0.4 options exist and the move has not run yet.
      *
-     * On a site that never had 0.4 the flag is written here, so the two non-autoloaded legacy
-     * reads that detect a 0.4 site happen once instead of on every request the site serves —
-     * which, hooked on `init`, is what this would otherwise be. The flag read above costs no
-     * query of its own: every write of it, here and in run(), is autoloaded (class docblock).
+     * On a site that never had 0.4 the flag is written here, so the two legacy reads that detect
+     * a 0.4 site happen once instead of on every request the site serves — which, hooked on
+     * `init`, is what this would otherwise be. On such a site neither row exists at all, and a
+     * missing option is one uncached SELECT per request without a persistent object cache:
+     * core records the miss in its `notoptions` cache (wp-includes/option.php), which does not
+     * outlive the request. On a real 0.4 site both rows do exist and are autoloaded —
+     * `v0.4.17:src/Define.php` registers `api_url` and `default_model` `'autoload' => 'yes'`,
+     * and `v0.4.17:src/Utils/Options.php:43` passes that to add_option() — so there they cost no
+     * query of their own, this branch is not taken, and run() writes the flag instead. The flag
+     * read above costs no query either: every write of it, here and in run(), is autoloaded
+     * (class docblock).
      */
     private function optionsPending(): bool
     {

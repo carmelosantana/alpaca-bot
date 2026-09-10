@@ -43,6 +43,16 @@ uses()->beforeEach(function (): void {
     // not a pass-through: a test that asserts on what a write was handed should see the value
     // the site's database would (wpSlashLikeCore() does what core's does).
     Functions\when('wp_slash')->alias('wpSlashLikeCore');
+    // Settings\Migrate04's one-time flag repair calls wp_set_options_autoload(), which moves rows
+    // in a table this suite does not have. The stand-in records what it was handed in
+    // $GLOBALS['abAutoloadSet'] so a test can assert the call without a mock expectation; what it
+    // actually does to a row is asserted against a real WordPress in
+    // tests/Integration/Migrate04AutoloadTest.php, which is the only place that can see it.
+    $GLOBALS['abAutoloadSet'] = [];
+    Functions\when('wp_set_options_autoload')->alias(function (array $options, mixed $autoload): array {
+        $GLOBALS['abAutoloadSet'][] = ['options' => $options, 'autoload' => $autoload];
+        return array_fill_keys($options, true);
+    });
     // Plugin is a process-wide singleton and Pest runs the suite in one process:
     // reset it so every test's boot() starts from a cold state.
     $instance = new ReflectionProperty(Plugin::class, 'instance');

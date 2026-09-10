@@ -52,17 +52,18 @@ it('maps 0.4 options into the new schema and appends /v1 to the base url', funct
         ->and($written)->toBe($out);
 });
 
-it('is not needed when all three flags are set, and writes nothing', function (): void {
-    Functions\when('get_option')->alias(fn(string $k, mixed $d = false) => in_array($k, [Migrate04::FLAG, Migrate04::FLAG_RETENTION, Migrate04::FLAG_CONVERSATIONS], true) ? '1' : $d);
+it('is not needed when all four flags are set, and writes nothing', function (): void {
+    Functions\when('get_option')->alias(fn(string $k, mixed $d = false) => in_array($k, [Migrate04::FLAG, Migrate04::FLAG_RETENTION, Migrate04::FLAG_CONVERSATIONS, Migrate04::FLAG_AUTOLOAD], true) ? '1' : $d);
     Functions\expect('update_option')->never();
     Functions\expect('get_posts')->never();
     expect((new Migrate04(new Store()))->needed())->toBeFalse();
 });
 
-// Without the flags a 0.5-only site would re-run the detection get_option() calls (the two
-// legacy reads are non-autoloaded, so uncached misses) and the conversation query on every
-// admin request forever.
-it('on a fresh install moves no options, runs one empty conversation batch, and flags all three steps so detection runs only once', function (): void {
+// Without the flags a 0.5-only site would re-run the detection get_option() calls (on a site
+// that never had 0.4 neither legacy row exists, and a missing option is an uncached SELECT per
+// request: core's notoptions cache does not outlive the request) and the conversation query on
+// every admin request forever.
+it('on a fresh install moves no options, runs one empty conversation batch, and flags every step so detection runs only once', function (): void {
     $stored = [];
     migrate04Options($stored);
     // One query for receipts (none: a fresh site keeps the retention default), one conversation batch.
@@ -72,7 +73,7 @@ it('on a fresh install moves no options, runs one empty conversation batch, and 
     expect($m->needed())->toBeTrue()
         ->and($stored)->toBe([Migrate04::FLAG => '1']);
     $m->run();
-    expect($stored)->toBe([Migrate04::FLAG => '1', Migrate04::FLAG_RETENTION => '1', Migrate04::FLAG_CONVERSATIONS => '1'])
+    expect($stored)->toBe([Migrate04::FLAG => '1', Migrate04::FLAG_RETENTION => '1', Migrate04::FLAG_CONVERSATIONS => '1', Migrate04::FLAG_AUTOLOAD => '1'])
         ->and($m->needed())->toBeFalse()
         ->and((new Store())->get('privacy.usage_retention_days'))->toBe(90);
 });
@@ -280,8 +281,35 @@ it('writes the three completion flags autoloaded, so needed() adds no query once
     });
     Functions\when('get_posts')->justReturn([]);
     (new Migrate04(new Store()))->run();
-    expect($autoload)->toHaveKeys([Migrate04::FLAG, Migrate04::FLAG_RETENTION, Migrate04::FLAG_CONVERSATIONS])
+    expect($autoload)->toHaveKeys([Migrate04::FLAG, Migrate04::FLAG_RETENTION, Migrate04::FLAG_CONVERSATIONS, Migrate04::FLAG_AUTOLOAD])
         ->and($autoload[Migrate04::FLAG])->toBeTrue()
         ->and($autoload[Migrate04::FLAG_RETENTION])->toBeTrue()
-        ->and($autoload[Migrate04::FLAG_CONVERSATIONS])->toBeTrue();
+        ->and($autoload[Migrate04::FLAG_CONVERSATIONS])->toBeTrue()
+        ->and($autoload[Migrate04::FLAG_AUTOLOAD])->toBeTrue();
+});
+
+// Writing the flags autoloaded only reaches rows written from here on: no *Pending() looks at a
+// flag once it is set, so a site that finished migrating under a pre-release 0.5 keeps three
+// non-autoloaded rows and three SELECTs a request forever. FLAG_AUTOLOAD carries a one-time
+// wp_set_options_autoload() over them. What the call does to a real row is asserted in
+// tests/Integration/Migrate04AutoloadTest.php; this pins that it is made once, over the right
+// three names, and that it is not made again.
+it('repairs the autoload of flags a pre-release 0.5 already wrote, exactly once', function (): void {
+    $stored = [Migrate04::FLAG => '1', Migrate04::FLAG_RETENTION => '1', Migrate04::FLAG_CONVERSATIONS => '1'];
+    Functions\when('get_option')->alias(function (string $k, mixed $d = false) use (&$stored): mixed {
+        return $stored[$k] ?? ($k === 'alpaca_bot_settings' ? [] : $d);
+    });
+    Functions\when('update_option')->alias(function (string $k, mixed $v) use (&$stored): bool { $stored[$k] = $v; return true; });
+    Functions\expect('get_posts')->never();
+
+    $m = new Migrate04(new Store());
+    expect($m->needed())->toBeTrue();
+    $m->run();
+    expect($GLOBALS['abAutoloadSet'])->toBe([['options' => [Migrate04::FLAG, Migrate04::FLAG_RETENTION, Migrate04::FLAG_CONVERSATIONS], 'autoload' => true]])
+        ->and($stored[Migrate04::FLAG_AUTOLOAD])->toBe('1');
+
+    // Second request: nothing is pending, so the repair does not run again.
+    $again = new Migrate04(new Store());
+    expect($again->needed())->toBeFalse()
+        ->and($GLOBALS['abAutoloadSet'])->toHaveCount(1);
 });
