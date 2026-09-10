@@ -73,6 +73,16 @@ the totals and the headline are taken from. KB is 1,000 bytes and MB 1,000,000 t
 `assets/css/alpaca-bot-shortcode.css` (900 raw / 504 gz) exists but is a front-end shortcode
 asset; it is not loaded on the admin chat screen and is not in the total.
 
+**Two of those rows have moved since the measurement.** The table above is the build of
+2026-09-09 and the wire column can only be re-taken on the live site, so it is left as measured.
+What has changed is raw size, which is exact and tool-independent: task 6d's C5 fix added the
+front-end block to `resources/css/alpaca-bot.css` (12,134 → 14,209) and C3's fix added the
+`sent` guard to `resources/ts/chat.ts` (`assets/js/chat.js`, 14,605 → 14,619). The four fetched
+files' raw total is therefore 84,363 rather than 82,274, +2,089 B, all of it compressible text;
+`htmx.min.js` and `icon-80.png` are untouched. That leaves the (d) comparison and every
+conclusion drawn from it standing — 0.5 is still two orders of magnitude under 0.4.17 — and it
+is the number to re-measure, not to re-derive, if the wire figure is wanted again.
+
 **0.4.17 — everything its admin chat screen loads**
 
 | File | Raw | gzip -9 | Over the wire |

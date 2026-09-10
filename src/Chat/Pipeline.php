@@ -59,7 +59,8 @@ use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Tool\ToolCall;
  * `send()` is a generator, so nothing at all runs until the caller first advances it: the cap
  * check, the conversation lookup and every hook happen on the first iteration, not on the call.
  *
- * An `ephemeral` turn (Toolkit\SummarizeToolkit's inner call) runs the same path over a
+ * An `ephemeral` turn — Toolkit\SummarizeToolkit's inner call and both shortcodes' one-shot
+ * generations, the three sites that pass the flag — runs the same path over a
  * conversation that exists only in memory: no post is created, no transcript or partial reply
  * is written, and nothing is taken back on failure because nothing was made. The usage receipt
  * is still recorded, with conversation 0 (UsageMeter::record() already allows that), and every

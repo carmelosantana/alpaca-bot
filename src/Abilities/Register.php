@@ -82,7 +82,8 @@ use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Enum\ToolResultStatus;
  * on the path**. On `wp-abilities/v1/run` the reason survives: core's run controller calls
  * check_permissions() from its own REST permission callback and returns the WP_Error, restamping
  * its status (403 for a logged-in user, 401 for a visitor) — WP 7.1
- * class-wp-rest-abilities-v1-run-controller.php:171-174. Through WP_Ability::execute(), which is
+ * class-wp-rest-abilities-v1-run-controller.php:172-176, inside check_ability_permissions(),
+ * the callback registered at :66. Through WP_Ability::execute(), which is
  * the MCP and WP-AI-Client path, core withholds the message deliberately ("Don't leak the
  * permission check error to someone without the correct perms"): it answers a fixed
  * `ability_invalid_permissions` and hands our text to _doing_it_wrong() instead, so on a

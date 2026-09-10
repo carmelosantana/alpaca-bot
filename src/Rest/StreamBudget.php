@@ -52,7 +52,8 @@ use AlpacaBot\Settings\Store;
  *   with a `stream_timeout` error frame. This is the bound that does the work for a stream that
  *   is producing output, and it is checked in exactly the places the abort check is, including
  *   before every tool call (the pipeline emits an empty delta there).
- * - `set_time_limit(seconds())` in Sse::prepareOutput(), instead of the `0` that was there. This
+ * - `set_time_limit()` in Sse::prepareOutput(), instead of the `0` that was there, on the number
+ *   StreamController::serve() reads from seconds() and hands it. This
  *   is a backstop for a runaway that is spending CPU rather than waiting, and **not** the
  *   wall-clock bound: on Unix, max_execution_time does not count time blocked in a stream
  *   operation, which is where a slow provider's time goes.

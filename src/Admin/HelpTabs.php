@@ -28,7 +28,7 @@ final class HelpTabs
      * Only the first is a constant. Core derives a *submenu* screen's id from the parent's menu
      * *title*, translated — `add_menu_page()` stores `sanitize_title($menu_title)` in
      * `$admin_page_hooks[$slug]` and `get_plugin_page_hookname()` uses it as the prefix
-     * (wp-admin/includes/plugin.php:1397, :2152-2158) — so on a locale that translates
+     * (wp-admin/includes/plugin.php:1397, :2145-2158) — so on a locale that translates
      * "Alpaca Bot" the settings screen is not `alpaca-bot_page_alpaca-bot-settings` at all, and
      * a hard-coded id lost all four tabs there. The top-level page is unaffected: its own slug
      * is in `$admin_page_hooks`, which takes the `toplevel` branch of the same function and

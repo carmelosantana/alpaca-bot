@@ -61,8 +61,8 @@ final class Sse
      *
      * `$seconds` replaces the `set_time_limit(0)` this used to do. A lifted limit was for a slow
      * model outlasting max_execution_time; what it also allowed was one redeemed ticket holding a
-     * PHP worker with no end, and `ignore_user_abort(true)` two lines below means closing the
-     * browser does not end it either. StreamBudget::seconds() sizes the replacement and says how.
+     * PHP worker with no end, and the `ignore_user_abort(true)` at the foot of this method means
+     * closing the browser does not end it either. StreamBudget::seconds() sizes the replacement and says how.
      * It is a backstop and not the bound: on Unix, max_execution_time does not count time spent
      * blocked in a stream operation, which is where a slow provider's time goes, so this fires
      * for a run that is burning CPU and StreamController's own deadline check is what ends one
