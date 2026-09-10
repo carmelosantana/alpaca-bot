@@ -45,9 +45,9 @@ final class Assets
      * and under that same breakpoint it re-declares `display: table-cell` on the palette's cells
      * (forms.css:1691-1699, WP 7.1), as this rule does on the overrides table's. That precedent
      * is thin: in 7.1 the palette is a `<div>` that forms.css displays as a table
-     * (forms.css:1034-1045; misc.php:1041 prints it), so `.form-table td` never reaches its
-     * cells, and the rule's `td` selector matches no markup core prints. What the rule
-     * restores is widefat's padding, `display: table-cell` and `width: auto`; forms.css's 14px
+     * (forms.css:1034-1046; misc.php:1041 prints it), so `.form-table td` never reaches its
+     * cells, and the palette rule's `td` selector matches no markup core prints. What the
+     * overrides rule restores is widefat's padding, `display: table-cell` and `width: auto`; forms.css's 14px
      * font and 600-weight `th` are left as they are. The `vertical-align: middle` restores
      * nothing: the `th` is top-aligned under widefat (common.css:504) and under `.form-table th`
      * (forms.css:931) alike, which put each model name some 11px above the centre of its row's
