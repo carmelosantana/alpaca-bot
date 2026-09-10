@@ -83,10 +83,12 @@ it('refuses a token that is missing, unknown, another user\'s, or for another co
             ->and($res->get_error_message())->toBe('Invalid or expired stream token.')
             ->and($res->get_error_data())->toBe(['status' => 403]);
     }
-    // Nothing was deleted and nothing was written: a refused request spends no ticket and takes
-    // no budget slot. The claim comes after these checks, so a bad-token probe costs one read.
+    // No ticket was deleted, and not one statement was run against a slot row: a refused request
+    // spends nothing and writes nothing. The claim comes after these checks, so a bad-token
+    // probe costs one transient read — claiming first would charge it an insert and a delete.
     expect($deleted)->toBe([])
-        ->and($table->rows)->toBe([]);
+        ->and($table->rows)->toBe([])
+        ->and(array_filter($table->queries, static fn(string $q): bool => str_contains($q, StreamBudget::OPTION)))->toBe([]);
 });
 
 it('redeems a valid ticket once: the deletion is the claim, and the response carries nothing of the ticket', function (): void {
