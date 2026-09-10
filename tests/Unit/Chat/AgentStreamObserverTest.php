@@ -162,3 +162,40 @@ it('suspends the fiber it streams through on every delta, and only that fiber', 
     expect($stranger->isTerminated())->toBeTrue()->and($stranger->getReturn())->toBe('ran through')
         ->and(array_map(static fn(Delta $d): string => $d->text, $observer->drain()))->toBe(['c']);
 });
+
+// The name is the model's text too, and it is stored on the transcript beside the arguments and
+// the result. Nothing upstream holds it to the length of a registered tool id: a call the
+// registry has no tool for is still recorded, which is what makes the record say what the model
+// tried. Unbounded it was stored whole -- a 50,000-character name measured at 51,274 characters
+// on the record -- against the same packet budget the arguments are cut to fit.
+it('holds a tool name the model invented to NAME_CHARS, marking the cut, and leaves a real one alone', function (): void {
+    $agent = agentSubject();
+    $observer = new AgentStreamObserver();
+    $agent->attach($observer);
+    $invented = str_repeat('n', 50_000);
+    $agent->notify('agent.tool_call', new ToolCall('c1', $invented, ['text' => 'x']));
+    $agent->notify('agent.tool_result', ToolResult::error('no such tool')->withCallId('c1'));
+    $agent->notify('agent.tool_call', new ToolCall('c2', 'draft_post', ['title' => 'T']));
+    $agent->notify('agent.tool_result', ToolResult::success('ok')->withCallId('c2'));
+
+    $calls = $observer->toolCalls();
+    expect(mb_strlen($calls[0]['name']))->toBe(AgentStreamObserver::NAME_CHARS + 1)
+        ->and(str_ends_with($calls[0]['name'], '…'))->toBeTrue()
+        ->and($calls[0]['name'])->toStartWith(str_repeat('n', AgentStreamObserver::NAME_CHARS))
+        ->and($calls[1]['name'])->toBe('draft_post');
+});
+
+// A call that never got a result is listed too, so the bound has to be on what is *recorded*,
+// not on what a result closes: an invented name with no result behind it is the same text on
+// the same transcript.
+it('holds an unanswered call\'s invented name to NAME_CHARS as well', function (): void {
+    $agent = agentSubject();
+    $observer = new AgentStreamObserver();
+    $agent->attach($observer);
+    $agent->notify('agent.tool_call', new ToolCall('c1', str_repeat('z', 5_000), ['text' => 'x']));
+
+    $calls = $observer->toolCalls();
+    expect($calls)->toHaveCount(1)
+        ->and($calls[0]['ok'])->toBeFalse()
+        ->and(mb_strlen($calls[0]['name']))->toBe(AgentStreamObserver::NAME_CHARS + 1);
+});

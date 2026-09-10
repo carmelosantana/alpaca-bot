@@ -315,6 +315,39 @@ it('stops after the frame the client did not read: no done frame, the listener r
         ->and($h->meta[42]['ab_messages'][1]['meta']->duration_ms)->toBeInt(); // the partial reply's receipt shows its seconds on reload
 });
 
+// The settle() site fires from inside the generator's own destruction, which for this route
+// happens when stream() returns and its `$turn` local goes -- after stream()'s catch (\Throwable)
+// and after its finally. So a listener that throws there is outside every guard the controller
+// has, and would leave serve() with the response's headers already sent and no error frame
+// written. Pipeline::settle() catches it instead. What this holds is that stream() returns
+// normally and the frames it had written are unchanged.
+it('survives a chat/failed listener that throws while an abandoned turn settles, since that fires after its own catch and finally', function (): void {
+    $h = pipelineWith(pipelineProvider([
+        new Response('a', ProviderFinishReason::Stop),
+        new Response('b', ProviderFinishReason::Stop),
+    ]));
+    actionRuns('alpaca_bot/chat/started');
+    Actions\expectRemoved('alpaca_bot/chat/started')->once();
+    Actions\expectDone('alpaca_bot/chat/failed')->once()->whenHappen(static function (): void {
+        throw new \LogicException('a listener that throws');
+    });
+    $frames = [];
+    (new StreamController($h->pipeline, $h->store))->stream(
+        streamTicket(),
+        function (string $f) use (&$frames): void {
+            $frames[] = $f;
+        },
+        static function () use (&$frames): bool {
+            return count($frames) >= 2;
+        },
+    );
+
+    // Reached at all only because nothing escaped, and the partial reply was still stored: the
+    // listener runs after storePartial(), so the catch does not cost the transcript.
+    expect(array_map(static fn(string $f): string => strtok($f, "\n"), $frames))->toBe(['event: start', 'event: delta'])
+        ->and($h->meta[42]['ab_messages'][1])->toMatchArray(['role' => 'assistant', 'content' => 'a']);
+});
+
 it('writes one error frame, in the JSON route\'s error shape, when the pipeline refuses the turn', function (): void {
     // Over the cap: 402's code and data, before any provider call and with no start frame.
     $h = pipelineWith(null, ['governance.user_monthly_tokens' => 10]);

@@ -232,11 +232,27 @@ final class CoreClient implements Client
      * thought channel the reasoning (what a thinking model produced before answering, which the
      * pipeline stores and the caps count), function calls the tool calls.
      *
+     * An empty candidate list is refused here rather than indexed. Nothing on the pinned core
+     * produces one — GenerativeAiResult's constructor throws "At least one candidate must be
+     * provided" on an empty array, and fromArray() goes through that constructor (WP 7.1,
+     * wp-includes/php-ai-client/src/Results/DTO/GenerativeAiResult.php:83-88, :395-399) — so
+     * this is a guard against that invariant changing, in a dependency core ships at version
+     * 0.1.0, not a bug being fixed. It is worth the two lines because of what the unguarded
+     * `[0]` would do if it ever did: a PHP warning and then an \Error, which is not an
+     * \Exception, so it would pass generate()'s `catch (\Exception)` above untouched, break
+     * Client::generate()'s documented `@throws \RuntimeException`, and reach a caller that
+     * maps a failed turn by class (Rest\Errors::fromPipeline()) as something with no arm for
+     * it. Refused, it is the same RuntimeException every other failure on this path is.
+     *
      * @return WpAiReply
+     * @throws \RuntimeException when the provider returned no candidate to read
      */
     private static function reply(GenerativeAiResult $result): array
     {
-        $candidate = $result->getCandidates()[0];
+        $candidate = $result->getCandidates()[0] ?? null;
+        if ($candidate === null) {
+            throw new \RuntimeException(__('The WordPress AI provider returned no reply to read.', 'alpaca-bot'));
+        }
         $content = '';
         $reasoning = '';
         $calls = [];

@@ -466,22 +466,42 @@ final class Pipeline
             return;
         }
         $this->storePartial($ephemeral, $userId, $conversation, $model, $content, $reasoning, $prompt, $completion, self::elapsedMs($started), $toolCalls);
-        /**
-         * Fires when the consumer stopped reading the stream before the reply finished (a client
-         * that disconnected mid-turn). Unlike the provider-failure site, what had arrived is already
-         * stored: the partial reply is on the conversation (meta `partial: true`) and a usage receipt
-         * covers the time and tokens spent, so the conversation stays. Nothing is thrown afterwards;
-         * the generator simply ends.
-         *
-         * @since 0.5.0
-         * @param \RuntimeException $e            says the stream was abandoned
-         * @param Conversation      $conversation the conversation, with the partial reply appended
-         */
-        do_action(
-            'alpaca_bot/chat/failed',
-            new \RuntimeException('The stream was abandoned by the consumer before the reply finished.'),
-            $conversation,
-        );
+        try {
+            /**
+             * Fires when the consumer stopped reading the stream before the reply finished (a client
+             * that disconnected mid-turn). Unlike the provider-failure site, what had arrived is already
+             * stored: the partial reply is on the conversation (meta `partial: true`) and a usage receipt
+             * covers the time and tokens spent, so the conversation stays. Nothing is thrown afterwards;
+             * the generator simply ends. A listener that throws here is caught and logged behind
+             * WP_DEBUG rather than allowed out (the code below says why it has nowhere to go), so
+             * unlike the provider-failure site this one does not carry a listener's exception to
+             * anybody.
+             *
+             * @since 0.5.0
+             * @param \RuntimeException $e            says the stream was abandoned
+             * @param Conversation      $conversation the conversation, with the partial reply appended
+             */
+            do_action(
+                'alpaca_bot/chat/failed',
+                new \RuntimeException('The stream was abandoned by the consumer before the reply finished.'),
+                $conversation,
+            );
+        } catch (\Throwable $listener) {
+            // A listener's throw has nowhere to go from here. This site runs while the generator
+            // is being destroyed, and for the stream route that destruction is triggered by
+            // StreamController::stream() returning — so it happens after that method's own
+            // `catch (\Throwable)` and `finally` have already run, and the exception would leave
+            // the controller entirely, with the response's headers long sent and no error frame
+            // written. Reproduced on PHP 8.4.25. The provider-failure site above keeps a
+            // listener's exception instead, by letting PHP chain it behind the RuntimeException
+            // it throws from a finally; there is nothing to chain to here, so it goes to the
+            // debug log, behind WP_DEBUG exactly as Rest\Errors::provider() puts the provider's
+            // own text there.
+            if (defined('WP_DEBUG') && WP_DEBUG) {
+                // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log -- Deliberate diagnostic, gated on WP_DEBUG as core's own logging is; this is the only record a listener's failure can leave, since the turn is being torn down and no caller is left to tell.
+                error_log('[alpaca-bot] an alpaca_bot/chat/failed listener threw while an abandoned turn was settling: ' . $listener->getMessage());
+            }
+        }
     }
 
     /**

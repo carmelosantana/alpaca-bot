@@ -243,6 +243,26 @@ final class WpAiClientTest extends TestCase
         (new CoreClient())->generate(['model' => 'fake-text', 'messages' => [['role' => 'model', 'parts' => [['type' => 'text', 'text' => 'x']]], ['role' => 'user', 'parts' => [['type' => 'text', 'text' => 'y']]]]]);
     }
 
+    /**
+     * The guard on `getCandidates()[0]`. Unreachable on this core — GenerativeAiResult's
+     * constructor refuses an empty candidate list and fromArray() goes through it — so the
+     * result here is a subclass that returns one anyway. Without the guard the index is a PHP
+     * warning and an \Error, which is not an \Exception: it would pass generate()'s own catch
+     * and break the \RuntimeException that Client::generate() documents and that every caller
+     * mapping a failed turn by class relies on.
+     */
+    public function test_generate_refuses_a_result_with_no_candidate_as_a_runtime_exception_not_an_error(): void
+    {
+        FakeCoreTextModel::$noCandidates = true;
+        try {
+            $this->expectException(\RuntimeException::class);
+            $this->expectExceptionMessage('no reply to read');
+            (new CoreClient())->generate(['model' => 'fake-text', 'messages' => [['role' => 'user', 'parts' => [['type' => 'text', 'text' => 'x']]]]]);
+        } finally {
+            FakeCoreTextModel::$noCandidates = false;
+        }
+    }
+
     public function test_a_chat_turn_over_rest_is_answered_through_core_when_wp_ai_is_selected(): void
     {
         $store = Plugin::instance()->get(Store::class);
@@ -349,6 +369,14 @@ final class FakeCoreTextModel implements ModelInterface, TextGenerationModelInte
     /** @var \Closure(): list<MessagePart> the parts of the model message to answer with */
     public static \Closure $reply;
 
+    /**
+     * Whether the next generateTextResult() answers with an empty candidate list. Core's own
+     * GenerativeAiResult refuses to be built with one, so this is a subclass that overrides
+     * getCandidates(): what CoreClient::reply() must do if that invariant ever relaxes, which
+     * is the only way an empty list can reach it.
+     */
+    public static bool $noCandidates = false;
+
     private ModelConfig $config;
 
     public function __construct(private ModelMetadata $metadata, private ProviderMetadata $providerMetadata)
@@ -380,12 +408,17 @@ final class FakeCoreTextModel implements ModelInterface, TextGenerationModelInte
     {
         self::$prompts[] = $prompt;
         self::$configs[] = clone $this->config;
-        return new GenerativeAiResult(
-            'fake-result',
-            [new Candidate(new ModelMessage((self::$reply)()), FinishReasonEnum::stop())],
-            new TokenUsage(7, 3, 10, 1),
-            $this->providerMetadata,
-            $this->metadata,
-        );
+        $candidates = [new Candidate(new ModelMessage((self::$reply)()), FinishReasonEnum::stop())];
+        $usage = new TokenUsage(7, 3, 10, 1);
+        if (self::$noCandidates) {
+            return new class ('fake-result', $candidates, $usage, $this->providerMetadata, $this->metadata) extends GenerativeAiResult {
+                /** @return list<Candidate> */
+                public function getCandidates(): array
+                {
+                    return [];
+                }
+            };
+        }
+        return new GenerativeAiResult('fake-result', $candidates, $usage, $this->providerMetadata, $this->metadata);
     }
 }

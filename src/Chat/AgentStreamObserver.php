@@ -46,13 +46,15 @@ use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Tool\ToolResult;
  * result's callId, else to the oldest unanswered call (a provider that sends no ids, or the
  * same id twice, still gets one record per call). `ok` is Success; Error and Timeout are not.
  * Every record is stored on the assistant turn for the life of the conversation and counts
- * against the transcript's packet budget (ConversationStore::save()), so what is stored is
- * bounded: the result to RESULT_CHARS, each string argument to ARGUMENT_CHARS, and the
- * arguments record as a whole to ARGUMENTS_CHARS over its keys and values at every depth, all
- * in characters, with an ellipsis where a cut was made (boundedArguments()). A record is
- * therefore never larger than ARGUMENTS_CHARS plus its marks, whatever the model put in the
- * call. The full result was for the model and is gone with the run; the arguments are what
- * ran, and the per-string bound keeps a URL or a title whole while a drafted post's body,
+ * against the transcript's packet budget (ConversationStore::save()), so every part of it the
+ * model chose is bounded, in characters, with an ellipsis where a cut was made: the result to
+ * RESULT_CHARS, the tool's name to NAME_CHARS, each string argument to ARGUMENT_CHARS, and the
+ * arguments record as a whole to ARGUMENTS_CHARS over its keys and values at every depth
+ * (boundedArguments()). A record is therefore never larger than the sum of those three
+ * ceilings plus its marks, whatever the model put in the call — the name included, which was
+ * unbounded until 0.5.0 and stored whole (a 50,000-character name measured at 51,274 chars on
+ * the record). The full result was for the model and is gone with the run; the arguments are
+ * what ran, and the per-string bound keeps a URL or a title whole while a drafted post's body,
  * already in wp_posts, is not stored a second time.
  *
  * @since 0.5.0
@@ -61,6 +63,16 @@ final class AgentStreamObserver implements \SplObserver
 {
     /** The most of a tool's result kept on the record, in characters. */
     public const RESULT_CHARS = 200;
+
+    /**
+     * The most of the tool's name kept on the record, in characters. The name is the model's
+     * text, not the registry's: a call the registry has no tool for is still recorded (that is
+     * what makes the record say what the model tried), so nothing upstream of here holds it to
+     * the length of a real tool id. Well past any name a toolkit registers — the longest the
+     * plugin ships is `draft_post`, at ten — and short enough that the ellipsis says plainly
+     * that this was not one.
+     */
+    public const NAME_CHARS = 100;
 
     /** The most of one string argument kept on the record, in characters. */
     public const ARGUMENT_CHARS = 1000;
@@ -143,7 +155,7 @@ final class AgentStreamObserver implements \SplObserver
                 break;
             case 'agent.tool_call':
                 if ($data instanceof ToolCall) {
-                    $this->pending[] = ['id' => $data->id, 'name' => $data->name, 'arguments' => self::boundedArguments($data->arguments)];
+                    $this->pending[] = ['id' => $data->id, 'name' => self::bounded($data->name, self::NAME_CHARS), 'arguments' => self::boundedArguments($data->arguments)];
                     // The heartbeat: an empty delta, so the pipeline yields (and a streaming
                     // transport writes) something before the tool runs. The event fires before
                     // any tool of the iteration executes, which is the moment that matters.
