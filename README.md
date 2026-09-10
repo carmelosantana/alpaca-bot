@@ -4,51 +4,14 @@
   
 ### A privately hosted WordPress AI Chatbot
   
-  <img src="https://carmelosantana.org/alpacabot/wp-content/uploads/sites/4/2024/02/alpaca-bot-icon-1006.png" alt="Alpaca Bot" width="256px">
+  <img src=".wordpress-org/icon-256x256.png" alt="Alpaca Bot" width="256px">
 
-  [![Discord](https://img.shields.io/discord/485971823821979648?logo=discord&label=Discord&color=72edad)](https://discord.gg/vWQTHphkVt)
   ![GitHub release (latest by date)](https://img.shields.io/github/v/release/carmelosantana/alpaca-bot?label=Latest%20Release&color=668bf2)
   <a href="https://www.patreon.com/carmelosantana"><img src="https://img.shields.io/badge/Subscribe-Become%20a%20Patreon-826EB4?logo=patreon" alt="Patreon">
   </a>
 
   **WordPress plugin for quick content creation and workflow automation!**
 </div>
-
----
-
-## 0.5.0 development status
-
-The `develop` branch is a ground-up rewrite of the 0.4 plugin that ships as **0.5.0**, in five phases. 1.0 is reserved for feature complete and fully tested (see `CLAUDE.md`). Everything below
-this section describes the 0.5 code on this branch.
-
-- **P1 — foundations, provider, pipeline** (done): settings schema and 0.4 migration, provider
-  factory with streaming, usage meter and monthly caps, the chat pipeline and its hooks, and a
-  WP-CLI command (`wp alpaca-bot chat|models|usage|settings`).
-- **P2 — REST API and settings screen** (done): one namespace, `alpaca-bot/v1` (chat, streaming,
-  conversations, models, settings, usage), and the Settings API admin page. Reference, with
-  auth, streaming and error examples: [docs/api.md](docs/api.md).
-- **P3 — view layer and assets** (done): the admin chat screen, rendered server-side from
-  components, with htmx swapping the selects and a small TypeScript bundle driving the streamed
-  turn; Lucide icons, a stylesheet on the admin colour variables, and the 0.4 tree deleted.
-- **P4 — toolkits, shortcodes, abilities, WordPress AI adapter** (done): the three built-in
-  tools, both 0.4 shortcodes back on the new pipeline, three WordPress abilities, and the
-  WordPress AI Client as a second provider.
-- **P5 — hardening and release** (in progress): CI and Plugin Check, the tag-driven release
-  workflow, the security and performance reviews, and this readme.
-
-`readme.txt`'s header block described the shipped 0.4.x release for the whole of development, so
-that `Requires PHP: 8.1` next to `Stable tag: 0.4.17` kept 0.4.x updates reaching the PHP 8.1
-sites that release was published for. It now describes 0.5.0 -- `Stable tag: 0.5.0`,
-`Requires PHP: 8.4`, `Requires at least: 6.9`, `Tested up to: 7.1` -- which is the release
-decision, taken on all four rows at once. Its Description, FAQ and Changelog are generated from
-this file by `composer docs:readme`; the header block is not, and cannot be.
-
-Spec: [0.5 core refactor](docs/superpowers/specs/2026-09-05-alpaca-bot-1-0-core-refactor.md).
-Plans: [P1](docs/superpowers/plans/2026-09-05-alpaca-bot-p1-foundations-provider-pipeline.md),
-[P2](docs/superpowers/plans/2026-09-05-alpaca-bot-p2-rest-and-settings.md),
-[P3](docs/superpowers/plans/2026-09-05-alpaca-bot-p3-view-layer-and-assets.md),
-[P4](docs/superpowers/plans/2026-09-05-alpaca-bot-p4-toolkits-abilities-wp-ai.md),
-[P5](docs/superpowers/plans/2026-09-05-alpaca-bot-p5-hardening-and-release.md).
 
 ---
 
@@ -86,13 +49,17 @@ Plans: [P1](docs/superpowers/plans/2026-09-05-alpaca-bot-p1-foundations-provider
 
 ## Screenshots
 
-![The chat screen on a new conversation](docs/screenshots/2026-09-08-p3-default-1440-welcome.png)
+![Two chat turns, each with its receipt](.wordpress-org/screenshot-1.png)
 
-> A new conversation: the model and history selects in the header, the composer at the foot.
+> The chat screen: two turns, each reply streamed as the model writes it, and under each the receipt -- the model, the tokens it spent and how long it took.
 
-![A reply with a code block](docs/screenshots/2026-09-08-p3-default-1440-code.png)
+![Settings > Models](.wordpress-org/screenshot-2.png)
 
-> A reply with a code block, its copy button, and the receipt under it.
+> Settings > Models: the default model, temperature, context window and keep-alive, with the per-model overrides table under them.
+
+![A turn that used the draft_post tool](.wordpress-org/screenshot-3.png)
+
+> A turn that used the draft_post tool. The reply confirms the draft, and the receipt ends with the number of tools the turn ran.
 
 ## Requirements
 
@@ -112,7 +79,7 @@ A checkout needs `composer install` (which builds `vendor-prefixed/`) and `pnpm 
 2. In your WordPress admin, open `Alpaca Bot > Settings` and, on the Provider tab, enter the endpoint's base URL. For Ollama it ends in `/v1`: `http://localhost:11434/v1`.
 3. Click `Save Changes`. The Models tab then lists what the provider serves; pick a default.
 
-⭐️ **[Become a Patreon](https://www.patreon.com/carmelosantana)** and support [Alpaca Bot](https://carmelosantana.org/alpacabot/) development. ⭐️
+⭐️ **[Become a Patreon](https://www.patreon.com/carmelosantana)** and support [Alpaca Bot](https://carmelosantana.com/alpaca-bot) development. ⭐️
 
 ## Usage
 
@@ -196,31 +163,49 @@ The 0.4 form still works, under the same rules and cache: `get` shows the page's
 
 ## Frequently Asked Questions
 
-### Do I need my own AI server?
+<details>
+<summary>Do I need my own AI server?</summary>
 
 Yes. Alpaca Bot does not ship a model and sends nothing to a service of ours. Point it at an [Ollama](https://github.com/ollama/ollama) instance, or at any OpenAI-compatible endpoint, on the Provider tab. On WordPress 7.0 and later there is a second option: **WordPress AI provider** routes every turn through the AI client built into core, to whichever AI provider plugin the site has configured under Settings › Connectors. That path does not stream, because the WordPress client does not.
 
-### What leaves my site?
+</details>
+
+<details>
+<summary>What leaves my site?</summary>
 
 Whatever you type, and the recent messages of the conversation, go to the endpoint you configured, and nothing else. Conversations and usage receipts are rows in your own database. Turn conversation storage off entirely on the Privacy tab; a receipt is still written for every reply, because that is what the monthly caps count, and it never holds message text.
 
-### Who can use it?
+</details>
+
+<details>
+<summary>Who can use it?</summary>
 
 The chat screen is open to anyone who can edit posts, which includes Contributors. The `alpaca_bot/admin/menu_capability` filter changes that. Settings is administrators only. Read **Tools, and what they let the model reach**, under Usage, before you open the chat to a role: a role admitted to chat gets the enabled tools with it.
 
-### How do I stop it running up a bill?
+</details>
+
+<details>
+<summary>How do I stop it running up a bill?</summary>
 
 Three brakes, and they are independent. **Limits** sets a monthly token cap for the whole site and another per user, counted from the receipts and enforced on the server. A shared per-minute rate limit (thirty requests a user, moved by the `alpaca_bot/rate_limit` filter) covers the chat screen, the REST routes, the abilities and the shortcodes together. And **Tools** decides what the model may do besides answer. Shortcode answers are cached, and never generated for a visitor or for the REST API.
 
-### I upgraded from 0.4. Where did my settings go?
+</details>
+
+<details>
+<summary>I upgraded from 0.4. Where did my settings go?</summary>
 
 Into one option, moved automatically on the first request after the upgrade. Two things do not survive the move: 0.4's API username and password were sent as HTTP Basic and 0.5 sends a Bearer token instead, so the Provider tab starts with an empty **API key** for you to fill in. Your 0.4 conversations are kept, and become private to their author, which is what 0.5 enforces everywhere.
 
-### The model answers with the text of a tool call instead of an answer.
+</details>
+
+<details>
+<summary>The model answers with the text of a tool call instead of an answer.</summary>
 
 Some small models advertise tool support and then write the call out as prose. On the **Models** tab, set that model's **Tools** override to off; it beats whatever the provider claims. A model too small to use tools well is usually too small for the tools to be worth it.
 
 There is a price as well as a symptom. All three tools are on by default, and their schemas go with every turn: measured on this plugin, about 790 extra prompt tokens each time, against 36 with tools off. On a large model that is noise in the bill; on a small one it is most of the prompt, which is why the answer degrades. Turning off the tools you do not use, under **Tools**, costs nothing and is worth doing before you tune anything else.
+
+</details>
 
 ## Changelog
 
@@ -230,7 +215,8 @@ Releases before 0.5.0 are on the [releases page](https://github.com/carmelosanta
 
 A ground-up rewrite. The 0.4 code is gone rather than refactored, so the list below is what an upgrading site notices, not a summary of every commit.
 
-**Breaking**
+<details>
+<summary>Breaking</summary>
 
 - **PHP 8.4 and WordPress 6.9 are required.** The 0.4 listing asks for PHP 8.1 and WordPress 6.4. On PHP below 8.4 the plugin file loads nothing but an admin notice saying so.
 - **The 0.4 classes are gone.** `AlpacaBot\Agents`, `AlpacaBot\Api\*`, `AlpacaBot\Define`, `AlpacaBot\Help`, `AlpacaBot\Log\Post` and `AlpacaBot\Utils\*` were deleted, and with them the `alpaca_bot_*` hooks they applied. What 0.5 fires is in [docs/hooks.md](docs/hooks.md), generated from the call sites.
@@ -242,7 +228,10 @@ A ground-up rewrite. The 0.4 code is gone rather than refactored, so the list be
 - **The shortcode `cache` attribute changed, and so did its default.** This is the one that costs money. In 0.4 a bare `[alpacabot]` cached its answer permanently — in the post's meta inside the loop, in an option outside it — so a page generated once and never again. In 0.5 the default is a one-hour transient: the same page regenerates every hour, at the provider's price, the next time a viewer who may generate opens it. Write `cache="365d"` for the old behaviour, which is the longest 0.5 accepts. The spellings changed with it: 0.4 read `postmeta`, `option`, a number of seconds, and `0`, `disable` or `false` to switch caching off, while 0.5 caches in a transient only, for a duration written as `45s`, `30m`, `1h` or `2d`. `off` is now the only word that disables it, and 0.4's five other spellings — `postmeta`, `option`, `0`, `disable` and `false` — all fall through to that one-hour default.
 - **`[alpacabot_agent]` is deprecated.** It still fetches its URL and still asks the model for a `summarize`, but it logs a deprecation notice and goes away in a later 0.x release. Its fetch is now the `web_fetch` tool, so it does nothing while that tool is off under Settings › Tools, and it refuses a private, local or non-http(s) address.
 
-**Added**
+</details>
+
+<details>
+<summary>Added</summary>
 
 - A rewritten chat screen in wp-admin. Replies stream in over server-sent events as the model writes them, with a copy button on every message and code block, "Edit and resend" on your own, a thinking model's reasoning in a fold of its own, and an image attached from the media library for a model that can see.
 - A receipt under every reply: the model, the tokens it spent, how long it took, and how many tools it ran.
@@ -256,20 +245,15 @@ A ground-up rewrite. The 0.4 code is gone rather than refactored, so the list be
 - Both 0.4 shortcodes, back on the new pipeline: `[alpacabot]` for an answer in a page or the chat screen on it, and the `[alpacabot_agent]` shim above.
 - The plugin's own dependencies are namespace-prefixed, so php-agents or CommonMark installed by another plugin cannot collide with the copies shipped here.
 
+</details>
+
 ## Support
 
-If you need help or have questions, please join our [Discord](https://discord.gg/vWQTHphkVt) community.
+Questions and bug reports go to the [WordPress.org support forum](https://wordpress.org/support/plugin/alpaca-bot/). Say which plugin, WordPress and PHP versions you run.
 
-Premium support and video calls are available to our [Patreon](https://www.patreon.com/carmelosantana) subscribers. We can help set up your [Ollama](https://github.com/ollama/ollama) instance, troubleshoot issues, and more.
+For premium support, [book a call](https://carmelosantana.com/alpaca-bot): video calls, help setting up your [Ollama](https://github.com/ollama/ollama) instance or provider, troubleshooting, and onsite setup assistance.
 
-Patreon's also receive;
-
-- Access to our hosted [Ollama](https:/github.com/ollama/ollama) instances.
-- Priority feature requests.
-- Early access to new features and releases.
-- Video and community support.
-
-Please consider [becoming a Patreon](https://www.patreon.com/carmelosantana) today!
+If the plugin has been useful, [star Alpaca Bot on GitHub](https://github.com/carmelosantana/alpaca-bot); a star helps other site owners find it.
 
 ## Funding
 

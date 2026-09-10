@@ -34,7 +34,7 @@ A privately hosted WordPress AI chatbot. Chat with your own models, give them to
 2. In your WordPress admin, open `Alpaca Bot > Settings` and, on the Provider tab, enter the endpoint's base URL. For Ollama it ends in `/v1`: `http://localhost:11434/v1`.
 3. Click `Save Changes`. The Models tab then lists what the provider serves; pick a default.
 
-⭐️ **[Become a Patreon](https://www.patreon.com/carmelosantana)** and support [Alpaca Bot](https://carmelosantana.org/alpacabot/) development. ⭐️
+⭐️ **[Become a Patreon](https://www.patreon.com/carmelosantana)** and support [Alpaca Bot](https://carmelosantana.com/alpaca-bot) development. ⭐️
 
 = Usage =
 
@@ -112,18 +112,11 @@ The 0.4 form still works, under the same rules and cache: `get` shows the page's
 
 = Support =
 
-If you need help or have questions, please join our [Discord](https://discord.gg/vWQTHphkVt) community.
+Questions and bug reports go to the [WordPress.org support forum](https://wordpress.org/support/plugin/alpaca-bot/). Say which plugin, WordPress and PHP versions you run.
 
-Premium support and video calls are available to our [Patreon](https://www.patreon.com/carmelosantana) subscribers. We can help set up your [Ollama](https://github.com/ollama/ollama) instance, troubleshoot issues, and more.
+For premium support, [book a call](https://carmelosantana.com/alpaca-bot): video calls, help setting up your [Ollama](https://github.com/ollama/ollama) instance or provider, troubleshooting, and onsite setup assistance.
 
-Patreon's also receive;
-
-- Access to our hosted [Ollama](https:/github.com/ollama/ollama) instances.
-- Priority feature requests.
-- Early access to new features and releases.
-- Video and community support.
-
-Please consider [becoming a Patreon](https://www.patreon.com/carmelosantana) today!
+If the plugin has been useful, [star Alpaca Bot on GitHub](https://github.com/carmelosantana/alpaca-bot); a star helps other site owners find it.
 
 = Made Possible By =
 
