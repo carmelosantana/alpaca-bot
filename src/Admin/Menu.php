@@ -55,14 +55,18 @@ final class Menu
      * the grey the painted one settles on, and on any other it is a sidebar grey until the
      * painter runs.
      *
-     * Embedded rather than read at registration: admin_menu fires on every screen of the site's
-     * admin (wp-admin/admin.php loads menu.php, which ends by loading includes/menu.php, where it
-     * fires; the network and user admins fire their own action there instead, and admin-ajax.php
-     * and admin-post.php load no menu at all), and a value fixed at release time is not worth
-     * reading and base64-encoding the file on each of those screens. tests/Unit/Admin/MenuTest.php
-     * decodes this constant against the file's bytes, so the file stays the source of truth and
-     * the whole edit when the mark changes is to set the root fill in the new file and paste
-     * `base64 -w0 assets/img/menu-icon.svg` here.
+     * Embedded rather than read at registration: admin_menu fires on every request that builds
+     * the site admin's menu (wp-admin/admin.php loads menu.php, which ends by loading
+     * includes/menu.php, where it fires; the network and user admins fire their own action there
+     * instead, admin-ajax.php and admin-post.php load no menu at all, and upgrade.php, install.php
+     * and setup-config.php never load admin.php), and a value fixed at release time is not worth
+     * reading and base64-encoding the file on each of those requests.
+     * tests/Unit/Admin/MenuTest.php decodes this constant against the file's bytes and requires
+     * exactly one `fill="…"` in it, `#a7aaad`, and no `currentColor`, so the file stays the source
+     * of truth. When the mark changes: set that root fill in the new file and remove any other
+     * `fill="…"`, paste `base64 -w0 assets/img/menu-icon.svg` here, and re-check the prose above
+     * that describes this file (its only fill attribute, the `<path>`s that inherit it, the canvas
+     * reading), which no test holds. MenuTest fails while either of the first two is undone.
      */
     public const ICON = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMDAgMTAwIiB3aWR0aD0iMjAiIGhlaWdodD0iMjAiIGZpbGw9IiNhN2FhYWQiPjxwYXRoIGQ9Ik0yMiA2QzE5LjggNSAxOC4yIDYuNiAxOSA5QzE4IDE5IDIyIDM0IDMxIDQ0QzM1LjUgNDEgMzkgNDAuNSA0MyA0MUMzNyAzMSAyOSAxNiAyMiA2WiIvPjxwYXRoIGQ9Ik03NiA1Qzc4LjIgNCA3OS44IDUuNiA3OSA4QzgwIDE4IDc2IDMzIDY3IDQ0QzYyLjUgNDEgNTkgNDAuNSA1NSA0MUM2MSAzMSA2OSAxNSA3NiA1WiIvPjxwYXRoIGQ9Ik00MCA0MCA0MyAzMSA0NiAzNiA0OSAyOCA1MiAzNSA1NSAyOSA1OCAzNiA2MCA0MFoiLz48cGF0aCBmaWxsLXJ1bGU9ImV2ZW5vZGQiIGQ9Ik0yNiAzNGg0OGExNiAxNiAwIDAgMSAxNiAxNnYxOGExNiAxNiAwIDAgMS0xNiAxNkg0NmwtMTYgMTRWODRoLTRhMTYgMTYgMCAwIDEtMTYtMTZWNTBhMTYgMTYgMCAwIDEgMTYtMTZaTTM0LjUgNThhNS41IDUuNSAwIDEgMCAxMSAwYTUuNSA1LjUgMCAxIDAtMTEgMFpNNTYuNSA1OGE1LjUgNS41IDAgMSAwIDExIDBhNS41IDUuNSAwIDEgMC0xMSAwWiIvPjwvc3ZnPgo=';
 

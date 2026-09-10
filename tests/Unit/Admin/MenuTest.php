@@ -28,9 +28,9 @@ it('registers the top-level menu, the chat page as its first entry and Settings 
 it('embeds assets/img/menu-icon.svg byte for byte, so the file stays the single source of truth', function (): void {
     // The constant is a copy, and this is what keeps it one: replace the file and this fails
     // until the constant is re-encoded. The file is the designer's mark with its root fill set
-    // to `#a7aaad` (the next test says why), 590 bytes, trailing newline included; the newline
-    // is inside the base64, after `</svg>`, which XML allows and svg-painter's three regexes do
-    // not touch.
+    // to `#a7aaad` (the next test says why), and it ends in a newline, which is inside the
+    // base64, after `</svg>`, where XML allows it and svg-painter's three regexes do not touch
+    // it.
     $svg = file_get_contents(dirname(__DIR__, 3) . '/assets/img/menu-icon.svg');
     expect($svg)->toBeString()->toStartWith('<svg ');
     expect(Menu::ICON)->toStartWith('data:image/svg+xml;base64,');
