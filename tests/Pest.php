@@ -602,11 +602,25 @@ function cliCommand(object $h): object
     return $c;
 }
 
-/** ChatCommandTest: the WordPress user table as the command sees it: `$existing` ids resolve through get_userdata(), `$current` is get_current_user_id(). */
+/**
+ * ChatCommandTest: the WordPress user table as the command sees it: `$existing` ids resolve
+ * through get_userdata(), `$current` is who get_current_user_id() starts on.
+ *
+ * The current user is a variable, not a fixed return: `wp alpaca-bot chat` calls
+ * wp_set_current_user() to become the user it resolved, and the toolkits read the acting user
+ * from get_current_user_id() when a tool runs, so a test that asks who the turn ran as has to
+ * see the same move WordPress would make. The stand-in does only what this needs — record the
+ * id — where core's also loads the WP_User; nothing here reads one.
+ */
 function cliUsers(array $existing = [3], int $current = 0): void
 {
+    $GLOBALS['abCliCurrentUser'] = $current;
     Functions\when('get_userdata')->alias(static fn(int $id): object|false => in_array($id, $existing, true) ? (object) ['ID' => $id] : false);
-    Functions\when('get_current_user_id')->justReturn($current);
+    Functions\when('get_current_user_id')->alias(static fn(): int => (int) $GLOBALS['abCliCurrentUser']);
+    Functions\when('wp_set_current_user')->alias(static function (int $id): int {
+        $GLOBALS['abCliCurrentUser'] = $id;
+        return $id;
+    });
 }
 
 /**

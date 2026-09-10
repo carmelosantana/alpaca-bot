@@ -83,6 +83,19 @@ final class ChatCommand
      * `as user <id>`, so a run that fell back to the administrator says so. There is no
      * capability check here: whoever runs WP-CLI already has the site.
      *
+     * **This command sets WordPress's current user**, which under WP-CLI is process-global state
+     * (`wp eval 'echo get_current_user_id();'` prints 0 without the flag and the id with it).
+     * It has to: the pipeline is told the id, but the toolkits are not — Plugin::register()
+     * hands SummarizeToolkit and DraftPostToolkit `get_current_user_id(...)` as a closure and
+     * they ask it when a tool runs. Left at 0, `draft_post` refuses ("Nobody is logged in…")
+     * and `summarize` bills its inner turn to user 0, so the acting user's monthly cap is
+     * measured against the wrong month's receipts. Threading the id instead would mean
+     * building a second Registry (and a second Pipeline to hold it, since the pipeline is
+     * handed the registry at construction) for this one caller, and it would still leave
+     * `--user` and the administrator fallback behaving differently everywhere else that asks
+     * WordPress who is acting — a site's own filter, wp_insert_post()'s default author. One
+     * call makes the two invocations the same thing.
+     *
      * Only the reply text is streamed; a thinking model's reasoning is not shown.
      *
      * ## OPTIONS
@@ -122,6 +135,11 @@ final class ChatCommand
         $json = isset($assoc['json']) || ($assoc['format'] ?? 'text') === 'json';
         try {
             $userId = $this->userId($assoc);
+            // Become them, for the toolkits and anything else that reads the current user; the
+            // method docblock says why this and not a threaded id. Before send(), so a tool the
+            // first iteration calls already sees the right user, and after userId() has refused
+            // an id that does not exist.
+            wp_set_current_user($userId);
             $model = trim((string) ($assoc['model'] ?? ''));
             if ($model !== '' && !(bool) $this->store->get('chat.user_can_change_model')) {
                 // Pipeline::model() owns this policy: it honours a requested model only while

@@ -118,6 +118,53 @@ it('falls back to the first administrator when nobody is set, and says so in the
         ->and($c->out)->toEndWith(" · conversation 42 · as user 3]\n");
 });
 
+// The two invocations the acting-user rule has to hold for. The pipeline is *told* the id, so a
+// receipt naming the right user proves nothing about the toolkits: those read the acting user
+// from get_current_user_id() when a tool runs (Plugin::register() hands them the function as a
+// closure), and WP-CLI leaves that at 0 unless its global --user flag was given -- verified
+// against WP-CLI 2.12: `wp eval 'echo get_current_user_id();'` prints 0, and with --user=1
+// prints 1. So what these assert is who WordPress says is acting *while the turn runs*, read
+// from inside a listener the pipeline fires mid-turn.
+
+it('becomes the requested user for the whole turn, so a toolkit asking who is acting gets them and not 0', function (): void {
+    $h = pipelineWith(pipelineProvider([new Response('ok', ProviderFinishReason::Stop)]));
+    cliUsers([3], 0);
+    $acting = null;
+    Actions\expectDone('alpaca_bot/chat/completed')->once()->whenHappen(function () use (&$acting): void {
+        $acting = get_current_user_id();
+    });
+    $c = cliCommand($h);
+
+    $c->command->chat(['hello'], ['user' => '3']);
+
+    expect($c->errors)->toBe([])->and($acting)->toBe(3);
+});
+
+it('becomes the administrator it fell back to, so the default invocation acts as one user too', function (): void {
+    $h = pipelineWith(pipelineProvider([new Response('ok', ProviderFinishReason::Stop)]));
+    cliUsers([3], 0);
+    Functions\expect('get_users')->once()->andReturn([3]);
+    $acting = null;
+    Actions\expectDone('alpaca_bot/chat/completed')->once()->whenHappen(function () use (&$acting): void {
+        $acting = get_current_user_id();
+    });
+    $c = cliCommand($h);
+
+    $c->command->chat(['hello'], []);
+
+    expect($c->errors)->toBe([])->and($acting)->toBe(3);
+});
+
+it('does not become a user it refused, so a typo leaves the process as it was', function (): void {
+    $h = pipelineWith(null);
+    cliUsers([3], 0);
+    $c = cliCommand($h);
+
+    $c->command->chat(['hello'], ['user' => '99']);
+
+    expect($c->errors)->toBe(['User 99 does not exist.'])->and(get_current_user_id())->toBe(0);
+});
+
 it('refuses to run with no user and no administrator to fall back to', function (): void {
     $h = pipelineWith(null);
     cliUsers([], 0);
