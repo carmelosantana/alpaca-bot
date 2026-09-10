@@ -118,9 +118,12 @@ final class Migrate04
      *
      * The option is read with an explicit default, and core honours a caller's own default over
      * a registered one (filter_default_option() returns $default_value when $passed_default).
-     * Without it, `Schema::defaults()` — which SettingsPage::register() registers as the option's
-     * default — would stand in for a missing row wherever this runs with that registration in
-     * place, and a fresh install would look like a row that already has the field.
+     * On this hook nothing has registered one yet — the only register_setting() call is
+     * SettingsPage::register() on `admin_init`, which is later than the `init` priority 20 this
+     * migration runs on (Plugin::register()) — so the explicit default is defensive, not
+     * load-bearing today. It is here for a caller that runs the migration somewhere later, where
+     * `Schema::defaults()` would otherwise stand in for a missing row and make a fresh install
+     * look like a row that already carries the field.
      */
     private function migrateRetention(): void
     {
