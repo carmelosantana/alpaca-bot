@@ -2,7 +2,7 @@ includes:
     - vendor/szepeviktor/phpstan-wordpress/extension.neon
 parameters:
     level: 6
-    paths: [src, bin/hooks-doc.php]
+    paths: [src, bin/hooks-doc.php, bin/readme-sync.php]
     scanFiles:
         - alpaca-bot.php
         # WP-CLI is not a dependency and php-stubs/wp-cli-stubs conflicts with wordpress-stubs ^7.1,

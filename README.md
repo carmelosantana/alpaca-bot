@@ -30,8 +30,11 @@ this section describes the 0.5 code on this branch.
 - **P3 — view layer and assets** (done): the admin chat screen, rendered server-side from
   components, with htmx swapping the selects and a small TypeScript bundle driving the streamed
   turn; Lucide icons, a stylesheet on the admin colour variables, and the 0.4 tree deleted.
-- **P4 — toolkits, shortcodes, abilities, WordPress AI adapter** (next)
-- **P5 — hardening and release**
+- **P4 — toolkits, shortcodes, abilities, WordPress AI adapter** (done): the three built-in
+  tools, both 0.4 shortcodes back on the new pipeline, three WordPress abilities, and the
+  WordPress AI Client as a second provider.
+- **P5 — hardening and release** (in progress): CI and Plugin Check, the tag-driven release
+  workflow, the security and performance reviews, and this readme.
 
 `readme.txt` (the wordpress.org listing) intentionally keeps describing the shipped 0.4.x release
 (`Requires at least: 6.4`, `Requires PHP: 8.1`, `Stable tag: 0.4.17`) until 0.5.0 is tagged. The
@@ -49,6 +52,27 @@ Plans: [P1](docs/superpowers/plans/2026-09-05-alpaca-bot-p1-foundations-provider
 
 ---
 
+- [Description](#description)
+- [Screenshots](#screenshots)
+- [Requirements](#requirements)
+- [Installation](#installation)
+- [Setup](#setup)
+- [Usage](#usage)
+  - [The chat screen](#the-chat-screen)
+  - [Settings](#settings)
+  - [REST API and WP-CLI](#rest-api-and-wp-cli)
+- [Shortcodes](#shortcodes)
+- [Frequently Asked Questions](#frequently-asked-questions)
+- [Changelog](#changelog)
+- [Support](#support)
+- [Funding](#funding)
+- [Made Possible By](#made-possible-by)
+- [License](#license)
+
+---
+
+## Description
+
 **Alpaca Bot** is a chat screen inside WordPress admin, talking to a model you host. Conversations stay on your site, in your own database, and only their author can open them. It runs against [Ollama](https://github.com/ollama/ollama) out of the box, or any OpenAI-compatible endpoint.
 
 ### Features
@@ -59,24 +83,6 @@ Plans: [P1](docs/superpowers/plans/2026-09-05-alpaca-bot-p1-foundations-provider
 - A system prompt, per-model overrides (temperature, context window, keep-alive) and a receipt under every reply: model, tokens, time.
 - Monthly usage caps, per site and per user, with the meter behind them.
 - A REST API under `alpaca-bot/v1` ([docs/api.md](docs/api.md)) and a WP-CLI command.
-
----
-
-- [Screenshots](#screenshots)
-- [Requirements](#requirements)
-- [Installation](#installation)
-- [Setup](#setup)
-- [Usage](#usage)
-  - [The chat screen](#the-chat-screen)
-  - [Settings](#settings)
-  - [REST API and WP-CLI](#rest-api-and-wp-cli)
-- [Shortcodes](#shortcodes)
-- [Support](#support)
-- [Funding](#funding)
-- [Made Possible By](#made-possible-by)
-- [License](#license)
-
----
 
 ## Screenshots
 
@@ -187,6 +193,66 @@ With no `prompt`, the chat screen on a page, for logged-in users who can edit po
 ### `[alpacabot_agent name="get|summarize" url="…" length="…"]` (deprecated)
 
 The 0.4 form still works, under the same rules and cache: `get` shows the page's readable text, `summarize` fetches it and asks the model for a summary (`length` is free text, "2 sentences"; `model` and `cache` as above). The fetch is the chat's `web_fetch` tool itself, so it runs only while that tool is on under Settings › Tools, and through the same address guard: a private, local or non-http(s) address is refused. It logs a deprecation notice once per request under `WP_DEBUG` and goes away in a later 0.x release. Put the text to summarize in a `prompt` instead, or open the URL in the chat, where the fetch and summarize tools read it for you: `[alpacabot prompt="Summarize https://…"]` would **not** work, since a shortcode's turn runs no tools and the model cannot open the URL.
+
+## Frequently Asked Questions
+
+### Do I need my own AI server?
+
+Yes. Alpaca Bot does not ship a model and sends nothing to a service of ours. Point it at an [Ollama](https://github.com/ollama/ollama) instance, or at any OpenAI-compatible endpoint, on the Provider tab. On WordPress 7.0 and later there is a second option: **WordPress AI provider** routes every turn through the AI client built into core, to whichever AI provider plugin the site has configured under Settings › Connectors. That path does not stream, because the WordPress client does not.
+
+### What leaves my site?
+
+Whatever you type, and the recent messages of the conversation, go to the endpoint you configured, and nothing else. Conversations and usage receipts are rows in your own database. Turn conversation storage off entirely on the Privacy tab; a receipt is still written for every reply, because that is what the monthly caps count, and it never holds message text.
+
+### Who can use it?
+
+The chat screen is open to anyone who can edit posts, which includes Contributors. The `alpaca_bot/admin/menu_capability` filter changes that. Settings is administrators only. Read **Tools, and what they let the model reach**, under Usage, before you open the chat to a role: a role admitted to chat gets the enabled tools with it.
+
+### How do I stop it running up a bill?
+
+Three brakes, and they are independent. **Limits** sets a monthly token cap for the whole site and another per user, counted from the receipts and enforced on the server. A shared per-minute rate limit (thirty requests a user, moved by the `alpaca_bot/rate_limit` filter) covers the chat screen, the REST routes, the abilities and the shortcodes together. And **Tools** decides what the model may do besides answer. Shortcode answers are cached, and never generated for a visitor or for the REST API.
+
+### I upgraded from 0.4. Where did my settings go?
+
+Into one option, moved automatically on the first request after the upgrade. Two things do not survive the move: 0.4's API username and password were sent as HTTP Basic and 0.5 sends a Bearer token instead, so the Provider tab starts with an empty **API key** for you to fill in. Your 0.4 conversations are kept, and become private to their author, which is what 0.5 enforces everywhere.
+
+### The model answers with the text of a tool call instead of an answer.
+
+Some small models advertise tool support and then write the call out as prose. On the **Models** tab, set that model's **Tools** override to off; it beats whatever the provider claims. A model too small to use tools well is usually too small for the tools to be worth it.
+
+## Changelog
+
+Releases before 0.5.0 are on the [releases page](https://github.com/carmelosantana/alpaca-bot/releases).
+
+### 0.5.0
+
+A ground-up rewrite. The 0.4 code is gone rather than refactored, so the list below is what an upgrading site notices, not a summary of every commit.
+
+**Breaking**
+
+- **PHP 8.4 and WordPress 6.9 are required.** The 0.4 listing asks for PHP 8.1 and WordPress 6.4. On PHP below 8.4 the plugin file loads nothing but an admin notice saying so.
+- **The 0.4 classes are gone.** `AlpacaBot\Agents`, `AlpacaBot\Api\*`, `AlpacaBot\Define`, `AlpacaBot\Help`, `AlpacaBot\Log\Post` and `AlpacaBot\Utils\*` were deleted, and with them the `alpaca_bot_*` hooks they applied. What 0.5 fires is in [docs/hooks.md](docs/hooks.md), generated from the call sites.
+- **The REST routes changed.** The namespace is still `alpaca-bot/v1`, but 0.4's `htmx/*` and `wp/*` fragment endpoints are gone. 0.5 serves `/chat`, `/chat/{id}/stream`, `/conversations`, `/conversations/{id}`, `/models`, `/settings`, `/settings/schema`, `/usage` and a `/view/*` group; [docs/api.md](docs/api.md) is the reference.
+- **Settings moved into a single option** and are migrated automatically on the first request after the upgrade. 0.4's API username and password are not carried over — they went out as HTTP Basic, and 0.5's key goes out as a Bearer token, so an empty field you must fill is better than a populated one that cannot authenticate. 0.4's "Limit chat history" becomes **Messages sent to the model**.
+- **Existing conversations become private.** 0.4 stored them as published posts; the migration flips each to private and gives it an author, because 0.5 lets only a conversation's own author open it. A large history is moved a hundred rows per request rather than in one.
+- **`[alpacabot]` no longer reads the shortcode's content as the prompt.** 0.4 sent the text between the tags; 0.5 reads a `prompt` attribute, and with no `prompt` it renders the chat screen on the page. An enclosing `[alpacabot]…[/alpacabot]` left over from 0.4 therefore renders a chat screen, not an answer.
+- **A shortcode never generates for a visitor.** Generating costs tokens, so it needs a logged-in viewer who can edit posts. Anyone else sees a notice, or the answer an editor already cached where the site returns true from the `alpaca_bot/shortcode/allow_guests` filter. The REST API and the block editor never generate either, whoever is asking.
+- **The shortcode `cache` attribute changed, and so did its default.** This is the one that costs money. In 0.4 a bare `[alpacabot]` cached its answer permanently — in the post's meta inside the loop, in an option outside it — so a page generated once and never again. In 0.5 the default is a one-hour transient: the same page regenerates every hour, at the provider's price, the next time a viewer who may generate opens it. Write `cache="365d"` for the old behaviour, which is the longest 0.5 accepts. The spellings changed with it: 0.4 read `postmeta`, `option`, a number of seconds, and `0`, `disable` or `false` to switch caching off, while 0.5 caches in a transient only, for a duration written as `45s`, `30m`, `1h` or `2d`. `off` is now the only word that disables it, and 0.4's five other spellings — `postmeta`, `option`, `0`, `disable` and `false` — all fall through to that one-hour default.
+- **`[alpacabot_agent]` is deprecated.** It still fetches its URL and still asks the model for a `summarize`, but it logs a deprecation notice and goes away in a later 0.x release. Its fetch is now the `web_fetch` tool, so it does nothing while that tool is off under Settings › Tools, and it refuses a private, local or non-http(s) address.
+
+**Added**
+
+- A rewritten chat screen in wp-admin. Replies stream in over server-sent events as the model writes them, with a copy button on every message and code block, "Edit and resend" on your own, a thinking model's reasoning in a fold of its own, and an image attached from the media library for a model that can see.
+- A receipt under every reply: the model, the tokens it spent, how long it took, and how many tools it ran.
+- Conversations stored as private posts owned by their author, listed in the screen's history, with the transcript sent to the model bounded by a setting.
+- A usage meter with monthly token caps for the site and per user, enforced on the server, and a daily cleanup that keeps receipts for as long as the Privacy tab says.
+- A Settings API page in six tabs — Provider, Models, Chat, Privacy, Limits, Tools — with per-model overrides for temperature, context window, keep-alive, system prompt and tool support.
+- Tools the model can call: `web_fetch` reads one public web page as text under a two-stage address guard, `summarize` condenses text through the model, and `draft_post` writes a draft it never publishes. All three are on by default and switchable per site.
+- Three WordPress abilities — `alpaca-bot/chat`, `alpaca-bot/summarize` and `alpaca-bot/draft-post` — so other plugins and the MCP adapter can call the same code the screen does.
+- A REST API under `alpaca-bot/v1` covering everything the screen does, and `wp alpaca-bot chat|models|usage|settings` on the command line.
+- A per-minute rate limit shared by the chat screen, the REST routes, the abilities and the shortcodes, under one `alpaca_bot/rate_limit` filter.
+- Both 0.4 shortcodes, back on the new pipeline: `[alpacabot]` for an answer in a page or the chat screen on it, and the `[alpacabot_agent]` shim above.
+- The plugin's own dependencies are namespace-prefixed, so php-agents or CommonMark installed by another plugin cannot collide with the copies shipped here.
 
 ## Support
 

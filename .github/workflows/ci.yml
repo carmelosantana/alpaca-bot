@@ -72,6 +72,17 @@ jobs:
           composer docs:hooks
           git diff --exit-code docs/hooks.md
 
+      # Same shape, same reason: readme.txt's Description, FAQ and Changelog are rendered from
+      # README.md, so an edit to one that never reached the other is a red build rather than a
+      # wordpress.org listing describing a plugin nobody can install. The generator writes those
+      # three sections and nothing else -- not the header block, whose `Stable tag`,
+      # `Requires PHP`, `Requires at least` and `Tested up to` are a release decision -- so a
+      # diff here is only ever an unsynced README.
+      - name: readme.txt is what README.md generates
+        run: |
+          composer docs:readme
+          git diff --exit-code readme.txt
+
   assets:
     name: TypeScript, Node tests and the asset build on Node 22
     runs-on: ubuntu-latest
