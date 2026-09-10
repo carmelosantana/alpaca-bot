@@ -81,17 +81,19 @@ use AlpacaBot\Settings\Store;
  * - `add_option()` is not the atomic insert it looks like. It decides on `get_option()`
  *   (`wp-includes/option.php`, "Make sure the option doesn't already exist"), and its write is
  *   `INSERT … ON DUPLICATE KEY UPDATE`, which succeeds for every racer.
- * - `wp_cache_add()` is atomic on some persistent object caches and guaranteed by nothing; on a
- *   default installation there is no persistent cache at all, so it is a per-request array that
- *   always says yes.
+ * - `wp_cache_add()` is atomic on some persistent object caches and guaranteed by none of them.
+ *   On a default installation there is no persistent cache at all: the cache is an array that
+ *   lives for one request, so it can only refuse a key this same process already added and knows
+ *   nothing of any other worker.
  *
  * What is atomic is a uniquely-keyed row: `option_name` carries a UNIQUE index, so `INSERT
  * IGNORE` either inserts the row (1 affected) or finds it already there (0 affected), decided by
  * the database rather than by anything this process read. Core claims its own locks exactly this
- * way — `WP_Upgrader::create_lock()` runs
- * `INSERT IGNORE INTO $wpdb->options … VALUES (%s, %s, 'off')` on every plugin and theme update,
- * with a trailing SQL comment reading LOCK — so this is core's idiom on core's table, not a new
- * dependency on the schema.
+ * way: `WP_Upgrader::create_lock()` runs
+ * `INSERT IGNORE INTO $wpdb->options … VALUES (%s, %s, 'off')`, with a trailing SQL comment
+ * reading LOCK, and it is what the core updater (`Core_Upgrader::upgrade()`) and every automatic
+ * background update run (`WP_Automatic_Updater::run()`) take their lock with. So this is core's
+ * idiom on core's table, not a new dependency on the schema.
  *
  * One row per slot, named `alpaca_bot_stream_slot_<person>_<index>`, holding `<expiry>:<token>`,
  * autoloaded off. `claim()` walks the indexes and takes the first it can; a row whose expiry has

@@ -731,7 +731,10 @@ not limited: the POST that issued its ticket was, and the ticket can be redeemed
 What bounds that route instead is a concurrency cap, because one ticket holds a PHP worker for
 the length of a turn whether or not anyone is still reading: one person may have 3 streams
 running at once (filter `alpaca_bot/stream/concurrent`), and a redemption over that is the 429
-in the table above with its ticket left unspent. A turn is also bounded in wall-clock time —
+in the table above with its ticket left unspent. The one case that exceeds it is a provider that
+hangs: a stream stuck inside a provider call writes no frame, so it is still holding its PHP
+worker when its slot is released at the end of the budget — `Rest\StreamBudget` carries that
+argument in full. A turn is also bounded in wall-clock time —
 `provider.timeout × 6 × 2`, 720 s at the defaults, filter `alpaca_bot/stream/budget` — after
 which the stream ends with a 504 `alpaca_bot_stream_timeout` frame and the partial reply is
 saved.
