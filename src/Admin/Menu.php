@@ -31,23 +31,29 @@ final class Menu
     public const SLUG = 'alpaca-bot';
 
     /**
-     * The menu icon: assets/img/menu-icon.svg, the designer's mark, as the data URI core's
-     * menu-header.php takes. Core inlines it as the background-image of `div.wp-menu-image.svg`
-     * (admin-menu.css sizes it to 20px wide) and wp-admin/js/svg-painter.js recolours it per
-     * admin colour scheme. What the painter does, by line of WordPress 7.1's svg-painter.js: on
-     * DOM ready it collects every `#adminmenu .wp-menu-image` whose computed background-image
-     * contains `data:image/svg+xml;base64` (lines 22, 43); for each it decodes the base64 with
-     * atob (103), rewrites every `fill="…"` attribute in the XML to the scheme's hex colour
-     * (108) — in this file that is the root's `fill="currentColor"`, its only fill attribute,
-     * which the `<path>`s inherit; `fill-rule="evenodd"` does not match `fill="` — re-encodes
-     * it (116) and sets it as an inline `background-image … !important` (125). The colour is
-     * `current` when the `<li>` carries `current` or `wp-has-current-submenu`, otherwise `base`,
-     * then `focus` on mouseenter and `base` again 100ms after mouseleave (52-69); the three hex
-     * values are `_wpColorScheme.icons`, which wp_color_scheme_settings() prints for the user's
-     * scheme (30-35). So `currentColor` is not what recolours the icon — it is the value the
-     * painter overwrites — and until the painter runs, or with JS off, the browser draws the
-     * file as delivered, where an SVG loaded as an image has no `color` to inherit and
-     * `currentColor` is black (this data URI drawn onto a canvas reads 0,0,0 at the bubble).
+     * The menu icon: assets/img/menu-icon.svg, the designer's mark with its root fill set to
+     * `#a7aaad`, as the data URI core's menu-header.php takes. Core inlines it as the
+     * background-image of `div.wp-menu-image.svg` (admin-menu.css sizes it to 20px wide) and
+     * wp-admin/js/svg-painter.js recolours it per admin colour scheme. What the painter does, by
+     * line of WordPress 7.1's svg-painter.js: on DOM ready it collects every
+     * `#adminmenu .wp-menu-image` whose computed background-image contains
+     * `data:image/svg+xml;base64` (lines 22, 43); for each it decodes the base64 with atob (103),
+     * rewrites every `fill="…"` attribute in the XML to the scheme's hex colour (108) — in this
+     * file that is the root's `fill="#a7aaad"`, its only fill attribute, which the `<path>`s
+     * inherit; `fill-rule="evenodd"` does not match `fill="` — re-encodes it (116) and sets it as
+     * an inline `background-image … !important` (125). The colour is `current` when the `<li>`
+     * carries `current` or `wp-has-current-submenu`, otherwise `base`, then `focus` on mouseenter
+     * and `base` again 100ms after mouseleave (52-69); the three hex values are
+     * `_wpColorScheme.icons`, which wp_color_scheme_settings() prints for the user's scheme
+     * (30-35). So the fill written in the file is never what the painted icon shows — the
+     * painter overwrites it whatever it says — and it only matters before the painter runs, or
+     * with JS off, when the browser draws the file as delivered. The designer's file says
+     * `currentColor` there, and an SVG loaded as an image has no `color` to inherit, so that drew
+     * black on the dark sidebar until the footer script ran (the designer's data URI drawn onto
+     * a canvas reads 0,0,0 at the bubble; this one reads 167,170,173). `#a7aaad` is the Default
+     * scheme's resting icon colour (its `icons.base`), so on that scheme the unpainted icon is
+     * the grey the painted one settles on, and on any other it is a sidebar grey until the
+     * painter runs.
      *
      * Embedded rather than read at registration: admin_menu fires on every screen of the site's
      * admin (wp-admin/admin.php loads menu.php, which ends by loading includes/menu.php, where it
@@ -55,9 +61,10 @@ final class Menu
      * and admin-post.php load no menu at all), and a value fixed at release time is not worth
      * reading and base64-encoding the file on each of those screens. tests/Unit/Admin/MenuTest.php
      * decodes this constant against the file's bytes, so the file stays the source of truth and
-     * the whole edit when the mark changes is `base64 -w0 assets/img/menu-icon.svg` pasted here.
+     * the whole edit when the mark changes is to set the root fill in the new file and paste
+     * `base64 -w0 assets/img/menu-icon.svg` here.
      */
-    public const ICON = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMDAgMTAwIiB3aWR0aD0iMjAiIGhlaWdodD0iMjAiIGZpbGw9ImN1cnJlbnRDb2xvciI+PHBhdGggZD0iTTIyIDZDMTkuOCA1IDE4LjIgNi42IDE5IDlDMTggMTkgMjIgMzQgMzEgNDRDMzUuNSA0MSAzOSA0MC41IDQzIDQxQzM3IDMxIDI5IDE2IDIyIDZaIi8+PHBhdGggZD0iTTc2IDVDNzguMiA0IDc5LjggNS42IDc5IDhDODAgMTggNzYgMzMgNjcgNDRDNjIuNSA0MSA1OSA0MC41IDU1IDQxQzYxIDMxIDY5IDE1IDc2IDVaIi8+PHBhdGggZD0iTTQwIDQwIDQzIDMxIDQ2IDM2IDQ5IDI4IDUyIDM1IDU1IDI5IDU4IDM2IDYwIDQwWiIvPjxwYXRoIGZpbGwtcnVsZT0iZXZlbm9kZCIgZD0iTTI2IDM0aDQ4YTE2IDE2IDAgMCAxIDE2IDE2djE4YTE2IDE2IDAgMCAxLTE2IDE2SDQ2bC0xNiAxNFY4NGgtNGExNiAxNiAwIDAgMS0xNi0xNlY1MGExNiAxNiAwIDAgMSAxNi0xNlpNMzQuNSA1OGE1LjUgNS41IDAgMSAwIDExIDBhNS41IDUuNSAwIDEgMC0xMSAwWk01Ni41IDU4YTUuNSA1LjUgMCAxIDAgMTEgMGE1LjUgNS41IDAgMSAwLTExIDBaIi8+PC9zdmc+Cg==';
+    public const ICON = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMDAgMTAwIiB3aWR0aD0iMjAiIGhlaWdodD0iMjAiIGZpbGw9IiNhN2FhYWQiPjxwYXRoIGQ9Ik0yMiA2QzE5LjggNSAxOC4yIDYuNiAxOSA5QzE4IDE5IDIyIDM0IDMxIDQ0QzM1LjUgNDEgMzkgNDAuNSA0MyA0MUMzNyAzMSAyOSAxNiAyMiA2WiIvPjxwYXRoIGQ9Ik03NiA1Qzc4LjIgNCA3OS44IDUuNiA3OSA4QzgwIDE4IDc2IDMzIDY3IDQ0QzYyLjUgNDEgNTkgNDAuNSA1NSA0MUM2MSAzMSA2OSAxNSA3NiA1WiIvPjxwYXRoIGQ9Ik00MCA0MCA0MyAzMSA0NiAzNiA0OSAyOCA1MiAzNSA1NSAyOSA1OCAzNiA2MCA0MFoiLz48cGF0aCBmaWxsLXJ1bGU9ImV2ZW5vZGQiIGQ9Ik0yNiAzNGg0OGExNiAxNiAwIDAgMSAxNiAxNnYxOGExNiAxNiAwIDAgMS0xNiAxNkg0NmwtMTYgMTRWODRoLTRhMTYgMTYgMCAwIDEtMTYtMTZWNTBhMTYgMTYgMCAwIDEgMTYtMTZaTTM0LjUgNThhNS41IDUuNSAwIDEgMCAxMSAwYTUuNSA1LjUgMCAxIDAtMTEgMFpNNTYuNSA1OGE1LjUgNS41IDAgMSAwIDExIDBhNS41IDUuNSAwIDEgMC0xMSAwWiIvPjwvc3ZnPgo=';
 
     /** @param callable(): void $chatRenderer */
     public function __construct(private SettingsPage $settings, private $chatRenderer) {}
