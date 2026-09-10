@@ -116,11 +116,15 @@ jobs:
           # pinned SHA, deploy.sh exits 1 on an empty SVN_USERNAME at :39-42 and on an empty
           # SVN_PASSWORD at :44-47, and only reaches `if $INPUT_DRY_RUN` at :49 afterwards. So
           # keying this check on SVN_DRY_RUN would have left the failure it exists to prevent
-          # wide open in the state this repository is actually in until someone runs
-          # bin/release-secrets-wizard.sh -- no secrets written and SVN_DRY_RUN unset, so the
+          # wide open in the state this repository is actually in until both secrets are
+          # written -- no secrets, SVN_DRY_RUN unset, so the
           # `!= 'false'` at the deploy step reads as a dry run -- where the GitHub release
-          # publishes and the deploy then dies at deploy.sh:41. (The wizard cannot leave you
-          # there: it writes both secrets at :216 and :225 before it offers SVN_DRY_RUN at :235.)
+          # publishes and the deploy then dies at deploy.sh:41. Running the wizard does not
+          # rule that state out: set_secret and set_var degrade to a warning when gh is missing
+          # or unauthenticated (release-secrets-wizard.sh:132-143 and :146-156), which stage 1
+          # says out loud at :198, so a run that walks all five stages still exits 0 having
+          # written no secret and no SVN_DRY_RUN -- the state above, reached by someone who
+          # believes they configured the release. This step is what catches it.
           #
           # A step's `env:` may read `secrets`; a job-level `if:` may not, per the context
           # availability table cited above, which is why this is a step and not a job condition.

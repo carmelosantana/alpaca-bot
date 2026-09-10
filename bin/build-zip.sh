@@ -39,8 +39,15 @@ find dist/alpaca-bot -exec touch -h -d "@$SOURCE_DATE_EPOCH" {} +
 
 # The zip is the artifact everything downstream tests, so assert its contents rather than
 # eyeballing them: every runtime path present, nothing from the dev toolchain.
-# The list is fed to grep by herestring, never `printf | grep -q`: -q closes the pipe on the
-# first match, the writer takes SIGPIPE, and `pipefail` then reports a found path as missing.
+# The list is fed to grep by herestring, never `printf | grep -q`: -q exits on the first match
+# and closes the pipe, and the writer is killed if it is still writing. Not hypothetically, on
+# this artifact — 911 entries is 68,398 bytes against a 65,536-byte pipe, and
+# `printf '%s\n' "$list" | grep -qxF alpaca-bot/alpaca-bot.php` measures PIPESTATUS 141 0, so
+# `pipefail` hands back 141 and a path that IS in the zip is reported MISSING. What decides it
+# is bytes still in flight, not how many entries matched: the same pipeline runs clean at 931
+# forty-byte lines and dies at 932. So there is no match count to reason from, and the failure
+# arrives when the artifact grows rather than when this line is edited. A herestring has no
+# writer to kill.
 list=$(unzip -Z1 dist/alpaca-bot.zip)
 fail=0
 for path in \
@@ -70,10 +77,16 @@ for pattern in \
 do
   if grep -qE -- "$pattern" <<<"$list"; then
     echo "UNEXPECTED entries matching $pattern:"
-    # Herestring again, and for the same reason: `grep ... | head` dies 141 on SIGPIPE once more
-    # than ten entries match, and because this is a plain command in an `if` body rather than a
-    # condition, `pipefail` plus `set -e` would abort the script here — skipping fail=1, the
-    # FAILED message and exit 1, inside the one branch whose whole job is to print a diagnostic.
+    # Herestring again, and for the same reason. `grep ... | head` is the same race, and the ten
+    # lines head reads are not what decides it: head exits after them, and grep dies only if it
+    # is still writing by then. Measured on this artifact, `grep -E '^alpaca-bot/vendor-prefixed/'
+    # | head` leaves grep at 141 over its 812 matches; synthetically the flip is at 339 forty-byte
+    # matches and moves with line width (510 at 22 bytes, 275 at 126), which is what says it is
+    # bytes in flight and not entries matched — a small pipeline is not safe by being small, it
+    # is safe by being under the pipe. Because this is a plain command in an `if` body rather
+    # than a condition, `pipefail` plus `set -e` would abort the script on that 141 — skipping
+    # fail=1, the FAILED message and exit 1, inside the one branch whose whole job is to print
+    # a diagnostic.
     head <<<"$(grep -E -- "$pattern" <<<"$list")"
     fail=1
   fi
