@@ -78,6 +78,26 @@ do
     fail=1
   fi
 done
+# Every classmap entry has to name a file the zip actually holds. Composer classmaps a vendored
+# package by scanning it, so anything .distignore drops out of one is still named in
+# vendor-prefixed/composer/autoload_classmap.php — an entry pointing at nothing, which is a fatal
+# the first time something asks for that class. The check runs over dist/alpaca-bot, the staged
+# tree the zip is built from by `find` above, so its file set and the zip's entry set are the same
+# one. autoload_static.php carries a copy of the same list (composer writes both from one scan;
+# on this tree the two agree entry for entry), so checking the array file checks both.
+# The $ signs in the snippet below are PHP variables, so it is single-quoted and the shell must
+# not expand them.
+# shellcheck disable=SC2016
+if ! php -r '
+$map = require "dist/alpaca-bot/vendor-prefixed/composer/autoload_classmap.php";
+$missing = array_filter($map, static fn(string $f): bool => !is_file($f));
+foreach ($missing as $class => $file) { echo "DANGLING CLASSMAP $class => $file\n"; }
+exit($missing === [] ? 0 : 1);
+'; then
+  echo "the zip ships an autoload classmap naming files it does not contain"
+  fail=1
+fi
+
 [ "$fail" = 0 ] || { echo "zip contents check FAILED"; exit 1; }
 
 ls -la dist/alpaca-bot.zip

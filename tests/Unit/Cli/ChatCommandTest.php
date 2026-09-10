@@ -455,9 +455,14 @@ it('masks the API key in the whole dump but prints it when asked for by name', f
     $c->out = '';
     $c->command->settings(['provider.api_key'], []);
 
+    // Asserted against Schema::MASK, not the literal it happens to be: the dump shows the same
+    // stand-in the settings screen and the REST read show, so a command carrying its own mask
+    // again fails here. Which keys are masked is Schema::SECRETS, one entry today, so no
+    // assertion can separate reading that list from copying it — the reading is what makes a
+    // second credential follow, and this pins the half a test can see.
     expect($c->errors)->toBe([])
         ->and($dump)->not->toContain('sk-secret')
-        ->and(json_decode($dump, true))->toBe(array_replace(Schema::defaults(), ['models.default' => 'llama3.2', 'provider.api_key' => '***']))
+        ->and(json_decode($dump, true))->toBe(array_replace(Schema::defaults(), ['models.default' => 'llama3.2', 'provider.api_key' => Schema::MASK]))
         ->and($c->out)->toBe("\"sk-secret\"\n");
 });
 

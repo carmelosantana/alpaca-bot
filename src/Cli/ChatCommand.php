@@ -28,19 +28,6 @@ final class ChatCommand
     /** A reply with a broken UTF-8 sequence in it is still printed, with the sequence replaced, rather than as `false`. */
     private const JSON = JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE;
 
-    /**
-     * Settings that hold a credential. The whole dump (`wp alpaca-bot settings`, no key) is what
-     * ends up in CI logs and shell history, so these are shown as MASK there when set; asking
-     * for one by name (`wp alpaca-bot settings provider.api_key`) prints it, since that is an
-     * operator deliberately asking. Schema has no "secret" field type yet: when P2's settings
-     * screen needs one, this list should move there and the dump should read it from the field.
-     *
-     * @var list<string>
-     */
-    private const SECRET_KEYS = ['provider.api_key'];
-
-    private const MASK = '***';
-
     /** @var callable(string): void */
     private $write;
 
@@ -277,10 +264,17 @@ final class ChatCommand
     {
         if (!isset($args[0])) {
             $all = $this->store->all();
-            foreach (self::SECRET_KEYS as $secret) {
+            // Schema::SECRETS is the one list of credential-holding keys, and Schema::MASK the
+            // one stand-in for a stored one: the settings screen (Admin\Fields::display()), the
+            // REST read (Rest\SettingsController::masked()) and this dump all read them, so a
+            // second secret added to the schema is hidden here too. The whole dump is what ends
+            // up in CI logs and shell history; asking for one by name
+            // (`wp alpaca-bot settings provider.api_key`) still prints it, since that is an
+            // operator deliberately asking.
+            foreach (Schema::SECRETS as $secret) {
                 // An unset key stays visibly empty: "is one configured?" is still answerable.
                 if (($all[$secret] ?? '') !== '') {
-                    $all[$secret] = self::MASK;
+                    $all[$secret] = Schema::MASK;
                 }
             }
             $this->json($all);
