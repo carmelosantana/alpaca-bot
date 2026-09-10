@@ -98,7 +98,7 @@ final class ViewController extends Controller
             return Errors::notFound(__('Conversation', 'alpaca-bot'));
         }
         $who = Participants::current($this->store);
-        return self::html((new MessageList($c->messages, $this->markdown, $this->store, $who->userName, $who->userAvatar, $who->assistantAvatar, $c->id))->render());
+        return self::html((new MessageList($c->messages, $this->markdown, $this->store, $who->userName, $who->userAvatar, $who->assistantAvatar, $c->id, $who->assistantAvatarIsDefault))->render());
     }
 
     /**
@@ -214,7 +214,7 @@ final class ViewController extends Controller
     private function renderBubble(Message $message, bool $streaming): \WP_REST_Response
     {
         $who = Participants::current($this->store);
-        return self::html((new MessageBubble($message, $this->markdown, $who->userName, $who->userAvatar, $who->assistantAvatar, $streaming))->render());
+        return self::html((new MessageBubble($message, $this->markdown, $who->userName, $who->userAvatar, $who->assistantAvatar, $streaming, $who->assistantAvatarIsDefault))->render());
     }
 
     /** The response shape every route answers: the HTML as the data, marked for serve(). */

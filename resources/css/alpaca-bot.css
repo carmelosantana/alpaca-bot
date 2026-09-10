@@ -6,7 +6,8 @@
  * one the user picked; the Default scheme's values stand behind them as fallbacks so a missing
  * variable cannot blank a control -- which is also what makes the file usable off wp-admin,
  * where none of those variables exist. The surfaces, text and borders are core's fixed greys,
- * which do not change between schemes.
+ * and the default avatar's disc a fixed off-white (its rule says why); none of them change
+ * between schemes.
  *
  * Two places load this, and one of them is not wp-admin: the admin chat screen
  * (Admin\Assets::enqueue()) and a front-end page carrying `[alpacabot]` with no prompt
@@ -79,6 +80,20 @@
     text-align: center;
 }
 .ab-welcome__avatar { width: 128px; height: 128px; margin: 2em auto; border-radius: 50%; }
+/*
+ * The default assistant avatar (assets/img/alpaca-bot.svg, Participants) is black line art,
+ * taller than wide, on a transparent ground: an <img> does not inherit `color`, so its
+ * currentColor is black, and in a bare round crop its ear tips are cut off. It sits on a padded
+ * disc instead: border-box keeps the circle at the avatar's size, contain letterboxes the art
+ * inside the padding, and the padding is what brings the corners of the art's box inside the
+ * circle (the top-right corner is an ear tip). A warm off-white rather than --ab-panel because
+ * the disc has to read against two grounds: wp-admin's #f0f0f1 behind the transcript, where
+ * white reads as another panel and that grey would vanish, and a front-end theme's page, which
+ * is usually white. Only the default carries the class: a site's own avatar is a photo that
+ * fills its circle edge to edge.
+ */
+.ab-avatar--default { box-sizing: border-box; background: #f7f3ea; object-fit: contain; }
+.ab-welcome__avatar.ab-avatar--default { padding: 16px; }
 .ab-welcome__text { margin: 0; color: var(--ab-muted); font-size: 1.5rem; }
 .ab-msg {
     display: grid;
@@ -88,6 +103,7 @@
     margin: 0 auto 20px;
 }
 .ab-msg__avatar { width: 36px; height: 36px; border-radius: 50%; }
+.ab-msg__avatar.ab-avatar--default { padding: 5px; }
 /* Wrap anywhere on the whole body, so a long model id in the name or receipt cannot widen the column. */
 .ab-msg__body { min-width: 0; overflow-wrap: anywhere; }
 .ab-msg__meta {
@@ -332,6 +348,7 @@ pre > .ab-code__copy[aria-label]:hover::after {
     .ab-select { width: 100%; }
     .ab-msg { grid-template-columns: 32px 1fr; gap: 8px; }
     .ab-msg__avatar { width: 32px; height: 32px; }
+    .ab-msg__avatar.ab-avatar--default { padding: 4px; }
 
     /* 16px keeps iOS from zooming the page when the box takes focus, as core does for its inputs. */
     .ab-composer textarea { font-size: 16px; }

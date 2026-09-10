@@ -14,7 +14,8 @@ use Brain\Monkey\Functions;
  *
  * The three callers (View\Chat\Shell::render(), Rest\ViewController's bubble and list
  * fragments) hand what this returns straight to MessageBubble and MessageList as the `src` of an
- * <img>, so what is asserted here is the value each of those images gets.
+ * <img> and the flag that puts the default's disc class on it, so what is asserted here is the
+ * value each of those images gets.
  */
 
 beforeEach(function (): void {
@@ -32,15 +33,25 @@ it('shows the assistant with the avatar the site configured', function (): void 
         ->and($who->userAvatar)->toBe('https://gravatar.test/7');
 });
 
-it('falls back to the plugin icon only when no assistant avatar is set', function (): void {
+it('falls back to the alpaca logo only when no assistant avatar is set', function (): void {
     // The setting's schema default is '' (Schema::fields()), and sanitizeUrl() writes '' back for
     // anything it rejects, so '' is the one value that means "not set" and the only one this may
     // replace. A site that set an avatar and a site that did not must not look the same.
-    $icon = 'https://site.test/wp-content/plugins/alpaca-bot/assets/img/icon-80.png';
+    $logo = 'https://site.test/wp-content/plugins/alpaca-bot/assets/img/alpaca-bot.svg';
 
-    expect(Participants::current(new Store())->assistantAvatar)->toBe($icon)
-        ->and(Participants::current(new Store(['chat.assistant_avatar' => '']))->assistantAvatar)->toBe($icon)
-        ->and(Participants::current(new Store(['chat.assistant_avatar' => 'https://site.test/bot.png']))->assistantAvatar)->not->toBe($icon);
+    expect(Participants::current(new Store())->assistantAvatar)->toBe($logo)
+        ->and(Participants::current(new Store(['chat.assistant_avatar' => '']))->assistantAvatar)->toBe($logo)
+        ->and(Participants::current(new Store(['chat.assistant_avatar' => 'https://site.test/bot.png']))->assistantAvatar)->not->toBe($logo);
+});
+
+it('marks the fallback as the default, and a configured avatar as not', function (): void {
+    // The logo is black line art on a transparent ground, and its ears clip in a round crop, so
+    // the stylesheet seats it on a padded off-white disc. A site's own avatar is a photo that
+    // must keep filling its circle edge to edge, so the disc has to be scoped to the default,
+    // and the components cannot tell the two URLs apart: this flag is what they scope it with.
+    expect(Participants::current(new Store())->assistantAvatarIsDefault)->toBeTrue()
+        ->and(Participants::current(new Store(['chat.assistant_avatar' => '']))->assistantAvatarIsDefault)->toBeTrue()
+        ->and(Participants::current(new Store(['chat.assistant_avatar' => 'https://site.test/bot.png']))->assistantAvatarIsDefault)->toBeFalse();
 });
 
 it('carries an empty user avatar rather than the false core answers when there is none', function (): void {
