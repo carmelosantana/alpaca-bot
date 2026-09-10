@@ -116,11 +116,15 @@ final class StreamController extends Controller
      * becomes a transient key rather than stripped, so that no other string can be made to
      * name a ticket.
      *
-     * The budget slot is claimed before the ticket is read, and given back on any refusal after
-     * that. Before, because a caller at their concurrency limit must get their ticket back
+     * The budget slot is claimed between the checks and the deletion: after the token has been
+     * shown to name this user's ticket for this conversation, and before the deletion that
+     * spends it. After the checks, so a token that is missing, wrong or someone else's is the
+     * 403 it deserves rather than a 429, and so a probe with an invalid token writes nothing.
+     * Before the deletion, so a caller at their concurrency limit gets their ticket back
      * unspent: the 429 is "not yet", the ticket lives 120 s, and redeeming-then-refusing would
      * charge them a turn for being told to wait. The claim is keyed on the user core
-     * authenticated, so a wrong or stolen token can only churn its own sender's slots.
+     * authenticated, so a wrong or stolen token can only churn its own sender's slots, and the
+     * slot is given back when the deletion turns out to have lost the redemption race.
      */
     public function handle(\WP_REST_Request $request): \WP_REST_Response|\WP_Error
     {
@@ -130,12 +134,6 @@ final class StreamController extends Controller
             return $response;
         }
         $userId = $this->userId();
-        $claim = $this->budget->claim($userId);
-        if ($claim['slot'] === null) {
-            $response = rest_convert_error_to_response(Errors::tooMany($claim['retry_after']));
-            $response->header('Retry-After', (string) $claim['retry_after']);
-            return $response;
-        }
         $token = (string) $request->get_param('token');
         $key = ChatController::STREAM_TRANSIENT . $token;
         $ticket = preg_match('/^[A-Za-z0-9]+$/', $token) === 1 ? get_transient($key) : false;
@@ -143,13 +141,27 @@ final class StreamController extends Controller
             !is_array($ticket)
             || (int) ($ticket['user_id'] ?? -1) !== $userId
             || (int) ($ticket['conversation_id'] ?? -1) !== (int) $request->get_param('id')
-            || !delete_transient($key)
         ) {
+            return self::refused();
+        }
+        $claim = $this->budget->claim($userId);
+        if ($claim['slot'] === null) {
+            $response = rest_convert_error_to_response(Errors::tooMany($claim['retry_after']));
+            $response->header('Retry-After', (string) $claim['retry_after']);
+            return $response;
+        }
+        if (!delete_transient($key)) {
             $this->budget->release($userId, $claim['slot']);
-            return Errors::forbidden(__('Invalid or expired stream token.', 'alpaca-bot'));
+            return self::refused();
         }
         $this->redeemed = ['request' => $request, 'ticket' => $ticket, 'user_id' => $userId, 'slot' => $claim['slot']];
         return new \WP_REST_Response(null, 200);
+    }
+
+    /** The one refusal every failed redemption gets, so the two paths to it cannot drift apart. */
+    private static function refused(): \WP_Error
+    {
+        return Errors::forbidden(__('Invalid or expired stream token.', 'alpaca-bot'));
     }
 
     /**
@@ -171,7 +183,7 @@ final class StreamController extends Controller
      * The budget slot handle() claimed goes back in a `finally` around the stream, and also on
      * the `$served` path, where the ticket is spent and nothing will run. StreamBudget says why
      * that is the whole release path and what bounds the case it cannot reach — a redemption
-     * this filter is never called for at all holds its slot until the stamp expires.
+     * this filter is never called for at all holds its slot until the lease expires.
      */
     public function serve(bool $served, \WP_HTTP_Response $result, \WP_REST_Request $request, \WP_REST_Server $server): bool
     {

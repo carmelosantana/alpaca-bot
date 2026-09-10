@@ -10,8 +10,8 @@ use AlpacaBot\Settings\Store;
 /**
  * What one streamed turn may consume: a wall-clock budget in seconds, and a cap on how many
  * streams one person may hold open at once. Both are this class's because they are one policy
- * and share one number — a slot is stamped with the same budget the process was given, so a
- * process that is killed at its deadline cannot leave a slot anyone will count.
+ * and share one number — a slot is leased for the same budget the process was given, so a
+ * process killed at its deadline cannot leave a slot anyone will count.
  *
  * Why there has to be a bound at all. `GET /chat/{id}/stream` is deliberately not rate limited
  * (StreamController::routes() says why: the turn was counted on the POST that issued the
@@ -41,8 +41,8 @@ use AlpacaBot\Settings\Store;
  * call per iteration, plus one nested tool call per iteration". At the defaults (60 s, 6) that
  * is 720 s — twelve minutes for one chat turn, generous for a person watching a reply arrive and
  * finite for a pool. At the schema's maximum timeout of 600 s it is two hours, which is what a
- * site asking for ten-minute provider waits has asked for; the concurrency cap, not the clock,
- * is what keeps that site's pool alive. Filter `alpaca_bot/stream/budget` moves it.
+ * site asking for ten-minute provider waits has asked for. Filter `alpaca_bot/stream/budget`
+ * moves it.
  *
  * ## How the budget is enforced, and where each mechanism stops
  *
@@ -61,30 +61,69 @@ use AlpacaBot\Settings\Store;
  *   `ollama` kind; core's AI client on `wp-ai`), which throws into stream()'s catch and becomes
  *   an error frame.
  *
- * ## The concurrency cap
+ * ## The concurrency cap, and why it is SQL
  *
  * `claim()` hands out at most LIMIT slots per person at a time, and a refused redemption is a
- * 429 that leaves the ticket unspent, so the client may retry it within its 120 s life. The
- * slots live in one transient per person, as slot id => the timestamp the slot expires at.
- * Per-entry stamps rather than a counter with a TTL: a counter's TTL expires the whole count at
- * once, taking other live streams' slots with it, while a stamped entry frees exactly the slot
- * whose stream is over.
+ * 429 that leaves the ticket unspent, so the client may retry it within its 120 s life.
  *
- * `release()` is called from a `finally` in StreamController::serve(), which is why the stamp
- * matters. `finally` covers every ordinary end — the reply finishing, the client aborting, a
- * throw — but not a fatal error, an out-of-memory, or a killed process. A shutdown function
- * would cover the fatal; it is deliberately not used, because the one fatal a bounded stream
- * has is `set_time_limit()` expiring, and the slot was stamped with that same deadline, so the
- * slot is already expired to every later reader by the time the process dies. That leaves only
- * kill and OOM, which no in-process hook survives and which the stamp bounds anyway. One
- * release path that always runs beats two that have to agree.
+ * A cap is only a cap if the claim is atomic, and this one is the only place in `src/` that
+ * reaches for `$wpdb` to make it so. That is a deliberate exception, and the reason is that
+ * every portable alternative decides on a *prior read*, which is what a concurrency cap cannot
+ * do:
  *
- * Read-modify-write on a transient is not atomic, so N redemptions arriving at the same instant
- * can each see the same free slot and overshoot the cap by up to N. That is accepted: this cap
- * exists to stop tickets *accumulating* into held workers over a minute, which it does, and the
- * exact-simultaneity case is bounded by the `chat` bucket's 30/minute on the POST side. The
- * ticket redemption, where an off-by-one would mean a billed turn running twice, is not built
- * this way — StreamController::handle() claims it with delete_transient()'s own report.
+ * - A read-modify-write over one transient — a slot array, or a counter — is what this class
+ *   did first, and it does not cap anything. K redemptions arriving together all read the same
+ *   set and all write `set + their own slot`, so the store ends at "one more than before" while
+ *   K streams are live. The count never records the overshoot, so the race is repeatable rather
+ *   than a one-off skew, and a refused redemption keeps its ticket, so retrying until it lands
+ *   is free. Probed against this class as it then stood, three batches of ten redemptions from
+ *   one account against a cap of three gave 30 live streams and a recorded count of 3.
+ * - `add_option()` is not the atomic insert it looks like. It decides on `get_option()`
+ *   (`wp-includes/option.php`, "Make sure the option doesn't already exist"), and its write is
+ *   `INSERT … ON DUPLICATE KEY UPDATE`, which succeeds for every racer.
+ * - `wp_cache_add()` is atomic on some persistent object caches and guaranteed by nothing; on a
+ *   default installation there is no persistent cache at all, so it is a per-request array that
+ *   always says yes.
+ *
+ * What is atomic is a uniquely-keyed row: `option_name` carries a UNIQUE index, so `INSERT
+ * IGNORE` either inserts the row (1 affected) or finds it already there (0 affected), decided by
+ * the database rather than by anything this process read. Core claims its own locks exactly this
+ * way — `WP_Upgrader::create_lock()` runs
+ * `INSERT IGNORE INTO $wpdb->options … VALUES (%s, %s, 'off')` on every plugin and theme update,
+ * with a trailing SQL comment reading LOCK — so this is core's idiom on core's table, not a new
+ * dependency on the schema.
+ *
+ * One row per slot, named `alpaca_bot_stream_slot_<person>_<index>`, holding `<expiry>:<token>`,
+ * autoloaded off. `claim()` walks the indexes and takes the first it can; a row whose expiry has
+ * passed is taken over with `UPDATE … WHERE option_name = %s AND option_value = %s`, again
+ * decided by the affected-row count, so two processes finding the same lapsed row cannot both
+ * win it. `release()` deletes by name *and* value, so a slot that lapsed and was taken over by a
+ * later stream is never deleted by the earlier one. The rows are read and written only here and
+ * only through `$wpdb`, so no object cache holds a stale copy of them.
+ *
+ * ## What the lease does and does not bound
+ *
+ * `release()` is called from a `finally` in StreamController::serve(), and the expiry on the row
+ * is what covers the ends a `finally` cannot see: a fatal error, an out-of-memory, a killed
+ * process, or a redemption whose `rest_pre_serve_request` is never reached at all. A shutdown
+ * function would catch some of those and is deliberately not used: one release path that always
+ * runs beats two that have to agree, and the leak it would save is fail-closed — it costs that
+ * person their own capacity and nobody else's — and lasts at most `seconds()`.
+ *
+ * A lapsed row is taken over by that person's next claim rather than swept on a schedule, so
+ * what a killed process leaves behind is at most LIMIT autoload-off options rows per person,
+ * reused the next time they stream and otherwise inert. Nothing sweeps them for a person who
+ * never comes back; that is the price of a lease that outlives the process holding it.
+ *
+ * The lease bounds **counting, not holding**. A stream blocked inside one provider call writes
+ * no frame, and Unix max_execution_time does not count time blocked in a stream operation, so
+ * neither the in-band deadline nor `set_time_limit()` reaches it: at `seconds()` its row lapses
+ * while its PHP worker is still held, and that person may then claim the slot again. So a
+ * provider that hangs — or trickles a byte just under its idle timeout — is the one case where
+ * one person holds more than LIMIT workers, and it is not fixable from inside this process,
+ * because the only code that could shorten the lease is the code that is blocked. What ends
+ * those workers is the provider's own idle timeout. Everything that reaches a frame, a throw or
+ * an exit is capped at LIMIT.
  *
  * @since 0.5.0
  */
@@ -98,8 +137,8 @@ final class StreamBudget
      */
     public const LIMIT = 3;
 
-    /** One transient per person, holding that person's live slots. */
-    public const TRANSIENT = 'alpaca_bot_streams_';
+    /** One option row per slot: this prefix, then the person, then the slot's index. */
+    public const OPTION = 'alpaca_bot_stream_slot_';
 
     public function __construct(private Store $store) {}
 
@@ -119,6 +158,11 @@ final class StreamBudget
          * PHP worker pool tighter. Anything below one provider timeout is raised to it, so a
          * filter that forgot to return cannot end every turn before it starts.
          *
+         * Applied wherever the number is needed rather than once per request: one redemption
+         * asks for it up to three times (the slot lease in claim(), the process time limit and
+         * the in-band deadline in StreamController::serve()). A filter that only returns a
+         * number will not notice; one that counts or logs will see the repeats.
+         *
          * @since 0.5.0
          * @param int $seconds the default budget
          * @param int $timeout the site's `provider.timeout`, the number it was derived from
@@ -130,18 +174,21 @@ final class StreamBudget
     /**
      * Takes a slot for `$userId`, or reports that they are already at the limit.
      *
-     * `retry_after` on a refusal is the seconds until the *longest*-lived slot this person holds
-     * expires: every held slot is gone by then, so a client that waits it out will get through.
-     * A stream that ends normally frees its slot long before, which is why it is a ceiling on
-     * the wait and not a prediction of it.
+     * The returned slot is `<index>:<expiry>:<token>` — the index names the row and the rest is
+     * exactly what was written into it, which is what lets release() delete the claim it made
+     * and only that claim.
+     *
+     * `retry_after` on a refusal is the seconds until the *soonest*-expiring slot this person
+     * holds lapses: that slot is claimable then, so a client that waits it out gets through. A
+     * stream that ends normally frees its slot long before, which is why it is a ceiling on the
+     * wait and not a prediction of it. A slot whose row could not be read contributes no stamp,
+     * and if none of them could the ceiling is a whole budget.
      *
      * @return array{slot: string|null, retry_after: int}
      */
     public function claim(int $userId): array
     {
         $now = (int) current_time('timestamp', true);
-        $key = self::TRANSIENT . RateLimit::subject($userId);
-        $slots = $this->live($key, $now);
         /**
          * Filters how many streamed turns one person may have running at once. The stream route
          * is not rate limited (the turn was counted on the POST that issued the ticket), so this
@@ -156,64 +203,76 @@ final class StreamBudget
          * @param int $userId whose streams are being counted, 0 for a visitor
          */
         $limit = max(1, (int) apply_filters('alpaca_bot/stream/concurrent', self::LIMIT, $userId));
-        if (count($slots) >= $limit) {
-            return ['slot' => null, 'retry_after' => max(1, max($slots) - $now)];
-        }
-        // Unique, not unpredictable: a slot id is minted here, kept in this process and in this
-        // person's own transient, and never sent to a client or accepted from one, so there is
+        $expires = $now + $this->seconds();
+        // Unique, not unpredictable: a slot token is minted here, kept in this process and in
+        // this person's own rows, and never sent to a client or accepted from one, so there is
         // nothing to guess. random_bytes() is for uniqueness across concurrent processes, which
         // is the only property asked of it — wp_generate_password() would be the same bytes
         // dressed as a secret.
-        $slot = bin2hex(random_bytes(6));
-        $slots[$slot] = $now + $this->seconds();
-        $this->store($key, $slots, $now);
-        return ['slot' => $slot, 'retry_after' => 0];
+        $held = $expires . ':' . bin2hex(random_bytes(6));
+        $subject = RateLimit::subject($userId);
+        $waits = [];
+        for ($index = 0; $index < $limit; $index++) {
+            $wait = $this->take(self::OPTION . $subject . '_' . $index, $held, $now);
+            if ($wait === null) {
+                return ['slot' => $index . ':' . $held, 'retry_after' => 0];
+            }
+            $waits[] = $wait;
+        }
+        $waits = array_filter($waits);
+        return ['slot' => null, 'retry_after' => max(1, ($waits === [] ? $expires : min($waits)) - $now)];
     }
 
-    /** Gives back a slot claim() handed out. A slot that has already expired on its own is a no-op. */
+    /**
+     * Gives back a slot claim() handed out. The delete names the value as well as the row, so a
+     * slot this claim had already lost — its lease lapsed and another stream took the row over —
+     * is left with its new holder. A slot already gone is a no-op.
+     */
     public function release(int $userId, string $slot): void
     {
-        $now = (int) current_time('timestamp', true);
-        $key = self::TRANSIENT . RateLimit::subject($userId);
-        $slots = $this->live($key, $now);
-        unset($slots[$slot]);
-        $this->store($key, $slots, $now);
-    }
-
-    /**
-     * The person's slots that have not expired. Expired entries are dropped on the way past
-     * rather than on a schedule: the only code that reads this transient is this class, and
-     * every path through it either writes the pruned set back or is about to.
-     *
-     * @return array<string, int> slot id => the timestamp it expires at
-     */
-    private function live(string $key, int $now): array
-    {
-        $slots = get_transient($key);
-        if (!is_array($slots)) {
-            return [];
-        }
-        $live = [];
-        foreach ($slots as $slot => $expires) {
-            if (is_string($slot) && is_int($expires) && $expires > $now) {
-                $live[$slot] = $expires;
-            }
-        }
-        return $live;
-    }
-
-    /**
-     * Writes the slot set back, with a TTL that reaches the last slot to expire so the row
-     * outlives every stamp in it; an empty set is deleted rather than stored as one.
-     *
-     * @param array<string, int> $slots
-     */
-    private function store(string $key, array $slots, int $now): void
-    {
-        if ($slots === []) {
-            delete_transient($key);
+        [$index, $held] = array_pad(explode(':', $slot, 2), 2, '');
+        if ($held === '' || preg_match('/^\d+$/', $index) !== 1) {
             return;
         }
-        set_transient($key, $slots, max(1, max($slots) - $now));
+        global $wpdb;
+        // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- The class docblock says why the slot rows are $wpdb's and not the options API's: the claim has to be decided by the affected-row count rather than by a prior read. Both values are prepared; the only interpolation is $wpdb->options, the table name, as core's own WP_Upgrader::create_lock() writes it. No cache to invalidate: nothing reads these rows through get_option().
+        $wpdb->query($wpdb->prepare("DELETE FROM `{$wpdb->options}` WHERE `option_name` = %s AND `option_value` = %s", self::OPTION . RateLimit::subject($userId) . '_' . $index, $held));
+    }
+
+    /**
+     * Takes one slot row, or says when its holder's lease lapses.
+     *
+     * The insert is the claim: `INSERT IGNORE` is 1 affected row when this call created the row
+     * and 0 when the UNIQUE index on `option_name` found it already there, which is the whole
+     * reason this is SQL (see the class docblock). A row that is there but lapsed is taken over
+     * with a compare-and-set on its exact value, so the affected-row count decides that race too.
+     *
+     * @return int|null null when the slot is now this caller's; otherwise the timestamp the
+     *                  holder's lease expires at, or 0 when that could not be read — the row was
+     *                  gone by the time it was asked for, or the store refused the write for a
+     *                  reason of its own. 0 says "occupied, no stamp to offer", which keeps a
+     *                  guess out of the Retry-After a caller is handed.
+     */
+    private function take(string $name, string $held, int $now): ?int
+    {
+        global $wpdb;
+        // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- As release(): the affected-row count is the claim, every value is prepared, and $wpdb->options is the table name core interpolates the same way in WP_Upgrader::create_lock().
+        if ($wpdb->query($wpdb->prepare("INSERT IGNORE INTO `{$wpdb->options}` (`option_name`, `option_value`, `autoload`) VALUES (%s, %s, 'off')", $name, $held)) === 1) {
+            return null;
+        }
+        // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Reads the row the insert above did not get, to learn whether its lease has lapsed. get_option() would answer from the object cache, which nothing here writes to.
+        $there = $wpdb->get_var($wpdb->prepare("SELECT `option_value` FROM `{$wpdb->options}` WHERE `option_name` = %s", $name));
+        if (!is_string($there)) {
+            return 0;
+        }
+        $expires = (int) explode(':', $there, 2)[0];
+        if ($expires > $now) {
+            return $expires;
+        }
+        // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- The takeover, conditioned on the exact value that was read: 1 affected row means this process won the lapsed slot, 0 means another one did. Prepared, and the interpolation is the table name.
+        $taken = $wpdb->query($wpdb->prepare("UPDATE `{$wpdb->options}` SET `option_value` = %s WHERE `option_name` = %s AND `option_value` = %s", $held, $name, $there));
+        // A lost takeover leaves the slot held to a fresh lease, not to the stamp just read, so
+        // that stamp is not offered as a wait: 0 keeps it out of the Retry-After.
+        return $taken === 1 ? null : 0;
     }
 }

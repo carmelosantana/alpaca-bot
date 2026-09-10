@@ -71,6 +71,7 @@ if (!class_exists('WP_Error', false)) {
 if (!class_exists(\WpOrg\Requests\Exception::class, false)) {
     require_once __DIR__ . '/stubs/wp-requests.php';
 }
+require_once __DIR__ . '/stubs/wp-options-table.php';
 
 // ---------------------------------------------------------------- test helpers
 // Pest loads every test file into one process, so a helper declared at the root of a test
@@ -188,9 +189,10 @@ function conversationChatPost(int $id = 42, string $author = '3', string $type =
 
 /**
  * ConversationStoreTest and pipelineWith(): the database as ConversationStore::storageBudget()
- * reads it. Installs a `$wpdb` stand-in whose get_var() answers `$raw` to `SELECT
- * @@max_allowed_packet` (wpdb is a class Brain Monkey cannot stub, and the real one is not loaded
- * here), records every query in `->queries`, and stubs maybe_serialize() as serialize(), which is
+ * reads it. Installs the OptionsTable double (tests/stubs, shared with the stream budget's slot
+ * rows) with `$raw` as its answer to `SELECT @@max_allowed_packet` (wpdb is a class Brain Monkey
+ * cannot stub, and the real one is not loaded here), which records every query in `->queries`,
+ * and stubs maybe_serialize() as serialize(), which is
  * what core's does for an array. The store caches the figure for the request in a private
  * static, and Pest runs the suite in one process, so the cache is reset here the way Pest.php
  * resets Plugin::$instance; a test that wants a different figure calls this again. The reset
@@ -200,20 +202,9 @@ function conversationChatPost(int $id = 42, string $author = '3', string $type =
  * The default packet is MySQL's documented default, 16 MiB; a budget test passes something
  * smaller so a transcript of a few hundred bytes is over it.
  */
-function conversationStoreDb(mixed $raw = '16777216'): object
+function conversationStoreDb(mixed $raw = '16777216'): OptionsTable
 {
-    $db = new class ($raw) {
-        /** @var list<string> */
-        public array $queries = [];
-
-        public function __construct(private mixed $raw) {}
-
-        public function get_var(string $query): mixed
-        {
-            $this->queries[] = $query;
-            return $this->raw;
-        }
-    };
+    $db = new OptionsTable($raw);
     $GLOBALS['wpdb'] = $db;
     Functions\when('maybe_serialize')->alias(static fn(mixed $v): mixed => is_array($v) || is_object($v) ? serialize($v) : $v);
     (new ReflectionProperty(ConversationStore::class, 'maxAllowedPacket'))->setValue(null, null);
@@ -424,6 +415,20 @@ function transientsPersistIn(object $h): void
         unset($h->transients[$key]);
         return true;
     });
+}
+
+/**
+ * StreamControllerTest and StreamBudgetTest: gives the test an options table for Rest\StreamBudget
+ * to claim slots in. The budget's claim is `$wpdb`'s and not the options API's — the class
+ * docblock says why — so a test of it needs the table, not a transient array.
+ *
+ * The double is returned as well as installed: `->rows` is the slot state to assert on, and
+ * `->frozen` is how a test makes a batch of claims read the same instant.
+ */
+function slotRowsIn(): OptionsTable
+{
+    $GLOBALS['wpdb'] = new OptionsTable();
+    return $GLOBALS['wpdb'];
 }
 
 /**

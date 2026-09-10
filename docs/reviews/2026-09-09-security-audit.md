@@ -180,6 +180,18 @@ of `0`, or check it between frames and end the turn with an `error` frame. A con
 per user on ticket redemption (a short-lived transient counting live streams) would be the
 stronger fix and is cheap, since a ticket is already a transient.
 
+**What shipped, and one correction to the sentence above** (added 2026-09-09, after the audit;
+`src/Rest/StreamBudget.php` carries the whole argument). Both bounds were built: a wall-clock
+budget per turn, and a per-person cap on live streams. But **a transient counting live streams
+is not a cap** — the first version of this was exactly that, and it does not work. A transient
+is read-modify-write, so redemptions arriving together all read the same count and the store
+ends one higher however many of them ran. Probed against that version, three batches of ten
+redemptions from one account against a cap of three gave `live=30 recorded=3`. What replaced it
+is a claim the database decides: one option row per slot and `INSERT IGNORE` on the unique key
+over `option_name`, the same primitive core locks with in `WP_Upgrader::create_lock()`. The
+same probe against the shipped class gives `live=3 recorded=3`. The wall-clock half of the fix
+is as recommended here.
+
 ---
 
 ### M-2 — `GET /settings?reveal=1` returns the provider API key with no floor under the capability filter

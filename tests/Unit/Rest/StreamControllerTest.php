@@ -60,6 +60,7 @@ it('registers its route and hooks rest_pre_serve_request to serve the stream its
 
 it('refuses a token that is missing, unknown, another user\'s, or for another conversation, and leaves the ticket alone', function (): void {
     $h = pipelineWith(null);
+    $table = slotRowsIn();
     $h->transients[ChatController::STREAM_TRANSIENT . 'theirs'] = streamTicket(['user_id' => 9]);
     $h->transients[ChatController::STREAM_TRANSIENT . 'mine'] = streamTicket();
     $deleted = [];
@@ -82,10 +83,10 @@ it('refuses a token that is missing, unknown, another user\'s, or for another co
             ->and($res->get_error_message())->toBe('Invalid or expired stream token.')
             ->and($res->get_error_data())->toBe(['status' => 403]);
     }
-    // No ticket was deleted: a refused request spends nothing. The budget slot each attempt
-    // claimed and gave back is the other key that shows up here, which is release() doing its job.
-    expect(array_values(array_filter($deleted, static fn(string $k): bool => str_starts_with($k, ChatController::STREAM_TRANSIENT))))->toBe([])
-        ->and($deleted)->toBe(array_fill(0, 6, StreamBudget::TRANSIENT . '3'));
+    // Nothing was deleted and nothing was written: a refused request spends no ticket and takes
+    // no budget slot. The claim comes after these checks, so a bad-token probe costs one read.
+    expect($deleted)->toBe([])
+        ->and($table->rows)->toBe([]);
 });
 
 it('redeems a valid ticket once: the deletion is the claim, and the response carries nothing of the ticket', function (): void {
@@ -368,7 +369,8 @@ it('keeps the provider\'s words out of an editor\'s error frame and hands them t
 // --- StreamBudget, as the stream route uses it --------------------------------------------
 // StreamBudgetTest covers the arithmetic and the slot bookkeeping on their own; what is pinned
 // here is that this route actually applies them: the budget reaches the process time limit and
-// the in-band deadline, the cap is claimed before the ticket is read, and the slot comes back.
+// the in-band deadline, the cap is claimed once the ticket has been checked and before it is
+// spent, and the slot comes back.
 
 it('hands prepareOutput a wall-clock budget derived from provider.timeout and the iteration budget, never 0', function (): void {
     // The default 60 s provider timeout, six agent iterations, and room for one nested tool
@@ -438,8 +440,9 @@ it('ends a turn that has outrun its budget with a stream_timeout frame, keeping 
 it('refuses a redemption past the concurrent-stream limit with a 429, and leaves that ticket unspent', function (): void {
     // The stream route is not rate limited, so without this one account's 30 tickets a minute
     // redeem into 30 PHP workers held for the length of a turn each. The refusal comes before
-    // the ticket is read: a caller told to wait must still have their turn.
+    // the ticket is spent: a caller told to wait must still have their turn.
     $h = pipelineWith(null);
+    $table = slotRowsIn();
     transientsPersistIn($h);
     restConvertsErrors();
     foreach (range(1, StreamBudget::LIMIT + 1) as $n) {
@@ -450,41 +453,42 @@ it('refuses a redemption past the concurrent-stream limit with a 429, and leaves
         $res = $controller->handle(restRequest('GET', '/alpaca-bot/v1/chat/42/stream', ['id' => '42', 'token' => "tok{$n}"]));
         expect($res->get_status())->toBe(200, "redemption {$n}");
     }
-    expect($h->transients[StreamBudget::TRANSIENT . '3'])->toHaveCount(StreamBudget::LIMIT);
+    expect($table->rows)->toHaveCount(StreamBudget::LIMIT);
 
     $over = $controller->handle(restRequest('GET', '/alpaca-bot/v1/chat/42/stream', ['id' => '42', 'token' => 'tok4']));
     expect($over)->toBeInstanceOf(WP_REST_Response::class)
         ->and($over->get_status())->toBe(429)
         ->and($over->get_data()['code'])->toBe('alpaca_bot_rate_limited')
-        // Every slot this person holds has expired by then, so waiting it out always gets through.
+        // The soonest of this person's leases lapses then, so waiting it out gets through.
         ->and($over->get_headers())->toBe(['Retry-After' => '720'])
         ->and($over->get_data()['data']['retry_after'])->toBe(720)
         // Unspent: the ticket is still there to redeem when a slot frees.
         ->and($h->transients)->toHaveKey(ChatController::STREAM_TRANSIENT . 'tok4')
-        ->and($h->transients[StreamBudget::TRANSIENT . '3'])->toHaveCount(StreamBudget::LIMIT);
+        ->and($table->rows)->toHaveCount(StreamBudget::LIMIT);
 });
 
 it('gives the slot back when the stream ends, and when something else served the request instead', function (): void {
     $h = pipelineWith(pipelineProvider([new Response('a', ProviderFinishReason::Stop)]));
+    $table = slotRowsIn();
     actionRuns('alpaca_bot/chat/started');
     transientsPersistIn($h);
     $h->transients[ChatController::STREAM_TRANSIENT . 'tok'] = streamTicket();
     $controller = new StreamController($h->pipeline, $h->store, static function (int $seconds): void {});
     $request = restRequest('GET', '/alpaca-bot/v1/chat/42/stream', ['id' => '42', 'token' => 'tok']);
     $controller->handle($request);
-    expect($h->transients[StreamBudget::TRANSIENT . '3'])->toHaveCount(1);
+    expect($table->rows)->toHaveCount(1);
     ob_start();
     $controller->serve(false, new WP_REST_Response(), $request, new WP_REST_Server());
     ob_get_clean();
-    // The whole set was the one slot, so the row is gone rather than stored empty.
-    expect($h->transients)->not->toHaveKey(StreamBudget::TRANSIENT . '3');
+    // The row is deleted, not left holding a lease no stream is behind.
+    expect($table->rows)->toBe([]);
 
     // Served by something hooked earlier: nothing streams, the ticket is spent anyway, and
-    // holding the slot until its stamp expires would be a leak for no run.
+    // holding the slot until its lease lapses would be a leak for no run.
     $h->transients[ChatController::STREAM_TRANSIENT . 'two'] = streamTicket();
     $request = restRequest('GET', '/alpaca-bot/v1/chat/42/stream', ['id' => '42', 'token' => 'two']);
     $controller->handle($request);
-    expect($h->transients[StreamBudget::TRANSIENT . '3'])->toHaveCount(1)
+    expect($table->rows)->toHaveCount(1)
         ->and($controller->serve(true, new WP_REST_Response(), $request, new WP_REST_Server()))->toBeTrue()
-        ->and($h->transients)->not->toHaveKey(StreamBudget::TRANSIENT . '3');
+        ->and($table->rows)->toBe([]);
 });
