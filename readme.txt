@@ -1,7 +1,7 @@
 === Alpaca Bot ===  
 Contributors: carmelosantana  
 Donate link: https://www.patreon.com/carmelosantana  
-Tags: ai, large language model, embedding, chatbot, ollama  
+Tags: ai, large language model, chatbot, ollama, agent  
 Requires at least: 6.9  
 Tested up to: 7.1  
 Stable tag: 0.5.0  
@@ -168,6 +168,8 @@ Into one option, moved automatically on the first request after the upgrade. Two
 = The model answers with the text of a tool call instead of an answer. =
 
 Some small models advertise tool support and then write the call out as prose. On the **Models** tab, set that model's **Tools** override to off; it beats whatever the provider claims. A model too small to use tools well is usually too small for the tools to be worth it.
+
+There is a price as well as a symptom. All three tools are on by default, and their schemas go with every turn: measured on this plugin, about 790 extra prompt tokens each time, against 36 with tools off. On a large model that is noise in the bill; on a small one it is most of the prompt, which is why the answer degrades. Turning off the tools you do not use, under **Tools**, costs nothing and is worth doing before you tune anything else.
 
 == Screenshots ==
 
