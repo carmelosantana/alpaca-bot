@@ -59,8 +59,9 @@ it('is not needed when all three flags are set, and writes nothing', function ()
     expect((new Migrate04(new Store()))->needed())->toBeFalse();
 });
 
-// Without the flags a 0.5-only site would re-run the detection get_option() calls (all
-// non-autoloaded, so uncached misses) and the conversation query on every admin request forever.
+// Without the flags a 0.5-only site would re-run the detection get_option() calls (the two
+// legacy reads are non-autoloaded, so uncached misses) and the conversation query on every
+// admin request forever.
 it('on a fresh install moves no options, runs one empty conversation batch, and flags all three steps so detection runs only once', function (): void {
     $stored = [];
     migrate04Options($stored);
@@ -258,4 +259,29 @@ it('migrates conversations in bounded batches across requests without re-running
     expect($stored[Migrate04::FLAG_CONVERSATIONS])->toBe('1')
         ->and($stored['alpaca_bot_settings']['models.default'])->toBe('mistral')
         ->and((new Migrate04(new Store()))->needed())->toBeFalse();
+});
+
+// needed() runs on `init` on every request the site serves (Plugin::register() hooks it there,
+// and Migrate04's own docblock says why it is not admin_init), so once the three steps are done
+// the check is exactly these three option reads and nothing else. Written non-autoloaded they
+// were three uncached SELECTs on every request — three of the 31 queries measured on the admin
+// chat screen in docs/reviews/2026-09-09-performance-baseline.md — so they are written
+// autoloaded and ride in the single alloptions read WordPress already does.
+it('writes the three completion flags autoloaded, so needed() adds no query once migration is done', function (): void {
+    $stored = [];
+    $autoload = [];
+    Functions\when('get_option')->alias(function (string $k, mixed $d = false) use (&$stored): mixed {
+        return $stored[$k] ?? ($k === 'alpaca_bot_settings' ? [] : $d);
+    });
+    Functions\when('update_option')->alias(function (string $k, mixed $v, mixed $a = null) use (&$stored, &$autoload): bool {
+        $stored[$k] = $v;
+        $autoload[$k] = $a;
+        return true;
+    });
+    Functions\when('get_posts')->justReturn([]);
+    (new Migrate04(new Store()))->run();
+    expect($autoload)->toHaveKeys([Migrate04::FLAG, Migrate04::FLAG_RETENTION, Migrate04::FLAG_CONVERSATIONS])
+        ->and($autoload[Migrate04::FLAG])->toBeTrue()
+        ->and($autoload[Migrate04::FLAG_RETENTION])->toBeTrue()
+        ->and($autoload[Migrate04::FLAG_CONVERSATIONS])->toBeTrue();
 });

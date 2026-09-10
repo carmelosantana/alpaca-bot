@@ -23,6 +23,15 @@ use AlpacaBot\Plugin;
  * every request the site serves runs it while any flag is unset, an anonymous front-end page
  * view included. BATCH is therefore a bound on what a visitor's page view can be made to pay
  * for, not only on what an administrator waits through.
+ *
+ * The same hook is why all three flags are written autoloaded: needed() re-reads them on
+ * every request forever, and a non-autoloaded option costs one uncached SELECT per request
+ * each. That was measured rather than assumed: the three reads were three of the 31 queries the
+ * admin chat screen ran, and being on `init` they ran on every other request too
+ * (docs/reviews/2026-09-09-performance-baseline.md).
+ * Autoloaded they cost nothing beyond three short rows in the alloptions read WordPress
+ * already does. A site that ran a pre-release 0.5 migration keeps whatever autoload value
+ * its rows were given, because nothing rewrites a flag once it is set.
  */
 final class Migrate04
 {
@@ -88,11 +97,11 @@ final class Migrate04
     {
         if ($this->retentionPending()) {
             $this->migrateRetention();
-            update_option(self::FLAG_RETENTION, '1', false);
+            update_option(self::FLAG_RETENTION, '1', true);
         }
         if ($this->optionsPending()) {
             $this->migrateOptions();
-            update_option(self::FLAG, '1', false);
+            update_option(self::FLAG, '1', true);
         }
         if ($this->conversationsPending()) {
             $this->migrateConversations();
@@ -151,9 +160,10 @@ final class Migrate04
     /**
      * True when 0.4 options exist and the move has not run yet.
      *
-     * On a site that never had 0.4 the flag is written here, so the detection
-     * (three non-autoloaded option reads) happens once instead of on every request the site
-     * serves — which, hooked on `init`, is what this would otherwise be.
+     * On a site that never had 0.4 the flag is written here, so the two non-autoloaded legacy
+     * reads that detect a 0.4 site happen once instead of on every request the site serves —
+     * which, hooked on `init`, is what this would otherwise be. The flag read above costs no
+     * query of its own: every write of it, here and in run(), is autoloaded (class docblock).
      */
     private function optionsPending(): bool
     {
@@ -163,7 +173,7 @@ final class Migrate04
         $legacy = get_option(self::LEGACY_PREFIX . 'api_url', null) !== null
             || get_option(self::LEGACY_PREFIX . 'default_model', null) !== null;
         if (!$legacy) {
-            update_option(self::FLAG, '1', false);
+            update_option(self::FLAG, '1', true);
         }
         return $legacy;
     }
@@ -239,7 +249,7 @@ final class Migrate04
             wp_update_post(wp_slash($update));
         }
         if (count($posts) < self::BATCH) {
-            update_option(self::FLAG_CONVERSATIONS, '1', false);
+            update_option(self::FLAG_CONVERSATIONS, '1', true);
         }
     }
 }
