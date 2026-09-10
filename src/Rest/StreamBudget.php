@@ -118,10 +118,14 @@ use AlpacaBot\Settings\Store;
  * runs beats two that have to agree, and the leak it would save is fail-closed — it costs that
  * person their own capacity and nobody else's — and lasts at most `seconds()`.
  *
- * A lapsed row is taken over by that person's next claim rather than swept on a schedule, so
- * what a killed process leaves behind is at most LIMIT autoload-off options rows per person,
- * reused the next time they stream and otherwise inert. Nothing sweeps them for a person who
- * never comes back; that is the price of a lease that outlives the process holding it.
+ * A lapsed row is taken over by that subject's next claim rather than swept on a schedule, so
+ * what a killed process leaves behind is at most LIMIT autoload-off options rows per subject,
+ * reused the next time that subject streams and otherwise inert. Nothing sweeps them for a
+ * subject that never comes back; that is the price of a lease that outlives the process holding
+ * it. Per subject is the bound, and on a site that keeps the route to logged-in people the
+ * subjects are users, so the total is bounded by the user table. Open the route to visitors and
+ * the subject becomes a client address: the rows stay autoload-off and inert, but nothing bounds
+ * how many addresses turn up, so that site wants a sweep this class does not provide.
  *
  * The lease bounds **counting, not holding**. A stream blocked inside one provider call writes
  * no frame, and Unix max_execution_time does not count time blocked in a stream operation, so
@@ -167,9 +171,10 @@ final class StreamBudget
          * filter that forgot to return cannot end every turn before it starts.
          *
          * Applied wherever the number is needed rather than once per request: one redemption
-         * asks for it up to three times (the slot lease in claim(), the process time limit and
-         * the in-band deadline in StreamController::serve()). A filter that only returns a
-         * number will not notice; one that counts or logs will see the repeats.
+         * asks for it up to three times -- the slot lease in claim(), the process time limit in
+         * StreamController::serve(), and the in-band deadline in StreamController::stream().
+         * A filter that only returns a number will not notice; one that counts or logs will see
+         * the repeats.
          *
          * @since 0.5.0
          * @param int $seconds the default budget

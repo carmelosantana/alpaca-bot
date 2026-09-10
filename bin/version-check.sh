@@ -17,7 +17,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 hdr=$(grep -m1 '^Version:' alpaca-bot.php | awk '{print $2}')
 want="${1:-$hdr}"
-stable=$(grep -m1 '^Stable tag:' readme.txt | awk '{print $3}')
+stable=$(grep -m1 '^Stable tag:' readme.txt | awk '{print $3}' || true)
 pkg=$(node -p "require('./package.json').version")
 php=$(grep -m1 "VERSION = '" src/Plugin.php | sed -E "s/.*'([^']+)'.*/\1/")
 ok=1
