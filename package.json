@@ -11,7 +11,8 @@
     "check": "pnpm typecheck && pnpm test && pnpm build",
     "test": "node --test \"tests/ts/**/*.test.ts\"",
     "release:dry": "bash bin/build-zip.sh",
-    "e2e": "playwright test"
+    "e2e": "playwright test",
+    "e2e:offline": "playwright test tests/e2e/composer.spec.ts"
   },
   "devDependencies": {
     "@playwright/test": "1.63.0",

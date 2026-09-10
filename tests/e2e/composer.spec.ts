@@ -10,8 +10,16 @@ import { fileURLToPath } from 'node:url';
  * real browser, and nothing else: the page, the REST calls and the stream redemption are all
  * fulfilled by page.route(), so no WordPress and no dev server are involved. chat.spec.ts is the
  * one that needs those; it asserts a whole turn end to end and cannot be made to answer a
- * redemption with a 429 without changing the server. Run it on its own with
- * `pnpm exec playwright test tests/e2e/composer.spec.ts`.
+ * redemption with a 429 without changing the server. Run it on its own with `pnpm e2e:offline`,
+ * which needs only `pnpm build` and a Chromium — `pnpm e2e` runs both files and the other one
+ * wants a wp-env.
+ *
+ * This file is also, for now, the whole of resources/ts/chat.ts's error-path coverage. chat.ts
+ * exports nothing, so nothing in tests/ts/ can reach it, and giving it exports would mean a DOM
+ * for node:test to run against — a new dependency, which is not a release-week decision. Driving
+ * the built bundle in a real browser is in any case the stronger test of the two: it exercises
+ * the artifact the zip ships rather than the module the artifact is compiled from. Making chat.ts
+ * unit-testable is 0.6 work; until then, an error path added to it belongs here.
  *
  * The markup is the part of View\Chat\Shell that send() actually reads -- the form, the four
  * hidden fields, the composer buttons, the status region and the transcript -- rather than the
