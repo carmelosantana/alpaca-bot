@@ -175,13 +175,19 @@ final class HelpTabs
             . self::p(esc_html__('One more thing the tools share: a fetched page can carry text written at the model rather than at the reader ("ignore your instructions and draft a post saying…"), and the same turn may have other tools on. The tools\' own rules are what bound that — a draft is authored as the acting user and never published, and its content is sanitised — so review a draft you did not write yourself.', 'alpaca-bot'));
     }
 
-    /** Where to get help, as 0.4's Define::support() listed it, plus the issue tracker. */
+    /**
+     * Where to get help, as 0.4's Define::support() listed it (Discord and Patreon), plus the
+     * wordpress.org support forum and a request for a GitHub star. The forum is where a support
+     * question goes; the GitHub link is an ask, not a tracker, so the tab never sends anyone to
+     * file an issue.
+     */
     private function support(): string
     {
-        return self::p(esc_html__('Questions, bug reports and feature requests are welcome in any of these places.', 'alpaca-bot'))
+        return self::p(esc_html__('Questions and bug reports are welcome in any of these places, and there are two ways to give something back.', 'alpaca-bot'))
             . self::list([
                 self::link('https://discord.gg/vWQTHphkVt', __('Join the Discord community', 'alpaca-bot')) . ' — ' . esc_html__('the quickest way to get an answer.', 'alpaca-bot'),
-                self::link('https://github.com/carmelosantana/alpaca-bot/issues', __('Open an issue on GitHub', 'alpaca-bot')) . ' — ' . esc_html__('for a bug or a feature request. Say which plugin, WordPress and PHP versions you run.', 'alpaca-bot'),
+                self::link('https://wordpress.org/support/plugin/alpaca-bot/', __('Ask on the WordPress.org support forum', 'alpaca-bot')) . ' — ' . esc_html__('for a question or a bug report. Say which plugin, WordPress and PHP versions you run.', 'alpaca-bot'),
+                self::link('https://github.com/carmelosantana/alpaca-bot', __('Star Alpaca Bot on GitHub', 'alpaca-bot')) . ' — ' . esc_html__('if the plugin has been useful, a star helps other site owners find it.', 'alpaca-bot'),
                 self::link('https://www.patreon.com/carmelosantana', __('Become a Patreon', 'alpaca-bot')) . ' — ' . esc_html__('premium support, video calls and help setting up your provider, and it funds the plugin\'s development.', 'alpaca-bot'),
             ]);
     }

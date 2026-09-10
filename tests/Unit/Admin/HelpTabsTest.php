@@ -80,17 +80,21 @@ it('says what both shortcodes do now, that an answer costs tokens and is cached,
         ->not->toContain('removed')->not->toContain('registers no shortcodes')->not->toMatch('/(?<![\d.])1\.\d/');
 });
 
-it('describes what the chat screen does now, and points support at Discord, Patreon and the issue tracker', function (): void {
+it('describes what the chat screen does now, and points support at Discord, the wordpress.org forum, a GitHub star and Patreon, not the issue tracker', function (): void {
     Functions\when('esc_url')->returnArg();
     $chat = helpTabContent('alpaca-bot-chat');
     expect($chat)->toContain('New chat')->toContain('Enter')->toContain('Shift')->toContain('image')->toContain('Copy')->toContain('Edit and resend')
         // The image cap is Assets::maxImageBytes(), which reads post_max_size alone; the tab must name that setting, not the upload limit that has no say.
         ->toContain('post_max_size')->not->toMatch('/is the site.s own upload limit/');
+    // Support questions go to the wordpress.org forum, and the GitHub link is an ask for a star,
+    // not a place to file issues: the tab must carry both new hrefs and no longer point at /issues.
     $support = helpTabContent('alpaca-bot-support');
     expect($support)->toContain('href="https://discord.gg/vWQTHphkVt"')
+        ->toContain('href="https://wordpress.org/support/plugin/alpaca-bot/"')
+        ->toContain('href="https://github.com/carmelosantana/alpaca-bot"')
         ->toContain('href="https://www.patreon.com/carmelosantana"')
-        ->toContain('href="https://github.com/carmelosantana/alpaca-bot/issues"')
-        ->toContain('rel="noopener"');
+        ->toContain('rel="noopener"')
+        ->not->toContain('/issues')->not->toContain('issue tracker');
 });
 
 it('tells a site owner what the tools grant: the fetch is an outbound request, the rebinding window is open, an egress policy is the mitigation, and opening the chat opens the tools', function (): void {
