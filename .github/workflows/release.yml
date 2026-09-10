@@ -256,7 +256,8 @@ jobs:
         with:
           files: dist/alpaca-bot.zip
           # bin/version-check.sh treats a version containing `-` as a pre-release and leaves
-          # readme.txt's `Stable tag` alone for it (its line 19). This is the same rule at the
+          # readme.txt's headers alone for it (its `case "$want" in *-*) ;;` guard, which covers
+          # `Stable tag`, `Requires PHP` and `Requires at least` together). This is the same rule at the
           # publishing end: such a tag gets a GitHub pre-release, and the SVN job below is
           # skipped for it by the matching condition. The 0.5 line is not planned to use one.
           prerelease: ${{ contains(github.ref_name, '-') }}
