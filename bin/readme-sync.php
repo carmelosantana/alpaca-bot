@@ -42,6 +42,12 @@
  *                        `## Changelog` come out as `= 0.5.0 =`, which is the line the
  *                        wordpress.org parser splits releases on, and each `### question` of
  *                        the FAQ come out as the `= question =` that listing renders.
+ *   a <details> fold  => the `<details>` and `</details>` lines dropped and the `<summary>` line
+ *                        rendered as the heading it stands for, one nesting step down exactly as
+ *                        a `###` would be: `= X =` while no `= X =` stands above it, bold under
+ *                        one. GitHub folds each FAQ answer and each changelog group this way;
+ *                        wordpress.org folds the FAQ's `= question =` lines on its own and has no
+ *                        fold for anything else, so the summary survives as the heading it is.
  *   a table           => a bullet per body row, cells joined by " -- ", the first cell bolded,
  *                        an empty cell dropped along with its separator. The header row and the
  *                        `---` rule are dropped: the readme parser renders no table, and a
@@ -194,6 +200,9 @@ function convert(array $lines, bool $nested): array
     $out = [];
     $table = [];
     $fence = null;
+    // Whether a `= X =` stands above the current line: from the start when the block is nested,
+    // and from its first `###` when it is not. A `<summary>` takes the level a `###` would.
+    $headed = $nested;
     foreach ($lines as $line) {
         if (preg_match('/^\s*(```+|~~~+)/', $line, $m) === 1) {
             $token = $m[1][0];
@@ -217,6 +226,17 @@ function convert(array $lines, bool $nested): array
         if ($table !== []) {
             $out = array_merge($out, table($table));
             $table = [];
+        }
+        if (preg_match('/^\s*<\/?details\b[^>]*>\s*$/i', $line) === 1) {
+            continue;
+        }
+        if (preg_match('/^\s*<summary>(.*?)<\/summary>\s*$/i', $line, $m) === 1) {
+            $text = trim(strip_tags($m[1]));
+            $out[] = links($headed ? '**' . $text . '**' : '= ' . $text . ' =');
+            continue;
+        }
+        if (!$nested && preg_match('/^###\s/', $line) === 1) {
+            $headed = true;
         }
         $out[] = links(heading($line, $nested));
     }

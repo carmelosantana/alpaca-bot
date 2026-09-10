@@ -158,6 +158,28 @@ it('renders a heading one nesting step below the section marker', function (): v
         ->and($out)->toContain("= Usage =\n\n**The chat screen**");
 });
 
+// A `<details>` fold is GitHub markup; the readme.txt parser has none of its own, and the
+// wordpress.org FAQ already opens and closes each `= question =`. So the wrapper lines go and the
+// `<summary>` becomes the heading it stands for, one nesting step down exactly as a `###` would:
+// `= X =` straight under the section marker, where the FAQ puts its questions, and bold under a
+// heading of its own, which is where a changelog's Breaking and Added sit under `= 0.5.0 =`.
+it('renders a <details> fold as the heading its <summary> stands for, and drops the wrapper', function (): void {
+    $md = str_replace(
+        ["### Is it good?\n\nYes.", "### 0.5.0\n\n- a change"],
+        ["<details>\n<summary>Is it good?</summary>\n\nYes.\n\n</details>", "### 0.5.0\n\n<details open>\n<summary><strong>Breaking</strong></summary>\n\n- a change\n\n</details>"],
+        readmeSyncMarkdown(),
+    );
+    $root = readmeSyncTree($md);
+    readmeSync($root, $root . '/out.txt');
+    $out = (string) file_get_contents($root . '/out.txt');
+
+    expect($out)->toContain("= Is it good? =\n\nYes.")
+        ->and($out)->toContain("= 0.5.0 =\n\n**Breaking**\n\n- a change")
+        ->and($out)->not->toContain('<details')
+        ->and($out)->not->toContain('</details>')
+        ->and($out)->not->toContain('summary>');
+});
+
 it('renders a table as one bullet per row and drops the header and the rule', function (): void {
     $root = readmeSyncTree(readmeSyncMarkdown("\n| Attribute | Default | What it does |\n| --- | --- | --- |\n| `prompt` | | The message. |\n| `cache` | `1h` | How long. |\n"));
     readmeSync($root, $root . '/out.txt');
