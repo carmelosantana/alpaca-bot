@@ -32,15 +32,17 @@ it('shows the assistant with the avatar the site configured', function (): void 
         ->and($who->userAvatar)->toBe('https://gravatar.test/7');
 });
 
-it('falls back to the plugin icon only when no assistant avatar is set', function (): void {
+it('falls back to the plugin\'s alpaca avatar only when no assistant avatar is set', function (): void {
     // The setting's schema default is '' (Schema::fields()), and sanitizeUrl() writes '' back for
     // anything it rejects, so '' is the one value that means "not set" and the only one this may
-    // replace. A site that set an avatar and a site that did not must not look the same.
-    $icon = 'https://site.test/wp-content/plugins/alpaca-bot/assets/img/icon-80.png';
+    // replace. A site that set an avatar and a site that did not must not look the same. The
+    // fallback is a plain URL like any configured one: the cream ground is in the image itself,
+    // so nothing downstream needs to know which of the two it was handed.
+    $avatar = 'https://site.test/wp-content/plugins/alpaca-bot/assets/img/alpaca-bot-avatar.png';
 
-    expect(Participants::current(new Store())->assistantAvatar)->toBe($icon)
-        ->and(Participants::current(new Store(['chat.assistant_avatar' => '']))->assistantAvatar)->toBe($icon)
-        ->and(Participants::current(new Store(['chat.assistant_avatar' => 'https://site.test/bot.png']))->assistantAvatar)->not->toBe($icon);
+    expect(Participants::current(new Store())->assistantAvatar)->toBe($avatar)
+        ->and(Participants::current(new Store(['chat.assistant_avatar' => '']))->assistantAvatar)->toBe($avatar)
+        ->and(Participants::current(new Store(['chat.assistant_avatar' => 'https://site.test/bot.png']))->assistantAvatar)->not->toBe($avatar);
 });
 
 it('carries an empty user avatar rather than the false core answers when there is none', function (): void {

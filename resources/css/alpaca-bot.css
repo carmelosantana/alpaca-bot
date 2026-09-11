@@ -10,10 +10,11 @@
  *
  * Two places load this, and one of them is not wp-admin: the admin chat screen
  * (Admin\Assets::enqueue()) and a front-end page carrying `[alpacabot]` with no prompt
- * (Admin\Assets::enqueueFront()). Everything below is shared but one block, the height
- * arithmetic on .ab-wrap, which subtracts wp-admin's chrome from the viewport; the front end
- * has no #wpfooter and the shell there is a block inside a page rather than the whole screen,
- * so .ab-wrap--front (near the foot of this file) replaces it. View\Chat\Shell puts that
+ * (Admin\Assets::enqueueFront()). Everything below is shared but the height arithmetic on
+ * .ab-wrap, which subtracts wp-admin's chrome from the viewport, and one narrow-screen rule on
+ * `.wrap.ab-wrap` that serves it; the front end has no #wpfooter and the shell there is a block
+ * inside a page rather than the whole screen, so .ab-wrap--front (near the foot of this file)
+ * replaces the height, and has no .wrap for the other rule to match. View\Chat\Shell puts that
  * modifier on, and leaves core's .wrap off, for a shell it was told is not on the admin screen.
  */
 
@@ -34,11 +35,13 @@
     --ab-admin-bar: 32px;
     /* #wpbody-content's padding-bottom, where core parks #wpfooter. */
     --ab-footer: 65px;
+    /* What sits between the admin bar and the wrap's top edge besides the margin moved inside below: nothing, until narrow screens put the Help tab's row there (#screen-meta-links, which core prints only for a screen with help tabs or screen options; here that is the tabs HelpTabs registers). */
+    --ab-cleared: 0px;
     display: flex;
     flex-direction: column;
     box-sizing: border-box;
-    height: calc(100vh - var(--ab-admin-bar) - var(--ab-footer));
-    /* .wrap's own 10px top margin, moved inside so the height above is the whole space. */
+    height: calc(100vh - var(--ab-admin-bar) - var(--ab-cleared) - var(--ab-footer));
+    /* .wrap's own 10px top margin, moved inside so the height above is the whole space; the narrow-screen block takes it back. */
     margin-top: 0;
     padding-top: 10px;
     color: var(--ab-text);
@@ -294,7 +297,8 @@ pre > .ab-code__copy[aria-label]:hover::after {
  * -- a shell sized to the screen pushes everything after it out of reach, and #wpfooter is not
  * on the page to subtract. A bounded box instead. This replaces the height outright rather than
  * zeroing --ab-footer, so the narrow-screen block below, which retunes those variables for
- * wp-admin, has nothing to say here either. Everything else in this file works on both: the
+ * wp-admin, has nothing to say here either, nor does its `.wrap.ab-wrap` rule, since this shell
+ * has no .wrap. Everything else in this file works on both: the
  * variables all carry fallbacks for the admin colour scheme that is not there, `.ab-status
  * .notice` is what dom.ts writes on either surface, `.wp-header-end` is Header's own <hr>, and
  * `.ab-header > .notice` is the one rule that only wp-admin can trigger -- core's notice mover
@@ -309,8 +313,21 @@ pre > .ab-code__copy[aria-label]:hover::after {
 /* ---- narrow screens (core's own admin breakpoint) --------------------------------------- */
 
 @media screen and (max-width: 782px) {
-    /* Core's narrow layout: a taller admin bar, and 100px under #wpbody-content in place of the footer. */
-    .ab-wrap { --ab-admin-bar: 46px; --ab-footer: 100px; }
+    /*
+     * Core's narrow layout: a taller admin bar, 100px under #wpbody-content in place of the footer, and the
+     * Screen Options / Help tabs on a row of their own above the title: core's `.wrap { clear: both }` at this
+     * breakpoint (wp-admin/css/common.css) drops the wrap under the floated #screen-meta-links, 40px of
+     * buttons plus the 20px bottom margin core gives it here, so 60px of the viewport goes to that row.
+     */
+    .ab-wrap { --ab-admin-bar: 46px; --ab-footer: 100px; --ab-cleared: 60px; }
+    /*
+     * The clearance sets the wrap's border edge under the float and swallows its top margin (CSS 2.1 9.5.2),
+     * which is why core's own h1 sits flush with its wrap here; the padding standing in for that margin is
+     * inside the border edge, survives the clearance, and is 10px core does not have, so it goes with the
+     * margin. On `.wrap.ab-wrap` because it is core's .wrap that clears: the front shell has no .wrap and no
+     * #screen-meta-links to clear, and keeps its padding.
+     */
+    .wrap.ab-wrap { padding-top: 0; }
     .ab-header__controls { flex-basis: 100%; flex-direction: column; margin-left: 0; }
     .ab-select { width: 100%; }
     .ab-msg { grid-template-columns: 32px 1fr; gap: 8px; }

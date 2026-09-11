@@ -80,17 +80,32 @@ it('says what both shortcodes do now, that an answer costs tokens and is cached,
         ->not->toContain('removed')->not->toContain('registers no shortcodes')->not->toMatch('/(?<![\d.])1\.\d/');
 });
 
-it('describes what the chat screen does now, and points support at Discord, Patreon and the issue tracker', function (): void {
+it('describes what the chat screen does now, and points support at the wordpress.org forum, a booked call and a GitHub star, in that order, not Discord, Patreon or the issue tracker', function (): void {
     Functions\when('esc_url')->returnArg();
     $chat = helpTabContent('alpaca-bot-chat');
     expect($chat)->toContain('New chat')->toContain('Enter')->toContain('Shift')->toContain('image')->toContain('Copy')->toContain('Edit and resend')
         // The image cap is Assets::maxImageBytes(), which reads post_max_size alone; the tab must name that setting, not the upload limit that has no say.
         ->toContain('post_max_size')->not->toMatch('/is the site.s own upload limit/');
+    // A question goes to the wordpress.org forum, premium help is a call booked on
+    // carmelosantana.com, and the GitHub link is an ask for a star, not a place to file issues.
+    // Discord and Patreon's premium support were retired before 0.5.0 shipped.
     $support = helpTabContent('alpaca-bot-support');
-    expect($support)->toContain('href="https://discord.gg/vWQTHphkVt"')
-        ->toContain('href="https://www.patreon.com/carmelosantana"')
-        ->toContain('href="https://github.com/carmelosantana/alpaca-bot/issues"')
-        ->toContain('rel="noopener"');
+    expect($support)->toContain('href="https://wordpress.org/support/plugin/alpaca-bot/"')
+        ->toContain('href="https://carmelosantana.com/alpaca-bot"')
+        ->toContain('href="https://github.com/carmelosantana/alpaca-bot"')
+        ->toContain('rel="noopener"')
+        ->not->toContain('/issues')->not->toContain('issue tracker');
+    expect(strtolower($support))->not->toContain('discord')->not->toContain('patreon');
+    // The free channel first, the paid call second and the give-back last, so a star never reads
+    // as a place to take a bug report.
+    $order = array_map(static fn(string $needle): int => strpos($support, $needle), [
+        'href="https://wordpress.org/support/plugin/alpaca-bot/"',
+        'href="https://carmelosantana.com/alpaca-bot"',
+        'href="https://github.com/carmelosantana/alpaca-bot"',
+    ]);
+    $sorted = $order;
+    sort($sorted);
+    expect($order)->toBe($sorted)->not->toContain(false);
 });
 
 it('tells a site owner what the tools grant: the fetch is an outbound request, the rebinding window is open, an egress policy is the mitigation, and opening the chat opens the tools', function (): void {

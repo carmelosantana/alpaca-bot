@@ -156,7 +156,7 @@ it('shell composes the page: sprite once, header, status, message list, composer
         ->toContain('<div id="ab-chat" data-conversation="5">')->not->toContain('data-rest')->not->toContain('data-history-limit')
         ->toContain('id="ab-status"')->toContain('id="ab-messages"')->toContain('ab-msg--assistant')->toContain('id="ab-form"')
         ->toContain('name="conversation_id" value="5"')->toContain('name="context[post_id]" value="12"')->toContain('name="model" value="llama3.2"')
-        ->toContain('<option value="5" data-id="5" selected')->toContain('src="/plugins/alpaca-bot/assets/img/icon-80.png"');
+        ->toContain('<option value="5" data-id="5" selected')->toContain('src="/plugins/alpaca-bot/assets/img/alpaca-bot-avatar.png"');
     // The status region and the message list sit inside #ab-chat, ahead of the composer.
     expect(strpos($html, 'id="ab-status"'))->toBeLessThan((int) strpos($html, 'id="ab-messages"'))
         ->and(strpos($html, 'id="ab-messages"'))->toBeLessThan((int) strpos($html, 'id="ab-form"'));
@@ -219,7 +219,20 @@ it('passes every URL-valued attribute through esc_url', function (): void {
         ->and((new MessageBubble(new Message('assistant', 'hi'), new Markdown(), 'C', '/u.png', '/a.png'))->render())->toContain('src="URL(/a.png)"')
         ->and((new MessageList([], new Markdown(), new Store(), 'C', '/u.png', '/a.png'))->render())->toContain('src="URL(/a.png)"')
         ->and((new Header('T', new ModelSelect([], 'a', true), new HistorySelect([], 0), '/wp-admin/admin.php?page=alpaca-bot'))->render())->toContain('href="URL(/wp-admin/admin.php?page=alpaca-bot)"')
-        ->and(chatShell(null, [], sys_get_temp_dir() . '/ab-missing-' . getmypid() . '.svg')->render())->toContain('href="URL(/wp-admin/admin.php?page=alpaca-bot)"')->toContain('src="URL(/plugins/alpaca-bot/assets/img/icon-80.png)"');
+        ->and(chatShell(null, [], sys_get_temp_dir() . '/ab-missing-' . getmypid() . '.svg')->render())->toContain('href="URL(/wp-admin/admin.php?page=alpaca-bot)"')->toContain('src="URL(/plugins/alpaca-bot/assets/img/alpaca-bot-avatar.png)"');
+});
+
+// ---------------------------------------------------------------- the default avatar is a plain URL
+
+it('renders the default assistant avatar with the same markup as a configured one', function (): void {
+    // The cream ground is baked into the shipped image, so the default needs no class, padding or
+    // background of its own: the round crop every avatar gets is the whole treatment, and the
+    // bubble and the welcome block cannot tell (and need not be told) which URL they were handed.
+    $default = '/plugins/alpaca-bot/assets/img/alpaca-bot-avatar.png';
+    expect((new MessageBubble(new Message('assistant', 'hi', 'm'), new Markdown(), 'C', '/u.png', $default))->render())->toContain('<img class="ab-msg__avatar" src="' . $default . '" alt="">')
+        ->and((new MessageBubble(new Message('assistant', 'hi', 'm'), new Markdown(), 'C', '/u.png', '/a.png'))->render())->toContain('<img class="ab-msg__avatar" src="/a.png" alt="">')
+        ->and((new MessageList([], new Markdown(), new Store(), 'C', '/u.png', $default))->render())->toContain('<img class="ab-welcome__avatar" src="' . $default . '" alt="">')
+        ->and(chatShell(null, [], sys_get_temp_dir() . '/ab-missing-' . getmypid() . '.svg')->render())->toContain('<img class="ab-welcome__avatar" src="' . $default . '" alt="">');
 });
 
 // ---------------------------------------------------------------- Task 5: a user turn's images

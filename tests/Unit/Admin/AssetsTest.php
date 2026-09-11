@@ -6,13 +6,52 @@ use AlpacaBot\Admin\Assets;
 use AlpacaBot\Plugin;
 use Brain\Monkey\Functions;
 
-it('enqueues nothing on any screen but the chat screen', function (): void {
-    foreach (['index.php', 'alpaca-bot_page_alpaca-bot-settings', 'post.php', ''] as $hook) {
+// The settings page's hook suffix comes from core's derivation (SettingsPage::screen()), which
+// reads the parent's translated menu title; the stand-in spells the untranslated form.
+beforeEach(function (): void {
+    Functions\when('get_plugin_page_hookname')->alias(static fn(string $page, string $parent): string => 'alpaca-bot_page_' . $page);
+});
+
+it('enqueues nothing, and adds no inline style, on any screen but the chat screen and the settings page', function (): void {
+    foreach (['index.php', 'post.php', 'alpaca-bot_page_other', 'robot-alpaca_page_alpaca-bot-settings', ''] as $hook) {
         Functions\expect('wp_enqueue_script')->never();
         Functions\expect('wp_enqueue_style')->never();
         Functions\expect('wp_enqueue_media')->never();
+        Functions\expect('wp_add_inline_style')->never();
         (new Assets())->enqueue($hook);
     }
+});
+
+// The overrides table is a widefat nested in a Settings API row, and core's forms.css reaches
+// its cells (no left padding on the model name, a stacked column under 782px). The settings page
+// loads no plugin stylesheet, so the few rules that answer that ride inline on core's `forms`
+// handle, after the rules they answer; nothing of the chat screen's is loaded for them.
+it('adds the overrides table rules inline to core forms stylesheet on the settings page, under whatever id core derives, and enqueues nothing there', function (): void {
+    $css = null;
+    Functions\expect('wp_add_inline_style')->once()->with('forms', Mockery::on(static function (string $code) use (&$css): bool {
+        $css = $code;
+        return true;
+    }));
+    Functions\expect('wp_enqueue_script')->never();
+    Functions\expect('wp_enqueue_style')->never();
+    Functions\expect('wp_enqueue_media')->never();
+    (new Assets())->enqueue('alpaca-bot_page_alpaca-bot-settings');
+    expect($css)->toContain('.form-table .ab-overrides th')->toContain('.form-table .ab-overrides td')
+        // Core's own widefat cell padding (common.css), restored over forms.css's form-table rules.
+        ->toContain('padding: 8px 10px')
+        // widefat's own `tbody th` is top-aligned (common.css), so the model name sat some 11px above
+        // the centre of its row's inputs; the scoped rule centres it.
+        ->toContain('vertical-align: middle')
+        // Under 782px forms.css makes every form-table cell a block; the nested ones stay cells,
+        // and the wrapper, sized by the row there rather than by the table, scrolls them.
+        ->toContain('display: table-cell')
+        ->toContain('@media screen and (max-width: 782px)')->toContain('contain: inline-size')
+        ->not->toContain('.ab-wrap');
+
+    // A locale that translates "Alpaca Bot" derives another id; the rules follow it.
+    Functions\when('get_plugin_page_hookname')->alias(static fn(string $page, string $parent): string => 'robot-alpaca_page_' . $page);
+    Functions\expect('wp_add_inline_style')->once()->with('forms', Mockery::type('string'));
+    (new Assets())->enqueue('robot-alpaca_page_alpaca-bot-settings');
 });
 
 it('enqueues htmx, the chat bundle after it, the stylesheet and the media picker on the chat screen, with the REST root and nonce localised', function (): void {

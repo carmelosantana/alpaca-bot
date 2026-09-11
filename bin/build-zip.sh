@@ -63,7 +63,7 @@ for path in \
   alpaca-bot/assets/css/alpaca-bot.css \
   alpaca-bot/assets/css/alpaca-bot-shortcode.css \
   alpaca-bot/assets/img/icons.svg \
-  alpaca-bot/assets/img/icon-80.png
+  alpaca-bot/assets/img/alpaca-bot-avatar.png
 do
   grep -qxF -- "$path" <<<"$list" || { echo "MISSING $path"; fail=1; }
 done
