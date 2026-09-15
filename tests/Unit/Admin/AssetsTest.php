@@ -56,7 +56,11 @@ it('adds the overrides table rules inline to core forms stylesheet on the settin
         // system prompt's column asks for 35% of the table and shrinks to 12em.
         ->toContain('.form-table .ab-overrides tbody th { overflow-wrap: anywhere; min-width: 9em; }')
         ->toContain('.form-table .ab-overrides th.ab-overrides__system { width: 35%; }')
-        ->toContain('.form-table .ab-overrides .regular-text { width: 100%; min-width: 12em; }');
+        ->toContain('.form-table .ab-overrides .regular-text { width: 100%; min-width: 12em; }')
+        // Under 782px forms.css gives every form-table select `width: 100%`, which in an
+        // auto-width column shrank the Tools select to 40px and clipped "Model default"
+        // (Kanboard #4363); sized by its options, it holds its column at its label's width.
+        ->toContain('.form-table .ab-overrides select { width: auto; }');
 
     // A locale that translates "Alpaca Bot" derives another id; the rules follow it.
     Functions\when('get_plugin_page_hookname')->alias(static fn(string $page, string $parent): string => 'robot-alpaca_page_' . $page);

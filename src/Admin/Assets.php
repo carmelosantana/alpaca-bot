@@ -68,10 +68,12 @@ final class Assets
      * back first. A model id breaks where it has to (`overflow-wrap: anywhere`, which unlike
      * `break-word` lowers the column's minimum) but its column keeps 9em; the system prompt
      * fills a column that asks for 35% of the table and shrinks to 12em, a floor that also keeps
-     * core's narrow-screen `width: 100%` from collapsing the field in an auto-width cell. With
-     * the menu expanded the columns fit at 1280px and 1440px; at 960px, where core folds the
-     * menu, they scroll inside the wrapper, as they do at 600px, and at 782px they fit again.
-     * The label column keeps its 200px, which the table used to take from it.
+     * core's narrow-screen `width: 100%` from collapsing the field in an auto-width cell. The
+     * same `width: 100%` shrank the Tools select to 40px and clipped "Model default" (Kanboard
+     * #4363), so the select is `width: auto`: sized by its options, it holds its column at its
+     * label's width. With the menu expanded the columns fit at 1280px and 1440px; at 960px,
+     * where core folds the menu, and under 782px they scroll inside the wrapper. The label
+     * column keeps its 200px, which the table used to take from it.
      *
      * Inline on core's `forms` handle rather than in a stylesheet of the plugin's: the settings
      * page loads no plugin stylesheet, the chat shell's is another screen's stylesheet, and a
@@ -84,6 +86,7 @@ final class Assets
         .form-table .ab-overrides tbody th { overflow-wrap: anywhere; min-width: 9em; }
         .form-table .ab-overrides th.ab-overrides__system { width: 35%; }
         .form-table .ab-overrides .regular-text { width: 100%; min-width: 12em; }
+        .form-table .ab-overrides select { width: auto; }
         CSS;
 
     public function enqueue(string $hook): void
