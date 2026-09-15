@@ -55,16 +55,23 @@ final class Assets
      * rule changes the `th` and only restates the `td`. And the wrapper scrolls sideways where
      * the table is wider than the row.
      *
-     * That scrolling is only possible under 782px, core's breakpoint, where the row is blocks and
-     * the wrapper can be sized by the row rather than by the table (`contain: inline-size`; the
-     * block `td` still sits in an anonymous table cell, whose minimum is its content's, so
-     * without that the table widens the whole page instead). The system prompt keeps its desktop
-     * width there, since core's narrow-screen `width: 100%` on a text input inside an auto-width
-     * cell collapses it to about 74px. Above the breakpoint the row is a table cell, which cannot be
-     * narrower than the table it holds: at 1440px the six columns fit; on a laptop with the menu
-     * open they widen the page, as they always did. Sizing the wrapper by the row there too
-     * would fix that at the cost of a scrollbar at 1440px, where the label column would reclaim
-     * the 200px the table now takes from it.
+     * It can, because it is sized by the row rather than by the table (`contain: inline-size`). A
+     * table cell's minimum is its content's, so without that the nested table's minimum was the
+     * row's, and the page's. widefat's own `word-wrap: break-word` (common.css) does not lower a
+     * minimum, so a model id, which breaks only where line breaking allows (after most hyphens),
+     * held its column at its longest unbreakable run, and the system prompt held 25em: at 1280px
+     * with the menu expanded the page was 1343px wide (Kanboard #4348). Under 782px, core's
+     * breakpoint, the row's cells are blocks, but the block `td` still sits in an anonymous
+     * table cell, so the same holds there.
+     *
+     * The table's own minimum still decides when the wrapper scrolls, so the cells give width
+     * back first. A model id breaks where it has to (`overflow-wrap: anywhere`, which unlike
+     * `break-word` lowers the column's minimum) but its column keeps 9em; the system prompt
+     * fills a column that asks for 35% of the table and shrinks to 12em, a floor that also keeps
+     * core's narrow-screen `width: 100%` from collapsing the field in an auto-width cell. With
+     * the menu expanded the columns fit at 1280px and 1440px; at 960px, where core folds the
+     * menu, they scroll inside the wrapper, as they do at 600px, and at 782px they fit again.
+     * The label column keeps its 200px, which the table used to take from it.
      *
      * Inline on core's `forms` handle rather than in a stylesheet of the plugin's: the settings
      * page loads no plugin stylesheet, the chat shell's is another screen's stylesheet, and a
@@ -72,10 +79,11 @@ final class Assets
      * in a checkout that has not run `pnpm build`.
      */
     private const OVERRIDES_CSS = <<<'CSS'
-        .form-table .ab-overrides { overflow-x: auto; }
+        .form-table .ab-overrides { overflow-x: auto; contain: inline-size; }
         .form-table .ab-overrides th, .form-table .ab-overrides td { display: table-cell; width: auto; padding: 8px 10px; vertical-align: middle; }
-        .form-table .ab-overrides .regular-text { min-width: 25em; }
-        @media screen and (max-width: 782px) { .form-table .ab-overrides { contain: inline-size; } }
+        .form-table .ab-overrides tbody th { overflow-wrap: anywhere; min-width: 9em; }
+        .form-table .ab-overrides th.ab-overrides__system { width: 35%; }
+        .form-table .ab-overrides .regular-text { width: 100%; min-width: 12em; }
         CSS;
 
     public function enqueue(string $hook): void

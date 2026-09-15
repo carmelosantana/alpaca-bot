@@ -43,10 +43,20 @@ it('adds the overrides table rules inline to core forms stylesheet on the settin
         // the centre of its row's inputs; the scoped rule centres it.
         ->toContain('vertical-align: middle')
         // Under 782px forms.css makes every form-table cell a block; the nested ones stay cells,
-        // and the wrapper, sized by the row there rather than by the table, scrolls them.
+        // and the wrapper, sized by the row rather than by the table, scrolls them.
         ->toContain('display: table-cell')
-        ->toContain('@media screen and (max-width: 782px)')->toContain('contain: inline-size')
-        ->not->toContain('.ab-wrap');
+        ->not->toContain('.ab-wrap')
+        // The wrapper is sized by the row at every width, not only under core's breakpoint
+        // (Kanboard #4348: at 1280px with the menu expanded the table widened the page), and
+        // so is every rule here: none sits in a media query.
+        ->toContain('.form-table .ab-overrides { overflow-x: auto; contain: inline-size; }')
+        ->not->toContain('@media')
+        // What keeps that scrollbar for narrow screens: the cells give width back first. A model
+        // id wraps down to 9em rather than holding its column at its longest unbreakable run; the
+        // system prompt's column asks for 35% of the table and shrinks to 12em.
+        ->toContain('.form-table .ab-overrides tbody th { overflow-wrap: anywhere; min-width: 9em; }')
+        ->toContain('.form-table .ab-overrides th.ab-overrides__system { width: 35%; }')
+        ->toContain('.form-table .ab-overrides .regular-text { width: 100%; min-width: 12em; }');
 
     // A locale that translates "Alpaca Bot" derives another id; the rules follow it.
     Functions\when('get_plugin_page_hookname')->alias(static fn(string $page, string $parent): string => 'robot-alpaca_page_' . $page);

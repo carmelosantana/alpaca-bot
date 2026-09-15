@@ -175,9 +175,10 @@ final class SettingsPage
      *
      * The table is a `widefat` inside a Settings API row, where core's forms.css reaches its
      * cells (Assets::OVERRIDES_CSS says how); `div.ab-overrides` around it is what the rules
-     * Assets adds inline hang off, and it scrolls sideways where the row is narrower than six
-     * columns. The captions stay outside it, so that scrollbar is under the table and not under
-     * two paragraphs.
+     * Assets adds inline hang off, and it scrolls sideways where the row is narrower than the
+     * six columns at their narrowest. The system prompt's heading carries `ab-overrides__system`,
+     * which those rules size to 35% of the table, shrinking to a floor. The captions stay outside
+     * the wrapper, so that scrollbar is under the table and not under two paragraphs.
      *
      * The last column overrides no global field: `tools` overrides the model catalog's
      * capability flag, which is not a setting, so its heading is its own word and its control is
@@ -236,9 +237,10 @@ final class SettingsPage
                 . '</tr>';
         }
         $head = '<th>' . esc_html__('Model', 'alpaca-bot') . '</th>';
-        foreach (['models.temperature', 'models.num_ctx', 'models.keep_alive', 'chat.system_prompt'] as $key) {
+        foreach (['models.temperature', 'models.num_ctx', 'models.keep_alive'] as $key) {
             $head .= '<th>' . esc_html($fields[$key]['label']) . '</th>';
         }
+        $head .= '<th class="ab-overrides__system">' . esc_html($fields['chat.system_prompt']['label']) . '</th>';
         $head .= '<th>' . esc_html__('Tools', 'alpaca-bot') . '</th>';
         return '<div class="ab-overrides"><table class="widefat striped"><thead><tr>' . $head . '</tr></thead><tbody>' . $rows . '</tbody></table></div>'
             . '<p class="description">' . esc_html__('A blank cell uses the global value: the fields above for temperature, context window and keep alive, and the system prompt on the Chat tab. A model-level system prompt replaces the global one for that model.', 'alpaca-bot') . '</p>'

@@ -107,8 +107,8 @@ it('renders the overrides table with every model id and stored value escaped, la
     $escapedId = htmlspecialchars($evilId, ENT_QUOTES);
     expect($html)->not->toContain('<script')->not->toContain('<img')
         // The wrapper is what Assets' inline rules hang off: it scopes them to this table and
-        // scrolls it sideways where the row is narrower than six columns. The captions sit
-        // outside it, so the scrollbar is under the table and not under two paragraphs.
+        // scrolls it sideways where the row is narrower than the six columns at their narrowest.
+        // The captions sit outside it, so the scrollbar is under the table and not under two paragraphs.
         ->toContain('<div class="ab-overrides"><table class="widefat striped"><thead>')
         ->toContain('</table></div><p class="description">')
         ->toContain('<th scope="row">' . $escapedId . '</th>')
@@ -119,6 +119,9 @@ it('renders the overrides table with every model id and stored value escaped, la
         ->toContain('name="alpaca_bot_settings[models.overrides][gone-model][num_ctx]" value="2048"')
         ->toContain('placeholder="4096"')
         ->toContain('<th>Context window (tokens)</th><th>Keep alive</th>')
+        // The system prompt's heading carries the class Assets sizes that column by: it asks for
+        // 35% of the table and shrinks when the row is narrow.
+        ->toContain('<th>Keep alive</th><th class="ab-overrides__system">System prompt</th>')
         ->not->toContain('<th>num_ctx</th>')
         ->toContain('Chat tab');
     expect(substr_count($html, '<tr><th scope="row">'))->toBe(3);
