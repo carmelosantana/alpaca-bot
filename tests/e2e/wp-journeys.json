@@ -2,6 +2,8 @@
   "description": "wp-journeys manifest for Alpaca Bot. Run with WPJ_MANIFEST_DIR pointing at this directory (tests/e2e), not at the plugin root. JSON, so the plugin's own Playwright run does not collect it.",
   "version": 1,
   "plugin": "alpaca-bot",
+  "gate": { "screen": "alpaca-bot" },
+  "deprecated": { "shortcodes": ["alpacabot_agent"] },
   "journeys": [
     {
       "name": "alpaca-bot-welcome-round-trip",
