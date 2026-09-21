@@ -118,6 +118,11 @@ it('registers the settings store, provider factory, model catalog, conversation 
     // order. The setting enables all three by default, and a stubbed get_option() answers
     // nothing here, so all three are enabled; the filter runs with the user id it was given.
     Functions\when('get_option')->justReturn([]);
+    // enabled() holds each toolkit to its Access row for that user. This test is about the wiring
+    // -- which toolkits are registered, under which ids, into which pipeline -- so the user
+    // passes every row; RegistryTest is where the floor itself is pinned, and
+    // tests/Integration/ToolkitsTest.php where real roles answer it.
+    Functions\when('user_can')->justReturn(true);
     Filters\expectApplied('alpaca_bot/toolkits')->once()->with(Mockery::type('array'), 3)->andReturnFirstArg();
     $registry = $plugin->get(Registry::class);
     expect($registry)->toBeInstanceOf(Registry::class)

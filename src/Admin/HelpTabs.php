@@ -121,11 +121,13 @@ final class HelpTabs
      * This exists because two accepted risks were, until 0.5.0, argued only in source
      * docblocks — WebFetchToolkit's on the DNS-rebinding window its two address checks cannot
      * close, and Toolkit\Registry's on there being no capability check between "may chat" and
-     * "may call the enabled tools" — and a site owner is the only person who can act on either.
-     * A docblock is not where they will read it. The wording follows the audit
+     * "may call the enabled tools", which 0.6 closed with a row per tool — and a site owner is
+     * the only person who can act on either. A docblock is not where they will read it. The
+     * first is still open, and the second is now a setting an operator has to understand, which
+     * is why both are here. The wording follows the audit
      * (docs/reviews/2026-09-09-security-audit.md, H-1 and M-3) and is deliberately not a scare:
-     * both are documented trade-offs with a stated mitigation, and `web_fetch` reaching an
-     * author is a capability decision, not a break-in.
+     * the rebinding window is a documented trade-off with a stated mitigation, and `web_fetch`
+     * reaching an author is a capability decision, not a break-in.
      */
     private function tools(): string
     {
@@ -140,13 +142,13 @@ final class HelpTabs
             . self::p('<strong>' . esc_html__('web_fetch makes this server send a request and hands the reply back.', 'alpaca-bot') . '</strong> ' . esc_html__('Every URL is checked twice before the fetch — WordPress\'s own check, then the plugin\'s over every address the name resolves to, on the URL and on every redirect — and only http(s), only ports 80, 443 and 8080, and no private, loopback, link-local or other special-purpose address. What no check of that shape can cover is a name whose answer changes between the check and the connection: those are separate DNS lookups, so a host someone else controls, with a short time-to-live, can answer the checks with a public address and the connection with a local one. The page it returns then comes back as text. Pinning the resolved address into the connection is a later 0.x release.', 'alpaca-bot'))
             . self::p(sprintf(
                 /* translators: %s: [alpacabot_agent name="get" url="…"] */
-                esc_html__('Who can reach it today, with no model involved: anyone who can edit posts, a Contributor included, can put %s in their own draft and preview it. Treat the tool as a capability you are granting your authors.', 'alpaca-bot'),
+                esc_html__('Who can reach it today, with no model involved: anyone who may write a post and whom Settings › Access lets use web_fetch — by default anyone who can edit posts, a Contributor included — can put %s in their own draft and preview it. Treat the tool as a capability you are granting your authors.', 'alpaca-bot'),
                 '<code>[alpacabot_agent name="get" url="…"]</code>',
             ))
             . self::p('<strong>' . esc_html__('An egress policy is the supported mitigation', 'alpaca-bot') . '</strong> ' . esc_html__('and it is the one that covers every plugin on the site at once: stop this host from opening outbound connections to your private ranges and to the cloud metadata address, at the network or the host firewall, and require IMDSv2 on a cloud instance. If you cannot and do not need the tool, switch web_fetch off — the chat, the summaries and the drafts all work without it.', 'alpaca-bot'))
-            . self::p('<strong>' . esc_html__('Opening the chat to a role opens the tools to it too.', 'alpaca-bot') . '</strong> ' . sprintf(
+            . self::p('<strong>' . esc_html__('Each tool has a row of its own in Settings › Access, as well as Chat.', 'alpaca-bot') . '</strong> ' . sprintf(
                 /* translators: 1: alpaca_bot/capability/chat, 2: alpaca_bot/toolkits, 3: draft_post */
-                esc_html__('%1$s can name any capability, which is how a site builds a subscriber-facing chat, but which tools a turn may call is decided by the Enabled tools setting alone: there is no second check between a role that may chat and the tools that are on. So a role admitted only to converse gets web_fetch with it. %3$s is the exception and refuses a user who cannot edit posts or pages. Use the %2$s filter to take a tool away from the users you are opening the chat to.', 'alpaca-bot'),
+                esc_html__('Opening the chat to a role — with the Chat row, or with %1$s in code — does not hand it the tools: a tool is offered only to a user who passes that tool\'s row, Contributors and up by default. Lower a tool\'s row to give it to a role you opened the chat to, and raise it to keep it from one. %3$s asks the post type\'s own capability as well and refuses a user who lacks it. The %2$s filter runs after the rows, so a site can still add a toolkit of its own or take one away per user, in code.', 'alpaca-bot'),
                 '<code>alpaca_bot/capability/chat</code>',
                 '<code>alpaca_bot/toolkits</code>',
                 '<code>draft_post</code>',

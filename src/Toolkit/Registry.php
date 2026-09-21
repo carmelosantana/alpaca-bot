@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace AlpacaBot\Toolkit;
 
+use AlpacaBot\Access;
 use AlpacaBot\Settings\Store;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Contract\ToolInterface;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Contract\ToolkitInterface;
@@ -11,14 +12,20 @@ use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Contract\ToolkitInterface;
 /**
  * Every toolkit the plugin built, by id, and the subset a turn may use.
  *
- * Two gates, in order. The `toolkits.enabled` setting names the built-ins an administrator has
+ * Three gates, in order. The `toolkits.enabled` setting names the built-ins an administrator has
  * switched on; it is a checkbox list over the ids Schema knows, so it can never name a toolkit
- * the plugin did not ship (Schema::coerce() drops anything else). Then filter
- * `alpaca_bot/toolkits` (array<string, ToolkitInterface>, int $userId) runs over that subset,
- * and it is the one extension point: a site adds its own toolkit there, or takes one away for
- * one user. Registering a third-party toolkit here and expecting the setting to show it would
+ * the plugin did not ship (Schema::coerce() drops anything else). Then the floor: a toolkit is
+ * kept only for a user who passes its Settings › Access row (Access::allows(), `tool.{id}` unless
+ * register() was given another), asked with user_can() of the id the turn runs as rather than
+ * current_user_can(), for the reason DraftPostToolkit gives — the id that is checked is the id
+ * the tool would act as, so the check and the act cannot disagree about who is asking. Then
+ * filter `alpaca_bot/toolkits` (array<string, ToolkitInterface>, int $userId) runs over what is
+ * left, and it is the one extension point: a site adds its own toolkit there, or takes one away
+ * for one user. Registering a third-party toolkit here and expecting the setting to show it would
  * not work, and that is by design: the settings page is the plugin's, and a toolkit a site adds
- * in code is the site's to gate in code.
+ * in code is the site's to gate in code. The floor runs before the filter on purpose: the filter
+ * can still hand a toolkit back for a user, which is how a site gives a tool to a role no row
+ * covers, and it can still take one away.
  *
  * The filter's return is held to the contract the way Plugin::controllers() holds its filter:
  * an entry that is not a toolkit, or whose key is not a string id, is dropped rather than left
@@ -41,11 +48,27 @@ final class Registry
     /** @var array<string, ToolkitInterface> in registration order; a second register() of an id replaces in place */
     private array $toolkits = [];
 
-    public function __construct(private Store $store) {}
+    /** @var array<string, string> id => the Settings › Access row that gates it */
+    private array $rows = [];
 
-    public function register(string $id, ToolkitInterface $toolkit): void
+    private Access $access;
+
+    public function __construct(private Store $store, ?Access $access = null)
+    {
+        $this->access = $access ?? new Access($store);
+    }
+
+    /**
+     * `$row` is the Settings › Access row enabled() holds this toolkit to, `tool.{id}` unless a
+     * caller names another (the MCP toolkits are `mcp.{id}`). It is the registrar's, not the
+     * id's, so a toolkit registered under a display id is still gated by the row an administrator
+     * sees. A row Access::defaults() does not list reads as `manage_options`, so a toolkit
+     * registered without one fails closed.
+     */
+    public function register(string $id, ToolkitInterface $toolkit, ?string $row = null): void
     {
         $this->toolkits[$id] = $toolkit;
+        $this->rows[$id] = $row ?? 'tool.' . $id;
     }
 
     /** @return list<string> every registered id, enabled or not, in registration order */
@@ -55,8 +78,11 @@ final class Registry
     }
 
     /**
-     * The toolkits this user's turn may use: the registered ones the setting enables, through
-     * `alpaca_bot/toolkits`.
+     * The toolkits this user's turn may use: the registered ones the setting enables and this
+     * user's Access rows allow, through `alpaca_bot/toolkits`.
+     *
+     * The setting is tested first, so a switched-off toolkit costs no capability lookup, and the
+     * whole floor runs before the filter.
      *
      * @return array<string, ToolkitInterface>
      */
@@ -64,7 +90,11 @@ final class Registry
     {
         $setting = $this->store->get('toolkits.enabled', []);
         $enabled = is_array($setting) ? $setting : [];
-        $subset = array_filter($this->toolkits, static fn(string $id): bool => in_array($id, $enabled, true), ARRAY_FILTER_USE_KEY);
+        $subset = array_filter(
+            $this->toolkits,
+            fn(string $id): bool => in_array($id, $enabled, true) && $this->access->allows($userId, $this->rows[$id], $userId),
+            ARRAY_FILTER_USE_KEY,
+        );
         /**
          * Filters the toolkits a user's turn may call, after the `toolkits.enabled` setting has
          * chosen among the built-ins. The one way to give the model a toolkit the plugin did not
@@ -73,12 +103,13 @@ final class Registry
          * key is not a string or whose value is not a ToolkitInterface is dropped, and a return that
          * is not an array enables nothing.
          *
-         * This filter is also, today, the only capability gate over the tools. enabled() has none
-         * of its own, so a site that opens `alpaca_bot/capability/chat` to a role hands that role
-         * every enabled toolkit — `web_fetch`, an outbound-request primitive, included; only
-         * `draft_post` re-checks a capability. `user_can($userId, …)` here is how a site keeps a
-         * tool away from the users it admitted only to converse. A floor of enabled()'s own is a
-         * later 0.x release.
+         * It is no longer the only capability gate over the tools: enabled() has already dropped
+         * every toolkit whose Settings › Access row this user fails
+         * (`alpaca_bot/capability/tool/{id}`, `edit_posts` for the built-ins), so a site that
+         * opens `alpaca_bot/capability/chat` to a role hands that role the chat and no tools
+         * until a row admits them. What this filter is, is the last word: a toolkit added here
+         * has no row and no Settings entry, so `user_can($userId, …)` here is the site's own gate
+         * over it, and a toolkit taken away here is gone whatever its row says.
          *
          * @since 0.5.0
          * @param array<string, ToolkitInterface> $toolkits the enabled built-ins, by id

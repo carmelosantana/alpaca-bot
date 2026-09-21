@@ -123,8 +123,10 @@ final class Plugin
         // The registry is built empty before the pipeline and filled after it: the pipeline asks
         // the registry what a turn may run, and the summarize toolkit runs its inner turn through
         // the pipeline, so one of the two has to exist before the other is complete. Nothing is
-        // read from the registry until a turn runs, well after plugins_loaded.
-        $registry = new Toolkit\Registry($store);
+        // read from the registry until a turn runs, well after plugins_loaded. It is handed the
+        // container's Access rather than making one: enabled() holds each toolkit to its row, and
+        // sharing the instance is what keeps that on the one memoised read of the settings option.
+        $registry = new Toolkit\Registry($store, $this->get(Access::class));
         $this->set(Chat\Pipeline::class, new Chat\Pipeline($store, $factory, $this->get(Provider\ModelCatalog::class), $conversations, $meter, $caps, $collector, $prefs, $registry));
         // The built-in toolkits, under the ids Schema's `toolkits.enabled` options name. The two
         // that act as a user take get_current_user_id as a closure and ask it when a tool runs,

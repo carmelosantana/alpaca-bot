@@ -555,6 +555,10 @@ function echoToolkit(string $name, string $guidelines = 'Use it.', ?callable $ca
  */
 function registryWith(array $toolkits): AlpacaBot\Toolkit\Registry
 {
+    // enabled() asks each toolkit's Access row now; every caller of this helper is about the turn,
+    // not about who may run it. No test that uses it expects user_can() itself (checked:
+    // PipelineToolsTest, ChatTest, AgentShimTest), which is what lets this be a when().
+    Functions\when('user_can')->justReturn(true);
     $registry = new AlpacaBot\Toolkit\Registry(new Store(['toolkits.enabled' => array_keys($toolkits)]));
     foreach ($toolkits as $id => $toolkit) {
         $registry->register($id, $toolkit);
@@ -691,7 +695,10 @@ function shortcodeChat(object $h, int $postId = 7): AlpacaBot\Shortcodes\Chat
 
 /**
  * Shortcodes tests: the viewer of the page. `$id` 0 is a visitor (is_user_logged_in() false);
- * a logged-in viewer holds exactly `$caps`.
+ * a logged-in viewer holds exactly `$caps`. Both questions are answered from that one list:
+ * current_user_can(), which the shortcodes ask, and user_can() of the viewer's id, which
+ * Toolkit\Registry::enabled() asks through the shim -- so the two cannot disagree about a
+ * viewer the test has just described.
  *
  * @param list<string> $caps
  */
@@ -700,6 +707,7 @@ function shortcodeViewer(int $id, array $caps = ['edit_posts']): void
     Functions\when('is_user_logged_in')->justReturn($id > 0);
     Functions\when('get_current_user_id')->justReturn($id);
     Functions\when('current_user_can')->alias(static fn(string $cap): bool => $id > 0 && in_array($cap, $caps, true));
+    Functions\when('user_can')->alias(static fn(int $user, string $cap): bool => $id > 0 && $user === $id && in_array($cap, $caps, true));
 }
 
 /**

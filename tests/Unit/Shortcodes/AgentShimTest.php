@@ -11,6 +11,7 @@ use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Message\SystemMessage;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Message\UserMessage;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Provider\Response;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Provider\Usage;
+use Brain\Monkey\Filters;
 use Brain\Monkey\Functions;
 
 // The 0.4 `[alpacabot_agent]` shim over the same harness as ChatTest (shortcodeChat() and
@@ -128,6 +129,19 @@ it('does not fetch while the administrator has web_fetch switched off in Setting
     $html = $shim->render(['name' => 'get', 'url' => 'https://example.test/a'], null, 'alpacabot_agent');
     expect($html)->toContain('class="alpaca-bot-notice"')->toContain('switched off')
         ->and($h->stored)->toBe([]);
+});
+
+it('does not fetch for a viewer who fails the web_fetch row, and says so without naming the setting as the only cause', function (): void {
+    $h = pipelineWith(null);
+    $shim = agentShim($h);
+    shortcodeViewer(3);
+    Functions\when('home_url')->justReturn('https://site.test/');
+    Functions\when('_doing_it_wrong')->justReturn();
+    Functions\expect('wp_safe_remote_get')->never();
+    Filters\expectApplied('alpaca_bot/capability/tool/web_fetch')->once()->with('edit_posts', 3)->andReturn('manage_options');
+    $html = $shim->render(['name' => 'get', 'url' => 'https://example.test/a'], null, 'alpacabot_agent');
+    expect($html)->toContain('class="alpaca-bot-notice"')->toContain('Settings › Access')
+        ->and($h->writes)->toBe([]);
 });
 
 it('never fetches or generates for a guest', function (): void {

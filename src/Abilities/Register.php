@@ -73,11 +73,11 @@ use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Enum\ToolResultStatus;
  *
  * The Tools setting. An ability whose toolkit is switched off (`toolkits.enabled`) stays
  * registered and refuses in its permission callback, with a WP_Error that says which switch,
- * evaluated on every call through Registry::enabled() for the calling user so the
- * `alpaca_bot/toolkits` filter counts too. And what enabled() hands back under the id is what
- * runs, not an instance held here: a site that swaps `summarize` or `draft_post` through the
- * filter swaps it for the model and the ability alike, and never has the two answer with
- * different implementations. Unregistering was rejected: registration happens
+ * evaluated on every call through Registry::enabled() for the calling user so the tool's
+ * Settings › Access row and the `alpaca_bot/toolkits` filter both count too. And what enabled()
+ * hands back under the id is what runs, not an instance held here: a site that swaps `summarize`
+ * or `draft_post` through the filter swaps it for the model and the ability alike, and never has
+ * the two answer with different implementations. Unregistering was rejected: registration happens
  * once, on a hook that fires before any particular caller is known, so it would freeze one
  * moment's setting and one user's filter answer for the whole process (a test run, a
  * long-lived worker), and a client would see a 404 it cannot tell from a typo. The cost of
@@ -317,7 +317,8 @@ final class Register
 
     /**
      * The toolkit under `$id` for the acting user, as Registry::enabled() hands it out (the
-     * setting, then the `alpaca_bot/toolkits` filter), or the refusal that names the switch.
+     * setting, the tool's Access row for this user, then the `alpaca_bot/toolkits` filter), or
+     * the refusal that names both things an administrator can change.
      */
     private function toolkit(string $id): ToolkitInterface|\WP_Error
     {
@@ -328,7 +329,7 @@ final class Register
         return new \WP_Error(
             'alpaca_bot_toolkit_disabled',
             /* translators: %s: the tool's id, e.g. summarize */
-            sprintf(__('The %s tool is switched off on this site. An administrator can enable it under Alpaca Bot > Settings > Tools.', 'alpaca-bot'), $id),
+            sprintf(__('The %s tool is not available to you: it is switched off on this site, or Settings › Access keeps it from your role. An administrator can change either under Alpaca Bot > Settings.', 'alpaca-bot'), $id),
             ['status' => 403],
         );
     }

@@ -113,7 +113,11 @@ final class Access
      *
      * The three built-in tool rows are new gates, not new defaults: 0.5 had nothing between "may
      * chat" and "may call the enabled tools" (`alpaca_bot/toolkits` was the only lever), so they
-     * start at chat's own `edit_posts` and change nothing until a site narrows them.
+     * start at chat's own `edit_posts`. A site whose chat is still at that capability therefore
+     * sees no change. One that opened the chat lower — a lowered Chat row, or
+     * `alpaca_bot/capability/chat` in code — keeps the chat and loses the tools until it lowers a
+     * tool row to match: that is Toolkit\Registry::enabled()'s floor, and it is the one behaviour
+     * change these defaults carry.
      *
      * @return array<string, string>
      */

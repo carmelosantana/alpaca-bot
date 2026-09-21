@@ -165,7 +165,12 @@ final class AbilitiesTest extends TestCase
         // check_permissions() from its own REST permission callback and returns our WP_Error, so
         // the operator is told which switch and where to flip it.
         $this->assertStringContainsString('switched off on this site', $response->get_data()['message']);
-        $this->assertStringContainsString('Settings > Tools', $response->get_data()['message']);
+        // It names both screens and not one tab: Registry::enabled() hands back an absence, not a
+        // reason, so a toolkit held back by this user's Settings › Access row reads here exactly
+        // like one switched off under Tools, and a message that named only Tools would send an
+        // operator to the wrong tab half the time.
+        $this->assertStringContainsString('Settings › Access', $response->get_data()['message']);
+        $this->assertStringContainsString('Alpaca Bot > Settings', $response->get_data()['message']);
         // Direct execution -- the MCP and WP-AI-Client path -- is the other half: core withholds
         // the message on purpose and answers a fixed code, passing our text to _doing_it_wrong()
         // instead, so a WP_DEBUG site gets a "doing it wrong" notice on every call to a

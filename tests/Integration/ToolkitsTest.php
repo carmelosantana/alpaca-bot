@@ -37,6 +37,28 @@ final class ToolkitsTest extends TestCase
         $this->assertInstanceOf(DraftPostToolkit::class, $registry->enabled($admin)['draft_post']);
     }
 
+    public function test_a_tool_is_offered_only_to_users_who_pass_its_access_row_and_a_row_filter_can_open_it(): void
+    {
+        $registry = Plugin::instance()->get(Registry::class);
+        $subscriber = self::factory()->user->create(['role' => 'subscriber']);
+        $editor = self::factory()->user->create(['role' => 'editor']);
+        // A Contributor is the floor of "may chat" on a default site (core grants edit_posts), so
+        // it is the role that proves the floor changed nothing there, not merely the editor.
+        $contributor = self::factory()->user->create(['role' => 'contributor']);
+
+        // A default site is unchanged for every role that could always chat, and closed for the
+        // role a site would only have admitted by opening a capability filter.
+        $this->assertSame(['web_fetch', 'summarize', 'draft_post'], array_keys($registry->enabled($editor)));
+        $this->assertSame(['web_fetch', 'summarize', 'draft_post'], array_keys($registry->enabled($contributor)));
+        $this->assertSame([], $registry->enabled($subscriber));
+
+        Plugin::instance()->get(Store::class)->set('access.tool.web_fetch', 'manage_options');
+        $this->assertSame(['summarize', 'draft_post'], array_keys($registry->enabled($editor)));
+
+        add_filter('alpaca_bot/capability/tool/summarize', static fn(): string => 'read');
+        $this->assertSame(['summarize'], array_keys($registry->enabled($subscriber)));
+    }
+
     public function test_the_settings_page_renders_one_checkbox_per_toolkit_and_a_save_with_none_checked_stores_none(): void
     {
         $this->asAdmin();
