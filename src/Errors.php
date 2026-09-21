@@ -85,7 +85,7 @@ final class Errors
     }
 
     /**
-     * 504 for a streamed turn that outran the site's wall-clock budget for one (StreamBudget
+     * 504 for a streamed turn that outran the site's wall-clock budget for one (Rest\StreamBudget
      * says how the budget is chosen). Gateway Timeout rather than 408: the client's request
      * arrived whole and on time, and what ran out of time was the turn behind it. It only ever
      * reaches a client inside an `error` frame — a stream that has already sent its headers has

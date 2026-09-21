@@ -23,7 +23,7 @@ it('autoloads Errors and RateLimit from the plugin root namespace, and the Rest\
 
 it('leaves no file that ships or documents the plugin naming Rest\Errors or Rest\RateLimit', function (): void {
     $root = dirname(__DIR__, 2);
-    $files = ['docs/api.md', 'docs/hooks.md', 'phpcs.xml.dist', 'README.md', 'readme.txt'];
+    $files = ['alpaca-bot.php', '.github/workflows/plugin-check.yml', 'docs/api.md', 'docs/hooks.md', 'phpcs.xml.dist', 'README.md', 'readme.txt'];
     foreach (['src', 'tests', 'bin'] as $dir) {
         $iterator = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($root . '/' . $dir, FilesystemIterator::SKIP_DOTS));
         foreach ($iterator as $file) {
@@ -38,7 +38,7 @@ it('leaves no file that ships or documents the plugin naming Rest\Errors or Rest
             continue;
         }
         foreach (preg_split('~\R~', (string) file_get_contents($root . '/' . $path)) ?: [] as $n => $line) {
-            if (preg_match('~Rest[\\\\/](?:Errors|RateLimit)\b~', $line) === 1) {
+            if (preg_match('~Rest[\\\\/](?:Errors|RateLimit)~', $line) === 1) {
                 $stale[] = $path . ':' . ($n + 1);
             }
         }
