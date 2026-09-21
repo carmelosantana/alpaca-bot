@@ -62,7 +62,7 @@ it('reads the settings option once however many rows are asked', function (): vo
     $access = new Access(new Store());
     foreach (array_keys(Access::defaults()) as $row) {
         $access->stored($row);
-        $access->effective($row);
+        $access->effective($row, ...array_fill(0, Access::expectedArgs($row), 1));
     }
     expect($access->stored('chat'))->toBe('publish_posts');
 });
@@ -78,7 +78,7 @@ it('names each row\'s hook with its dots as slashes', function (): void {
     $hooks = ['tool.summarize' => 'tool/summarize', 'tool.draft_post' => 'tool/draft_post', 'tool.abilities' => 'tool/abilities', 'mcp.github' => 'mcp/github', 'shortcode' => 'shortcode', 'settings.read' => 'settings/read', 'settings.write' => 'settings/write'];
     foreach ($hooks as $row => $hook) {
         Filters\expectApplied("alpaca_bot/capability/{$hook}")->once()->andReturn('read');
-        expect($access->effective($row))->toBe('read', $row);
+        expect($access->effective($row, ...array_fill(0, Access::expectedArgs($row), 1)))->toBe('read', $row);
     }
 });
 
@@ -95,19 +95,19 @@ it('ignores a row filter that answers anything but a capability name, as Capabil
     $access = new Access(new Store([]));
     foreach ([true, false, '1', 0, 7, '', null, ['manage_options']] as $bad) {
         Filters\expectApplied('alpaca_bot/capability/shortcode')->once()->andReturn($bad);
-        expect($access->effective('shortcode'))->toBe('edit_posts', var_export($bad, true));
+        expect($access->effective('shortcode', 7, 'alpacabot'))->toBe('edit_posts', var_export($bad, true));
     }
 });
 
 it('says a row is overridden only when its filter moved it off the stored value', function (): void {
     $access = new Access(new Store(['access.tool.summarize' => 'publish_posts']));
     Filters\expectApplied('alpaca_bot/capability/tool/summarize')->once()->andReturnFirstArg();
-    expect($access->overridden('tool.summarize'))->toBeFalse();
+    expect($access->overridden('tool.summarize', 5))->toBeFalse();
     Filters\expectApplied('alpaca_bot/capability/tool/summarize')->once()->andReturn('manage_options');
-    expect($access->overridden('tool.summarize'))->toBeTrue();
+    expect($access->overridden('tool.summarize', 5))->toBeTrue();
     // A guarded answer is no opinion, so it overrides nothing.
     Filters\expectApplied('alpaca_bot/capability/tool/summarize')->once()->andReturn(true);
-    expect($access->overridden('tool.summarize'))->toBeFalse();
+    expect($access->overridden('tool.summarize', 5))->toBeFalse();
 });
 
 it('asks user_can() of the user it is given, never the logged-in one', function (): void {
@@ -121,4 +121,59 @@ it('asks user_can() of the user it is given, never the logged-in one', function 
     expect($access->allows(5, 'tool.draft_post', 5))->toBeTrue()
         ->and($access->allows(6, 'tool.draft_post', 6))->toBeFalse()
         ->and($asked)->toBe([[5, 'publish_posts'], [6, 'publish_posts']]);
+});
+
+// The half of a row's contract that crashes when it is wrong: core slices a listener's argument
+// list to its `accepted_args` and calls it with what it has, so a callback declaring more
+// parameters than the hook fires with raises an ArgumentCountError. Access fixes the count so a
+// listener can be registered against it and no caller has to re-derive it.
+it('fixes how many arguments each row fires with, every row said out loud and an unlisted one requiring nothing', function (): void {
+    expect(array_map(Access::expectedArgs(...), array_keys(Access::defaults())))
+        ->toBe([0, 1, 1, 1, 1, 1, 1, 2])
+        ->and(Access::expectedArgs('shortcode'))->toBe(2)
+        ->and(Access::expectedArgs('chat'))->toBe(0)
+        ->and(Access::expectedArgs('mcp.github'))->toBe(1)
+        ->and(Access::expectedArgs('mcp.some.dotted.id'))->toBe(1)
+        ->and(Access::expectedArgs('tool.somebody_elses'))->toBe(0);
+});
+
+// Loud, not tolerant. Every caller of effective() is about to decide whether somebody may do
+// something and knows its own arguments, so a short call is a bug; falling back to the stored
+// value would discard a filter that *tightens* the row and hand back a looser capability with no
+// symptom at all.
+it('refuses a caller that passes fewer arguments than the row fires with, naming the row and the count', function (): void {
+    $access = new Access(new Store([]));
+    expect(fn(): string => $access->effective('shortcode'))
+        ->toThrow(InvalidArgumentException::class, 'The shortcode access row fires with 2 argument(s) after the capability and was given 0');
+    expect(fn(): string => $access->effective('shortcode', 7))->toThrow(InvalidArgumentException::class);
+    expect(fn(): string => $access->effective('tool.web_fetch'))->toThrow(InvalidArgumentException::class);
+    expect(fn(): string => $access->effective('settings.write'))->toThrow(InvalidArgumentException::class);
+    expect(fn(): string => $access->effective('mcp.github'))->toThrow(InvalidArgumentException::class);
+    expect(fn(): bool => $access->allows(5, 'shortcode', 7))->toThrow(InvalidArgumentException::class);
+    // A row that declares none is not refused, and neither is a caller with more than enough:
+    // a row may grow an argument without breaking what already calls it.
+    Functions\when('user_can')->justReturn(true);
+    expect($access->effective('chat'))->toBe('edit_posts')
+        ->and($access->effective('tool.summarize', 5, 'spare'))->toBe('edit_posts')
+        ->and($access->allows(5, 'shortcode', 7, 'alpacabot'))->toBeTrue();
+});
+
+// overridden() is the screen's question, and a screen must not be fatal. Two things stop it being
+// answered: a caller without the row's arguments (a settings screen has no post id for the
+// shortcode row), and a listener that throws. Both read as true, and the first does so whether or
+// not a listener exists -- asked without the arguments, this cannot find out. True there does not
+// claim "code has a say", it says "the screen is not the whole story".
+it('answers true rather than fatalling when the row cannot be resolved from where the question is asked', function (): void {
+    $access = new Access(new Store(['access.shortcode' => 'read']));
+    // No post id and no tag, the way a settings screen asks: effective() would throw. No listener
+    // is registered here at all, and it still reads true -- that is the answer, not a bug.
+    expect($access->overridden('shortcode'))->toBeTrue();
+    // A listener that throws for reasons of its own, called with everything it asked for.
+    Filters\expectApplied('alpaca_bot/capability/tool/draft_post')->once()->andReturnUsing(static function (): string {
+        throw new RuntimeException('a listener of the site\'s own');
+    });
+    expect($access->overridden('tool.draft_post', 5))->toBeTrue();
+    // And it is still the plain comparison when the row does resolve.
+    Filters\expectApplied('alpaca_bot/capability/tool/draft_post')->once()->andReturnFirstArg();
+    expect($access->overridden('tool.draft_post', 5))->toBeFalse();
 });

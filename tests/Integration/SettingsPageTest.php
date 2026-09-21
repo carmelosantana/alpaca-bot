@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace AlpacaBot\Tests\Integration;
 
+use AlpacaBot\Access;
 use AlpacaBot\Admin\Menu;
 use AlpacaBot\Admin\SettingsPage;
 use AlpacaBot\Plugin;
@@ -161,6 +162,11 @@ final class SettingsPageTest extends TestCase
             'models.default' => 'qwen3-vl:2b',
             'models.temperature' => 0.3,
             'models.overrides' => ['qwen3-vl:2b' => ['num_ctx' => 4096, 'system' => 'Be brief & kind']],
+            // A flat map, which Fields::hidden() prints nothing for: it is absent from the post,
+            // Schema::sanitize() keeps what is stored, and the round trip below is what proves
+            // it. Seeded non-empty on purpose -- with an empty map the assertion passes whatever
+            // the carry-over does, and what would be lost is access-control data.
+            'access.mcp' => ['github' => 'read'],
             // Posted by a textarea as CRLF; stored as LF, and carried through a hidden input unchanged.
             'chat.system_prompt' => "You are terse.\r\nAnswer in one line.",
             'chat.spellcheck' => false,
@@ -168,6 +174,7 @@ final class SettingsPageTest extends TestCase
         ]));
         $before = get_option('alpaca_bot_settings');
         $this->assertSame('sk-secret-integration', $before['provider.api_key']);
+        $this->assertSame(['github' => 'read'], $before['access.mcp']);
         $this->assertSame("You are terse.\nAnswer in one line.", $before['chat.system_prompt']);
 
         $_GET['tab'] = 'chat';
@@ -194,6 +201,33 @@ final class SettingsPageTest extends TestCase
         $this->assertTrue($after['chat.spellcheck']);
         unset($before['chat.welcome'], $after['chat.welcome'], $before['chat.spellcheck'], $after['chat.spellcheck']);
         $this->assertSame($before, $after);
+    }
+
+    /**
+     * The Access tab arrives with the section: SettingsPage builds a tab per Schema section and a
+     * control per field, so a row added to Schema is a select on this screen with nothing else
+     * written. Asserted by rendering it rather than by counting tabs, because an empty tab counts
+     * the same as a working one. A later release redesigns this screen; this is what it has to
+     * keep.
+     */
+    public function test_the_access_tab_renders_a_control_for_every_row(): void
+    {
+        $_GET['tab'] = 'access';
+        set_current_screen('alpaca-bot_page_alpaca-bot-settings');
+        ob_start();
+        $page = Plugin::instance()->get(SettingsPage::class);
+        $page->render();
+        $html = (string) ob_get_clean();
+
+        $this->assertSame('access', $page->activeTab());
+        foreach (array_keys(Access::defaults()) as $row) {
+            $this->assertStringContainsString('<select id="ab-access-' . str_replace('.', '-', $row) . '"', $html, $row);
+        }
+        $this->assertSame(count(Access::defaults()), preg_match_all('/<select id="ab-access-/', $html));
+        $this->assertStringContainsString('value="edit_posts" selected', $html);
+        // A PHP notice from a field the page cannot render would be printed into this markup.
+        $this->assertStringNotContainsString('Notice:', $html);
+        $this->assertStringNotContainsString('Warning:', $html);
     }
 
     /**

@@ -27,8 +27,13 @@ use AlpacaBot\Settings\Store;
  * and a shortcode tag, or nothing at all). A listener must therefore declare — and register
  * `accepted_args` for — the arguments its own row fires with: core slices the argument list to
  * `accepted_args` and calls the listener with what it has, so a callback that expects more
- * arguments than its row passes raises an ArgumentCountError when the hook fires. What a row
- * passes is decided at the surface that asks for it, not here.
+ * arguments than its row passes raises an ArgumentCountError when the hook fires.
+ *
+ * That is the half of the contract that crashes, so this class owns it too: ARGS fixes how many
+ * arguments each row fires with, expectedArgs() reads it, effective() refuses a caller that
+ * passes fewer, and overridden() — the question a screen asks — answers rather than fatals when
+ * a listener cannot be called. The *values* are the asking surface's; the *count* is this
+ * class's, and a site registering a listener can rely on it.
  *
  * `chat` has no filter here, and must not: that capability is already filtered by the two hooks
  * that were there before this tab — the menu's `alpaca_bot/admin/menu_capability` and each chat
@@ -63,6 +68,36 @@ final class Access
 
     /** The row-name prefix whose rows live in the `access.mcp` map: `mcp.github` is that map's `github`. */
     public const MCP_PREFIX = 'mcp.';
+
+    /**
+     * Row => how many arguments its filter is called with after the capability, and so how many
+     * a caller of effective() must pass. Every row is listed, `0` included, because a row that
+     * fires with nothing is a decision and not an omission.
+     *
+     * What those arguments are: the four tool rows the turn's user id; an `mcp.<server id>` row
+     * the same (MCP_ARGS); the two settings rows the WP_REST_Request being authorised; the
+     * shortcode row the post id it is rendering in and the shortcode tag. `chat` is `0` because
+     * it has no filter here at all.
+     *
+     * A row this class does not list requires nothing, which is the only honest answer for a row
+     * whose contract nobody declared; such a row also resolves to UNLISTED, so it is not a path
+     * anything is meant to enforce on.
+     *
+     * @var array<string, int>
+     */
+    private const ARGS = [
+        'chat' => 0,
+        'tool.web_fetch' => 1,
+        'tool.summarize' => 1,
+        'tool.draft_post' => 1,
+        'tool.abilities' => 1,
+        'settings.read' => 1,
+        'settings.write' => 1,
+        'shortcode' => 2,
+    ];
+
+    /** What an `mcp.<server id>` row's filter is called with: the turn's user id, as the tool rows are. */
+    private const MCP_ARGS = 1;
 
     /** What a row defaults() does not list resolves to. */
     private const UNLISTED = 'manage_options';
@@ -113,13 +148,33 @@ final class Access
     }
 
     /**
+     * How many arguments follow the capability when `$row`'s filter fires: what a caller of
+     * effective() has to pass, and what a listener on that row may be registered for.
+     */
+    public static function expectedArgs(string $row): int
+    {
+        return str_starts_with($row, self::MCP_PREFIX) ? self::MCP_ARGS : (self::ARGS[$row] ?? 0);
+    }
+
+    /**
      * The capability `$row` resolves to for this call, code included: the stored row through its
      * filter. `$args` are passed on to the filter, so a surface hands it what it knows (the turn's
      * user id, the post and tag a shortcode is rendering in, the REST request being authorised).
-     * What a row passes is that row's own contract, not a shape shared by all of them; the class
-     * docblock says what follows from that for a listener.
+     * What a row passes is that row's own contract, not a shape shared by all of them; ARGS is
+     * how many, and the class docblock says what follows from that for a listener.
+     *
+     * A caller that passes fewer than expectedArgs() throws rather than being tolerated. This is
+     * the enforcement path: every caller here is about to decide whether somebody may do
+     * something, and each of them knows its own arguments, so a short call is a programming
+     * error and nothing else. Falling back to the stored value instead would throw away whatever
+     * the site's filter had to say — including a filter that *tightens* the row — and hand back
+     * a looser capability than the site asked for, with no symptom. A fatal in development is
+     * the cheap end of that trade; overridden() is where the loud version is not wanted, and it
+     * is guarded there and only there. Extra arguments are passed on untouched, so a row may
+     * grow one without breaking its callers.
      *
      * @param mixed ...$args extra arguments the row's filter receives after the capability
+     * @throws \InvalidArgumentException when fewer than expectedArgs() arguments are passed
      */
     public function effective(string $row, mixed ...$args): string
     {
@@ -127,6 +182,15 @@ final class Access
         if ($row === 'chat') {
             // No hook here on purpose: the class docblock says which two hooks carry this row.
             return $stored;
+        }
+        $expected = self::expectedArgs($row);
+        if (count($args) < $expected) {
+            throw new \InvalidArgumentException(sprintf(
+                'The %s access row fires with %d argument(s) after the capability and was given %d: a listener registered for that row would be called with fewer than it declared and raise an ArgumentCountError.',
+                $row,
+                $expected,
+                count($args),
+            ));
         }
         $hook = self::hook($row);
         /**
@@ -143,26 +207,55 @@ final class Access
          * `$args` differs by row rather than being one signature shared by all of them, so a
          * listener has to be registered for the arguments its own row fires with: core slices the
          * argument list to the callback's `accepted_args`, so one that asks for more than its row
-         * passes raises an ArgumentCountError when the hook fires.
+         * passes raises an ArgumentCountError when the hook fires. `Access::expectedArgs($row)` is
+         * how many each row fires with, and it is fixed: the tool rows and an `mcp/{server id}`
+         * row pass the turn's user id, the settings rows the WP_REST_Request, `shortcode` the
+         * post id and the shortcode tag. A caller that passes fewer is refused before the filter
+         * runs, so a listener registered for its row's arguments is always called with them.
          *
          * @since 0.6.0
          * @param string $capability the row as the site saved it, its default when it never was
-         * @param mixed  ...$args    what the asking surface passes, which is the row's own contract and may be nothing
+         * @param mixed  ...$args    what the asking surface passes: Access::expectedArgs() of them, the row's own contract, and none at all for a row that declares none
          */
         return Capability::filtered("alpaca_bot/capability/{$hook}", $stored, ...$args);
     }
 
-    /** Whether code moved this row off what the site saved, which is what the Access tab shows as "set in code". */
+    /**
+     * Whether code moved this row off what the site saved.
+     *
+     * The guarded one, and the only one: this is the question a screen asks about a row, and a
+     * screen must not be fatal. Two things can stop it being answered. A listener is the site's
+     * own code and may throw for reasons of its own, or declare more arguments than the hook
+     * fires with (core then raises an ArgumentCountError). And a caller here may legitimately
+     * not have the arguments its row fires with — a settings screen has no post id for the
+     * shortcode row — which effective() refuses before any filter runs.
+     *
+     * Both answer true, and the second is worth being plain about: it is true whether or not any
+     * listener exists, because asked without a row's arguments this cannot find out. So true
+     * here does not mean "code has a say", it means "the screen is not the whole story", which
+     * is the safer of the two readings to be wrong about and the one that sends somebody to
+     * look. A caller that does have its row's arguments gets the plain comparison and no
+     * guesswork; a caller that does not should expect this row to read as overridden always.
+     * True rather than a third state, so the return stays a plain bool no caller can forget to
+     * unpack.
+     */
     public function overridden(string $row, mixed ...$args): bool
     {
-        return $this->effective($row, ...$args) !== $this->stored($row);
+        try {
+            return $this->effective($row, ...$args) !== $this->stored($row);
+        } catch (\Throwable) {
+            return true;
+        }
     }
 
     /**
      * Whether `$userId` passes `$row`. user_can() of that id rather than current_user_can(), for
      * the reason DraftPostToolkit gives: the id that is checked is the id the work is done as (the
      * turn's user, a shortcode's viewer), so the check and the act cannot disagree about who is
-     * asking.
+     * asking. An enforcement path, so it inherits effective()'s refusal of a short argument list
+     * rather than guarding it.
+     *
+     * @throws \InvalidArgumentException when fewer than expectedArgs() arguments are passed
      */
     public function allows(int $userId, string $row, mixed ...$args): bool
     {
