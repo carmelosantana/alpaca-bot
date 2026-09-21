@@ -1102,7 +1102,7 @@ it('reads a termination that had nothing to say as the termination it is: an emp
     // a run a tool ended, exactly like any other, and before tools this was a finished turn
     // showing whatever had streamed. Refusing to match on empty content would make it a
     // failure instead — the reply marked partial, `alpaca_bot/chat/failed` fired, and
-    // `Provider error: ...` in the user's bubble — for a stop nothing went wrong in.
+    // UNREPORTED_FAILURE in the user's bubble — for a stop nothing went wrong in.
     $empty = new Output(
         content: '',
         toolResults: [ToolResult::success('')],
