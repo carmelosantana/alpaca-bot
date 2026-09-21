@@ -683,7 +683,7 @@ route the same object is the `error` frame's data.
 | 404 | `rest_no_route` | Core: no such route for that method (e.g. `POST` on the stream route) | |
 | 405 | `alpaca_bot_method_not_allowed` | `HEAD` on the stream route (`Allow: GET`) | |
 | 429 | `alpaca_bot_rate_limited` | Two different causes, one code: the `chat` bucket is spent for this minute (`Retry-After` holds the seconds until it turns over); or a stream redemption found this user already at the concurrent-stream cap, where `Retry-After` is a ceiling on the wait for a slot — up to the site's whole stream budget, 720 s at the defaults — and the ticket is left unspent | `retry_after` (same number as the header) |
-| 502 | `alpaca_bot_provider_error` | The model provider failed or could not be built | `detail` (the raw provider error, administrators only) |
+| 502 | `alpaca_bot_provider_error` | The model provider failed or could not be built; also a tool turn whose run failed without the provider saying so, or that a tool stopped before it began | `detail` (administrators only): `Provider error: …` and the provider's own text when the provider threw, or the plugin's own sentence when it had no part in it |
 | 504 | `alpaca_bot_stream_timeout` | A streamed turn ran past the site's wall-clock budget for one turn and was stopped; what had arrived is saved as a partial reply. Only ever an `error` frame — the response's status was already sent — so this is a code to key on, not a status a client will read | `limit` (the budget in seconds, 720 at the defaults) |
 
 The 402, with the per-user cap set to 1 token for the run:

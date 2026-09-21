@@ -19,6 +19,7 @@ use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Contract\ProviderInterface;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Contract\ToolkitInterface;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Enum\AgentFinishReason;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Enum\ToolResultStatus;
+use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Exception\TerminationException;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Message\AssistantMessage;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Message\Conversation as AgentConversation;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Message\SystemMessage;
@@ -171,7 +172,7 @@ final class Pipeline
      * @return \Generator<int, Delta, mixed, Result>
      * @throws \InvalidArgumentException for an empty message (also one `before_send` blanked), an image that is not a base64 image data URL or a set of them past the site's allowance, a requested model a non-empty catalog does not list, a conversation the user does not own, or `ephemeral` with a `conversation_id`
      * @throws CapExceeded before any provider call
-     * @throws \RuntimeException when no model can be resolved, or wrapping a provider failure as 'Provider error: ...'
+     * @throws \RuntimeException when no model can be resolved, or wrapping a provider failure as 'Provider error: ...' (a tool turn's failure the provider had no part in is raised in the plugin's own words instead: raised())
      */
     public function send(int $userId, string $text, array $options = []): \Generator
     {
@@ -291,10 +292,10 @@ final class Pipeline
                     $content = self::recovered($content);
                     $failure = self::failure($output, $observer);
                     if ($failure !== null) {
-                        // The agent swallowed the provider's throw; raising it here puts it on the
-                        // path a plain provider failure takes (the catch below, which keeps the
-                        // partial transcript when a tool had run).
-                        throw new \RuntimeException($failure);
+                        // The run failed, and failure() has already said whose words the failure
+                        // is in. Raising it here puts it on the path a plain provider failure takes
+                        // (the catch below, which keeps the partial transcript when a tool had run).
+                        throw $failure;
                     }
                 } else {
                     // The vendored stream() marks text and reasoning deltas with finishReason Stop
@@ -336,9 +337,10 @@ final class Pipeline
                      * not stored (a tool turn that had already run tools keeps its partial transcript, so the
                      * draft it made is traceable), and a conversation this turn created is deleted afterwards
                      * unless a listener saved a turn onto it. A listener that throws does not replace the
-                     * provider error: that is rethrown as a RuntimeException with the listener's exception
-                     * chained behind it. The same action fires from settle() when the consumer abandons the
-                     * stream, with a RuntimeException saying so.
+                     * failure: that is rethrown as a RuntimeException, `Provider error: ` and what the
+                     * provider threw, or in the plugin's own words where the provider had no part in it,
+                     * with the listener's exception chained behind it. The same action fires from settle()
+                     * when the consumer abandons the stream, with a RuntimeException saying so.
                      *
                      * @since 0.5.0
                      * @param \Throwable   $e            what the provider or the tool loop threw
@@ -347,11 +349,11 @@ final class Pipeline
                     do_action('alpaca_bot/chat/failed', $e, $conversation);
                 } finally {
                     // Thrown from the finally so a listener that throws cannot replace the
-                    // provider failure with its own exception: a caller maps what arrives by
-                    // class (ChatController reads an InvalidArgumentException as the user's
-                    // mistake, 400). PHP chains a pending exception behind the one thrown here,
-                    // so a listener's is kept, after $e.
-                    throw new \RuntimeException('Provider error: ' . $e->getMessage(), 0, $e);
+                    // failure with its own exception: a caller maps what arrives by class
+                    // (ChatController reads an InvalidArgumentException as the user's mistake,
+                    // 400). PHP chains a pending exception behind the one thrown here, so a
+                    // listener's is kept, after $e. raised() says what the message is.
+                    throw new \RuntimeException(self::raised($e), 0, $e);
                 }
             } finally {
                 $this->settle($streamEnded, $ephemeral, $userId, $conversation, $model, $content, $reasoning, $prompt, $completion, $started, $observer?->toolCalls() ?? []);
@@ -536,7 +538,7 @@ final class Pipeline
     }
 
     /**
-     * The message a run failed on, or null when it did not fail. An Error finish is a failure
+     * The exception a run that failed is raised as, or null when it did not fail. An Error finish is a failure
      * unless it is positively a termination: a tool that ended the run by throwing
      * TerminationException, which is not a failure at all. Nothing failed there; a tool asked to
      * stop, and the turn finishes on its word (agentTurn() yields it). Telling the two apart is
@@ -583,14 +585,16 @@ final class Pipeline
      * finish is a failure, which is the direction a wrong guess should fail in. (The pin is
      * `~0.15.2` besides, so a minor release cannot arrive unreviewed.)
      *
-     * The announcement supplies the words when it had any: it is the specific message, and
-     * send() raises it. Without one there is nothing to quote — the content is the library's own
-     * prose, never announced and not the plugin's to present as an error — so the failure is
-     * reported in words of this plugin's own, which translate. An announcement that is itself
-     * empty (the provider threw a Throwable whose getMessage() is '') is still an announcement
-     * and still a failure; it simply has no words to lend.
+     * The announcement supplies the words when it had any, and the failure is the provider's: a
+     * plain RuntimeException, which send() raises as `Provider error: ` and those words
+     * (raised()). An announcement that is itself empty (the provider threw a Throwable whose
+     * getMessage() is '') is still the provider's failure and keeps the prefix; it has no words
+     * to lend, so it borrows this plugin's. Without an announcement there is nothing to quote and
+     * no provider failure to report: the content is the library's own prose, never announced. The
+     * failure is a RunFailure in words of this plugin's own, which translate, and which send()
+     * raises without the prefix (Kanboard #4327).
      */
-    private static function failure(Output $output, AgentStreamObserver $observer): ?string
+    private static function failure(Output $output, AgentStreamObserver $observer): ?\RuntimeException
     {
         if ($output->finishReason !== AgentFinishReason::Error) {
             return null;
@@ -602,10 +606,32 @@ final class Pipeline
                     return null;
                 }
             }
+            return new RunFailure(__('The run ended in an error the assistant did not report.', 'alpaca-bot'));
         }
-        return $announced !== null && $announced !== ''
-            ? $announced
-            : __('The run ended in an error the assistant did not report.', 'alpaca-bot');
+        return new \RuntimeException($announced !== '' ? $announced : __('The provider gave no reason.', 'alpaca-bot'));
+    }
+
+    /**
+     * The message send() raises a failed turn with: `Provider error: ` and what was thrown,
+     * except for two failures the provider had no part in, which arrive in words of their own.
+     *
+     * A RunFailure is failure()'s, for a tool run whose Error finish nobody announced, and its
+     * message is raised as it is. A TerminationException that reaches here escaped the agent's
+     * own catch: AbstractAgent::run() collects every toolkit's tools() before its first try, so
+     * a toolkit that stops the run from there is not caught by the library the way a tool that
+     * stops it from execute() is (that one is a finished turn: failure()). It says what the tool
+     * said, or that a tool stopped the run when it said nothing.
+     *
+     * Everything else keeps the prefix, as every failure did before 0.6: a provider that threw
+     * on the plain path, one the agent announced, and whatever else lands in send()'s catch.
+     */
+    private static function raised(\Throwable $e): string
+    {
+        return match (true) {
+            $e instanceof RunFailure => $e->getMessage(),
+            $e instanceof TerminationException => $e->getMessage() !== '' ? $e->getMessage() : __('A tool stopped the run without giving a reason.', 'alpaca-bot'),
+            default => 'Provider error: ' . $e->getMessage(),
+        };
     }
 
     /**

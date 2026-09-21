@@ -8,6 +8,7 @@ use AlpacaBot\Chat\Delta;
 use AlpacaBot\Chat\Message;
 use AlpacaBot\Chat\Pipeline;
 use AlpacaBot\Chat\Result;
+use AlpacaBot\Chat\RunFailure;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Agent\Output;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Contract\ProviderInterface;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Contract\ToolInterface;
@@ -981,12 +982,31 @@ it('leaves a plain turn that mentions <tool_call> untouched, tools branch or not
 /** The message an unannounced failure carries, as Pipeline::failure() writes it. */
 const UNREPORTED_FAILURE = 'The run ended in an error the assistant did not report.';
 
-/** Pipeline::failure(), which is private and static. */
-function pipelineFailure(Output $output, AgentStreamObserver $observer): ?string
+/** Pipeline::failure(), which is private and static: the exception a failed run is raised as, or null. */
+function pipelineFailureException(Output $output, AgentStreamObserver $observer): ?\RuntimeException
 {
-    /** @var ?string */
+    /** @var ?\RuntimeException */
     return (new ReflectionMethod(Pipeline::class, 'failure'))->invoke(null, $output, $observer);
 }
+
+/** The message of that exception, or null: what the cases below pin. */
+function pipelineFailure(Output $output, AgentStreamObserver $observer): ?string
+{
+    return pipelineFailureException($output, $observer)?->getMessage();
+}
+
+/** Pipeline::raised(), which is private and static: the message send() raises for what a failed turn threw. */
+function pipelineRaised(\Throwable $e): string
+{
+    /** @var string */
+    return (new ReflectionMethod(Pipeline::class, 'raised'))->invoke(null, $e);
+}
+
+/** The words an announcement with none borrows, as Pipeline::failure() writes them. */
+const NO_REASON = 'The provider gave no reason.';
+
+/** The words a tool that stopped the run with none gets, as Pipeline::raised() writes them. */
+const TOOL_STOPPED = 'A tool stopped the run without giving a reason.';
 
 /** An observer that heard `agent.error` with `$message`, or heard nothing when it is null. */
 function observerHearing(?string $message): AgentStreamObserver
@@ -1009,8 +1029,8 @@ it('reads an Error finish that announced nothing and terminated nothing as a fai
     $unannounced = new Output(content: 'Provider error: boom', finishReason: AgentFinishReason::Error);
 
     expect(pipelineFailure($unannounced, observerHearing(null)))->toBe(UNREPORTED_FAILURE)
-        // Never the library's raw content: send() puts what comes back in a RuntimeException as
-        // the announced message, and 'Provider error: boom' is not a message anything announced.
+        // Never the library's raw content: failure() raises words of this plugin's own when
+        // nothing was announced, and 'Provider error: boom' is not a message anything announced.
         ->not->toContain('boom')
         // Announced or not, the finish decides; the announcement only supplies the words.
         ->and(pipelineFailure($unannounced, observerHearing('boom')))->toBe('boom');
@@ -1021,9 +1041,9 @@ it('reads each of the library\'s announced Error finishes as a failure, in the a
     expect(pipelineFailure(new Output(content: 'Task was cancelled.', finishReason: AgentFinishReason::Error), observerHearing('Task cancelled')))->toBe('Task cancelled')
         ->and(pipelineFailure(new Output(content: 'Provider error: 500 Internal Server Error', finishReason: AgentFinishReason::Error), observerHearing('500 Internal Server Error')))->toBe('500 Internal Server Error')
         // The provider site announces a Throwable's getMessage(), which can be ''. Announced
-        // with no words is still announced, and still a failure — it just borrows this
-        // plugin's words, the same ones an unannounced failure gets.
-        ->and(pipelineFailure(new Output(content: 'Provider error: ', finishReason: AgentFinishReason::Error), observerHearing('')))->toBe(UNREPORTED_FAILURE);
+        // with no words is still the provider's failure, so it keeps the prefix send() puts on
+        // one; it has no words to lend and borrows this plugin's (Kanboard #4327).
+        ->and(pipelineFailure(new Output(content: 'Provider error: ', finishReason: AgentFinishReason::Error), observerHearing('')))->toBe(NO_REASON);
 });
 
 it('reads an announced Error finish as the failure it is even when a tool result repeats its content, because the announcement is read first', function (): void {
@@ -1096,4 +1116,67 @@ it('leaves every finish that is not an Error alone', function (): void {
     foreach ([AgentFinishReason::Stop, AgentFinishReason::Done, AgentFinishReason::MaxIterations, AgentFinishReason::BudgetExhausted, AgentFinishReason::EmptyResponse] as $reason) {
         expect(pipelineFailure(new Output(content: 'Answer', finishReason: $reason), observerHearing('boom')))->toBeNull();
     }
+});
+
+// Kanboard #4327, option (a): `Provider error:` says the provider threw, so it is on what the
+// provider threw and nothing else. A run that ended in an error nobody announced, and a tool
+// that stopped the run from outside the agent's own catch, are raised in the plugin's words.
+
+it('says "Provider error:" only where the provider threw, and raises the plugin\'s own words as they are', function (): void {
+    expect(pipelineRaised(new \RuntimeException('connection refused')))->toBe('Provider error: connection refused')
+        ->and(pipelineRaised(new RunFailure(UNREPORTED_FAILURE)))->toBe(UNREPORTED_FAILURE)
+        ->and(pipelineRaised(new TerminationException('')))->toBe(TOOL_STOPPED)
+        ->and(pipelineRaised(new TerminationException('Stopped: over quota')))->toBe('Stopped: over quota');
+});
+
+it('hands an unannounced failure back in the plugin\'s words, and an announced one as the provider\'s, prefix and all', function (): void {
+    $unannounced = pipelineFailureException(new Output(content: 'Provider error: boom', finishReason: AgentFinishReason::Error), observerHearing(null));
+    $announced = pipelineFailureException(new Output(content: 'Provider error: boom', finishReason: AgentFinishReason::Error), observerHearing('boom'));
+    $silent = pipelineFailureException(new Output(content: 'Provider error: ', finishReason: AgentFinishReason::Error), observerHearing(''));
+
+    expect($unannounced)->toBeInstanceOf(RunFailure::class)
+        ->and(pipelineRaised($unannounced))->toBe(UNREPORTED_FAILURE)
+        ->and($announced)->toBeInstanceOf(\RuntimeException::class)->not->toBeInstanceOf(RunFailure::class)
+        ->and(pipelineRaised($announced))->toBe('Provider error: boom')
+        ->and($silent)->not->toBeInstanceOf(RunFailure::class)
+        ->and(pipelineRaised($silent))->toBe('Provider error: ' . NO_REASON);
+});
+
+it('raises a toolkit that stops the run before it starts in words of its own, not as a provider error', function (): void {
+    // AbstractAgent::run() collects every toolkit's tools() before its first try (:142-143
+    // against :242 in the pinned library), so a TerminationException thrown there is not the
+    // library's to catch: it escapes the fiber into send()'s catch, where it used to become
+    // "Provider error: ".
+    $toolkit = new class implements ToolkitInterface {
+        public function tools(): array
+        {
+            throw new TerminationException('');
+        }
+
+        public function guidelines(): string
+        {
+            return 'Use it.';
+        }
+    };
+    $h = pipelineWith(agentProvider([]), [], [], TOOL_MODEL, null, registryWith(['stop' => $toolkit]));
+    $failed = null;
+    Actions\expectDone('alpaca_bot/chat/failed')->once()->whenHappen(function (\Throwable $e) use (&$failed): void {
+        $failed = $e;
+    });
+    Actions\expectDone('alpaca_bot/chat/completed')->never();
+
+    $caught = null;
+    try {
+        $h->pipeline->complete(3, 'go');
+    } catch (\RuntimeException $e) {
+        $caught = $e;
+    }
+
+    expect($caught)->not->toBeNull()
+        ->and($caught->getMessage())->toBe(TOOL_STOPPED)
+        ->and($caught->getPrevious())->toBeInstanceOf(TerminationException::class)
+        // chat/failed still hears what was thrown, as it always has.
+        ->and($failed)->toBeInstanceOf(TerminationException::class)
+        // Nothing ran, so nothing is kept: the post made for this turn is taken back.
+        ->and(array_map(static fn(array $w): array => [$w[0], $w[1]], $h->writes))->toBe([['wp_insert_post', 'chat_history'], ['wp_delete_post', 42]]);
 });
