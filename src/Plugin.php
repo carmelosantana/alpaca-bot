@@ -229,8 +229,11 @@ final class Plugin
      * plugins_loaded, but building them only for a REST request keeps every other request free
      * of them. Anything that is not a Controller is dropped rather than left to fatal inside
      * register(). Every controller that survives is handed the container's Access, a third
-     * party's included, so a route may declare Rest\Controller::CHAT wherever it is registered
-     * from and still resolve to the Chat row this site saved.
+     * party's included, so a route registered *through this filter* may declare
+     * Rest\Controller::CHAT and resolve to the Chat row this site saved. A controller registered
+     * outside it — built and register()ed on rest_api_init by hand — is never handed one, and its
+     * CHAT routes resolve to Access::defaults() instead, the shipped `edit_posts`, whatever the
+     * site saved.
      *
      * @return list<Rest\Controller>
      */

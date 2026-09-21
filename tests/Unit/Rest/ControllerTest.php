@@ -226,3 +226,51 @@ it('reads no setting to register a CHAT route, so rest_api_init stays free of th
     Functions\expect('register_rest_route')->once()->withArgs(fn(string $ns, string $path): bool => $path === '/chat');
     $chat->register();
 });
+
+it('lets a subclass resolve a row of its own, arguments and all, and hand the answer to the base', function (): void {
+    // The seam the settings read/write split is dispatched against: an override of capability()
+    // that resolves a row of its own and passes the answer down as the route's default, so the
+    // route's filter still runs last over it. accessRow() is what makes that reachable — the
+    // override never sees the null, and never builds a second Access over the same Store.
+    $controller = new class extends Controller {
+        public function routes(): array
+        {
+            return [['path' => '/rows', 'methods' => 'GET', 'callback' => fn() => [], 'capability' => 'manage_options']];
+        }
+
+        protected function capability(string $route, string $declared, \WP_REST_Request $request): string
+        {
+            return parent::capability($route, $this->accessRow('settings.read', $request), $request);
+        }
+    };
+    $controller->useAccess(new Access(new Store(['access.settings.read' => 'edit_others_posts'])));
+    // The row's own filter runs first, with the argument that row fires with...
+    Filters\expectApplied('alpaca_bot/capability/settings/read')->once()->with('edit_others_posts', Mockery::type('WP_REST_Request'))->andReturnFirstArg();
+    // ...and the route's filter last, over whatever the row resolved to.
+    Filters\expectApplied('alpaca_bot/capability/rows')->once()->with('edit_others_posts', Mockery::type('WP_REST_Request'))->andReturnFirstArg();
+    Functions\expect('current_user_can')->once()->with('edit_others_posts')->andReturn(true);
+    $perm = $controller->permission('rows', 'manage_options');
+    expect($perm(new WP_REST_Request('GET', '/alpaca-bot/v1/rows')))->toBeTrue();
+});
+
+it('resolves a subclass\'s row to its shipped default, and fires no row filter, with no Access in hand', function (): void {
+    // The same override with nobody having called useAccess(): the row still means something,
+    // and what it means is Access::defaults() — `manage_options` for settings.read. The row's
+    // own filter cannot run, because there is no stored row for it to be handed.
+    $controller = new class extends Controller {
+        public function routes(): array
+        {
+            return [];
+        }
+
+        protected function capability(string $route, string $declared, \WP_REST_Request $request): string
+        {
+            return parent::capability($route, $this->accessRow('settings.read', $request), $request);
+        }
+    };
+    Filters\expectApplied('alpaca_bot/capability/settings/read')->never();
+    Filters\expectApplied('alpaca_bot/capability/rows')->once()->with('manage_options', Mockery::type('WP_REST_Request'))->andReturnFirstArg();
+    Functions\expect('current_user_can')->once()->with('manage_options')->andReturn(true);
+    $perm = $controller->permission('rows', 'manage_options');
+    expect($perm(new WP_REST_Request('GET', '/alpaca-bot/v1/rows')))->toBeTrue();
+});

@@ -836,4 +836,7 @@ The route key for that filter is `ping`, so `alpaca_bot/capability/ping` applies
 A route may declare `\AlpacaBot\Rest\Controller::CHAT` in place of a capability name, and it
 then follows the Chat row of **Settings › Access** — still through its own
 `alpaca_bot/capability/{key}` filter. Every controller the filter hands back is given the row
-resolver, so this works from a third party's subclass as it does from the plugin's own.
+resolver, so this works from a third party's subclass as it does from the plugin's own — but only
+through this filter. A controller you build and `register()` yourself on `rest_api_init` is never
+handed one, and its `CHAT` routes fall back to the shipped `edit_posts` rather than to the row the
+site saved.

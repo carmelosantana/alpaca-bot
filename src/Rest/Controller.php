@@ -31,8 +31,11 @@ abstract class Controller
 
     /**
      * The Chat row of Settings › Access, as a route declares it in place of a capability name.
-     * capability() resolves it per request, so one row is the default of the menu, the chat
-     * screen and every chat route at once, and each route's own filter still runs over it.
+     * capability() resolves it per request for a route; Admin\Menu::register() reads the same row
+     * for the menu and its chat screen. Two readers of one row, not one mechanism serving both —
+     * which is what makes a site that moves the row move the screen and the API together, each
+     * still behind its own filter (`alpaca_bot/capability/{route}` and
+     * `alpaca_bot/admin/menu_capability`).
      */
     public const CHAT = 'chat';
 
@@ -102,10 +105,36 @@ abstract class Controller
     }
 
     /**
+     * What one row of Settings › Access resolves to here, for a controller that may not have been
+     * handed an Access: the row through its own filter, or the row's shipped default when nothing
+     * handed this controller one. Access::effective() fires no filter for self::CHAT — that row's
+     * hooks are the menu's and each route's, and Access owns that rule — so a chat route's only
+     * filter is still the one capability() applies.
+     *
+     * This is the seam a subclass overriding capability() resolves its rows through, rather than
+     * reaching for the Access object: the null case is answered once, here, so an override never
+     * null-checks, and nothing has to build a second Access over the same Store — Plugin::register()
+     * keeps one per request on purpose, and a second would read the settings option again.
+     *
+     * `$args` are the row's own, passed straight through. Access::expectedArgs() fixes how many
+     * each row fires with and effective() throws when handed fewer, which is a programming error
+     * and stays loud. A row Access::defaults() does not list falls back to `manage_options`,
+     * so a row nobody declared fails closed rather than open.
+     *
+     * @param mixed ...$args the arguments this row's filter fires with, Access::expectedArgs() of them
+     * @throws \InvalidArgumentException when fewer than Access::expectedArgs($row) arguments are passed
+     * @since 0.6.0
+     */
+    protected function accessRow(string $row, mixed ...$args): string
+    {
+        return $this->access?->effective($row, ...$args) ?? (Access::defaults()[$row] ?? 'manage_options');
+    }
+
+    /**
      * The capability this route's permission callback checks for this request: the route's
      * declared capability — or, for self::CHAT, the Chat row of Settings › Access — through the
      * route's own filter. Overridable, so a subclass can resolve a route of its own some other
-     * way and fall back here for the rest.
+     * way — accessRow() is how it reaches another row — and fall back here for the rest.
      *
      * The row is read here rather than in routes(): routes() is called from register(), on
      * `rest_api_init`, which fires for every REST request the site serves, `/wp/v2/*` included,
@@ -115,9 +144,7 @@ abstract class Controller
      */
     protected function capability(string $route, string $declared, \WP_REST_Request $request): string
     {
-        $default = $declared === self::CHAT
-            ? ($this->access?->stored(self::CHAT) ?? Access::defaults()[self::CHAT])
-            : $declared;
+        $default = $declared === self::CHAT ? $this->accessRow(self::CHAT) : $declared;
         /**
          * Filters the capability a REST route's permission callback checks, per request. `{route}`
          * is the route's key (Controller::routeKey(): `chat`, `conversations`, `chat/stream`,
