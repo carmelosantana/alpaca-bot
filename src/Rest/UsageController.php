@@ -33,7 +33,7 @@ final class UsageController extends Controller
             'path' => '/usage',
             'methods' => 'GET',
             'callback' => [$this, 'show'],
-            'capability' => 'edit_posts',
+            'capability' => self::CHAT,
             'args' => ['user' => ['type' => 'string', 'default' => 'me', 'enum' => ['me', 'all']]],
         ]];
     }

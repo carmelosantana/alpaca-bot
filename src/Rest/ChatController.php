@@ -46,7 +46,7 @@ final class ChatController extends Controller
             'path' => '/chat',
             'methods' => 'POST',
             'callback' => [$this, 'create'],
-            'capability' => 'edit_posts',
+            'capability' => self::CHAT,
             'rate_limit' => true,
             'args' => [
                 'message' => ['type' => 'string', 'required' => false, 'default' => ''],

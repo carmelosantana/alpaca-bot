@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use AlpacaBot\Context\Context;
 use AlpacaBot\Rest\ChatController;
+use AlpacaBot\Rest\Controller;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Enum\ProviderFinishReason;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Provider\Response;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Provider\Usage;
@@ -30,7 +31,7 @@ it('declares one rate-limited POST /chat route for editors', function (): void {
     expect($routes)->toHaveCount(1)
         ->and($routes[0]['path'])->toBe('/chat')
         ->and($routes[0]['methods'])->toBe('POST')
-        ->and($routes[0]['capability'])->toBe('edit_posts')
+        ->and($routes[0]['capability'])->toBe(Controller::CHAT)
         ->and($routes[0]['rate_limit'])->toBeTrue()
         // Not required: an images-only turn has no message, and core would refuse the request
         // before the callback ran (rest_missing_callback_param) if the schema said otherwise.

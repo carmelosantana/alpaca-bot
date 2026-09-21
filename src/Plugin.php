@@ -182,7 +182,7 @@ final class Plugin
         add_action('admin_init', [$settingsPage, 'register']);
         $chatScreen = new Admin\ChatScreen($store, $this->get(Provider\ModelCatalog::class), $conversations, $prefs);
         $this->set(Admin\ChatScreen::class, $chatScreen);
-        $menu = new Admin\Menu($settingsPage, [$chatScreen, 'render']);
+        $menu = new Admin\Menu($settingsPage, [$chatScreen, 'render'], $this->get(Access::class));
         add_action('admin_menu', [$menu, 'register']);
         // Assets::enqueue() gates on the hook suffix itself, so this listens on every admin
         // screen and acts on two (the chat screen's assets; the settings page's inline rules).
@@ -228,7 +228,9 @@ final class Plugin
      * the controllers are built then too: they hold the container's services, which all exist by
      * plugins_loaded, but building them only for a REST request keeps every other request free
      * of them. Anything that is not a Controller is dropped rather than left to fatal inside
-     * register().
+     * register(). Every controller that survives is handed the container's Access, a third
+     * party's included, so a route may declare Rest\Controller::CHAT wherever it is registered
+     * from and still resolve to the Chat row this site saved.
      *
      * @return list<Rest\Controller>
      */
@@ -237,8 +239,9 @@ final class Plugin
         /**
          * Filters the REST controllers registered under `alpaca-bot/v1`, on `rest_api_init`. Append
          * a Rest\Controller subclass to get the namespace, the `alpaca_bot/capability/{route}`
-         * permission filters and the rate limit without writing them, or drop one of the plugin's
-         * to unregister its routes (each controller's docblock says what a site loses with it).
+         * permission filters and the rate limit without writing them, and the Chat row for a route
+         * that declares `Controller::CHAT` — or drop one of the plugin's to unregister its routes
+         * (each controller's docblock says what a site loses with it).
          * Anything that is not a Controller is dropped rather than left to fatal inside register().
          *
          * @since 0.5.0
@@ -254,10 +257,15 @@ final class Plugin
             new Rest\UsageController($this->get(Chat\UsageMeter::class), $this->get(Store::class)),
             new Rest\ViewController($this->get(Chat\ConversationStore::class), $this->get(Store::class), $this->get(Provider\ModelCatalog::class), new View\Markdown(), $this->get(Chat\UserPrefs::class)),
         ]);
-        return array_values(array_filter(
+        $access = $this->get(Access::class);
+        $controllers = array_values(array_filter(
             is_array($controllers) ? $controllers : [],
             static fn(mixed $controller): bool => $controller instanceof Rest\Controller,
         ));
+        foreach ($controllers as $controller) {
+            $controller->useAccess($access);
+        }
+        return $controllers;
     }
 
     public function set(string $id, object $service): void

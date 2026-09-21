@@ -85,7 +85,7 @@ A checkout needs `composer install` (which builds `vendor-prefixed/`) and `pnpm 
 
 ### The chat screen
 
-Click **Alpaca Bot** in the admin menu, below Dashboard and above Posts. The screen is open to every user who can edit posts (filter `alpaca_bot/admin/menu_capability` to change that).
+Click **Alpaca Bot** in the admin menu, below Dashboard and above Posts. The screen is open to every user who can edit posts. **Settings › Access › Chat** changes that for the screen and the chat REST routes together, and the `alpaca_bot/admin/menu_capability` filter overrides the row in code.
 
 - The **model** select in the header picks the model for this conversation; where the site allows it, your pick is saved as your default. The **history** select opens one of your earlier conversations, and **New chat** starts a fresh one.
 - Type in the box at the foot of the screen. **Enter** sends, **Shift+Enter** adds a line, **Escape** clears the box.
@@ -180,7 +180,7 @@ Whatever you type, and the recent messages of the conversation, go to the endpoi
 <details>
 <summary>Who can use it?</summary>
 
-The chat screen is open to anyone who can edit posts, which includes Contributors. The `alpaca_bot/admin/menu_capability` filter changes that. Settings is administrators only. Read **Tools, and what they let the model reach**, under Usage, before you open the chat to a role: a role admitted to chat gets the enabled tools with it.
+The chat screen is open to anyone who can edit posts, which includes Contributors. **Settings › Access** changes it, and the `alpaca_bot/admin/menu_capability` filter overrides that in code. Settings is administrators only. Read **Tools, and what they let the model reach**, under Usage, before you open the chat to a role: a role admitted to chat gets the enabled tools with it.
 
 </details>
 

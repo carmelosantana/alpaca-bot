@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace AlpacaBot\Admin;
 
+use AlpacaBot\Access;
 use AlpacaBot\Capability;
 
 /**
@@ -11,11 +12,13 @@ use AlpacaBot\Capability;
  * ChatScreen::render), with "Chat" and "Settings" beneath it.
  *
  * The first submenu repeats the parent's slug so the top-level page reads "Chat" in the list
- * rather than "Alpaca Bot" twice, the way core does for Posts. The chat capability is
- * `edit_posts` through filter `alpaca_bot/admin/menu_capability` (the REST chat routes use the
- * same default under `alpaca_bot/capability/chat`, but the two are filtered separately: a site
- * may open the screen to a role and not the API, or the reverse); Settings is always
- * `manage_options`, because options.php demands it whatever the menu says.
+ * rather than "Alpaca Bot" twice, the way core does for Posts. The chat capability is the Chat
+ * row of Settings › Access (`edit_posts` unless the site changed it) through filter
+ * `alpaca_bot/admin/menu_capability`. The REST chat routes take the same row as *their* default,
+ * under `alpaca_bot/capability/{route}`, so one row moves the screen and the API together; the
+ * filters stay separate, so a site may still open the screen to a role and not the API, or the
+ * reverse. Settings is always `manage_options`, because options.php demands it whatever the menu
+ * says.
  *
  * The menu filter goes through Capability::filtered() for the reason the REST one does. The
  * value to worry about is `__return_true`, the first thing a site tries when a menu will not
@@ -72,7 +75,7 @@ final class Menu
     public const ICON = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMDAgMTAwIiB3aWR0aD0iMjAiIGhlaWdodD0iMjAiIGZpbGw9IiNhN2FhYWQiPjxwYXRoIGQ9Ik0yMiA2QzE5LjggNSAxOC4yIDYuNiAxOSA5QzE4IDE5IDIyIDM0IDMxIDQ0QzM1LjUgNDEgMzkgNDAuNSA0MyA0MUMzNyAzMSAyOSAxNiAyMiA2WiIvPjxwYXRoIGQ9Ik03NiA1Qzc4LjIgNCA3OS44IDUuNiA3OSA4QzgwIDE4IDc2IDMzIDY3IDQ0QzYyLjUgNDEgNTkgNDAuNSA1NSA0MUM2MSAzMSA2OSAxNSA3NiA1WiIvPjxwYXRoIGQ9Ik00MCA0MCA0MyAzMSA0NiAzNiA0OSAyOCA1MiAzNSA1NSAyOSA1OCAzNiA2MCA0MFoiLz48cGF0aCBmaWxsLXJ1bGU9ImV2ZW5vZGQiIGQ9Ik0yNiAzNGg0OGExNiAxNiAwIDAgMSAxNiAxNnYxOGExNiAxNiAwIDAgMS0xNiAxNkg0NmwtMTYgMTRWODRoLTRhMTYgMTYgMCAwIDEtMTYtMTZWNTBhMTYgMTYgMCAwIDEgMTYtMTZaTTM0LjUgNThhNS41IDUuNSAwIDEgMCAxMSAwYTUuNSA1LjUgMCAxIDAtMTEgMFpNNTYuNSA1OGE1LjUgNS41IDAgMSAwIDExIDBhNS41IDUuNSAwIDEgMC0xMSAwWiIvPjwvc3ZnPgo=';
 
     /** @param callable(): void $chatRenderer */
-    public function __construct(private SettingsPage $settings, private $chatRenderer) {}
+    public function __construct(private SettingsPage $settings, private $chatRenderer, private Access $access) {}
 
     public function register(): void
     {
@@ -81,12 +84,12 @@ final class Menu
          * from the REST routes' `alpaca_bot/capability/chat`, so a site can open the screen to a
          * role and not the API, or the reverse. Only a non-empty, non-numeric string is honoured
          * (Capability::filtered()): `true`, `__return_true` or a number would turn the check into a
-         * legacy user level, so they are ignored and `edit_posts` stands.
+         * legacy user level, so they are ignored and the Chat row stands.
          *
          * @since 0.5.0
-         * @param string $capability `edit_posts`
+         * @param string $capability the Chat row of Settings › Access, `edit_posts` by default
          */
-        $cap = Capability::filtered('alpaca_bot/admin/menu_capability', 'edit_posts');
+        $cap = Capability::filtered('alpaca_bot/admin/menu_capability', $this->access->stored('chat'));
         add_menu_page(__('Alpaca Bot', 'alpaca-bot'), __('Alpaca Bot', 'alpaca-bot'), $cap, self::SLUG, $this->chatRenderer, self::ICON, 3);
         add_submenu_page(self::SLUG, __('Chat', 'alpaca-bot'), __('Chat', 'alpaca-bot'), $cap, self::SLUG, $this->chatRenderer);
         add_submenu_page(self::SLUG, __('Alpaca Bot Settings', 'alpaca-bot'), __('Settings', 'alpaca-bot'), 'manage_options', SettingsPage::SLUG, [$this->settings, 'render']);

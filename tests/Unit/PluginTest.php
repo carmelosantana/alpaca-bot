@@ -202,6 +202,8 @@ it('renders the chat screen, enqueues its assets, hands the pipeline the user pr
     });
     Functions\when('add_submenu_page')->justReturn(false);
     Functions\when('add_shortcode')->justReturn();
+    // The menu's capability is the Chat row now, so building it reads the settings option.
+    Functions\when('get_option')->justReturn([]);
     Filters\expectApplied('alpaca_bot/admin/menu_capability')->once()->andReturn('edit_posts');
     Actions\expectAdded('admin_enqueue_scripts')->once()->with(Mockery::on(
         static fn (mixed $cb): bool => is_array($cb) && ($cb[0] ?? null) instanceof Assets && ($cb[1] ?? null) === 'enqueue'

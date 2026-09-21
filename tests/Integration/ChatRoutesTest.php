@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace AlpacaBot\Tests\Integration;
 
+use AlpacaBot\Plugin;
+use AlpacaBot\Settings\Store;
+
 /**
  * POST /chat and the /conversations routes over real core: real permission callbacks, real
  * chat_history posts, the real rate-limit transient. Only the model provider is faked, through
@@ -182,5 +185,21 @@ final class ChatRoutesTest extends TestCase
         $this->assertSame(get_current_user_id(), $ticket['user_id']);
         $this->assertSame('later', $ticket['message']);
         $this->assertSame([], $this->rest('GET', '/conversations')->get_data());
+    }
+
+    public function test_the_chat_row_opens_the_chat_routes_to_a_subscriber_and_a_route_filter_still_wins(): void
+    {
+        $subscriber = self::factory()->user->create(['role' => 'subscriber']);
+        wp_set_current_user($subscriber);
+        $this->assertSame(403, $this->rest('GET', '/conversations')->get_status());
+
+        // The container's Store is what the controllers resolve through, so the row is written
+        // through it (TestCase says a bare update_option() is not seen by the memo).
+        Plugin::instance()->get(Store::class)->set('access.chat', 'read');
+        $this->assertSame(200, $this->rest('GET', '/conversations')->get_status());
+
+        // Code still wins, per route: the row is only the default the filter is handed.
+        add_filter('alpaca_bot/capability/conversations', static fn(): string => 'edit_posts');
+        $this->assertSame(403, $this->rest('GET', '/conversations')->get_status());
     }
 }

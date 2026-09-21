@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use AlpacaBot\Access;
 use AlpacaBot\Plugin;
 use AlpacaBot\Rest\ChatController;
 use AlpacaBot\Rest\Controller;
@@ -11,6 +12,7 @@ use AlpacaBot\Rest\SettingsController;
 use AlpacaBot\Rest\StreamController;
 use AlpacaBot\Rest\UsageController;
 use AlpacaBot\Rest\ViewController;
+use AlpacaBot\Settings\Store;
 use Brain\Monkey\Actions;
 use Brain\Monkey\Filters;
 use Brain\Monkey\Functions;
@@ -147,4 +149,80 @@ it('Plugin registers every controller the alpaca_bot/rest/controllers filter han
     Functions\expect('register_rest_route')->once()->with('alpaca-bot/v1', '/ping', Mockery::type('array'));
     Functions\expect('register_rest_route')->once()->with('alpaca-bot/v1', '/limited', Mockery::type('array'));
     $onRestInit();
+});
+
+it('resolves a route declared CHAT to the stored Chat row, which is the default its filter receives', function (): void {
+    $chat = restController([['path' => '/chat', 'methods' => 'POST', 'callback' => fn() => [], 'capability' => Controller::CHAT]]);
+    $chat->useAccess(new Access(new Store(['access.chat' => 'read'])));
+    Filters\expectApplied('alpaca_bot/capability/chat')->once()->with('read', Mockery::type('WP_REST_Request'))->andReturnFirstArg();
+    Functions\expect('current_user_can')->once()->with('read')->andReturn(true);
+    $perm = $chat->permission('chat', Controller::CHAT);
+    expect($perm(new WP_REST_Request('POST', '/alpaca-bot/v1/chat')))->toBeTrue();
+});
+
+it('lets a route filter win over the Chat row, in either direction', function (): void {
+    $chat = restController([['path' => '/chat', 'methods' => 'POST', 'callback' => fn() => [], 'capability' => Controller::CHAT]]);
+    $chat->useAccess(new Access(new Store(['access.chat' => 'read'])));
+    Filters\expectApplied('alpaca_bot/capability/chat')->once()->with('read', Mockery::type('WP_REST_Request'))->andReturn('manage_options');
+    Functions\expect('current_user_can')->once()->with('manage_options')->andReturn(false);
+    Functions\when('is_user_logged_in')->justReturn(true);
+    Functions\when('__')->returnArg();
+    $perm = $chat->permission('chat', Controller::CHAT);
+    expect($perm(new WP_REST_Request('POST', '/alpaca-bot/v1/chat')))->toBeInstanceOf(WP_Error::class);
+});
+
+it('falls back to the Chat row\'s own default when nobody handed the controller an Access', function (): void {
+    // A controller a site registered by hand, or a test: the token still has to mean something,
+    // and what it means is the shipped default, never an unresolved literal.
+    Filters\expectApplied('alpaca_bot/capability/chat')->once()->with('edit_posts', Mockery::type('WP_REST_Request'))->andReturnFirstArg();
+    Functions\expect('current_user_can')->once()->with('edit_posts')->andReturn(true);
+    $perm = restController([])->permission('chat', Controller::CHAT);
+    expect($perm(new WP_REST_Request('POST', '/alpaca-bot/v1/chat')))->toBeTrue();
+});
+
+it('reads the settings once however many chat routes one request authorises', function (): void {
+    Functions\expect('get_option')->once()->with(Plugin::OPTION, [])->andReturn(['access.chat' => 'publish_posts']);
+    $controller = restController([]);
+    $controller->useAccess(new Access(new Store()));
+    Functions\when('current_user_can')->justReturn(true);
+    foreach (['chat', 'chat/stream', 'conversations', 'view/bubble'] as $route) {
+        Filters\expectApplied("alpaca_bot/capability/{$route}")->once()->with('publish_posts', Mockery::type('WP_REST_Request'))->andReturnFirstArg();
+        $perm = $controller->permission($route, Controller::CHAT);
+        expect($perm(new WP_REST_Request('GET', '/alpaca-bot/v1/' . $route)))->toBeTrue();
+    }
+});
+
+it('Plugin hands the container\'s Access to every controller the filter returns, a third party\'s included', function (): void {
+    $onRestInit = null;
+    Actions\expectAdded('rest_api_init')->once()->with(Mockery::on(static function (mixed $cb) use (&$onRestInit): bool {
+        $onRestInit = $cb;
+        return $cb instanceof Closure;
+    }));
+    Functions\when('add_shortcode')->justReturn();
+    Functions\when('get_option')->justReturn(['access.chat' => 'read']);
+    Plugin::boot()->register();
+    $theirs = restController([['path' => '/theirs', 'methods' => 'GET', 'callback' => fn() => [], 'capability' => Controller::CHAT]]);
+    Filters\expectApplied('alpaca_bot/rest/controllers')->once()->andReturn([$theirs]);
+    $permission = null;
+    Functions\expect('register_rest_route')->once()->withArgs(function (string $ns, string $path, array $opts) use (&$permission): bool {
+        $permission = $opts['permission_callback'];
+        return $path === '/theirs';
+    });
+    $onRestInit();
+
+    Filters\expectApplied('alpaca_bot/capability/theirs')->once()->with('read', Mockery::type('WP_REST_Request'))->andReturnFirstArg();
+    Functions\expect('current_user_can')->once()->with('read')->andReturn(true);
+    expect($permission(new WP_REST_Request('GET', '/alpaca-bot/v1/theirs')))->toBeTrue();
+});
+
+it('reads no setting to register a CHAT route, so rest_api_init stays free of the option', function (): void {
+    // Why a route declares a token rather than being handed a resolved capability: routes() is
+    // called from register(), on rest_api_init, which fires for every REST request the site
+    // serves, `/wp/v2/*` included. get_option() is deliberately not stubbed here — Brain Monkey
+    // fails the test the moment anything reaches for it — so registering costs no read, and only
+    // a request that reaches one of these routes pays for one.
+    $chat = restController([['path' => '/chat', 'methods' => 'POST', 'callback' => fn() => [], 'capability' => Controller::CHAT]]);
+    $chat->useAccess(new Access(new Store()));
+    Functions\expect('register_rest_route')->once()->withArgs(fn(string $ns, string $path): bool => $path === '/chat');
+    $chat->register();
 });

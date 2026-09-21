@@ -34,10 +34,10 @@ final class ConversationsController extends Controller
     public function routes(): array
     {
         return [
-            ['path' => '/conversations', 'methods' => 'GET', 'callback' => [$this, 'index'], 'capability' => 'edit_posts', 'args' => ['limit' => ['type' => 'integer', 'default' => 0, 'minimum' => 0, 'maximum' => 200]]],
-            ['path' => '/conversations', 'methods' => 'DELETE', 'callback' => [$this, 'destroyAll'], 'capability' => 'edit_posts'],
-            ['path' => '/conversations/(?P<id>\d+)', 'methods' => 'GET', 'callback' => [$this, 'show'], 'capability' => 'edit_posts'],
-            ['path' => '/conversations/(?P<id>\d+)', 'methods' => 'DELETE', 'callback' => [$this, 'destroy'], 'capability' => 'edit_posts'],
+            ['path' => '/conversations', 'methods' => 'GET', 'callback' => [$this, 'index'], 'capability' => self::CHAT, 'args' => ['limit' => ['type' => 'integer', 'default' => 0, 'minimum' => 0, 'maximum' => 200]]],
+            ['path' => '/conversations', 'methods' => 'DELETE', 'callback' => [$this, 'destroyAll'], 'capability' => self::CHAT],
+            ['path' => '/conversations/(?P<id>\d+)', 'methods' => 'GET', 'callback' => [$this, 'show'], 'capability' => self::CHAT],
+            ['path' => '/conversations/(?P<id>\d+)', 'methods' => 'DELETE', 'callback' => [$this, 'destroy'], 'capability' => self::CHAT],
         ];
     }
 

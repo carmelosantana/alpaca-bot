@@ -41,8 +41,11 @@ use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Enum\ToolResultStatus;
  * registration is not a request), and the capability is asked about that id, user_can(),
  * for the reason DraftPostToolkit gives: the same id authors the draft and owns the
  * conversation, so the check and the act cannot disagree. Chat and summarize need
- * `edit_posts`, the capability every other surface that spends (the REST routes, the
- * shortcode, the chat screen) asks for; a draft needs the post type's own capability, from
+ * `edit_posts`. It is what every other spending surface asks by default, but they ask it
+ * through the Chat row of Settings › Access (the REST routes and the chat screen) while the
+ * shortcode asks it directly, and these two abilities read no row at all: core's
+ * `wp_ability_permission_result` is the seam for an ability, for the reason "not filterable
+ * here" gives below. A draft needs the post type's own capability, from
  * DraftPostToolkit::TYPES, which is what the editor asks before showing a New button. The
  * capabilities are not filterable here: core's `wp_ability_permission_result` filter exists
  * for exactly that, with the ability name and the input in hand, and a second seam would be

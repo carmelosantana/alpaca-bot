@@ -6,6 +6,7 @@ use AlpacaBot\Chat\Assistant;
 use AlpacaBot\Chat\CapExceeded;
 use AlpacaBot\Chat\Conversation;
 use AlpacaBot\Rest\ChatController;
+use AlpacaBot\Rest\Controller;
 use AlpacaBot\Rest\StreamBudget;
 use AlpacaBot\Rest\StreamController;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Enum\ProviderFinishReason;
@@ -40,7 +41,7 @@ it('declares one GET /chat/{id}/stream route for editors, token required, not ra
     expect($routes)->toHaveCount(1)
         ->and($routes[0]['path'])->toBe('/chat/(?P<id>\d+)/stream')
         ->and($routes[0]['methods'])->toBe('GET')
-        ->and($routes[0]['capability'])->toBe('edit_posts')
+        ->and($routes[0]['capability'])->toBe(Controller::CHAT)
         ->and($routes[0]['args'])->toBe(['token' => ['type' => 'string', 'required' => true]])
         // The turn was already counted on the POST that issued the ticket; a second hit here
         // would make a streamed turn cost two.

@@ -76,7 +76,7 @@ final class StreamController extends Controller
             'path' => '/chat/(?P<id>\d+)/stream',
             'methods' => 'GET',
             'callback' => [$this, 'handle'],
-            'capability' => 'edit_posts',
+            'capability' => self::CHAT,
             'args' => ['token' => ['type' => 'string', 'required' => true]],
         ]];
     }

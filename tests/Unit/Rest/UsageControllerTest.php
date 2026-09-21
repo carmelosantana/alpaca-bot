@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use AlpacaBot\Chat\UsageMeter;
+use AlpacaBot\Rest\Controller;
 use AlpacaBot\Rest\UsageController;
 use AlpacaBot\Settings\Store;
 use Brain\Monkey\Functions;
@@ -24,7 +25,7 @@ beforeEach(function (): void {
 it('declares one route for editors whose user switch is me or all, not rate limited', function (): void {
     $routes = $this->controller->routes();
     expect($routes)->toHaveCount(1)
-        ->and($routes[0])->toMatchArray(['path' => '/usage', 'methods' => 'GET', 'capability' => 'edit_posts'])
+        ->and($routes[0])->toMatchArray(['path' => '/usage', 'methods' => 'GET', 'capability' => Controller::CHAT])
         ->and($routes[0]['args'])->toBe(['user' => ['type' => 'string', 'default' => 'me', 'enum' => ['me', 'all']]])
         ->and($routes[0])->not->toHaveKey('rate_limit');
 });

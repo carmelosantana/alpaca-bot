@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace AlpacaBot\Rest;
 
+use AlpacaBot\Access;
 use AlpacaBot\Capability;
 use AlpacaBot\Errors;
 use AlpacaBot\RateLimit;
@@ -29,8 +30,23 @@ abstract class Controller
     public const NAMESPACE = 'alpaca-bot/v1';
 
     /**
+     * The Chat row of Settings › Access, as a route declares it in place of a capability name.
+     * capability() resolves it per request, so one row is the default of the menu, the chat
+     * screen and every chat route at once, and each route's own filter still runs over it.
+     */
+    public const CHAT = 'chat';
+
+    /**
+     * The Settings › Access rows this controller's routes resolve tokens against, once something
+     * has handed them over. Null until then, which capability() reads as the shipped default.
+     */
+    private ?Access $access = null;
+
+    /**
      * One entry per route; `path` is core's route pattern relative to the namespace (named regex
      * groups allowed), `methods` a core method string ('GET', 'POST', 'GET, DELETE', ...).
+     * `capability` is a capability name, or `Controller::CHAT` for a route that follows the Chat
+     * row of Settings › Access.
      *
      * @return list<array{path: string, methods: string, callback: callable, capability: string, args?: array<string, array<string, mixed>>, rate_limit?: bool}>
      */
@@ -53,9 +69,25 @@ abstract class Controller
     }
 
     /**
-     * The permission callback for a route whose default capability is `$capability`. The filter
-     * sees the request, so a site can tighten (or, for a route it exposes to subscribers, loosen)
-     * per request.
+     * Hands this controller the Settings › Access rows its routes resolve tokens against.
+     * Plugin::controllers() calls it on everything the `alpaca_bot/rest/controllers` filter hands
+     * back, a third party's subclass included, so a route registered through that filter may
+     * declare self::CHAT and get the row this site saved. A controller nobody called this on (a
+     * test, a site registering one by hand) resolves the token to Access::defaults() instead —
+     * the shipped default, never an unresolved literal.
+     *
+     * @since 0.6.0
+     */
+    public function useAccess(Access $access): void
+    {
+        $this->access = $access;
+    }
+
+    /**
+     * The permission callback for a route whose declared capability is `$capability` — a
+     * capability name, or self::CHAT for a route that follows the Chat row of Settings › Access.
+     * capability() resolves that per request, and the filter it applies sees the request, so a
+     * site can tighten (or, for a route it exposes to subscribers, loosen) per request.
      *
      * Only a capability name is honoured, and Capability::filtered() is where that rule lives:
      * a filter returning a bool or a number would otherwise cast to a legacy user-level check
@@ -64,33 +96,52 @@ abstract class Controller
      */
     public function permission(string $route, string $capability): \Closure
     {
-        return static function (\WP_REST_Request $request) use ($route, $capability): bool|\WP_Error {
-            /**
-             * Filters the capability a REST route's permission callback checks, per request. `{route}`
-             * is the route's key (Controller::routeKey(): `chat`, `conversations`, `chat/stream`,
-             * `settings/schema`...), so one filter covers a collection and its items. Return a
-             * capability to tighten a route, or to open one to a role (a subscriber-facing chat). Only
-             * a non-empty, non-numeric string is honoured (Capability::filtered()): a bool or a number
-             * would become a legacy user-level check, so it is ignored and the default stands.
-             *
-             * Opening `chat` or `chat/stream` opens every enabled tool to that role as well.
-             * Toolkit\Registry::enabled() chooses a turn's toolkits from the `toolkits.enabled`
-             * setting and the `alpaca_bot/toolkits` filter, and has no capability check of its own,
-             * so there is nothing between "may chat" and "may call the tools that are switched on" —
-             * including `web_fetch`, which makes the web server send an outbound request and hands
-             * the reply back. Only `draft_post` re-checks a capability and refuses a role that lacks
-             * it. `read` and `exist` are honoured strings, so `read` is every Subscriber and `exist`
-             * is every visitor, logged out included. Use `alpaca_bot/toolkits` to take a tool away
-             * from the users a loosened route admits; README's "Tools, and what they let the model
-             * reach" is the operator-facing version of this, with the egress policy that mitigates it.
-             *
-             * @since 0.5.0
-             * @param string           $capability the route's default capability
-             * @param \WP_REST_Request $request    the request being authorised
-             */
-            $cap = Capability::filtered("alpaca_bot/capability/{$route}", $capability, $request);
-            return current_user_can($cap) ? true : Errors::forbidden();
+        return function (\WP_REST_Request $request) use ($route, $capability): bool|\WP_Error {
+            return current_user_can($this->capability($route, $capability, $request)) ? true : Errors::forbidden();
         };
+    }
+
+    /**
+     * The capability this route's permission callback checks for this request: the route's
+     * declared capability — or, for self::CHAT, the Chat row of Settings › Access — through the
+     * route's own filter. Overridable, so a subclass can resolve a route of its own some other
+     * way and fall back here for the rest.
+     *
+     * The row is read here rather than in routes(): routes() is called from register(), on
+     * `rest_api_init`, which fires for every REST request the site serves, `/wp/v2/*` included,
+     * while this runs only for a request that has reached one of these routes — and then through
+     * the memoised Store, which reads the settings option at most once per request however many
+     * rows are asked.
+     */
+    protected function capability(string $route, string $declared, \WP_REST_Request $request): string
+    {
+        $default = $declared === self::CHAT
+            ? ($this->access?->stored(self::CHAT) ?? Access::defaults()[self::CHAT])
+            : $declared;
+        /**
+         * Filters the capability a REST route's permission callback checks, per request. `{route}`
+         * is the route's key (Controller::routeKey(): `chat`, `conversations`, `chat/stream`,
+         * `settings/schema`...), so one filter covers a collection and its items. Return a
+         * capability to tighten a route, or to open one to a role (a subscriber-facing chat). Only
+         * a non-empty, non-numeric string is honoured (Capability::filtered()): a bool or a number
+         * would become a legacy user-level check, so it is ignored and the default stands.
+         *
+         * Opening `chat` or `chat/stream` opens every enabled tool to that role as well.
+         * Toolkit\Registry::enabled() chooses a turn's toolkits from the `toolkits.enabled`
+         * setting and the `alpaca_bot/toolkits` filter, and has no capability check of its own,
+         * so there is nothing between "may chat" and "may call the tools that are switched on" —
+         * including `web_fetch`, which makes the web server send an outbound request and hands
+         * the reply back. Only `draft_post` re-checks a capability and refuses a role that lacks
+         * it. `read` and `exist` are honoured strings, so `read` is every Subscriber and `exist`
+         * is every visitor, logged out included. Use `alpaca_bot/toolkits` to take a tool away
+         * from the users a loosened route admits; README's "Tools, and what they let the model
+         * reach" is the operator-facing version of this, with the egress policy that mitigates it.
+         *
+         * @since 0.5.0
+         * @param string           $capability the route's default: its declared capability, or for a chat route the Chat row of Settings › Access (`edit_posts` unless the site changed it)
+         * @param \WP_REST_Request $request    the request being authorised
+         */
+        return Capability::filtered("alpaca_bot/capability/{$route}", $default, $request);
     }
 
     /**

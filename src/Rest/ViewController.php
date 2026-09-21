@@ -22,8 +22,8 @@ use AlpacaBot\View\Markdown;
  * The `/view/*` routes: the chat screen's fragments, rendered server-side by the same components
  * the screen is built from, for htmx (the selects) and chat.ts (the bubbles) to swap in. Each
  * answers `text/html`, not JSON, and is for the screen: a client that wants data reads the JSON
- * routes. Every route is `edit_posts`, as the screen and the chat routes are, under its own
- * `alpaca_bot/capability/view/{name}` filter.
+ * routes. Every route takes the Chat row of Settings › Access (`edit_posts` by default), as the
+ * screen and the chat routes do, under its own `alpaca_bot/capability/view/{name}` filter.
  *
  * - `GET /view/messages/{id}`: the transcript (#ab-messages) of one of the user's conversations;
  *   404 for anyone else's, as `/conversations/{id}` answers.
@@ -64,12 +64,12 @@ final class ViewController extends Controller
     {
         $role = ['type' => 'string', 'enum' => self::ROLES];
         return [
-            ['path' => '/view/messages/(?P<id>\d+)', 'methods' => 'GET', 'callback' => [$this, 'messages'], 'capability' => 'edit_posts'],
-            ['path' => '/view/history', 'methods' => 'GET', 'callback' => [$this, 'history'], 'capability' => 'edit_posts', 'args' => ['conversation_id' => ['type' => 'integer', 'default' => 0, 'minimum' => 0]]],
-            ['path' => '/view/models', 'methods' => 'GET', 'callback' => [$this, 'models'], 'capability' => 'edit_posts', 'rate_limit' => true, 'args' => ['refresh' => ['type' => 'boolean', 'default' => false]]],
-            ['path' => '/view/default-model', 'methods' => 'POST', 'callback' => [$this, 'defaultModel'], 'capability' => 'edit_posts', 'args' => ['model' => ['type' => 'string', 'required' => true]]],
-            ['path' => '/view/bubble', 'methods' => 'GET', 'callback' => [$this, 'streamingBubble'], 'capability' => 'edit_posts', 'args' => ['role' => $role + ['default' => 'assistant'], 'streaming' => ['type' => 'boolean', 'default' => false]]],
-            ['path' => '/view/bubble', 'methods' => 'POST', 'callback' => [$this, 'bubble'], 'capability' => 'edit_posts', 'args' => [
+            ['path' => '/view/messages/(?P<id>\d+)', 'methods' => 'GET', 'callback' => [$this, 'messages'], 'capability' => self::CHAT],
+            ['path' => '/view/history', 'methods' => 'GET', 'callback' => [$this, 'history'], 'capability' => self::CHAT, 'args' => ['conversation_id' => ['type' => 'integer', 'default' => 0, 'minimum' => 0]]],
+            ['path' => '/view/models', 'methods' => 'GET', 'callback' => [$this, 'models'], 'capability' => self::CHAT, 'rate_limit' => true, 'args' => ['refresh' => ['type' => 'boolean', 'default' => false]]],
+            ['path' => '/view/default-model', 'methods' => 'POST', 'callback' => [$this, 'defaultModel'], 'capability' => self::CHAT, 'args' => ['model' => ['type' => 'string', 'required' => true]]],
+            ['path' => '/view/bubble', 'methods' => 'GET', 'callback' => [$this, 'streamingBubble'], 'capability' => self::CHAT, 'args' => ['role' => $role + ['default' => 'assistant'], 'streaming' => ['type' => 'boolean', 'default' => false]]],
+            ['path' => '/view/bubble', 'methods' => 'POST', 'callback' => [$this, 'bubble'], 'capability' => self::CHAT, 'args' => [
                 'role' => $role + ['required' => true],
                 'content' => ['type' => 'string', 'default' => ''],
                 'model' => ['type' => 'string', 'default' => ''],

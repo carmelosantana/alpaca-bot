@@ -96,23 +96,25 @@ Revoke a password when the client is done with it: `wp user application-password
 
 ### Capabilities and the `alpaca_bot/capability/{route}` filters
 
-Each route declares a capability. Chat, streaming, conversations, models and usage need
-`edit_posts` (Contributors and up); the settings routes need `manage_options`.
+Each route declares a capability, or the Chat row. Chat, streaming, conversations, models, usage
+and the view fragments take the Chat row of **Settings › Access**, `edit_posts` (Contributors and
+up) unless the site changed it; the settings routes need `manage_options`. Whichever it is, it is
+only the default the route's own filter is handed.
 
 | Filter key | Routes covered | Default |
 |---|---|---|
-| `chat` | `POST /chat` | `edit_posts` |
-| `chat/stream` | `GET /chat/{id}/stream` | `edit_posts` |
-| `conversations` | `GET\|DELETE /conversations`, `GET\|DELETE /conversations/{id}` | `edit_posts` |
-| `models` | `GET /models` | `edit_posts` |
-| `usage` | `GET /usage` | `edit_posts` |
+| `chat` | `POST /chat` | Chat row (`edit_posts`) |
+| `chat/stream` | `GET /chat/{id}/stream` | Chat row (`edit_posts`) |
+| `conversations` | `GET\|DELETE /conversations`, `GET\|DELETE /conversations/{id}` | Chat row (`edit_posts`) |
+| `models` | `GET /models` | Chat row (`edit_posts`) |
+| `usage` | `GET /usage` | Chat row (`edit_posts`) |
 | `settings` | `GET\|PUT /settings` | `manage_options` |
 | `settings/schema` | `GET /settings/schema` | `manage_options` |
-| `view/messages` | `GET /view/messages/{id}` | `edit_posts` |
-| `view/history` | `GET /view/history` | `edit_posts` |
-| `view/models` | `GET /view/models` | `edit_posts` |
-| `view/default-model` | `POST /view/default-model` | `edit_posts` |
-| `view/bubble` | `GET\|POST /view/bubble` | `edit_posts` |
+| `view/messages` | `GET /view/messages/{id}` | Chat row (`edit_posts`) |
+| `view/history` | `GET /view/history` | Chat row (`edit_posts`) |
+| `view/models` | `GET /view/models` | Chat row (`edit_posts`) |
+| `view/default-model` | `POST /view/default-model` | Chat row (`edit_posts`) |
+| `view/bubble` | `GET\|POST /view/bubble` | Chat row (`edit_posts`) |
 
 The filter is `alpaca_bot/capability/{key}` with signature `(string $capability,
 \WP_REST_Request $request)`, and the key is the route path with its `{id}` segment removed, so
@@ -132,32 +134,32 @@ add_filter('alpaca_bot/capability/conversations', static function (string $cap, 
 ```
 
 Return a capability name. Only a non-empty, non-numeric string is honoured; anything else
-(`true`, `false`, `null`, a number) is ignored and the route's declared capability is checked
-instead. That rule exists because `current_user_can('1')` is a legacy user-level check that
-every Contributor passes, so a filter that returned a boolean by mistake would otherwise open
-the route rather than close it.
+(`true`, `false`, `null`, a number) is ignored and the route's default — its declared capability,
+or the Chat row for a chat route — is checked instead. That rule exists because
+`current_user_can('1')` is a legacy user-level check that every Contributor passes, so a filter
+that returned a boolean by mistake would otherwise open the route rather than close it.
 
 ## 3. Routes
 
 | Method | Route | Capability | Rate limited |
 |---|---|---|---|
-| `POST` | `/chat` | `edit_posts` | yes (`chat` bucket) |
-| `GET` | `/chat/{conversation}/stream?token=…` | `edit_posts` | no (the ticket was) |
-| `GET` | `/conversations?limit=` | `edit_posts` | no |
-| `DELETE` | `/conversations` | `edit_posts` | no |
-| `GET` | `/conversations/{id}` | `edit_posts` | no |
-| `DELETE` | `/conversations/{id}` | `edit_posts` | no |
-| `GET` | `/models?refresh=` | `edit_posts` | yes (`chat` bucket) |
+| `POST` | `/chat` | Chat row (`edit_posts`) | yes (`chat` bucket) |
+| `GET` | `/chat/{conversation}/stream?token=…` | Chat row (`edit_posts`) | no (the ticket was) |
+| `GET` | `/conversations?limit=` | Chat row (`edit_posts`) | no |
+| `DELETE` | `/conversations` | Chat row (`edit_posts`) | no |
+| `GET` | `/conversations/{id}` | Chat row (`edit_posts`) | no |
+| `DELETE` | `/conversations/{id}` | Chat row (`edit_posts`) | no |
+| `GET` | `/models?refresh=` | Chat row (`edit_posts`) | yes (`chat` bucket) |
 | `GET` | `/settings?reveal=` | `manage_options` | no |
 | `PUT` | `/settings` | `manage_options` | no |
 | `GET` | `/settings/schema` | `manage_options` | no |
-| `GET` | `/usage?user=` | `edit_posts` (`user=all` needs `manage_options`) | no |
-| `GET` | `/view/messages/{id}` | `edit_posts` | no |
-| `GET` | `/view/history?conversation_id=` | `edit_posts` | no |
-| `GET` | `/view/models?refresh=` | `edit_posts` | yes (`chat` bucket) |
-| `POST` | `/view/default-model` | `edit_posts` | no |
-| `GET` | `/view/bubble?role=&streaming=` | `edit_posts` | no |
-| `POST` | `/view/bubble` | `edit_posts` | no |
+| `GET` | `/usage?user=` | Chat row (`edit_posts`); `user=all` needs `manage_options` | no |
+| `GET` | `/view/messages/{id}` | Chat row (`edit_posts`) | no |
+| `GET` | `/view/history?conversation_id=` | Chat row (`edit_posts`) | no |
+| `GET` | `/view/models?refresh=` | Chat row (`edit_posts`) | yes (`chat` bucket) |
+| `POST` | `/view/default-model` | Chat row (`edit_posts`) | no |
+| `GET` | `/view/bubble?role=&streaming=` | Chat row (`edit_posts`) | no |
+| `POST` | `/view/bubble` | Chat row (`edit_posts`) | no |
 
 Every response is JSON except a redeemed stream, which is `text/event-stream`, and the `/view/*`
 fragments, which are `text/html` (section 3, "The `/view/*` fragments"). In the examples,
@@ -784,10 +786,11 @@ The plugin's menu slug is `alpaca-bot`: `admin.php?page=alpaca-bot` is the chat 
 the settings page, one Schema section per tab, saved through core's `options.php` with the same
 `Schema::sanitize()` the REST route uses. Settings is always `manage_options`.
 
-The chat screen's capability is `edit_posts` through `alpaca_bot/admin/menu_capability`, with
-signature `(string $capability)` — no request, since a menu is built once per admin load. It is
-filtered separately from the REST routes, so a site can open the screen to a role without the
-API or the reverse:
+The chat screen's capability is the Chat row of **Settings › Access** (`edit_posts` by default)
+through `alpaca_bot/admin/menu_capability`, with signature `(string $capability)` — no request,
+since a menu is built once per admin load. The row is the same one the chat REST routes take as
+their default, so moving it moves the screen and the API together; the two filters stay separate,
+so a site can still open the screen to a role without the API or the reverse:
 
 ```php
 add_filter('alpaca_bot/admin/menu_capability', static fn(string $cap): string => 'publish_posts');
@@ -795,7 +798,7 @@ add_filter('alpaca_bot/admin/menu_capability', static fn(string $cap): string =>
 
 The same rule §2 gives for the REST capability filters applies here, for the same reason: only a
 non-empty, non-numeric string is honoured, and anything else (`true`, `false`, `null`, a number)
-is ignored in favour of `edit_posts`. `__return_true` is the trap this closes — it is the obvious
+is ignored in favour of the Chat row. `__return_true` is the trap this closes — it is the obvious
 thing to reach for when a menu will not appear, and `(string) true` is `'1'`, which
 `current_user_can()` reads as the legacy `level_1` check rather than as a capability. Stock
 `edit_posts` and `level_1` cover the same roles, so on a default site the swap would show no
@@ -829,3 +832,8 @@ add_filter('alpaca_bot/rest/controllers', static function (array $controllers): 
 ```
 
 The route key for that filter is `ping`, so `alpaca_bot/capability/ping` applies to it.
+
+A route may declare `\AlpacaBot\Rest\Controller::CHAT` in place of a capability name, and it
+then follows the Chat row of **Settings › Access** — still through its own
+`alpaca_bot/capability/{key}` filter. Every controller the filter hands back is given the row
+resolver, so this works from a third party's subclass as it does from the plugin's own.

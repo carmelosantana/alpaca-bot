@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use AlpacaBot\Access;
 use AlpacaBot\Admin\Menu;
 use AlpacaBot\Admin\SettingsPage;
 use AlpacaBot\Provider\Factory;
@@ -22,7 +23,7 @@ it('registers the top-level menu, the chat page as its first entry and Settings 
     Functions\expect('add_menu_page')->once()->with('Alpaca Bot', 'Alpaca Bot', 'read', Menu::SLUG, $chat, $icon, 3);
     Functions\expect('add_submenu_page')->once()->with(Menu::SLUG, 'Chat', 'Chat', 'read', Menu::SLUG, $chat);
     Functions\expect('add_submenu_page')->once()->with(Menu::SLUG, 'Alpaca Bot Settings', 'Settings', 'manage_options', SettingsPage::SLUG, [$settings, 'render']);
-    (new Menu($settings, $chat))->register();
+    (new Menu($settings, $chat, new Access(new Store([]))))->register();
 });
 
 it('embeds assets/img/menu-icon.svg byte for byte, so the file stays the single source of truth', function (): void {
@@ -71,9 +72,19 @@ it('ignores a menu capability filter that returns anything but a capability name
     $bad = [true, false, '1', 0, 7, '', null, ['manage_options']];
     foreach ($bad as $value) {
         Filters\expectApplied('alpaca_bot/admin/menu_capability')->once()->with('edit_posts')->andReturn($value);
-        (new Menu($settings, $chat))->register();
+        (new Menu($settings, $chat, new Access(new Store([]))))->register();
     }
     // Per register(): the menu page, the Chat submenu, then Settings, which is manage_options
     // whatever the filter says.
     expect($caps)->toBe(array_merge(...array_fill(0, count($bad), ['edit_posts', 'edit_posts', 'manage_options'])));
+});
+
+it('shows the menu at the Chat row, so a site that opens the row opens the screen', function (): void {
+    $store = new Store(['access.chat' => 'read']);
+    $settings = new SettingsPage($store, new ModelCatalog(new Factory($store)));
+    $chat = static function (): void {};
+    Filters\expectApplied('alpaca_bot/admin/menu_capability')->once()->with('read')->andReturn('read');
+    Functions\expect('add_menu_page')->once()->withArgs(static fn(mixed ...$a): bool => $a[2] === 'read');
+    Functions\expect('add_submenu_page')->twice()->withArgs(static fn(mixed ...$a): bool => in_array($a[3], ['read', 'manage_options'], true));
+    (new Menu($settings, $chat, new Access($store)))->register();
 });

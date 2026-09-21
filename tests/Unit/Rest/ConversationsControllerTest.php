@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use AlpacaBot\Chat\ConversationStore;
+use AlpacaBot\Rest\Controller;
 use AlpacaBot\Rest\ConversationsController;
 use AlpacaBot\Settings\Store;
 use Brain\Monkey\Functions;
@@ -26,7 +27,7 @@ it('declares the collection and item routes for editors, none rate limited', fun
         ['/conversations/(?P<id>\d+)', 'GET'],
         ['/conversations/(?P<id>\d+)', 'DELETE'],
     ])
-        ->and(array_unique(array_column($routes, 'capability')))->toBe(['edit_posts'])
+        ->and(array_unique(array_column($routes, 'capability')))->toBe([Controller::CHAT])
         ->and(array_filter($routes, static fn(array $r): bool => !empty($r['rate_limit'])))->toBe([])
         // The schema says what index() accepts, so core refuses 201 (or -1) with rest_invalid_param
         // rather than the route quietly clamping; 0 is "the site's history_limit".

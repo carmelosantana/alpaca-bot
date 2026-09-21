@@ -6,6 +6,7 @@ use AlpacaBot\Chat\ConversationStore;
 use AlpacaBot\Chat\UserPrefs;
 use AlpacaBot\Provider\Factory;
 use AlpacaBot\Provider\ModelCatalog;
+use AlpacaBot\Rest\Controller;
 use AlpacaBot\Rest\ViewController;
 use AlpacaBot\Settings\Store;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Config\ModelDefinition;
@@ -70,7 +71,7 @@ it('declares the five view routes for editors, with the model list rate limited 
     $routes = viewController()->routes();
     $byMethod = [];
     foreach ($routes as $route) {
-        expect($route['capability'])->toBe('edit_posts');
+        expect($route['capability'])->toBe(Controller::CHAT);
         $byMethod[$route['methods'] . ' ' . $route['path']] = $route;
     }
     expect(array_keys($byMethod))->toBe(['GET /view/messages/(?P<id>\d+)', 'GET /view/history', 'GET /view/models', 'POST /view/default-model', 'GET /view/bubble', 'POST /view/bubble'])
