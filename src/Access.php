@@ -232,7 +232,16 @@ final class Access
      * True means the screen is not the whole story about this row, which is what the question is
      * for. Three ways it gets there: a listener changed the value; a listener exists that this
      * call site cannot supply the arguments for; or resolving the row threw, which the catch
-     * below is about. False is the one unambiguous answer — what is stored is what is checked.
+     * below is about. False says only that nothing moved the row *here*, which for a row with a
+     * filter of its own is the whole story.
+     *
+     * `chat` is the row it is not. It has no filter here (effective() returns the stored value
+     * before any hook), so this comparison is always false for it — on a site that names a
+     * capability in code as much as on one that does not. What filters that capability is the
+     * menu's `alpaca_bot/admin/menu_capability` and each chat route's
+     * `alpaca_bot/capability/{route}`, separately, so a screen wanting to know whether the Chat
+     * row is set in code has to ask those surfaces, one at a time. This method cannot answer it
+     * and does not pretend to.
      *
      * The second case is why this is the guarded one, and the only one. It is the question a
      * screen asks, and a screen must not be fatal — but a screen also may not have a row's
@@ -241,9 +250,12 @@ final class Access
      * keeps that from becoming a blanket answer: with no listener registered nothing can have
      * moved the row, so it is false, and the label does not appear on every site in the world;
      * with one registered the honest answer is that code has a say here and this call cannot
-     * find out what it is. Counting a listener that would have returned the stored value
-     * unchanged is the cost, and it is the same blind spot every row has — no caller can tell a
-     * no-op filter from an absent one without running it.
+     * find out what it is. Counting a listener that leaves the row where it was is the cost —
+     * one that returns the stored value, and equally one whose return Capability::filtered()
+     * discards (a bool, a number, '', null, an array), which lands on the stored value too. That
+     * is the price of not running the filter, and it is particular to this branch: nothing can
+     * tell a filter that changes nothing from an absent one without calling it, and this is the
+     * one path that cannot call it. Given the arguments, both read false, correctly.
      *
      * The catch is the rest: a listener that throws, one registered with more `accepted_args`
      * than its row fires with (core raises an ArgumentCountError), and anything else thrown

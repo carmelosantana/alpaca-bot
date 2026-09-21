@@ -87,6 +87,13 @@ it('gives the Chat row no filter of its own: its hooks are the menu\'s and each 
     $access = new Access(new Store(['access.chat' => 'read']));
     expect($access->effective('chat'))->toBe('read')
         ->and($access->overridden('chat'))->toBeFalse();
+    // And still false with the two hooks that really do carry this capability listened on: this
+    // method cannot see them, so a screen asking it about the Chat row learns nothing and has to
+    // ask those surfaces one at a time. Pinned because the docblock says so and a screen would
+    // otherwise render "not set in code" over a site that sets it in code.
+    add_filter('alpaca_bot/admin/menu_capability', '__return_true');
+    add_filter('alpaca_bot/capability/chat', '__return_true');
+    expect($access->overridden('chat'))->toBeFalse();
 });
 
 it('ignores a row filter that answers anything but a capability name, as Capability::filtered() does everywhere', function (): void {
@@ -137,8 +144,8 @@ it('fixes how many arguments each row fires with, every row said out loud and an
         ->and(Access::expectedArgs('tool.somebody_elses'))->toBe(0);
 });
 
-// Loud, not tolerant. Every caller of effective() is about to decide whether somebody may do
-// something and knows its own arguments, so a short call is a bug; falling back to the stored
+// Loud, not tolerant. An enforcement caller of effective() is about to decide whether somebody
+// may do something and knows its own arguments, so a short call is a bug; falling back to the stored
 // value would discard a filter that *tightens* the row and hand back a looser capability with no
 // symptom at all.
 it('refuses a caller that passes fewer arguments than the row fires with, naming the row and the count', function (): void {
