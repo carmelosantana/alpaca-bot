@@ -276,6 +276,11 @@ it('counts a failed try on every row a batch left in publish, and asks only for 
     Functions\when('get_post_meta')->alias(static function (int $id, string $key = '', bool $single = false) use (&$meta): mixed {
         return $meta[$id][$key] ?? '';
     });
+    // countFailures() primes the counts in one query before reading them. The real thing fills
+    // WordPress's meta cache from a database this suite does not have, and the read above answers
+    // from $meta either way, so the stand-in has nothing to do; the number of queries it saves is
+    // the integration suite's to exercise, not this one's.
+    Functions\when('update_meta_cache')->justReturn([]);
     Functions\expect('update_post_meta')->twice()->andReturnUsing(static function (int $id, string $key, mixed $value) use (&$meta): bool {
         $meta[$id][$key] = $value;
         return true;

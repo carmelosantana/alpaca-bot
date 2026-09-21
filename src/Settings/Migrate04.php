@@ -54,10 +54,14 @@ final class Migrate04
     public const META_ATTEMPTS = 'ab_migration_attempts';
 
     /**
-     * Tries per row before the conversation pass stops asking for it. Three rather than one
-     * because a failure can be passing (a lock, a filter that only objects mid-request); a few
-     * rather than many because every try is one wp_update_post() and its hook chain, paid by
-     * whichever request comes next, a visitor's page view included.
+     * The most tries a row gets before the conversation pass stops asking for it, not a number
+     * it is guaranteed to reach: only a full batch comes back for another request at all, so a
+     * stuck row in a batch that was already short is tried once and the pass ends around it
+     * (migrateConversations()).
+     *
+     * Three rather than one because a failure can be passing (a lock, a filter that only objects
+     * mid-request); a few rather than many because every try is one wp_update_post() and its
+     * hook chain, paid by whichever request comes next, a visitor's page view included.
      */
     public const MAX_ATTEMPTS = 3;
 
@@ -288,9 +292,15 @@ final class Migrate04
      * the cap, a full batch of such rows came back on every request, forever, front-end page views
      * included (Kanboard #4335). With it, each is tried MAX_ATTEMPTS times (countFailures()) and
      * then left as it is: still `publish`, carrying its count under META_ATTEMPTS, where anyone
-     * investigating finds it. A request that dies inside the loop counts nothing, since the count
-     * comes after it. The bound is for a write that fails, not for one that takes the request
-     * down, which the site's error log already shows.
+     * investigating finds it.
+     *
+     * MAX_ATTEMPTS times is the full batch's story, which is the one that did not end. A batch
+     * that comes back short flags the pass in the same request whatever became of its rows, as it
+     * always did, so a stuck row in a short batch is tried once and left carrying 1. META_ATTEMPTS
+     * therefore says how many batches found the row still in `publish`, not that this plugin gave
+     * up on it. A request that dies inside the loop counts nothing at all, since the count comes
+     * after it. The bound is for a write that fails, not for one that takes the request down,
+     * which the site's error log already shows.
      */
     private function migrateConversations(): void
     {
@@ -332,12 +342,16 @@ final class Migrate04
 
     /**
      * One more failed try on every row of the batch still in `publish` after its update: one
-     * query to find them, and a meta read and a meta write for each. On a site where every
-     * update takes, that query comes back empty and nothing is read or written.
+     * query to find them, one to prime their counts, and a meta write for each. On a site where
+     * every update takes, the first query comes back empty and nothing else runs at all.
      *
-     * The read is a query of its own rather than a cache hit: the batch query primed these
-     * rows' meta, but wp_update_post() dropped each row's meta cache on the way past
-     * (clean_post_cache(), wp-includes/post.php), so the count comes from the database again.
+     * The counts are primed in one query rather than read one at a time, because the batch
+     * query's priming cannot be relied on any more: wp_update_post() drops a row's meta cache on
+     * the way past (clean_post_cache(), wp-includes/post.php), which happens to every row whose
+     * UPDATE reached the database -- including one a `wp_insert_post_data` filter put back in
+     * `publish` -- but not to one refused by `wp_insert_post_empty_content`, which returns 0
+     * before the cache is touched. update_meta_cache() covers both without having to tell them
+     * apart, and costs one query where the loop would otherwise cost one per row.
      *
      * @param list<int> $ids the batch, in the order it was read
      */
@@ -353,6 +367,10 @@ final class Migrate04
             'update_post_meta_cache' => false,
             'update_post_term_cache' => false,
         ]);
+        if ($stuck === []) {
+            return;
+        }
+        update_meta_cache('post', $stuck);
         foreach ($stuck as $post) {
             $id = (int) $post;
             // wp_slash() for the rule the loop above states: every write that unslashes is handed a slashed value.
