@@ -43,6 +43,9 @@ final class Plugin
     {
         $store = new Store();
         $this->set(Store::class, $store);
+        // One Access for the request, over the same Store: it holds nothing else, and sharing the
+        // Store is what keeps the settings option at one read however many rows are asked.
+        $this->set(Access::class, new Access($store));
         $factory = new Provider\Factory($store, new Provider\WpAi\CoreClient());
         $this->set(Provider\Factory::class, $factory);
         $this->set(Provider\ModelCatalog::class, new Provider\ModelCatalog($factory));

@@ -70,7 +70,7 @@
         <!--
             Hooks are named `alpaca_bot/scope/event` on purpose. That slash convention is the
             plugin's documented public extension API (bin/hooks-doc.php generates the reference
-            from it), so renaming the 19 hooks to underscores would break every site filtering
+            from it), so renaming them to underscores would break every site filtering
             them for a cosmetic gain.
         -->
         <exclude name="WordPress.NamingConventions.ValidHookName.UseUnderscores"/>

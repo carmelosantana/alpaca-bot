@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use AlpacaBot\Access;
 use AlpacaBot\Settings\Schema;
 use Brain\Monkey\Functions;
 
@@ -36,6 +37,59 @@ it('stores toolkits.enabled as the checked subset of its options, in option orde
     expect(Schema::sanitize(['toolkits.enabled' => 'web_fetch'], ['toolkits.enabled' => ['summarize']])['toolkits.enabled'])->toBe([]);
     // Left out of the write: keeps what is stored, as every field does.
     expect(Schema::sanitize([], ['toolkits.enabled' => ['summarize']])['toolkits.enabled'])->toBe(['summarize']);
+});
+
+// One row per Access row, as a select over the fixed capability list: the schema is the single
+// place that knows what a row may be set to, and Access::defaults() the single place that knows
+// what it starts as, so the two cannot drift.
+it('declares one Settings › Access select per row, each defaulting to Access::defaults() and offering exactly Access::CAPABILITIES', function (): void {
+    $fields = Schema::fields();
+    expect(Schema::sections())->toHaveKey('access');
+    foreach (Access::defaults() as $row => $capability) {
+        $f = $fields['access.' . $row] ?? null;
+        expect($f)->toBeArray($row);
+        expect($f['type'])->toBe('select', $row)
+            ->and($f['section'])->toBe('access', $row)
+            ->and($f['default'])->toBe($capability, $row)
+            ->and(array_keys($f['options'] ?? []))->toBe(Access::CAPABILITIES, $row)
+            ->and($f['label'])->toBeString()->not->toBe('');
+    }
+    // Every row of the section, in Access::defaults() order, and then the MCP map: the section
+    // holds the declared rows and nothing else, so a row added to one and not the other shows up
+    // here rather than as a select nobody can reach.
+    expect(array_keys(array_filter($fields, static fn(array $f): bool => $f['section'] === 'access')))
+        ->toBe([...array_map(static fn(string $row): string => 'access.' . $row, array_keys(Access::defaults())), 'access.mcp']);
+});
+
+it('stores an access row only as one of the listed capabilities, and anything else as that row\'s default', function (): void {
+    $out = Schema::sanitize(['access.chat' => 'read', 'access.tool.web_fetch' => 'exist', 'access.settings.write' => '1', 'access.shortcode' => ['publish_posts']], []);
+    expect($out['access.chat'])->toBe('read')
+        ->and($out['access.tool.web_fetch'])->toBe('edit_posts')
+        ->and($out['access.settings.write'])->toBe('manage_options')
+        ->and($out['access.shortcode'])->toBe('edit_posts');
+});
+
+// The MCP rows are one map field and not a key per server, because sanitize() rebuilds the whole
+// option from fields() and drops every key it does not declare: a per-server key could never be
+// saved. Access::stored('mcp.<id>') reads this map, so the row names are unchanged.
+it('keeps every MCP server row in the one access.mcp map, dropping an id or a capability it cannot use', function (): void {
+    $f = Schema::fields()['access.mcp'];
+    expect($f['type'])->toBe('array')
+        ->and($f['section'])->toBe('access')
+        ->and($f['default'])->toBe([]);
+    $out = Schema::sanitize(['access.mcp' => [
+        'github' => 'read',
+        'jira' => 'not_a_capability',
+        'confluence' => ['read'],
+        '' => 'read',
+        7 => 'read',
+        'filesystem' => 'manage_options',
+    ]], []);
+    expect($out['access.mcp'])->toBe(['github' => 'read', 'filesystem' => 'manage_options']);
+    // Not a map at all: nothing is stored, rather than a default that would open every server.
+    expect(Schema::sanitize(['access.mcp' => 'github'], [])['access.mcp'])->toBe([]);
+    // Left out of the write: keeps what is stored, as every field does.
+    expect(Schema::sanitize([], ['access.mcp' => ['github' => 'read']])['access.mcp'])->toBe(['github' => 'read']);
 });
 
 it('bounds the transcript sent to the model with chat.context_messages, 20 by default, 0 allowed for everything', function (): void {

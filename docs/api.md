@@ -366,12 +366,14 @@ x-alpaca-bot-default-model: qwen3-vl:2b
 ### `GET /settings`, `PUT /settings`, `GET /settings/schema`
 
 Administrators only. `GET /settings` is the whole `alpaca_bot_settings` option, every schema key
-with defaults filled in. The one secret, `provider.api_key`, reads back as `••••` when a key is
+with defaults filled in. The `access.*` keys are the Settings › Access rows (section 7); each one
+is a capability name from a fixed list, except `access.mcp`, which is one map of MCP server id to
+capability. The one secret, `provider.api_key`, reads back as `••••` when a key is
 stored and `""` when none is:
 
 ```
 $ curl -s -u "admin:$PW" "$B/settings"
-{"provider.kind":"ollama","provider.base_url":"http:\/\/ollama.example:11434\/v1","provider.api_key":"","provider.timeout":60,"models.default":"qwen3-vl:2b","models.temperature":0.7,"models.num_ctx":8192,"models.keep_alive":"5m","models.overrides":[],"chat.system_prompt":"","chat.welcome":"How can I help?","chat.placeholder":"Message Alpaca Bot","chat.user_can_change_model":true,"chat.context_messages":20,"chat.history_limit":20,"chat.spellcheck":true,"chat.assistant_avatar":"","privacy.save_history":true,"privacy.usage_log":true,"privacy.usage_retention_days":0,"governance.site_monthly_tokens":0,"governance.user_monthly_tokens":0,"toolkits.enabled":["web_fetch","summarize","draft_post"],"toolkits.user_agent":"AlpacaBot\/0.5 (+https:\/\/github.com\/carmelosantana\/alpaca-bot)"}
+{"provider.kind":"ollama","provider.base_url":"http:\/\/ollama.example:11434\/v1","provider.api_key":"","provider.timeout":60,"models.default":"qwen3-vl:2b","models.temperature":0.7,"models.num_ctx":8192,"models.keep_alive":"5m","models.overrides":[],"chat.system_prompt":"","chat.welcome":"How can I help?","chat.placeholder":"Message Alpaca Bot","chat.user_can_change_model":true,"chat.context_messages":20,"chat.history_limit":20,"chat.spellcheck":true,"chat.assistant_avatar":"","privacy.save_history":true,"privacy.usage_log":true,"privacy.usage_retention_days":0,"governance.site_monthly_tokens":0,"governance.user_monthly_tokens":0,"toolkits.enabled":["web_fetch","summarize","draft_post"],"toolkits.user_agent":"AlpacaBot\/0.5 (+https:\/\/github.com\/carmelosantana\/alpaca-bot)","access.chat":"edit_posts","access.tool.web_fetch":"edit_posts","access.tool.summarize":"edit_posts","access.tool.draft_post":"edit_posts","access.tool.abilities":"manage_options","access.settings.read":"manage_options","access.settings.write":"manage_options","access.shortcode":"edit_posts","access.mcp":[]}
 ```
 
 (`provider.base_url` is the site's own value.) What this route answers is what is *stored*, which
@@ -778,7 +780,7 @@ retry-after: 10
 ## 7. The admin surface
 
 The plugin's menu slug is `alpaca-bot`: `admin.php?page=alpaca-bot` is the chat screen and
-`admin.php?page=alpaca-bot-settings&tab={provider|models|chat|privacy|governance|toolkits}`
+`admin.php?page=alpaca-bot-settings&tab={provider|models|chat|privacy|governance|toolkits|access}`
 the settings page, one Schema section per tab, saved through core's `options.php` with the same
 `Schema::sanitize()` the REST route uses. Settings is always `manage_options`.
 

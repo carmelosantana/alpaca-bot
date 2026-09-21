@@ -11,9 +11,10 @@
  * taking the docblock there covers `$x = (bool) apply_filters(...)`, `return apply_filters(...)`
  * and `max(1, (int) apply_filters(...))` alike.
  *
- * Two of the plugin's hooks are not spelled at an `apply_filters` call at all: the REST
- * permission callbacks (`alpaca_bot/capability/{route}`, Rest\Controller) and the admin menu
- * (`alpaca_bot/admin/menu_capability`, Admin\Menu) hand their names to Capability::filtered(),
+ * Three of the plugin's hooks are not spelled at an `apply_filters` call at all: the REST
+ * permission callbacks (`alpaca_bot/capability/{route}`, Rest\Controller), the admin menu
+ * (`alpaca_bot/admin/menu_capability`, Admin\Menu) and the Settings › Access rows
+ * (`alpaca_bot/capability/{hook}`, Access) hand their names to Capability::filtered(),
  * which applies the filter and reduces the result to a capability name. So `Capability::filtered(`
  * is treated as a filter call site, its first argument the hook, and the `apply_filters($hook, ...)`
  * inside the body of Capability::filtered() itself, the one place a hook name is legitimately a

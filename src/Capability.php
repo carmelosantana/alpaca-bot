@@ -6,8 +6,10 @@ namespace AlpacaBot;
 
 /**
  * The one guard a filtered capability name goes through, wherever the plugin lets a site name
- * one: the REST permission callbacks (`alpaca_bot/capability/{route}`) and the admin menu
- * (`alpaca_bot/admin/menu_capability`).
+ * one: the REST permission callbacks (`alpaca_bot/capability/{route}`, Rest\Controller), the admin
+ * menu (`alpaca_bot/admin/menu_capability`, Admin\Menu) and every row of Settings › Access
+ * (`alpaca_bot/capability/{hook}`, Access::effective()). docs/hooks.md, which bin/hooks-doc.php
+ * generates by reading this method's call sites, is the list that cannot go stale.
  *
  * Only a capability name is honoured. WP_User::has_cap() reads a numeric capability as a legacy
  * user level — '1' is level_1, which every Contributor holds, and '0' is level_0, which every
@@ -18,9 +20,8 @@ namespace AlpacaBot;
  * non-empty, non-numeric string is treated as no opinion and the declared capability is what
  * gets checked: a filter cannot loosen a surface by accident, only by naming a capability.
  *
- * It is one function rather than two copies because both call sites guard the same thing for
- * the same reason, and a third (P3's chat screen has its own surfaces) must not have to
- * rediscover why.
+ * It is one function rather than a copy per call site because they all guard the same thing for
+ * the same reason, and the next one must not have to rediscover why.
  */
 final class Capability
 {

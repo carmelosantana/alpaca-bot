@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace AlpacaBot\Settings;
 
+use AlpacaBot\Access;
+
 /**
  * The single source of truth for what lives in the `alpaca_bot_settings` option.
  *
@@ -58,6 +60,7 @@ final class Schema
             'privacy' => ['label' => __('Privacy', 'alpaca-bot'), 'description' => __('What is stored in your database. Message content lives only in saved conversations; a usage receipt never contains it.', 'alpaca-bot')],
             'governance' => ['label' => __('Limits', 'alpaca-bot'), 'description' => __('Server-enforced monthly token caps, counted from the usage receipts. 0 means unlimited. Completion tokens include the reasoning a thinking model produces before its answer (it comes back as message.meta.reasoning), so a thinking model spends a cap faster than its visible reply suggests: a short answer can cost several hundred reasoning tokens first.', 'alpaca-bot')],
             'toolkits' => ['label' => __('Tools', 'alpaca-bot'), 'description' => __('Settings for built-in tools.', 'alpaca-bot')],
+            'access' => ['label' => __('Access', 'alpaca-bot'), 'description' => __('Who may use each part of Alpaca Bot. Each row is the capability that is checked, and the default the matching alpaca_bot/capability/* filter receives, so a capability named in code wins over this tab.', 'alpaca-bot')],
         ];
     }
 
@@ -97,6 +100,21 @@ final class Schema
             // the single place that knows what the built-ins are called.
             'toolkits.enabled' => ['type' => 'checkbox-list', 'default' => ['web_fetch', 'summarize', 'draft_post'], 'section' => 'toolkits', 'label' => __('Enabled tools', 'alpaca-bot'), 'description' => __('What the assistant may do besides answer. A tool that is off is not offered to the model at all.', 'alpaca-bot'), 'options' => ['web_fetch' => __('Fetch a web page the user names', 'alpaca-bot'), 'summarize' => __('Summarize text', 'alpaca-bot'), 'draft_post' => __('Draft a post or page (never publishes)', 'alpaca-bot')]],
             'toolkits.user_agent' => ['type' => 'string', 'default' => 'AlpacaBot/0.5 (+https://github.com/carmelosantana/alpaca-bot)', 'section' => 'toolkits', 'label' => __('User agent for fetch tools', 'alpaca-bot')],
+            'access.chat' => self::access('chat', __('Chat', 'alpaca-bot'), __('Who may open the chat screen and use the chat REST routes. A tool needs its own row as well as this one.', 'alpaca-bot')),
+            'access.tool.web_fetch' => self::access('tool.web_fetch', __('Tool: fetch a web page', 'alpaca-bot'), __('Who may run a turn that can fetch a page. The tool makes this server send an outbound request and hands the reply back; the Tools help tab says what that grants.', 'alpaca-bot')),
+            'access.tool.summarize' => self::access('tool.summarize', __('Tool: summarize', 'alpaca-bot'), __('Who may run a turn that can summarize text through the model.', 'alpaca-bot')),
+            'access.tool.draft_post' => self::access('tool.draft_post', __('Tool: draft a post', 'alpaca-bot'), __('Who may run a turn that can write a draft. The tool also asks the post type\'s own capability of the same user, so this row can only narrow that.', 'alpaca-bot')),
+            'access.tool.abilities' => self::access('tool.abilities', __('Tool: the site\'s abilities', 'alpaca-bot'), __('Who may run a turn that can call the abilities allowlisted under Tools. An ability runs with its own permission callback as well.', 'alpaca-bot')),
+            'access.settings.read' => self::access('settings.read', __('Read settings over REST', 'alpaca-bot'), __('Who may read GET /settings and GET /settings/schema. The provider API key is never included; revealing it always needs an administrator.', 'alpaca-bot')),
+            'access.settings.write' => self::access('settings.write', __('Write settings over REST', 'alpaca-bot'), __('Who may send PUT /settings. provider.base_url is a settable field, so this row decides who can point every turn at another server. The Settings screen itself is always administrators.', 'alpaca-bot')),
+            'access.shortcode' => self::access('shortcode', __('Shortcodes', 'alpaca-bot'), __('Who triggers a generation by viewing a page carrying [alpacabot]. A visitor never does, whatever this says.', 'alpaca-bot')),
+            // Every MCP server's row in one map, server id => capability, and not a key per
+            // server: sanitize() rebuilds the option from this list and drops whatever is not in
+            // it, so a per-server key could never be saved. Access::stored('mcp.<id>') reads it,
+            // so the row names are the same as every other row's. Empty until a server is
+            // configured, and a server with no entry reads as manage_options (Access), which is
+            // to say a server nobody has ruled on is administrators-only.
+            'access.mcp' => ['type' => 'array', 'default' => [], 'section' => 'access', 'label' => __('Per-server access', 'alpaca-bot'), 'sanitize' => [self::class, 'sanitizeAccessMcp']],
         ];
     }
 
@@ -210,6 +228,64 @@ final class Schema
         $v = is_scalar($raw) ? trim((string) $raw) : '';
         $v = $v === '' ? '' : rtrim(esc_url_raw($v), '/');
         return $v === '' ? (string) $f['default'] : $v;
+    }
+
+    /**
+     * One Settings › Access row: a select over Access::CAPABILITIES, starting at that row's
+     * Access::defaults() value. `select` is what validates it — coerce() keeps only a value that is
+     * a key of `options`, so a PUT or a hand-edited option naming anything else stores the default.
+     *
+     * @return Field
+     */
+    private static function access(string $row, string $label, string $description): array
+    {
+        return ['type' => 'select', 'default' => Access::defaults()[$row], 'section' => 'access', 'label' => $label, 'description' => $description, 'options' => self::capabilityLabels()];
+    }
+
+    /**
+     * Access::CAPABILITIES with the words an operator picks from. The roles named are the stock
+     * ones that hold each capability; a site with custom roles gets whoever holds it there, which
+     * is why the row stores the capability and not a role.
+     *
+     * @return array<string, string>
+     */
+    private static function capabilityLabels(): array
+    {
+        return [
+            'manage_options' => __('Administrators', 'alpaca-bot'),
+            'edit_others_posts' => __('Editors and up', 'alpaca-bot'),
+            'publish_posts' => __('Authors and up', 'alpaca-bot'),
+            'edit_posts' => __('Contributors and up', 'alpaca-bot'),
+            'read' => __('Any logged-in user', 'alpaca-bot'),
+        ];
+    }
+
+    /**
+     * server id => one of Access::CAPABILITIES; anything else is dropped rather than defaulted.
+     *
+     * Dropped, not corrected: this map has no per-server default to fall back to, and an entry
+     * this cannot read would otherwise be stored as a capability nobody chose. An id with no entry
+     * reads as `manage_options` (Access::stored()), so dropping fails closed.
+     *
+     * What it can check is the value and the shape of the id, not whether a server by that id
+     * exists: a save may reach here before, or after, the server it names is configured. An id has
+     * to be a non-empty string, which also drops the purely numeric ids PHP would have turned into
+     * int keys on the way in.
+     *
+     * @return array<string, string>
+     */
+    public static function sanitizeAccessMcp(mixed $raw): array
+    {
+        if (!is_array($raw)) {
+            return [];
+        }
+        $out = [];
+        foreach ($raw as $id => $capability) {
+            if (is_string($id) && $id !== '' && is_string($capability) && in_array($capability, Access::CAPABILITIES, true)) {
+                $out[$id] = $capability;
+            }
+        }
+        return $out;
     }
 
     /**

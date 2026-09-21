@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use AlpacaBot\Abilities;
+use AlpacaBot\Access;
 use AlpacaBot\Admin\Assets;
 use AlpacaBot\Admin\ChatScreen;
 use AlpacaBot\Admin\HelpTabs;
@@ -321,4 +322,13 @@ it('prints the wp-ai fallback notice to administrators on admin_notices, and bus
     $onUpdate(['provider.kind' => 'ollama', 'chat.welcome' => 'a'], ['provider.kind' => 'wp-ai', 'chat.welcome' => 'a']);
     $onUpdate(['provider.kind' => 'ollama', 'chat.welcome' => 'a'], ['provider.kind' => 'ollama', 'chat.welcome' => 'b']);
     $onUpdate('not an array', ['provider.kind' => 'ollama']);
+});
+
+it('registers one Access over the container\'s Store, so every surface resolves a row the same way', function (): void {
+    Functions\when('add_shortcode')->justReturn();
+    Functions\when('get_option')->justReturn(['access.chat' => 'publish_posts']);
+    $plugin = Plugin::boot();
+    $plugin->register();
+    expect($plugin->get(Access::class))->toBeInstanceOf(Access::class)
+        ->and($plugin->get(Access::class)->stored('chat'))->toBe('publish_posts');
 });
