@@ -113,11 +113,14 @@ final class SettingsController extends Controller
      * plugin, `alpaca_bot/capability/{route}` and all. Without that test it would be handed to
      * Access::effective() as if it were a row: an undeclared row fails closed to
      * `manage_options`, so the route would quietly be authorised at that rather than at what it
-     * declared, and the only filter it offered a site would be one named after the capability
-     * (`alpaca_bot/capability/manage_options`) — a hook nobody documents, since bin/hooks-doc.php
-     * reads string literals and this name is built at runtime. The check is against
-     * Access::defaults() rather than a list kept here so that a row added to the access model is
-     * usable from this table the day it exists.
+     * declared, and the only filter it offered a site would be one named after the *declared
+     * capability* — Access::hook() builds the name from the token it is handed, so a route
+     * declaring `edit_posts` would fire `alpaca_bot/capability/edit_posts`, a hook nobody
+     * documents, since bin/hooks-doc.php reads string literals and this name is built at runtime.
+     * The check is against Access::defaults() rather than a list kept here so that a row the access
+     * model declares a default for is usable from this table the day it exists. That is every row
+     * but `mcp.<server id>`, which exists only once a server does and is deliberately not in
+     * defaults(); such a row would fall through to the base, and no route here wants one.
      *
      * What Access resolves is returned as it comes, and is never handed back to
      * parent::capability() as its `$declared` — the fallback above passes the route's *declared*

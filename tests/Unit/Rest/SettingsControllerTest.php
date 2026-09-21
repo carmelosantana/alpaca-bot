@@ -114,12 +114,15 @@ it('ignores a settings/write filter that answers anything but a capability name'
 it('hands a declared capability that is not an access row back to the base, rather than resolving it as a row', function (): void {
     // Every route in this controller's table declares a row today, so this is the guard for the
     // next one added. Resolved as a row, a plain capability would fail closed to the unlisted
-    // default — authorising the route at `manage_options` instead of what it declared — and the
-    // only filter it would offer a site is one named after the capability itself.
+    // default — authorising the route at `manage_options` instead of the `edit_posts` it declared
+    // — and the only filter it would offer a site is one named after the declared capability,
+    // since Access::hook() builds the hook from the token it is handed. That is the hook asserted
+    // never to fire: it is what the unguarded path would apply, so this line fails if the guard
+    // goes away.
     $controller = new SettingsController(new Store());
     $controller->useAccess(new Access(new Store()));
     ($this->capabilities)();
-    Filters\expectApplied('alpaca_bot/capability/manage_options')->never();
+    Filters\expectApplied('alpaca_bot/capability/edit_posts')->never();
     Filters\expectApplied('alpaca_bot/capability/settings/export')->once()->with('edit_posts', Mockery::type('WP_REST_Request'))->andReturnFirstArg();
     $gate = $controller->permission('settings/export', 'edit_posts');
     expect($gate(restRequest('GET', '/alpaca-bot/v1/settings/export')))->toBeTrue()

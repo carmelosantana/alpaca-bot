@@ -86,9 +86,11 @@ final class SettingsRoutesTest extends TestCase
      * schema alone to a lower role, and that role is refused now. It narrows as well as widens.
      * `alpaca_bot/capability/settings/read` is where such a filter moves to.
      *
-     * The filter below is the *widening* shape, and it is the one that has to go uncalled for the
-     * retirement to be real: it names a capability the current user does not hold, so were it
-     * still applied the route would answer 403 rather than 200.
+     * The filter below is the *tightening* shape, chosen over the widening one because it is the
+     * direction that shows up in the status code: it names a capability the editor does not hold,
+     * so were the key still applied the route would answer 403 rather than 200. A widening
+     * fixture (`fn() => 'edit_posts'`) would answer 200 either way and leave only the counter
+     * doing any work. The counter is direction-agnostic and covers both.
      */
     public function test_the_retired_settings_schema_key_is_no_longer_consulted(): void
     {
