@@ -35,7 +35,7 @@ use AlpacaBot\View\Markdown;
  * provider tokens on every view, and this class exists to bring the feature back without that.
  * Three rules do it, and they are the design, not details:
  *
- * A viewer who is not logged in, or who fails the Shortcode row of Settings › Access
+ * A viewer who is not logged in, or who fails the Shortcodes row of Settings › Access
  * (`edit_posts` by default, filter `alpaca_bot/capability/shortcode`, which is handed the post
  * and the tag), never triggers generation. They may be served what an editor's view already
  * cached, and only when the site says so through filter `alpaca_bot/shortcode/allow_guests`;
@@ -91,13 +91,13 @@ use AlpacaBot\View\Markdown;
  * goes through Markdown (raw HTML stripped, links held, wp_kses over an allowlist) or through
  * esc_html(), and a notice is escaped as it is built. What an author who can write shortcodes
  * but not unfiltered HTML gains here is a model turn with their prompt, billed to whoever the
- * Shortcode row admits and who views the page, held to that viewer's monthly cap; a `system`
+ * Shortcodes row admits and who views the page, held to that viewer's monthly cap; a `system`
  * attribute is a prompt, and a prompt is what the shortcode is for. `temperature` is held to
  * the schema's range and `model` to the catalog (the pipeline refuses one it does not list).
  * That anyone who can write a post can write a prompt whose answer nobody reads before it is
  * public, and that the answer's links and images reach the page, is the feature's shape, said
  * in the help tab rather than gated here: an authoring gate would be a second copy of WordPress's own
- * contributor model. The per-site setting that does exist, the Shortcode row, decides who
+ * contributor model. The per-site setting that does exist, the Shortcodes row, decides who
  * *triggers* a generation by viewing the page, not who may write one into a draft; those are
  * different questions and only the first costs tokens.
  *
@@ -207,12 +207,12 @@ final class Chat
         $cached = $this->served[$key] ?? ($cacheSeconds > 0 ? get_transient($key) : false);
         if (!$this->viewerMayGenerate($postId, $tag)) {
             /**
-             * Whether a viewer who may not generate -- not logged in, or failing the Shortcode
-             * row of Settings › Access -- may be shown a cached shortcode answer.
-             * Default false: they see a notice. True serves them what an editor's view cached
-             * for this post, and only that: a viewer the filter admits never triggers a
+             * Whether a viewer who may not generate, because they are not logged in or because
+             * they fail the Shortcodes row of Settings › Access, may be shown a cached shortcode
+             * answer. Default false: they see a notice. True serves them what an editor's view
+             * cached for this post, and only that: a viewer the filter admits never triggers a
              * generation, so a page with no cache entry (expired, or never primed) shows them
-             * the notice until someone with the capability opens it.
+             * the notice until someone the row admits opens it.
              *
              * @since 0.5.0
              * @param bool   $allow  false
@@ -389,9 +389,9 @@ final class Chat
     }
 
     /**
-     * Whether this viewer may make the page spend: logged in, and past the Shortcode row of
+     * Whether this viewer may make the page spend: logged in, and past the Shortcodes row of
      * Settings › Access for the post and tag being rendered. The login check stays in front of
-     * the row because `exist` is an honoured capability name and user_can(0, 'exist') is true --
+     * the row because `exist` is an honoured capability name and user_can(0, 'exist') is true;
      * a visitor must never trigger a generation, whatever a row or a filter says.
      */
     private function viewerMayGenerate(int $postId, string $tag): bool
@@ -401,7 +401,7 @@ final class Chat
 
     /**
      * What a viewer who may not generate sees: a login link for a visitor (back to this page),
-     * and for a logged-in user the Shortcode row does not admit, that the page is not for their
+     * and for a logged-in user the Shortcodes row does not admit, that the page is not for their
      * account, since a login link would send them round in a circle.
      */
     private function refused(): string

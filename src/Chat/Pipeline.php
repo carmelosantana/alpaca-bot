@@ -95,7 +95,7 @@ use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Message\UserMessage;
  * recursion with no bound but each level's iteration budget. Shortcodes\Chat's `prompt=` form
  * and Shortcodes\AgentShim's `summarize` are a page rendering itself: the prompt is written by
  * whoever could write the post (a Contributor, at least) and the turn runs as whichever viewer
- * the Shortcode row admits opened the page, so a tool turn there would let that prompt make the
+ * the Shortcodes row admits opened the page, so a tool turn there would let that prompt make the
  * server fetch addresses of the model's choosing (web_fetch), or author drafts under the
  * viewer's name that nobody asked for (draft_post), once per cache miss. AgentShim wants a
  * fetch and runs the web_fetch tool itself instead, on the URL its author wrote (its docblock

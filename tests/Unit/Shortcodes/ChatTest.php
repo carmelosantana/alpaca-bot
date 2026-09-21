@@ -207,7 +207,7 @@ it('keeps a cached answer from a guest, and from a logged-in user who cannot edi
         ->and($h->writes)->toBe([]);
 });
 
-it('asks the Shortcode row of the viewer, so raising the row keeps a Contributor from generating', function (): void {
+it('asks the Shortcodes row of the viewer, so raising the row keeps a Contributor from generating', function (): void {
     // pipelineWith(null) pins that no provider is ever built: deleting the check fails the test
     // rather than passing it with the guard off.
     $h = pipelineWith(null, ['access.shortcode' => 'publish_posts']);
@@ -584,6 +584,32 @@ it('shows a guest the login notice instead of the shell, and enqueues only the s
     shortcodeViewer(5, ['read']);
     expect($chat->render('', null, 'alpacabot'))->toContain('does not answer here for your account')->not->toContain('id="ab-chat"')
         ->and(array_column($h->styles, 0))->toBe(['alpaca-bot-shortcode', 'alpaca-bot-shortcode']);
+});
+
+it('asks the Shortcodes row for the shell too, and hands its filter the page and the tag', function (): void {
+    // viewerMayGenerate()'s second call site, and the one nothing else would notice going wrong:
+    // shell() has no $tag of its own, so it passes self::postId() and self::TAG, and both are
+    // scalars, so a swapped pair still type-checks and still resolves a row. The order is
+    // answer()'s, which is alpaca_bot/shortcode/allow_guests's. A Subscriber the row refuses by
+    // default is admitted in code, so the row decides the shell and not only the prompt form.
+    $h = pipelineWith(null);
+    $chat = shortcodeChat($h, 7);
+    shortcodeViewer(5, ['read']);
+    Filters\expectApplied('alpaca_bot/capability/shortcode')->once()->with('edit_posts', 7, 'alpacabot')->andReturn('read');
+    Functions\when('get_posts')->justReturn([]);
+    Functions\when('wp_get_current_user')->justReturn((object) ['display_name' => 'Ada', 'ID' => 5]);
+    Functions\when('get_avatar_url')->justReturn('/u.png');
+    Functions\when('admin_url')->alias(static fn(string $p): string => '/wp-admin/' . $p);
+    Functions\when('rest_url')->alias(static fn(string $p): string => '/wp-json/' . $p);
+    Functions\when('wp_create_nonce')->justReturn('n');
+    Functions\when('wp_convert_hr_to_bytes')->justReturn(8 * 1024 * 1024);
+    Functions\when('get_user_meta')->justReturn('llama3.2');
+    Functions\when('selected')->alias(static fn(mixed $a, mixed $b, bool $echo = true): string => $a == $b ? ' selected' : '');
+    Functions\when('number_format_i18n')->alias(static fn(mixed $n): string => (string) $n);
+    Functions\when('wp_enqueue_script')->justReturn();
+    Functions\when('wp_localize_script')->justReturn();
+    Functions\when('wp_enqueue_media')->justReturn();
+    expect($chat->render('', null, 'alpacabot'))->toContain('id="ab-chat"')->not->toContain('alpaca-bot-notice');
 });
 
 it('registers itself as [alpacabot]', function (): void {

@@ -80,7 +80,7 @@ final class HelpTabs
     {
         return self::p(sprintf(
             /* translators: 1: [alpacabot prompt="…"], 2: [alpacabot] */
-            esc_html__('%1$s puts the model\'s answer to the prompt in a post or page; %2$s with no prompt puts this chat screen there. Both are for logged-in users the Shortcode row of Settings › Access admits, which by default is anyone who can edit posts.', 'alpaca-bot'),
+            esc_html__('%1$s puts the model\'s answer to the prompt in a post or page; %2$s with no prompt puts this chat screen there. Both are for logged-in users the Shortcodes row of Settings › Access admits, which by default is anyone who can edit posts.', 'alpaca-bot'),
             '<code>[alpacabot prompt="…"]</code>',
             '<code>[alpacabot]</code>',
         ))
@@ -92,12 +92,12 @@ final class HelpTabs
             ))
             . self::p(sprintf(
                 /* translators: %s: the filter name alpaca_bot/shortcode/allow_guests */
-                esc_html__('A visitor, or a logged-in user the Shortcode row does not admit, sees a notice instead of the answer. A site that wants visitors to see it returns true from the %s filter, and they then see the cached answer and nothing else: a visitor never triggers a generation, so a page nobody with the capability opens spends nothing.', 'alpaca-bot'),
+                esc_html__('A visitor, or a logged-in user the Shortcodes row does not admit, sees a notice instead of the answer. A site that wants visitors to see it returns true from the %s filter, and they then see the cached answer and nothing else: a visitor never triggers a generation, so a page nobody the row admits opens spends nothing.', 'alpaca-bot'),
                 '<code>alpaca_bot/shortcode/allow_guests</code>',
             ))
             . self::p(esc_html__('A generation counts against the same limit as the chat: thirty a minute per user, shared with the chat screen, the REST routes and the abilities. A page carrying more shortcodes than the minute allows shows the rest as a "Too many requests" notice and fills them in on a later view; a cached answer costs nothing.', 'alpaca-bot'))
             . self::p(esc_html__('The block editor and the REST API show the cached answer, or a notice when there is none: an answer is generated only when the page is viewed on the site, so listing posts over the API never spends anything. The chat screen form shows a notice there too; on the site it carries the viewing user\'s own REST nonce, as it does in wp-admin, so leave a page carrying it out of a full-page cache that caches pages for logged-in users.', 'alpaca-bot'))
-            . self::p('<strong>' . esc_html__('Anyone who can write a post can write a prompt.', 'alpaca-bot') . '</strong> ' . esc_html__('A Contributor can put a prompt, and a system prompt, in a draft; once it is published, the first user the Shortcode row admits to view the page generates the answer, the tokens count against that viewer\'s monthly cap, and the answer is then on the page for everyone, without anyone having read it first. The answer\'s markdown is sanitised (no scripts, no raw HTML), but links and images the model writes reach the public page. Review a page after its answer appears, as you would any content.', 'alpaca-bot'))
+            . self::p('<strong>' . esc_html__('Anyone who can write a post can write a prompt.', 'alpaca-bot') . '</strong> ' . esc_html__('A Contributor can put a prompt, and a system prompt, in a draft; once it is published, the first user the Shortcodes row admits to view the page generates the answer, the tokens count against that viewer\'s monthly cap, and the answer is then on the page for everyone, without anyone having read it first. The answer\'s markdown is sanitised (no scripts, no raw HTML), but links and images the model writes reach the public page. Review a page after its answer appears, as you would any content.', 'alpaca-bot'))
             . self::p(sprintf(
                 /* translators: 1: model="…", 2: system="…", 3: temperature="…", 4: format="text" */
                 esc_html__('The other attributes: %1$s picks the model where users may change it (otherwise the answer runs on the model the viewing editor would chat on), %2$s replaces the system prompt for this answer, %3$s the temperature, and %4$s shows the answer as plain text instead of rendering its markdown. Changing the site\'s system prompt starts a new answer; changing its default model does not, since the model is recorded only when the shortcode names one.', 'alpaca-bot'),
