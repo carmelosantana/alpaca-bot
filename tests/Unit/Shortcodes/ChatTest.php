@@ -203,7 +203,61 @@ it('keeps a cached answer from a guest, and from a logged-in user who cannot edi
     shortcodeViewer(5, ['read']);
     Filters\expectApplied('alpaca_bot/shortcode/allow_guests')->once()->andReturn(false);
     $html = $chat->render(['prompt' => 'Say hi'], null, 'alpacabot');
-    expect($html)->toContain('class="alpaca-bot-notice"')->toContain('edit posts')->not->toContain('wp-login.php')->not->toContain('From the cache')
+    expect($html)->toContain('class="alpaca-bot-notice"')->toContain('does not answer here for your account')->not->toContain('wp-login.php')->not->toContain('From the cache')
+        ->and($h->writes)->toBe([]);
+});
+
+it('asks the Shortcode row of the viewer, so raising the row keeps a Contributor from generating', function (): void {
+    // pipelineWith(null) pins that no provider is ever built: deleting the check fails the test
+    // rather than passing it with the guard off.
+    $h = pipelineWith(null, ['access.shortcode' => 'publish_posts']);
+    $chat = shortcodeChat($h, 7);
+    shortcodeViewer(3, ['edit_posts']);
+    expect($chat->render(['prompt' => 'Say hi'], null, 'alpacabot'))
+        ->toContain('class="alpaca-bot-notice"')->not->toContain('alpaca-bot-answer')
+        ->and($h->writes)->toBe([])
+        ->and($h->stored)->toBe([]);
+});
+
+it('generates for a viewer the row admits, and hands the row\'s filter the post and the tag', function (): void {
+    $h = pipelineWith(pipelineProvider(shortcodeReply('Hi')));
+    $chat = shortcodeChat($h, 7);
+    // A Subscriber, admitted in code: the filter is handed the stored row, the post being
+    // rendered and the shortcode, so a site can open one page's shortcode and not another's.
+    shortcodeViewer(5, ['read']);
+    Filters\expectApplied('alpaca_bot/capability/shortcode')->once()->with('edit_posts', 7, 'alpacabot')->andReturn('read');
+    expect($chat->render(['prompt' => 'Say hi'], null, 'alpacabot'))->toContain('alpaca-bot-answer')->toContain('Hi');
+});
+
+it('never generates for a visitor, whatever the row or its filter say', function (): void {
+    // `exist` is an honoured capability name and user_can(0, 'exist') is true -- has_cap()
+    // grants `exist` to everyone, logged out included -- so a page nobody with an account
+    // opened must still spend nothing. shortcodeViewer(0) alone would not pin that: its
+    // user_can() refuses id 0 every capability, so the row would refuse the visitor with the
+    // login check deleted too. The row is the most open the screen offers and the user_can()
+    // below answers as `exist` does, so the login check is the only thing left refusing them.
+    $h = pipelineWith(null, ['access.shortcode' => 'read']);
+    $chat = shortcodeChat($h, 7);
+    shortcodeViewer(0);
+    Functions\when('user_can')->alias(static fn(int $user, string $cap): bool => true);
+    Filters\expectApplied('alpaca_bot/shortcode/allow_guests')->once()->andReturn(false);
+    expect($chat->render(['prompt' => 'Say hi'], null, 'alpacabot'))->toContain('Log in')
+        ->and($h->writes)->toBe([]);
+});
+
+it('ignores a shortcode row filter that answers __return_true, on the surface where that costs money', function (): void {
+    // The viewer holds `1` as well as `read`: WP_User::has_cap() reads a numeric capability as
+    // a legacy user level, and level_1 is one every Contributor holds, so honouring the filter's
+    // `true` would admit them here. Capability::filtered() ignores it and the stored row stands,
+    // which is the only reason the notice below is what a page nobody vouched for gets.
+    $h = pipelineWith(null);
+    $chat = shortcodeChat($h, 7);
+    shortcodeViewer(5, ['read', '1']);
+    Filters\expectApplied('alpaca_bot/capability/shortcode')->once()->andReturn(true);
+    // The guest filter still runs, as it does for every viewer who may not generate: it is
+    // about serving a cache entry, and there is none here.
+    Filters\expectApplied('alpaca_bot/shortcode/allow_guests')->once()->andReturn(false);
+    expect($chat->render(['prompt' => 'Say hi'], null, 'alpacabot'))->toContain('class="alpaca-bot-notice"')
         ->and($h->writes)->toBe([]);
 });
 
@@ -528,7 +582,7 @@ it('shows a guest the login notice instead of the shell, and enqueues only the s
     Filters\expectApplied('alpaca_bot/shortcode/allow_guests')->never();
     expect($chat->render('', null, 'alpacabot'))->toContain('class="alpaca-bot-notice"')->toContain('Log in')->not->toContain('id="ab-chat"');
     shortcodeViewer(5, ['read']);
-    expect($chat->render('', null, 'alpacabot'))->toContain('edit posts')->not->toContain('id="ab-chat"')
+    expect($chat->render('', null, 'alpacabot'))->toContain('does not answer here for your account')->not->toContain('id="ab-chat"')
         ->and(array_column($h->styles, 0))->toBe(['alpaca-bot-shortcode', 'alpaca-bot-shortcode']);
 });
 
@@ -537,7 +591,7 @@ it('registers itself as [alpacabot]', function (): void {
     $chat = shortcodeChat($h);
     Functions\expect('add_shortcode')->once()->with('alpacabot', [$chat, 'render']);
     $chat->register();
-    expect(Chat::TAG)->toBe('alpacabot')->and(Chat::CAPABILITY)->toBe('edit_posts');
+    expect(Chat::TAG)->toBe('alpacabot');
 });
 
 // Pipeline's class docblock: an ephemeral turn runs no tools, and for the shortcode that is a

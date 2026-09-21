@@ -43,7 +43,7 @@ use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Enum\ToolResultStatus;
  * conversation, so the check and the act cannot disagree. Chat and summarize need
  * `edit_posts`. It is what every other spending surface asks by default, but they ask it
  * through the Chat row of Settings › Access (the REST routes and the chat screen) while the
- * shortcode asks it directly, and these two abilities read no row at all: core's
+ * shortcode asks the Shortcode row, and these two abilities read no row at all: core's
  * `wp_ability_permission_result` is the seam for an ability, for the reason "not filterable
  * here" gives below. A draft needs the post type's own capability, from
  * DraftPostToolkit::TYPES, which is what the editor asks before showing a New button. The

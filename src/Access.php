@@ -118,10 +118,11 @@ final class Access
 
     /**
      * Row => the capability it starts at. These reproduce 0.5 exactly where 0.5 had an answer:
-     * chat is the menu's and the chat routes' `edit_posts`, and the shortcode is
-     * Shortcodes\Chat::CAPABILITY, also `edit_posts`, so a site that never opens this tab sees no
-     * change. Both settings rows are the `manage_options` those routes already declare, and the
-     * abilities toolkit is new in 0.6 and starts closed at `manage_options`.
+     * chat is the menu's and the chat routes' `edit_posts`, and the shortcode is the
+     * `edit_posts` Shortcodes\Chat asked of a viewer before this row existed, so a site that
+     * never opens this tab sees no change. Both settings rows are the `manage_options` those
+     * routes already declare, and the abilities toolkit is new in 0.6 and starts closed at
+     * `manage_options`.
      *
      * The three built-in tool rows are new gates, not new defaults: 0.5 had nothing between "may
      * chat" and "may call the enabled tools" (`alpaca_bot/toolkits` was the only lever), so they

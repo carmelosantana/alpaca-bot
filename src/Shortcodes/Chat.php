@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace AlpacaBot\Shortcodes;
 
+use AlpacaBot\Access;
 use AlpacaBot\Admin\Assets;
 use AlpacaBot\Chat\ConversationStore;
 use AlpacaBot\Chat\Pipeline;
@@ -24,25 +25,30 @@ use AlpacaBot\View\Markdown;
  * `format="text"`. `model`, `system` and `temperature` are the turn's options (`model` is
  * honoured under the same rule as everywhere else: only while `chat.user_can_change_model` is
  * on and the catalog lists it). Without a prompt, the chat screen's Shell is rendered on the
- * page and its bundle enqueued (Assets::enqueueFront()), for a logged-in viewer who can edit
- * posts; anyone else sees a notice. That form is a preview of the front-end chat a later 0.x
- * release designs (its own bundle, a guest policy); here it is the admin screen on a page.
+ * page and its bundle enqueued (Assets::enqueueFront()), for a logged-in viewer the Shortcode
+ * row of Settings › Access admits (anyone who can edit posts, by default); anyone else sees a
+ * notice. That form is a preview of the front-end chat a later 0.x release designs (its own
+ * bundle, a guest policy); here it is the admin screen on a page.
  *
  * The prompt form is what 0.4's `[alpacabot]` was: content generated at render time. P3 shipped
  * no shortcodes rather than that, because a page nobody is watching would go on spending
  * provider tokens on every view, and this class exists to bring the feature back without that.
  * Three rules do it, and they are the design, not details:
  *
- * A viewer who is not logged in with `edit_posts` never triggers generation. They may be served
- * what an editor's view already cached, and only when the site says so through filter
- * `alpaca_bot/shortcode/allow_guests`; with no cache entry they get the login notice, not a
- * generated answer. So a site with visitors sees the answer an editor primed, for as long as
- * the cache holds, and a page nobody with the capability opens again spends nothing. The
- * capability is not filterable: the plugin's one guard for a filtered capability (Capability)
- * exists because `__return_true` on such a filter opens a surface to every role, and this is
- * the surface where that costs money. The same rule governs a REST request: `content.rendered`
- * is produced for every item of a collection, so a `GET /wp/v2/posts?per_page=100` by an editor
- * would otherwise be up to a hundred serialized turns in one request. Inside one, an editor is
+ * A viewer who is not logged in, or who fails the Shortcode row of Settings › Access
+ * (`edit_posts` by default, filter `alpaca_bot/capability/shortcode`, which is handed the post
+ * and the tag), never triggers generation. They may be served what an editor's view already
+ * cached, and only when the site says so through filter `alpaca_bot/shortcode/allow_guests`;
+ * with no cache entry they get the login notice, not a generated answer. So a site with
+ * visitors sees the answer an editor primed, for as long as the cache holds, and a page nobody
+ * the row admits opens again spends nothing. The capability is filterable *because* of the
+ * guard, not in spite of it: Capability::filtered() exists because `__return_true` on such a
+ * filter would open a surface to every role, and this is the surface where that costs money, so
+ * the row and its filter are held to a non-numeric capability name and nothing else. The
+ * visitor rule is not a capability question at all and sits in front of the row
+ * (viewerMayGenerate()). The same rule governs a REST request: `content.rendered` is produced
+ * for every item of a collection, so a `GET /wp/v2/posts?per_page=100` by an editor would
+ * otherwise be up to a hundred serialized turns in one request. Inside one, an editor is
  * served the cache or a notice, never a generation; a page render on the site is where an
  * editor's view generates, which is also what the block editor's preview should show. The
  * shell form is under the same rule (shell() says what a shell in a listing would cost).
@@ -84,15 +90,16 @@ use AlpacaBot\View\Markdown;
  * The attributes are the post author's, and the output lands on a public page, so the answer
  * goes through Markdown (raw HTML stripped, links held, wp_kses over an allowlist) or through
  * esc_html(), and a notice is escaped as it is built. What an author who can write shortcodes
- * but not unfiltered HTML gains here is a model turn with their prompt, billed to whoever views
- * the page with `edit_posts`, held to that viewer's monthly cap; a `system` attribute is a
- * prompt, and a prompt is what the shortcode is for. `temperature` is held to the schema's
- * range and `model` to the catalog (the pipeline refuses one it does not list). That anyone
- * who can write a post can write a prompt whose answer nobody reads before it is public, and
- * that the answer's links and images reach the page, is the feature's shape, said in the help
- * tab rather than gated here: an authoring gate would be a second copy of WordPress's own
- * contributor model, and a per-site capability setting belongs to the admin-wide panel of a
- * later 0.x release.
+ * but not unfiltered HTML gains here is a model turn with their prompt, billed to whoever the
+ * Shortcode row admits and who views the page, held to that viewer's monthly cap; a `system`
+ * attribute is a prompt, and a prompt is what the shortcode is for. `temperature` is held to
+ * the schema's range and `model` to the catalog (the pipeline refuses one it does not list).
+ * That anyone who can write a post can write a prompt whose answer nobody reads before it is
+ * public, and that the answer's links and images reach the page, is the feature's shape, said
+ * in the help tab rather than gated here: an authoring gate would be a second copy of WordPress's own
+ * contributor model. The per-site setting that does exist, the Shortcode row, decides who
+ * *triggers* a generation by viewing the page, not who may write one into a draft; those are
+ * different questions and only the first costs tokens.
  *
  * The shell form carries no post context: the page the shortcode is on is not "the post being
  * edited", and a context block on every turn would spend the page's length in tokens each time.
@@ -102,9 +109,6 @@ use AlpacaBot\View\Markdown;
 final class Chat
 {
     public const TAG = 'alpacabot';
-
-    /** The capability a viewer needs to trigger generation or to open the shell. */
-    public const CAPABILITY = 'edit_posts';
 
     /** The `cache` attribute's default, as an author would write it. */
     public const DEFAULT_CACHE = '1h';
@@ -139,6 +143,7 @@ final class Chat
         private Pipeline $pipeline,
         private Markdown $markdown,
         private Assets $assets,
+        private Access $access,
     ) {}
 
     public function register(): void
@@ -200,9 +205,10 @@ final class Chat
         $key = self::cacheKey($tag, $identity, $postId, $cacheSeconds);
         // What this request already made, else the transient (never read with the cache off).
         $cached = $this->served[$key] ?? ($cacheSeconds > 0 ? get_transient($key) : false);
-        if (!self::viewerMayGenerate()) {
+        if (!$this->viewerMayGenerate($postId, $tag)) {
             /**
-             * Whether a viewer without `edit_posts` may be shown a cached shortcode answer.
+             * Whether a viewer who may not generate -- not logged in, or failing the Shortcode
+             * row of Settings › Access -- may be shown a cached shortcode answer.
              * Default false: they see a notice. True serves them what an editor's view cached
              * for this post, and only that: a viewer the filter admits never triggers a
              * generation, so a page with no cache entry (expired, or never primed) shows them
@@ -382,20 +388,26 @@ final class Chat
         return is_int($id) && $id > 0 ? $id : 0;
     }
 
-    private static function viewerMayGenerate(): bool
+    /**
+     * Whether this viewer may make the page spend: logged in, and past the Shortcode row of
+     * Settings › Access for the post and tag being rendered. The login check stays in front of
+     * the row because `exist` is an honoured capability name and user_can(0, 'exist') is true --
+     * a visitor must never trigger a generation, whatever a row or a filter says.
+     */
+    private function viewerMayGenerate(int $postId, string $tag): bool
     {
-        return is_user_logged_in() && current_user_can(self::CAPABILITY);
+        return is_user_logged_in() && $this->access->allows((int) get_current_user_id(), 'shortcode', $postId, $tag);
     }
 
     /**
      * What a viewer who may not generate sees: a login link for a visitor (back to this page),
-     * and for a logged-in user without the capability, who the answer is for, since a login
-     * link would send them round in a circle.
+     * and for a logged-in user the Shortcode row does not admit, that the page is not for their
+     * account, since a login link would send them round in a circle.
      */
     private function refused(): string
     {
         if (is_user_logged_in()) {
-            return $this->notice(__('Alpaca Bot answers here only for users who can edit posts.', 'alpaca-bot'));
+            return $this->notice(__('Alpaca Bot does not answer here for your account.', 'alpaca-bot'));
         }
         $this->assets->enqueueShortcode();
         $link = '<a href="' . esc_url(wp_login_url((string) get_permalink())) . '">' . esc_html__('Log in', 'alpaca-bot') . '</a>';
@@ -420,7 +432,7 @@ final class Chat
      */
     private function shell(): string
     {
-        if (!self::viewerMayGenerate()) {
+        if (!$this->viewerMayGenerate(self::postId(), self::TAG)) {
             return $this->refused();
         }
         if (wp_is_rest_endpoint()) {

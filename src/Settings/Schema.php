@@ -107,7 +107,7 @@ final class Schema
             'access.tool.abilities' => self::access('tool.abilities', __('Tool: the site\'s abilities', 'alpaca-bot'), __('Who may run a turn that can call the abilities allowlisted under Tools. An ability runs with its own permission callback as well.', 'alpaca-bot')),
             'access.settings.read' => self::access('settings.read', __('Read settings over REST', 'alpaca-bot'), __('Who may read GET /settings and GET /settings/schema. The provider API key is never included; revealing it always needs an administrator.', 'alpaca-bot')),
             'access.settings.write' => self::access('settings.write', __('Write settings over REST', 'alpaca-bot'), __('Who may send PUT /settings. provider.base_url is a settable field, so this row decides who can point every turn at another server. The Settings screen itself is always administrators.', 'alpaca-bot')),
-            'access.shortcode' => self::access('shortcode', __('Shortcodes', 'alpaca-bot'), __('Who triggers a generation by viewing a page carrying [alpacabot]. A visitor never does, whatever this says.', 'alpaca-bot')),
+            'access.shortcode' => self::access('shortcode', __('Shortcodes', 'alpaca-bot'), __('Who triggers a generation by viewing a page carrying [alpacabot], or the deprecated [alpacabot_agent], which generates through the same rules. A visitor never does, whatever this says.', 'alpaca-bot')),
             // Every MCP server's row in one map, server id => capability, and not a key per
             // server: sanitize() rebuilds the option from this list and drops whatever is not in
             // it, so a per-server key could never be saved. Access::stored('mcp.<id>') reads it,

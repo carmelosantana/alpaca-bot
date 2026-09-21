@@ -655,8 +655,10 @@ function chatShell(?AlpacaBot\Chat\Conversation $conversation, array $history, ?
  * stubbed: the post being rendered is `$postId` (get_the_ID()), shortcode_atts() is core's
  * merge (the pairs' keys only), and the transients are the harness's own `$h->transients`, so
  * set_transient() writes where get_transient() reads and a test can seed a cache entry or read
- * what was written. Every transient read is recorded in `$h->reads` and every write in
- * `$h->stored` as [key, value, ttl], for the tests about the cache, except the rate limiter's
+ * what was written. The Access the shortcode asks its row of reads that same Store, so a test
+ * seeds the row through pipelineWith()'s settings. Every transient read is recorded in
+ * `$h->reads` and every write in `$h->stored` as [key, value, ttl], for the tests about the
+ * cache, except the rate limiter's
  * counter (`alpaca_bot_rl_*`), which goes to `$h->limited` as [key, count] so a test about the
  * cache reads the cache alone and a test about the limiter reads its hits. wp_kses() is the
  * strip_tags stand-in MarkdownTest uses, so the markdown path keeps its allowed tags and drops
@@ -695,7 +697,7 @@ function shortcodeChat(object $h, int $postId = 7): AlpacaBot\Shortcodes\Chat
     Functions\when('wp_enqueue_style')->alias(static function (string $handle, string $src = '', array $deps = [], mixed $ver = false) use ($h): void {
         $h->styles[] = [$handle, $src];
     });
-    return new AlpacaBot\Shortcodes\Chat($h->store, $h->catalog, new ConversationStore($h->store), new AlpacaBot\Chat\UserPrefs(), $h->pipeline, new AlpacaBot\View\Markdown(), new AlpacaBot\Admin\Assets());
+    return new AlpacaBot\Shortcodes\Chat($h->store, $h->catalog, new ConversationStore($h->store), new AlpacaBot\Chat\UserPrefs(), $h->pipeline, new AlpacaBot\View\Markdown(), new AlpacaBot\Admin\Assets(), new AlpacaBot\Access($h->store));
 }
 
 /**

@@ -198,7 +198,7 @@ final class Plugin
         // shortcodes.php's load, and a shortcode registered on plugins_loaded is there for
         // whatever renders content first. The shim runs the same web_fetch instance the
         // registry holds, so the two fetch under one guard and one user agent.
-        $shortcode = new Shortcodes\Chat($store, $this->get(Provider\ModelCatalog::class), $conversations, $prefs, $this->get(Chat\Pipeline::class), new View\Markdown(), $assets);
+        $shortcode = new Shortcodes\Chat($store, $this->get(Provider\ModelCatalog::class), $conversations, $prefs, $this->get(Chat\Pipeline::class), new View\Markdown(), $assets, $this->get(Access::class));
         $this->set(Shortcodes\Chat::class, $shortcode);
         $shortcode->register();
         $shim = new Shortcodes\AgentShim($shortcode, $this->get(Chat\Pipeline::class), $registry);
