@@ -533,7 +533,7 @@ final class HooksDoc
             'that is deliberate: it is how a site builds a subscriber-facing or public chat.',
             '',
             'What used to be easy to miss was that opening `chat` or `chat/stream` to a role opened',
-            'every enabled tool to it. Since 0.6 it does not. `Toolkit\Registry::enabled()` offers a',
+            'every enabled tool to it. It no longer does. `Toolkit\Registry::enabled()` offers a',
             'turn only the toolkits whose Settings › Access row the turn\'s user passes',
             '(`alpaca_bot/capability/tool/{id}`, `edit_posts` for the built-ins), before',
             '`alpaca_bot/toolkits` runs, so a role admitted only to converse gets no tools until a row',

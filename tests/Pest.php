@@ -555,9 +555,14 @@ function echoToolkit(string $name, string $guidelines = 'Use it.', ?callable $ca
  */
 function registryWith(array $toolkits): AlpacaBot\Toolkit\Registry
 {
-    // enabled() asks each toolkit's Access row now; every caller of this helper is about the turn,
-    // not about who may run it. No test that uses it expects user_can() itself (checked:
-    // PipelineToolsTest, ChatTest, AgentShimTest), which is what lets this be a when().
+    // enabled() asks each toolkit's Access row now, so this helper has to answer user_can(). A
+    // when() rather than an expect(): every caller of this helper is about the turn, not about who
+    // may run it, and no test that reaches it expects user_can() itself -- the suite's only
+    // Functions\expect('user_can') sites are CurrentScreenSourceTest and DraftPostToolkitTest,
+    // neither of which builds a registry. A caller that does care about the answer stubs it again
+    // after this returns (AgentShimTest passes the helper's registry to pipelineWith() and then
+    // calls shortcodeViewer(), whose map is the one that decides), and Brain Monkey takes the
+    // later one.
     Functions\when('user_can')->justReturn(true);
     $registry = new AlpacaBot\Toolkit\Registry(new Store(['toolkits.enabled' => array_keys($toolkits)]));
     foreach ($toolkits as $id => $toolkit) {

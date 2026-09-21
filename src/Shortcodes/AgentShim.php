@@ -32,6 +32,12 @@ use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Enum\ToolResultStatus;
  * the same way, and for the same reason: the fetch is the tool, so it is the tool's gates. The
  * shortcode then shows the editor a notice naming both screens, and caches nothing.
  *
+ * Both gates decide the *next* fetch and not the last one. Shortcodes\Chat::answer() returns a
+ * cached answer before this closure runs at all, so page text fetched while the tool was on, and
+ * while the viewer's row admitted them, stays on the post until its `cache` expires (an hour by
+ * default, 365 days at most). Switching the tool off has always worked that way; the row is no
+ * different, and neither is a retraction.
+ *
  * What the hint says is deliberately not `[alpacabot prompt="Summarize {url}"]`: that turn
  * runs no tools either, so the model would be handed a URL it cannot open and answer from
  * nothing. The replacement that works is the text itself in the prompt, or the chat screen,

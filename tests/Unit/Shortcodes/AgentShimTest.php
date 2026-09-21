@@ -137,11 +137,15 @@ it('does not fetch for a viewer who fails the web_fetch row, and says so without
     shortcodeViewer(3);
     Functions\when('home_url')->justReturn('https://site.test/');
     Functions\when('_doing_it_wrong')->justReturn();
+    // Both, as the switched-off sibling below has both: the refusal has to land before the URL
+    // is ever validated, and the RED run for this test reached wp_http_validate_url(), so that
+    // is the assertion that proves the floor stopped it rather than a later guard.
     Functions\expect('wp_safe_remote_get')->never();
+    Functions\expect('wp_http_validate_url')->never();
     Filters\expectApplied('alpaca_bot/capability/tool/web_fetch')->once()->with('edit_posts', 3)->andReturn('manage_options');
     $html = $shim->render(['name' => 'get', 'url' => 'https://example.test/a'], null, 'alpacabot_agent');
     expect($html)->toContain('class="alpaca-bot-notice"')->toContain('Settings › Access')
-        ->and($h->writes)->toBe([]);
+        ->and($h->stored)->toBe([]);
 });
 
 it('never fetches or generates for a guest', function (): void {

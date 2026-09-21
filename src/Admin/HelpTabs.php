@@ -107,11 +107,12 @@ final class HelpTabs
                 '<code>format="text"</code>',
             ))
             . self::p(sprintf(
-                /* translators: 1: [alpacabot_agent], 2: name="get|summarize" url="…", 3: Settings › Tools */
-                esc_html__('%1$s, the 0.4 form (%2$s), is deprecated: it still fetches the page and, for summarize, asks the model, under the same rules, and it logs a notice under WP_DEBUG. The fetch is the chat\'s web_fetch tool, so it runs only while that tool is on under %3$s. It goes away in a later 0.x release; put the text to summarize in a prompt instead, or open the URL in this chat, where the fetch and summarize tools read it for you.', 'alpaca-bot'),
+                /* translators: 1: [alpacabot_agent], 2: name="get|summarize" url="…", 3: Settings › Tools, 4: Settings › Access */
+                esc_html__('%1$s, the 0.4 form (%2$s), is deprecated: it still fetches the page and, for summarize, asks the model, under the same rules, and it logs a notice under WP_DEBUG. The fetch is the chat\'s web_fetch tool, so it runs only while that tool is on under %3$s and the viewer passes its row under %4$s — from the next fetch, though: an answer already cached on the post stands until its cache expires. It goes away in a later 0.x release; put the text to summarize in a prompt instead, or open the URL in this chat, where the fetch and summarize tools read it for you.', 'alpaca-bot'),
                 '<code>[alpacabot_agent]</code>',
                 '<code>name="get|summarize" url="…"</code>',
                 esc_html__('Settings › Tools', 'alpaca-bot'),
+                esc_html__('Settings › Access', 'alpaca-bot'),
             ));
     }
 
@@ -121,7 +122,7 @@ final class HelpTabs
      * This exists because two accepted risks were, until 0.5.0, argued only in source
      * docblocks — WebFetchToolkit's on the DNS-rebinding window its two address checks cannot
      * close, and Toolkit\Registry's on there being no capability check between "may chat" and
-     * "may call the enabled tools", which 0.6 closed with a row per tool — and a site owner is
+     * "may call the enabled tools", which a row per tool has since closed — and a site owner is
      * the only person who can act on either. A docblock is not where they will read it. The
      * first is still open, and the second is now a setting an operator has to understand, which
      * is why both are here. The wording follows the audit
