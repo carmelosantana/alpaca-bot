@@ -172,7 +172,7 @@ final class Pipeline
      * @return \Generator<int, Delta, mixed, Result>
      * @throws \InvalidArgumentException for an empty message (also one `before_send` blanked), an image that is not a base64 image data URL or a set of them past the site's allowance, a requested model a non-empty catalog does not list, a conversation the user does not own, or `ephemeral` with a `conversation_id`
      * @throws CapExceeded before any provider call
-     * @throws \RuntimeException when no model can be resolved, or wrapping a provider failure as 'Provider error: ...' (a tool turn's failure the provider had no part in is raised in the plugin's own words instead: raised())
+     * @throws \RuntimeException when no model can be resolved, or wrapping a provider failure as 'Provider error: ...' (a tool turn's failure the provider had no part in is raised in words of its own instead: raised())
      */
     public function send(int $userId, string $text, array $options = []): \Generator
     {
@@ -338,12 +338,12 @@ final class Pipeline
                      * draft it made is traceable), and a conversation this turn created is deleted afterwards
                      * unless a listener saved a turn onto it. A listener that throws does not replace the
                      * failure: that is rethrown as a RuntimeException, `Provider error: ` and what the
-                     * provider threw, or in the plugin's own words where the provider had no part in it,
-                     * with the listener's exception chained behind it. The same action fires from settle()
+                     * provider threw, or in words of its own where the provider had no part in it, with
+                     * the listener's exception chained behind it. The same action fires from settle()
                      * when the consumer abandons the stream, with a RuntimeException saying so.
                      *
                      * @since 0.5.0
-                     * @param \Throwable   $e            what the provider or the tool loop threw
+                     * @param \Throwable   $e            what the turn failed on: what the provider or the tool loop threw, or the Chat\RunFailure the pipeline read out of a run that failed without announcing it
                      * @param Conversation $conversation the conversation, with the user turn appended and no finished reply
                      */
                     do_action('alpaca_bot/chat/failed', $e, $conversation);
@@ -538,11 +538,13 @@ final class Pipeline
     }
 
     /**
-     * The exception a run that failed is raised as, or null when it did not fail. An Error finish is a failure
-     * unless it is positively a termination: a tool that ended the run by throwing
-     * TerminationException, which is not a failure at all. Nothing failed there; a tool asked to
-     * stop, and the turn finishes on its word (agentTurn() yields it). Telling the two apart is
-     * what keeps a toolkit's own "stop" from reaching the user as `Provider error: ...`.
+     * The exception a run that failed is raised as, or null when it did not fail. An Error
+     * finish is a failure unless it is positively a termination: a tool that ended the run by
+     * throwing TerminationException, which is not a failure at all. Nothing failed there; a
+     * tool asked to stop, and the turn finishes on its word (agentTurn() yields it). Telling
+     * the two apart is what keeps a toolkit's own "stop" from reaching the user as a failure at
+     * all: read as one it would be raised out of send(), the reply marked partial and
+     * `alpaca_bot/chat/failed` fired, for a turn nothing went wrong in.
      *
      * An announcement settles it first, and on its own. Every `agent.error` the library notifies
      * is followed immediately by the return it belongs to, so nothing can announce and then go
