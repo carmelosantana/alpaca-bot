@@ -49,11 +49,12 @@ tests_add_filter('pre_option_upload_path', static fn(): string => '/tmp/alpaca-b
 
 // Not reaching the network is a property of the suite rather than of each test's care
 // (Kanboard #4322). Two doors get a guard each, both here because both WPH_MODEs load this file
-// (bin/test-integration.sh). What is guarded is WP_Http and the provider Factory::make() builds,
-// which is what the plugin's own outbound calls go through today -- not every way PHP can open a
-// socket. Code that builds its own Symfony HttpClient, cURL handle or stream outside
-// Provider\Factory is reached by neither guard, and a test for such a caller has to hand it a
-// client of its own.
+// (bin/test-integration.sh): WP_Http, and the Ollama provider Factory::make() builds. Two doors
+// guarded is not every door. Factory::make() also builds WpAiClientProvider when `provider.kind`
+// selects it, and the second guard passes that one through untouched (its reason is below, and it
+// is not that its transport is covered); code that builds its own Symfony HttpClient, cURL handle
+// or stream outside Provider\Factory is reached by neither guard, and a test for such a caller has
+// to hand it a client of its own.
 //
 // WP_Http: a request no test stubbed is refused, naming the URL. At the last priority, so a
 // test's own `pre_http_request` stub (ToolkitsTest, ShortcodesTest) answers first and this sees
@@ -66,16 +67,24 @@ tests_add_filter('pre_http_request', static function (mixed $pre, array $args, s
 // The model provider: the configured Ollama provider talks through Symfony's HttpClient, which no
 // `pre_http_request` sees, and ModelCatalog forgives a provider that fails, so a test that touched
 // the catalog without TestCase::fakeProvider() made a real connection attempt to the stored
-// `provider.base_url` and heard nothing back. It is swapped for OfflineProvider at the first
-// priority, so fakeProvider() (default priority) still replaces it. Only an OllamaProvider is
-// swapped: a WpAiClientProvider is left as built, because WpAiClientTest asserts Factory::make()
-// returns one and registers an in-test fake model with core for it to reach.
+// `provider.base_url` and heard nothing back. It is swapped for OfflineProvider.
+//
+// What keeps fakeProvider() in charge is the `instanceof` test, not this priority: by the time a
+// test's own filter has returned its fake, the value is no longer an OllamaProvider, so this guard
+// passes it through whenever it runs (checked by moving it to PHP_INT_MAX, where HermeticTest
+// stays green). PHP_INT_MIN -- genuinely first, and the mirror of the sibling guard's PHP_INT_MAX
+// -- buys something narrower: the guard sees the provider exactly as Factory::make() built it,
+// before any filter can wrap it in something this `instanceof` would no longer recognise.
+//
+// Only an OllamaProvider is swapped: a WpAiClientProvider is left exactly as built, which is not a
+// claim that its transport is covered. It is left because WpAiClientTest asserts Factory::make()
+// returns one, and what that provider reaches there is an in-test fake model registered with core.
 tests_add_filter(
     'alpaca_bot/provider',
     static fn(mixed $provider): mixed => $provider instanceof \AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Provider\OllamaProvider
         ? new \AlpacaBot\Tests\Integration\OfflineProvider()
         : $provider,
-    1,
+    PHP_INT_MIN,
 );
 
 require $tests . '/includes/bootstrap.php';
