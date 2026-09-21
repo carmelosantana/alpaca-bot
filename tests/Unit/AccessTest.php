@@ -158,21 +158,41 @@ it('refuses a caller that passes fewer arguments than the row fires with, naming
         ->and($access->allows(5, 'shortcode', 7, 'alpacabot'))->toBeTrue();
 });
 
-// overridden() is the screen's question, and a screen must not be fatal. Two things stop it being
-// answered: a caller without the row's arguments (a settings screen has no post id for the
-// shortcode row), and a listener that throws. Both read as true, and the first does so whether or
-// not a listener exists -- asked without the arguments, this cannot find out. True there does not
-// claim "code has a say", it says "the screen is not the whole story".
-it('answers true rather than fatalling when the row cannot be resolved from where the question is asked', function (): void {
+// overridden() is the screen's question, and a screen must not be fatal. The settings page has no
+// post id for the shortcode row, so effective() would refuse it before any filter ran; answering
+// true regardless would label that row "set in code" on every site in the world. has_filter() is
+// what keeps the answer honest: no listener, nothing can have moved the row.
+it('asks whether a listener exists at all when the caller cannot supply the row\'s arguments', function (): void {
     $access = new Access(new Store(['access.shortcode' => 'read']));
-    // No post id and no tag, the way a settings screen asks: effective() would throw. No listener
-    // is registered here at all, and it still reads true -- that is the answer, not a bug.
+    expect($access->overridden('shortcode'))->toBeFalse();
+    expect($access->overridden('settings.write'))->toBeFalse()
+        ->and($access->overridden('mcp.github'))->toBeFalse();
+    // With a listener registered the row is out of the operator's hands, and this call cannot
+    // find out what it did: true is the honest answer, and it is what stops the check above
+    // from being a blanket false.
+    add_filter('alpaca_bot/capability/shortcode', '__return_true');
     expect($access->overridden('shortcode'))->toBeTrue();
+    // Unaffected: a caller that has the row's arguments never reaches this branch.
+    Filters\expectApplied('alpaca_bot/capability/shortcode')->once()->andReturnFirstArg();
+    expect($access->overridden('shortcode', 7, 'alpacabot'))->toBeFalse();
+});
+
+// error_log() is a PHP internal, so the WP_DEBUG line this leaves cannot be asserted from here;
+// what is asserted is the answer, and that it is the same answer whatever threw.
+it('reports a row as set in code when resolving it throws, whether the throw came from a listener or from the option read', function (): void {
+    $access = new Access(new Store(['access.tool.draft_post' => 'read']));
     // A listener that throws for reasons of its own, called with everything it asked for.
     Filters\expectApplied('alpaca_bot/capability/tool/draft_post')->once()->andReturnUsing(static function (): string {
         throw new RuntimeException('a listener of the site\'s own');
     });
     expect($access->overridden('tool.draft_post', 5))->toBeTrue();
+    // Not only a listener: `stored()` reads the option inside the same guard, and a site's
+    // pre_option_alpaca_bot_settings listener can throw. Every row would otherwise read as
+    // overridden with nothing at all to show for it.
+    Functions\when('get_option')->alias(static function (): mixed {
+        throw new RuntimeException('another plugin filtered the option and threw');
+    });
+    expect((new Access(new Store()))->overridden('tool.draft_post', 5))->toBeTrue();
     // And it is still the plain comparison when the row does resolve.
     Filters\expectApplied('alpaca_bot/capability/tool/draft_post')->once()->andReturnFirstArg();
     expect($access->overridden('tool.draft_post', 5))->toBeFalse();

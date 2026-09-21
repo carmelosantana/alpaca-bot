@@ -150,6 +150,12 @@ final class Access
     /**
      * How many arguments follow the capability when `$row`'s filter fires: what a caller of
      * effective() has to pass, and what a listener on that row may be registered for.
+     *
+     * An enforcement caller does not need this. It knows its own row and its own arguments, so
+     * it passes them and lets effective() be the one that checks; branching on this number in a
+     * path that has the arguments only adds a second place to be wrong about the count. It is
+     * here for the opposite case — a surface that may not be able to supply a row's arguments
+     * and has to know that before it asks, which is what overridden() does with it.
      */
     public static function expectedArgs(string $row): int
     {
@@ -164,8 +170,8 @@ final class Access
      * how many, and the class docblock says what follows from that for a listener.
      *
      * A caller that passes fewer than expectedArgs() throws rather than being tolerated. This is
-     * the enforcement path: every caller here is about to decide whether somebody may do
-     * something, and each of them knows its own arguments, so a short call is a programming
+     * the enforcement path: an enforcement caller is about to decide whether somebody may do
+     * something, and it knows its own arguments, so a short call is a programming
      * error and nothing else. Falling back to the stored value instead would throw away whatever
      * the site's filter had to say — including a filter that *tightens* the row — and hand back
      * a looser capability than the site asked for, with no symptom. A fatal in development is
@@ -223,27 +229,47 @@ final class Access
     /**
      * Whether code moved this row off what the site saved.
      *
-     * The guarded one, and the only one: this is the question a screen asks about a row, and a
-     * screen must not be fatal. Two things can stop it being answered. A listener is the site's
-     * own code and may throw for reasons of its own, or declare more arguments than the hook
-     * fires with (core then raises an ArgumentCountError). And a caller here may legitimately
-     * not have the arguments its row fires with — a settings screen has no post id for the
-     * shortcode row — which effective() refuses before any filter runs.
+     * True means the screen is not the whole story about this row, which is what the question is
+     * for. Three ways it gets there: a listener changed the value; a listener exists that this
+     * call site cannot supply the arguments for; or resolving the row threw, which the catch
+     * below is about. False is the one unambiguous answer — what is stored is what is checked.
      *
-     * Both answer true, and the second is worth being plain about: it is true whether or not any
-     * listener exists, because asked without a row's arguments this cannot find out. So true
-     * here does not mean "code has a say", it means "the screen is not the whole story", which
-     * is the safer of the two readings to be wrong about and the one that sends somebody to
-     * look. A caller that does have its row's arguments gets the plain comparison and no
-     * guesswork; a caller that does not should expect this row to read as overridden always.
-     * True rather than a third state, so the return stays a plain bool no caller can forget to
-     * unpack.
+     * The second case is why this is the guarded one, and the only one. It is the question a
+     * screen asks, and a screen must not be fatal — but a screen also may not have a row's
+     * arguments (the settings page has no post id for the shortcode row), and effective()
+     * refuses a short argument list before any filter runs. Asking has_filter() first is what
+     * keeps that from becoming a blanket answer: with no listener registered nothing can have
+     * moved the row, so it is false, and the label does not appear on every site in the world;
+     * with one registered the honest answer is that code has a say here and this call cannot
+     * find out what it is. Counting a listener that would have returned the stored value
+     * unchanged is the cost, and it is the same blind spot every row has — no caller can tell a
+     * no-op filter from an absent one without running it.
+     *
+     * The catch is the rest: a listener that throws, one registered with more `accepted_args`
+     * than its row fires with (core raises an ArgumentCountError), and anything else thrown
+     * under this call, `stored()`'s own read of the option included — a site's
+     * `pre_option_alpaca_bot_settings` listener can throw, and then every row would read as
+     * overridden with no other symptom. So it is `\Throwable`, deliberately wide, and it leaves
+     * a line in the debug log behind WP_DEBUG: a security-relevant label that flips because of
+     * an unrelated plugin's exception should not do it silently. True rather than a third state,
+     * so the return stays a plain bool no caller can forget to unpack.
      */
     public function overridden(string $row, mixed ...$args): bool
     {
         try {
+            if (count($args) < self::expectedArgs($row)) {
+                // The prefix is spelled again rather than shared with effective()'s: a hook name
+                // handed to Capability::filtered() has to be a string literal or bin/hooks-doc.php
+                // fails the run, so that one cannot be built from a constant, and a constant used
+                // only here would be the odd half of a pair.
+                return (bool) has_filter('alpaca_bot/capability/' . self::hook($row));
+            }
             return $this->effective($row, ...$args) !== $this->stored($row);
-        } catch (\Throwable) {
+        } catch (\Throwable $e) {
+            if (defined('WP_DEBUG') && WP_DEBUG) {
+                // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log -- Deliberate diagnostic, gated on WP_DEBUG as core's own logging is; this is the only record left, since the answer returned to the screen is a bool with nowhere to carry a reason.
+                error_log(sprintf('[alpaca-bot] resolving the %s access row threw, so it is reported as set in code: %s', $row, $e->getMessage()));
+            }
             return true;
         }
     }
