@@ -7,8 +7,10 @@ namespace AlpacaBot;
 /**
  * The one guard a filtered capability name goes through, wherever the plugin lets a site name
  * one: the REST permission callbacks (`alpaca_bot/capability/{route}`, Rest\Controller), the admin
- * menu (`alpaca_bot/admin/menu_capability`, Admin\Menu) and every row of Settings › Access
- * (`alpaca_bot/capability/{hook}`, Access::effective()). docs/hooks.md, which bin/hooks-doc.php
+ * menu (`alpaca_bot/admin/menu_capability`, Admin\Menu), every row of Settings › Access
+ * (`alpaca_bot/capability/{hook}`, Access::effective()) and the 0.5 key the two settings rows run
+ * ahead of their own (`alpaca_bot/capability/settings`, Access::effective() again).
+ * docs/hooks.md, which bin/hooks-doc.php
  * generates by reading this method's call sites, is the list that cannot go stale.
  *
  * Only a capability name is honoured. WP_User::has_cap() reads a numeric capability as a legacy

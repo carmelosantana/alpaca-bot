@@ -9,9 +9,9 @@ use AlpacaBot\Settings\Schema;
 use AlpacaBot\Settings\Store;
 
 /**
- * The `alpaca_bot_settings` option over REST, for administrators: `GET /settings` is the full
- * array (every Schema key, defaults filled in), `PUT /settings` a partial update of it, and
- * `GET /settings/schema` the field list a client renders a form from.
+ * The `alpaca_bot_settings` option over REST, for administrators by default: `GET /settings` is
+ * the full array (every Schema key, defaults filled in), `PUT /settings` a partial update of it,
+ * and `GET /settings/schema` the field list a client renders a form from.
  *
  * Secrets (Schema::SECRETS, today the provider API key) read back as Schema::MASK when set and
  * as '' when not, so a client can show "there is a key" without holding it. The mask is also
@@ -26,14 +26,14 @@ use AlpacaBot\Settings\Store;
  * body says.
  *
  * `reveal` asks `manage_options` in show(), a second check the route's own gate has already
- * passed. The gate is filtered — `alpaca_bot/capability/settings` (below) — and the filter
- * decides the route, so without this check a site that loosened the filter for a custom role
- * would be handing that role the provider credential in cleartext. A caller the filter admitted
+ * passed. The gate is the `settings.read` row of Settings › Access and its filters (capability()
+ * below), and a site may lower that row or filter it for a custom role, so without this check it
+ * would be handing that role the provider credential in cleartext. A caller the gate admitted
  * without `manage_options` is not refused the route, only the secret: the reply is the masked
  * read, the same one they get without the flag. Nothing else on the route has a floor, because
- * nothing else on it is a credential; the write verb is the other half of that argument and is
- * a 0.6 ticket (splitting the filter into read and write keys), not a check that can be added
- * here without deciding what a "read-only settings" role means.
+ * nothing else on it is a credential — and the write, the other half of that argument in 0.5,
+ * now has a row and a key of its own, so admitting a role to the read no longer admits it to
+ * the PUT.
  *
  * The reveal response sets `Cache-Control: no-store` itself even though core normally supplies
  * it. WP_REST_Server::serve_request() sends a response's own headers first and then, when
@@ -64,16 +64,20 @@ use AlpacaBot\Settings\Store;
  * answer 200 with nothing changed, a PUT that names no known key is a 400 that says to send
  * JSON.
  *
- * Capability filters follow Controller::routeKey(): `alpaca_bot/capability/settings` covers
- * both verbs on `/settings`, and `/settings/schema` has its own, `alpaca_bot/capability/settings/schema`.
- * A site that loosens the first for a custom role has not loosened the second; a client of that
- * role reads the settings and gets a 403 on the schema until the site names it too.
+ * Capability: the two GETs ask the `settings.read` row and the PUT the `settings.write` row,
+ * both `manage_options` by default, through Access::effective() — 0.5's
+ * `alpaca_bot/capability/settings` over the stored row, then
+ * `alpaca_bot/capability/settings/read` or `…/settings/write` over what it returned, so a site
+ * that filtered the old key keeps what it set and the newer key wins where both are set.
  *
- * One key over both verbs is worth saying plainly: loosening `alpaca_bot/capability/settings`
- * to admit a role to the GET admits it to the PUT as well, and `provider.base_url` is a
- * settable field — so that role can point every turn the site takes at a server of its
- * choosing. Tighten per request off the WP_REST_Request the filter is handed
- * (`$request->get_method()`) until 0.6 separates the keys.
+ * These routes do not apply `alpaca_bot/capability/{route}`, so 0.5's
+ * `alpaca_bot/capability/settings/schema` is gone, folded into `settings/read`: a site that had
+ * named it to *open* the schema had to open `settings` too and is unaffected; one that had named
+ * it only to tighten the schema names `settings/read` instead.
+ *
+ * Splitting the verbs is what makes a read-only settings role possible: `provider.base_url` is a
+ * settable field, so a role admitted to the write can point every turn the site takes at a
+ * server of its choosing.
  */
 final class SettingsController extends Controller
 {
@@ -82,10 +86,42 @@ final class SettingsController extends Controller
     public function routes(): array
     {
         return [
-            ['path' => '/settings', 'methods' => 'GET', 'callback' => [$this, 'show'], 'capability' => 'manage_options', 'args' => ['reveal' => ['type' => 'boolean', 'default' => false]]],
-            ['path' => '/settings', 'methods' => 'PUT', 'callback' => [$this, 'update'], 'capability' => 'manage_options'],
-            ['path' => '/settings/schema', 'methods' => 'GET', 'callback' => [$this, 'schema'], 'capability' => 'manage_options'],
+            ['path' => '/settings', 'methods' => 'GET', 'callback' => [$this, 'show'], 'capability' => 'settings.read', 'args' => ['reveal' => ['type' => 'boolean', 'default' => false]]],
+            ['path' => '/settings', 'methods' => 'PUT', 'callback' => [$this, 'update'], 'capability' => 'settings.write'],
+            ['path' => '/settings/schema', 'methods' => 'GET', 'callback' => [$this, 'schema'], 'capability' => 'settings.read'],
         ];
+    }
+
+    /**
+     * These three routes resolve their Settings › Access row rather than the base's
+     * `alpaca_bot/capability/{route}`: accessRow() hands the row to Access::effective(), which
+     * applies 0.5's `alpaca_bot/capability/settings` over the stored row and then the row's own
+     * key, and that chain is the whole of the split.
+     *
+     * `$declared` is the row name the route table carries, so the verb is read off the table
+     * rather than off the request — the GET and the PUT share a path, and `routeKey()` would
+     * hand both the one key again.
+     *
+     * The resolved capability is returned outright and never handed back to parent::capability()
+     * as its `$declared`. That is deliberate rather than a shortcut. The base reads `$declared`
+     * for Controller::CHAT, which is the literal string 'chat', while a site's
+     * `alpaca_bot/capability/settings/read` filter may return any capability name it likes —
+     * 'chat' among them, since Capability::filtered() honours every non-empty non-numeric string.
+     * Routing a resolved capability back through that comparison would let such a filter flip a
+     * settings route onto the Chat row; returning here means a capability name can never be read
+     * as the sentinel. It also means these routes apply no `{route}` filter at all, which is what
+     * retires `alpaca_bot/capability/settings/schema` and keeps `alpaca_bot/capability/settings`
+     * to the one application Access makes of it.
+     *
+     * A controller nobody handed an Access — a test, a site building one by hand — resolves the
+     * row to Access::defaults() instead, `manage_options` for both; accessRow() answers that case
+     * once, in the base, so nothing here builds a second Access over the same Store.
+     *
+     * @since 0.6.0
+     */
+    protected function capability(string $route, string $declared, \WP_REST_Request $request): string
+    {
+        return $this->accessRow($declared, $request);
     }
 
     public function show(\WP_REST_Request $request): \WP_REST_Response

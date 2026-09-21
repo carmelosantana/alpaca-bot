@@ -48,8 +48,9 @@ abstract class Controller
     /**
      * One entry per route; `path` is core's route pattern relative to the namespace (named regex
      * groups allowed), `methods` a core method string ('GET', 'POST', 'GET, DELETE', ...).
-     * `capability` is a capability name, or `Controller::CHAT` for a route that follows the Chat
-     * row of Settings › Access.
+     * `capability` is a capability name, `Controller::CHAT` for a route that follows the Chat row
+     * of Settings › Access, or — for a subclass that overrides capability() — whatever token that
+     * override resolves (SettingsController declares Access row names such as `settings.read`).
      *
      * @return list<array{path: string, methods: string, callback: callable, capability: string, args?: array<string, array<string, mixed>>, rate_limit?: bool}>
      */
@@ -88,9 +89,10 @@ abstract class Controller
 
     /**
      * The permission callback for a route whose declared capability is `$capability` — a
-     * capability name, or self::CHAT for a route that follows the Chat row of Settings › Access.
-     * capability() resolves that per request, and the filter it applies sees the request, so a
-     * site can tighten (or, for a route it exposes to subscribers, loosen) per request.
+     * capability name, self::CHAT for a route that follows the Chat row of Settings › Access, or
+     * whatever token an overriding subclass declares. capability() resolves that per request, and
+     * the filter it applies sees the request, so a site can tighten (or, for a route it exposes to
+     * subscribers, loosen) per request.
      *
      * Only a capability name is honoured, and Capability::filtered() is where that rule lives:
      * a filter returning a bool or a number would otherwise cast to a legacy user-level check
@@ -148,7 +150,10 @@ abstract class Controller
         /**
          * Filters the capability a REST route's permission callback checks, per request. `{route}`
          * is the route's key (Controller::routeKey(): `chat`, `conversations`, `chat/stream`,
-         * `settings/schema`...), so one filter covers a collection and its items. Return a
+         * `view/messages`...), so one filter covers a collection and its items. Not every route
+         * has one: SettingsController overrides capability() and resolves its Settings › Access
+         * row instead, so `/settings` and `/settings/schema` apply no key here at all — which is
+         * why 0.5's `alpaca_bot/capability/settings/schema` no longer fires. Return a
          * capability to tighten a route, or to open one to a role (a subscriber-facing chat). Only
          * a non-empty, non-numeric string is honoured (Capability::filtered()): a bool or a number
          * would become a legacy user-level check, so it is ignored and the default stands.

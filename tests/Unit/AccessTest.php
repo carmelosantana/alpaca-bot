@@ -73,6 +73,30 @@ it('hands a row filter the stored value and the caller\'s own arguments, and the
     expect($access->effective('tool.web_fetch', 5))->toBe('manage_options');
 });
 
+it('runs the 0.5 settings key before a settings row\'s own, so a site that filtered it keeps what it set', function (): void {
+    $access = new Access(new Store(['access.settings.read' => 'edit_others_posts']));
+    Filters\expectApplied('alpaca_bot/capability/settings')->once()->with('edit_others_posts', 'ctx')->andReturn('publish_posts');
+    Filters\expectApplied('alpaca_bot/capability/settings/read')->once()->with('publish_posts', 'ctx')->andReturnFirstArg();
+    expect($access->effective('settings.read', 'ctx'))->toBe('publish_posts');
+});
+
+it('takes the 0.5 settings key nowhere near a row that is not a settings row', function (): void {
+    $access = new Access(new Store(['access.settings.read' => 'edit_others_posts']));
+    Filters\expectApplied('alpaca_bot/capability/settings')->never();
+    Filters\expectApplied('alpaca_bot/capability/shortcode')->once()->andReturnFirstArg();
+    expect($access->effective('shortcode', 7, 'alpacabot'))->toBe('edit_posts');
+});
+
+it('refuses a short call on a settings row before the 0.5 key runs, not after it', function (): void {
+    // The chain must not become a way to reach a filter with fewer arguments than the row fires
+    // with: the arity refusal is what lets a listener declare `accepted_args` against
+    // expectedArgs() and be called with them, and `alpaca_bot/capability/settings` fires with the
+    // WP_REST_Request exactly as `…/settings/read` does.
+    $access = new Access(new Store([]));
+    Filters\expectApplied('alpaca_bot/capability/settings')->never();
+    expect(fn(): string => $access->effective('settings.read'))->toThrow(InvalidArgumentException::class);
+});
+
 it('names each row\'s hook with its dots as slashes', function (): void {
     $access = new Access(new Store([]));
     $hooks = ['tool.summarize' => 'tool/summarize', 'tool.draft_post' => 'tool/draft_post', 'tool.abilities' => 'tool/abilities', 'mcp.github' => 'mcp/github', 'shortcode' => 'shortcode', 'settings.read' => 'settings/read', 'settings.write' => 'settings/write'];
@@ -182,6 +206,18 @@ it('asks whether a listener exists at all when the caller cannot supply the row\
     // Unaffected: a caller that has the row's arguments never reaches this branch.
     Filters\expectApplied('alpaca_bot/capability/shortcode')->once()->andReturnFirstArg();
     expect($access->overridden('shortcode', 7, 'alpacabot'))->toBeFalse();
+});
+
+// A settings row runs two hooks, so "is there a listener at all" has to ask about both or the
+// screen tells an operator their row is theirs on a site whose 0.5 filter is still moving it.
+it('counts a listener on the 0.5 settings key as code having a say in a settings row', function (): void {
+    $access = new Access(new Store(['access.settings.read' => 'read']));
+    expect($access->overridden('settings.read'))->toBeFalse();
+    add_filter('alpaca_bot/capability/settings', '__return_true');
+    expect($access->overridden('settings.read'))->toBeTrue()
+        ->and($access->overridden('settings.write'))->toBeTrue()
+        // Only the settings rows run that key, so nothing else is labelled by it.
+        ->and($access->overridden('shortcode'))->toBeFalse();
 });
 
 // error_log() is a PHP internal, so the WP_DEBUG line this leaves cannot be asserted from here;

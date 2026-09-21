@@ -94,12 +94,13 @@ $ curl -s 'https://alpaca10.wp.test/index.php?rest_route=/alpaca-bot/v1/models'
 Revoke a password when the client is done with it: `wp user application-password delete admin
 <uuid>` (the uuid is in `wp user application-password list admin`).
 
-### Capabilities and the `alpaca_bot/capability/{route}` filters
+### Capabilities and the `alpaca_bot/capability/*` filters
 
-Each route declares a capability, or the Chat row. Chat, streaming, conversations, models, usage
-and the view fragments take the Chat row of **Settings › Access**, `edit_posts` (Contributors and
-up) unless the site changed it; the settings routes need `manage_options`. Whichever it is, it is
-only the default the route's own filter is handed.
+Each route declares a capability or a row of **Settings › Access**. Chat, streaming,
+conversations, models, usage and the view fragments take the Chat row, `edit_posts` (Contributors
+and up) unless the site changed it; the settings routes take the `settings.read` and
+`settings.write` rows, `manage_options` each unless the site changed them. Whichever it is, it is
+only the default the route's own filters are handed.
 
 | Filter key | Routes covered | Default |
 |---|---|---|
@@ -108,8 +109,8 @@ only the default the route's own filter is handed.
 | `conversations` | `GET\|DELETE /conversations`, `GET\|DELETE /conversations/{id}` | Chat row (`edit_posts`) |
 | `models` | `GET /models` | Chat row (`edit_posts`) |
 | `usage` | `GET /usage` | Chat row (`edit_posts`) |
-| `settings` | `GET\|PUT /settings` | `manage_options` |
-| `settings/schema` | `GET /settings/schema` | `manage_options` |
+| `settings/read` | `GET /settings`, `GET /settings/schema` | the row of that name (`manage_options`), after `alpaca_bot/capability/settings` |
+| `settings/write` | `PUT /settings` | the row of that name (`manage_options`), after `alpaca_bot/capability/settings` |
 | `view/messages` | `GET /view/messages/{id}` | Chat row (`edit_posts`) |
 | `view/history` | `GET /view/history` | Chat row (`edit_posts`) |
 | `view/models` | `GET /view/models` | Chat row (`edit_posts`) |
@@ -118,8 +119,17 @@ only the default the route's own filter is handed.
 
 The filter is `alpaca_bot/capability/{key}` with signature `(string $capability,
 \WP_REST_Request $request)`, and the key is the route path with its `{id}` segment removed, so
-one filter covers a collection and its items. `settings/schema` is its own key: loosening
-`settings` for a custom role does not let that role read the schema until you name it too.
+one filter covers a collection and its items.
+
+The three settings routes are the exception: they take no `{route}` key at all. Each resolves its
+**Settings › Access** row (section 7) instead — `settings.read` for the two GETs, `settings.write`
+for the `PUT` — and a row runs two filters in order, both with the same `(string $capability,
+\WP_REST_Request $request)` signature. First `alpaca_bot/capability/settings`, 0.5's one key over
+the settings routes, over the stored row; then `alpaca_bot/capability/settings/read` or
+`alpaca_bot/capability/settings/write` over whatever that returned. So a site that already filters
+`alpaca_bot/capability/settings` keeps exactly what it set, on all three routes, and the newer key
+is how it takes the write (or the read) back. `alpaca_bot/capability/settings/schema` is retired:
+it is no longer applied, and the schema route asks `settings/read` with the rest of the read.
 
 ```php
 // Let Authors chat and read their own history, but keep settings to administrators.
@@ -134,8 +144,9 @@ add_filter('alpaca_bot/capability/conversations', static function (string $cap, 
 ```
 
 Return a capability name. Only a non-empty, non-numeric string is honoured; anything else
-(`true`, `false`, `null`, a number) is ignored and the route's default — its declared capability,
-or the Chat row for a chat route — is checked instead. That rule exists because
+(`true`, `false`, `null`, a number) is ignored and the value that filter was handed stands — the
+route's declared capability, the Chat row for a chat route, or for a settings route whatever the
+previous link in its chain returned. That rule exists because
 `current_user_can('1')` is a legacy user-level check that every Contributor passes, so a filter
 that returned a boolean by mistake would otherwise open the route rather than close it.
 
@@ -150,9 +161,9 @@ that returned a boolean by mistake would otherwise open the route rather than cl
 | `GET` | `/conversations/{id}` | Chat row (`edit_posts`) | no |
 | `DELETE` | `/conversations/{id}` | Chat row (`edit_posts`) | no |
 | `GET` | `/models?refresh=` | Chat row (`edit_posts`) | yes (`chat` bucket) |
-| `GET` | `/settings?reveal=` | `manage_options` | no |
-| `PUT` | `/settings` | `manage_options` | no |
-| `GET` | `/settings/schema` | `manage_options` | no |
+| `GET` | `/settings?reveal=` | `settings.read` row (`manage_options`); `reveal=1` needs `manage_options` | no |
+| `PUT` | `/settings` | `settings.write` row (`manage_options`) | no |
+| `GET` | `/settings/schema` | `settings.read` row (`manage_options`) | no |
 | `GET` | `/usage?user=` | Chat row (`edit_posts`); `user=all` needs `manage_options` | no |
 | `GET` | `/view/messages/{id}` | Chat row (`edit_posts`) | no |
 | `GET` | `/view/history?conversation_id=` | Chat row (`edit_posts`) | no |
@@ -367,7 +378,9 @@ x-alpaca-bot-default-model: qwen3-vl:2b
 
 ### `GET /settings`, `PUT /settings`, `GET /settings/schema`
 
-Administrators only. `GET /settings` is the whole `alpaca_bot_settings` option, every schema key
+Administrators by default: the two GETs ask the `settings.read` row of **Settings › Access** and
+the `PUT` asks `settings.write` (section 2). `?reveal=1` needs `manage_options` whatever the rows
+say. `GET /settings` is the whole `alpaca_bot_settings` option, every schema key
 with defaults filled in. The `access.*` keys are the Settings › Access rows (section 7); each one
 is a capability name from a fixed list, except `access.mcp`, which is one map of MCP server id to
 capability. The one secret, `provider.api_key`, reads back as `••••` when a key is
@@ -784,7 +797,9 @@ retry-after: 10
 The plugin's menu slug is `alpaca-bot`: `admin.php?page=alpaca-bot` is the chat screen and
 `admin.php?page=alpaca-bot-settings&tab={provider|models|chat|privacy|governance|toolkits|access}`
 the settings page, one Schema section per tab, saved through core's `options.php` with the same
-`Schema::sanitize()` the REST route uses. Settings is always `manage_options`.
+`Schema::sanitize()` the REST route uses. The settings page is always `manage_options` — core's
+`options.php` demands it — whatever the `settings.read` and `settings.write` rows say; those two
+govern the REST routes and nothing else.
 
 The chat screen's capability is the Chat row of **Settings › Access** (`edit_posts` by default)
 through `alpaca_bot/admin/menu_capability`, with signature `(string $capability)` — no request,

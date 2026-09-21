@@ -11,10 +11,11 @@
  * taking the docblock there covers `$x = (bool) apply_filters(...)`, `return apply_filters(...)`
  * and `max(1, (int) apply_filters(...))` alike.
  *
- * Three of the plugin's hooks are not spelled at an `apply_filters` call at all: the REST
+ * Four of the plugin's hooks are not spelled at an `apply_filters` call at all: the REST
  * permission callbacks (`alpaca_bot/capability/{route}`, Rest\Controller), the admin menu
- * (`alpaca_bot/admin/menu_capability`, Admin\Menu) and the Settings › Access rows
- * (`alpaca_bot/capability/{hook}`, Access) hand their names to Capability::filtered(),
+ * (`alpaca_bot/admin/menu_capability`, Admin\Menu), the Settings › Access rows
+ * (`alpaca_bot/capability/{hook}`, Access) and the one 0.5 key the two settings rows still run
+ * first (`alpaca_bot/capability/settings`, Access) hand their names to Capability::filtered(),
  * which applies the filter and reduces the result to a capability name. So `Capability::filtered(`
  * is treated as a filter call site, its first argument the hook, and the `apply_filters($hook, ...)`
  * inside the body of Capability::filtered() itself, the one place a hook name is legitimately a
@@ -543,12 +544,14 @@ final class HooksDoc
             'the user id, so a toolkit a site adds in code is that site\'s to gate. The operator-facing',
             'version is under "Tools, and what they let the model reach" in the README.',
             '',
-            '`alpaca_bot/capability/settings` is the other one worth a second look: one key covers both',
-            'verbs on `/settings`, so admitting a role to the read also admits it to the write, and',
-            '`provider.base_url` is a settable field. Tighten per request off the `WP_REST_Request` the',
-            'filter is handed (`$request->get_method()`). The `?reveal=1` parameter, which answers with',
-            'the provider API key in cleartext, asks `manage_options` on its own account and is not',
-            'reachable through this filter.',
+            '`alpaca_bot/capability/settings` is the other one worth a second look. It is 0.5\'s one key',
+            'over both verbs on `/settings`, and it is still applied — as the *default* the newer',
+            '`alpaca_bot/capability/settings/read` and `alpaca_bot/capability/settings/write` receive,',
+            'over the Settings › Access rows of the same names. So admitting a role through the old key',
+            'still admits it to the write; name `…/settings/write` to take that back.',
+            '`alpaca_bot/capability/settings/schema` is no longer applied: the schema route asks',
+            '`…/settings/read`. The `?reveal=1` parameter, which answers with the provider API key in',
+            'cleartext, asks `manage_options` on its own account and is not reachable through any of them.',
         ];
         if ($order !== null) {
             $lines[] = '';

@@ -2,9 +2,11 @@
 
 declare(strict_types=1);
 
+use AlpacaBot\Access;
 use AlpacaBot\Rest\SettingsController;
 use AlpacaBot\Settings\Schema;
 use AlpacaBot\Settings\Store;
+use Brain\Monkey\Filters;
 use Brain\Monkey\Functions;
 
 // restRequest() lives in tests/Pest.php. Store is final, so the controller runs over the real
@@ -15,8 +17,8 @@ use Brain\Monkey\Functions;
 
 beforeEach(function (): void {
     Functions\when('is_user_logged_in')->justReturn(true);
-    // An administrator unless a test says otherwise: the route's own gate is manage_options, and
-    // `reveal` asks for it a second time, on its own account rather than the filtered gate's.
+    // An administrator unless a test says otherwise: the settings rows are `manage_options` by
+    // default, and `reveal` asks for it a second time, on its own account rather than the gate's.
     Functions\when('current_user_can')->justReturn(true);
     $this->stored = ['provider.api_key' => 'secret', 'models.temperature' => 0.5, 'models.overrides' => ['a' => ['temperature' => 0.1], 'b' => ['num_ctx' => 1024]]];
     Functions\when('get_option')->alias(fn(): array => $this->stored);
@@ -26,18 +28,105 @@ beforeEach(function (): void {
         return true;
     });
     $this->controller = new SettingsController(new Store());
+
+    // The permission callbacks as core gets them, by "METHOD /path": what a test about the gate
+    // has to drive, since one path carries two verbs with two different rows.
+    //
+    // useAccess() is not optional here. Plugin::controllers() hands every controller the
+    // container's Access, so that is the only shape production ever runs in; a controller built
+    // without one resolves its row from Access::defaults() and fires no row filter at all, so a
+    // test written that way would assert nothing about the chain and would not notice a short
+    // argument list that production fatals on.
+    $permissions = [];
+    $this->gate = function (string $key) use (&$permissions): Closure {
+        $permissions = [];
+        Functions\when('register_rest_route')->alias(static function (string $ns, string $path, array $opts) use (&$permissions): void {
+            $permissions[$opts['methods'] . ' ' . $path] = $opts['permission_callback'];
+        });
+        $controller = new SettingsController(new Store());
+        $controller->useAccess(new Access(new Store()));
+        $controller->register();
+        return $permissions[$key];
+    };
+    $this->asked = [];
+    $this->capabilities = function (): void {
+        Functions\when('current_user_can')->alias(function (string $cap): bool {
+            $this->asked[] = $cap;
+            return true;
+        });
+    };
 });
 
-it('declares read, write and schema routes for administrators only, none rate limited', function (): void {
+it('declares the read row for both GETs and the write row for the PUT, none rate limited', function (): void {
     $routes = $this->controller->routes();
     expect(array_map(static fn(array $r): array => [$r['path'], $r['methods']], $routes))->toBe([
         ['/settings', 'GET'],
         ['/settings', 'PUT'],
         ['/settings/schema', 'GET'],
     ])
-        ->and(array_unique(array_column($routes, 'capability')))->toBe(['manage_options'])
+        ->and(array_column($routes, 'capability'))->toBe(['settings.read', 'settings.write', 'settings.read'])
         ->and(array_filter($routes, static fn(array $r): bool => !empty($r['rate_limit'])))->toBe([])
         ->and($routes[0]['args'])->toBe(['reveal' => ['type' => 'boolean', 'default' => false]]);
+});
+
+it('asks the settings.read row for GET /settings, through the 0.5 settings key and then settings/read', function (): void {
+    $this->stored['access.settings.read'] = 'edit_others_posts';
+    $gate = ($this->gate)('GET /settings');
+    ($this->capabilities)();
+    Filters\expectApplied('alpaca_bot/capability/settings')->once()->with('edit_others_posts', Mockery::type('WP_REST_Request'))->andReturn('publish_posts');
+    Filters\expectApplied('alpaca_bot/capability/settings/read')->once()->with('publish_posts', Mockery::type('WP_REST_Request'))->andReturnFirstArg();
+    expect($gate(restRequest('GET', '/alpaca-bot/v1/settings')))->toBeTrue()
+        ->and($this->asked)->toBe(['publish_posts']);
+});
+
+it('asks the same read row for the schema route, and no longer applies 0.5\'s settings/schema key', function (): void {
+    $gate = ($this->gate)('GET /settings/schema');
+    ($this->capabilities)();
+    Filters\expectApplied('alpaca_bot/capability/settings/schema')->never();
+    Filters\expectApplied('alpaca_bot/capability/settings')->once()->with('manage_options', Mockery::type('WP_REST_Request'))->andReturnFirstArg();
+    Filters\expectApplied('alpaca_bot/capability/settings/read')->once()->with('manage_options', Mockery::type('WP_REST_Request'))->andReturn('edit_others_posts');
+    expect($gate(restRequest('GET', '/alpaca-bot/v1/settings/schema')))->toBeTrue()
+        ->and($this->asked)->toBe(['edit_others_posts']);
+});
+
+it('asks the settings.write row for the PUT, never the read key, so opening the read leaves the write shut', function (): void {
+    // provider.base_url is a settable field: a role admitted to the read could otherwise point
+    // every turn the site takes at a server of its choosing.
+    $this->stored['access.settings.read'] = 'edit_others_posts';
+    $gate = ($this->gate)('PUT /settings');
+    ($this->capabilities)();
+    Filters\expectApplied('alpaca_bot/capability/settings/read')->never();
+    Filters\expectApplied('alpaca_bot/capability/settings')->once()->with('manage_options', Mockery::type('WP_REST_Request'))->andReturnFirstArg();
+    Filters\expectApplied('alpaca_bot/capability/settings/write')->once()->with('manage_options', Mockery::type('WP_REST_Request'))->andReturnFirstArg();
+    expect($gate(restRequest('PUT', '/alpaca-bot/v1/settings')))->toBeTrue()
+        ->and($this->asked)->toBe(['manage_options']);
+});
+
+it('ignores a settings/write filter that answers anything but a capability name', function (): void {
+    $gate = ($this->gate)('PUT /settings');
+    ($this->capabilities)();
+    Filters\expectApplied('alpaca_bot/capability/settings')->once()->andReturnFirstArg();
+    Filters\expectApplied('alpaca_bot/capability/settings/write')->once()->andReturn(true);
+    expect($gate(restRequest('PUT', '/alpaca-bot/v1/settings')))->toBeTrue()
+        ->and($this->asked)->toBe(['manage_options']);
+});
+
+it('never applies alpaca_bot/capability/settings/{route} for these three routes, so the row is the only chain', function (): void {
+    // The override answers outright rather than handing its answer back to the base as a
+    // *declared* capability: Controller::capability() compares `$declared` against
+    // Controller::CHAT, which is the literal 'chat', and `alpaca_bot/capability/settings/read`
+    // may return any string a site likes — 'chat' included — so feeding a resolved capability
+    // back through that comparison would let a settings filter flip these routes onto the Chat
+    // row. It cannot, because the base never sees the resolved value.
+    $this->stored['access.settings.read'] = 'edit_others_posts';
+    $gate = ($this->gate)('GET /settings');
+    ($this->capabilities)();
+    Filters\expectApplied('alpaca_bot/capability/settings')->once()->andReturnFirstArg();
+    Filters\expectApplied('alpaca_bot/capability/settings/read')->once()->andReturn(AlpacaBot\Rest\Controller::CHAT);
+    Filters\expectApplied('alpaca_bot/capability/chat')->never();
+    expect($gate(restRequest('GET', '/alpaca-bot/v1/settings')))->toBeTrue()
+        // Whatever the filter said is checked as the capability name it is, not read as the sentinel.
+        ->and($this->asked)->toBe(['chat']);
 });
 
 it('masks a stored api key on read and leaves an empty one empty', function (): void {
@@ -60,10 +149,10 @@ it('reveals the raw key on request, and marks that response no-store', function 
 });
 
 it('answers the masked settings, not the raw key, to a caller the capability filter admitted without manage_options', function (): void {
-    // `alpaca_bot/capability/settings` can name any capability, and the same key covers the PUT,
-    // so a site that loosens it for a custom role would otherwise hand that role both the
-    // provider credential and provider.base_url. The route's gate has already passed by the time
-    // show() runs; reveal asks manage_options itself so the filter cannot answer for it.
+    // The `settings.read` row, and the two filters over it, can name any capability, so a site
+    // that lowers the read for a custom role would otherwise hand that role the provider
+    // credential in cleartext. The route's gate has already passed by the time show() runs;
+    // reveal asks manage_options itself so neither the row nor its filters can answer for it.
     Functions\when('current_user_can')->alias(static fn(string $cap): bool => $cap !== 'manage_options');
     $res = $this->controller->show(restRequest('GET', '/alpaca-bot/v1/settings', ['reveal' => true]));
     expect($res->get_data()['provider.api_key'])->toBe(Schema::MASK)

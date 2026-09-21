@@ -8,6 +8,7 @@ use AlpacaBot\Chat\UsageMeter;
 use AlpacaBot\Plugin;
 use AlpacaBot\Provider\ModelCatalog;
 use AlpacaBot\Settings\Schema;
+use AlpacaBot\Settings\Store;
 
 /**
  * The /settings, /settings/schema, /usage and /models routes over real core: real permission
@@ -40,6 +41,61 @@ final class SettingsRoutesTest extends TestCase
         $this->assertSame(Schema::defaults()['models.num_ctx'], $res->get_data()['models.num_ctx']);
         $this->assertSame(array_keys(Schema::fields()), array_keys($res->get_data()));
         $this->assertSame(array_keys(Schema::fields()), array_keys(get_option('alpaca_bot_settings')));
+    }
+
+    public function test_the_read_row_can_admit_an_editor_without_admitting_the_write_or_the_key(): void
+    {
+        add_filter('alpaca_bot/capability/settings/read', static fn(): string => 'edit_others_posts');
+        $editor = self::factory()->user->create(['role' => 'editor']);
+        wp_set_current_user($editor);
+
+        $this->assertSame(200, $this->rest('GET', '/settings')->get_status());
+        $this->assertSame(200, $this->rest('GET', '/settings/schema')->get_status());
+        $this->assertSame(403, $this->rest('PUT', '/settings', ['models.temperature' => 1.5])->get_status());
+        $this->assertSame(Schema::defaults()['models.temperature'], get_option('alpaca_bot_settings')['models.temperature']);
+
+        // reveal is not the gate's to give away: an editor the read admitted still gets the mask.
+        Plugin::instance()->get(Store::class)->set('provider.api_key', 'sk-secret');
+        $this->assertSame(Schema::MASK, $this->rest('GET', '/settings', ['reveal' => 1])->get_data()['provider.api_key']);
+    }
+
+    /**
+     * The one thing this split may not do: change what a site that already filters 0.5's
+     * `alpaca_bot/capability/settings` gets. It is the default both rows' own keys receive, on
+     * all three routes — the schema route included, which in 0.5 was behind
+     * `alpaca_bot/capability/settings/schema` instead and is not any more.
+     */
+    public function test_the_0_5_settings_key_still_covers_all_three_routes_for_a_site_that_filtered_it(): void
+    {
+        add_filter('alpaca_bot/capability/settings', static fn(): string => 'edit_others_posts');
+        wp_set_current_user(self::factory()->user->create(['role' => 'editor']));
+        $this->assertSame(200, $this->rest('GET', '/settings')->get_status());
+        $this->assertSame(200, $this->rest('GET', '/settings/schema')->get_status());
+        $this->assertSame(200, $this->rest('PUT', '/settings', ['models.temperature' => 1.5])->get_status());
+
+        // …and the new key is how that site takes the write back.
+        add_filter('alpaca_bot/capability/settings/write', static fn(): string => 'manage_options');
+        $this->assertSame(403, $this->rest('PUT', '/settings', ['models.temperature' => 0.9])->get_status());
+        $this->assertSame(1.5, get_option('alpaca_bot_settings')['models.temperature']);
+    }
+
+    /**
+     * The one back-compat break: 0.5's own key for the schema route is retired, folded into
+     * `settings/read`. A site that had named it is not refused anything — the effect can only
+     * widen the schema read back to whatever the read row and `settings` already allow.
+     */
+    public function test_the_retired_settings_schema_key_is_no_longer_consulted(): void
+    {
+        $applied = 0;
+        add_filter('alpaca_bot/capability/settings/schema', static function (string $cap) use (&$applied): string {
+            $applied++;
+            return 'manage_options';
+        });
+        add_filter('alpaca_bot/capability/settings/read', static fn(): string => 'edit_others_posts');
+        wp_set_current_user(self::factory()->user->create(['role' => 'editor']));
+
+        $this->assertSame(200, $this->rest('GET', '/settings/schema')->get_status());
+        $this->assertSame(0, $applied);
     }
 
     /**

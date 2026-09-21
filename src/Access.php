@@ -21,8 +21,12 @@ use AlpacaBot\Settings\Store;
  * user_can(), is.
  *
  * Rows and hooks. Every row but `chat` has a filter of its own, `alpaca_bot/capability/{hook}`,
- * where hook() turns the row's dots into slashes (`tool.web_fetch` is `tool/web_fetch`). What
- * follows the capability in that filter's signature is the *caller's*, not this class's: each
+ * where hook() turns the row's dots into slashes (`tool.web_fetch` is `tool/web_fetch`). The two
+ * settings rows run one more, first: `alpaca_bot/capability/settings`, which in 0.5 was the one
+ * key over both verbs of `/settings`, applied to the stored row so that a site which filtered it
+ * keeps what it set and the row's own key still gets the last word. No other row runs a second
+ * hook here. What follows the capability in a row filter's signature is the *caller's*, not
+ * this class's: each
  * surface passes what it knows, and those differ row by row (a REST request, a user id, a post id
  * and a shortcode tag, or nothing at all). A listener must therefore declare — and register
  * `accepted_args` for — the arguments its own row fires with: core slices the argument list to
@@ -68,6 +72,14 @@ final class Access
 
     /** The row-name prefix whose rows live in the `access.mcp` map: `mcp.github` is that map's `github`. */
     public const MCP_PREFIX = 'mcp.';
+
+    /**
+     * The row-name prefix whose rows run 0.5's `alpaca_bot/capability/settings` before their own
+     * key: `settings.read` and `settings.write`. Private because it is not a name any caller
+     * needs — it marks which rows carry that one extra hook, and effective() is the only place
+     * that has to know.
+     */
+    private const SETTINGS_PREFIX = 'settings.';
 
     /**
      * Row => how many arguments its filter is called with after the capability, and so how many
@@ -202,13 +214,33 @@ final class Access
                 count($args),
             ));
         }
+        if (str_starts_with($row, self::SETTINGS_PREFIX)) {
+            /**
+             * Filters the capability both settings rows start from: 0.5's one key for the settings
+             * routes, kept as the default the newer keys receive so a site that filtered it keeps
+             * what it set. It runs over the stored row, and `alpaca_bot/capability/settings/read` or
+             * `…/settings/write` runs over what it returns, so the newer key wins where both are
+             * set. Since 0.6 it covers `GET /settings/schema` too, which 0.5 filtered under its own
+             * `alpaca_bot/capability/settings/schema` key; that key is no longer applied. One key
+             * over both verbs is why the rows exist: tighten the write with `…/settings/write`
+             * rather than here, or off the WP_REST_Request's `get_method()`.
+             *
+             * @since 0.5.0
+             * @param string $capability the `settings.read` or `settings.write` row, `manage_options` by default
+             * @param mixed  ...$args    the WP_REST_Request being authorised
+             */
+            $stored = Capability::filtered('alpaca_bot/capability/settings', $stored, ...$args);
+        }
         $hook = self::hook($row);
         /**
          * Filters the capability one row of Settings › Access resolves to. `{hook}` is the row with
          * its dots as slashes: `tool/web_fetch`, `tool/summarize`, `tool/draft_post`,
          * `tool/abilities`, `mcp/{server id}`, `settings/read`, `settings/write` and `shortcode`.
          * The value handed in is what the site saved for that row, so a filter here beats the
-         * screen. Only a non-empty, non-numeric string is honoured (Capability::filtered()):
+         * screen — with one exception: the two settings rows are handed what
+         * `alpaca_bot/capability/settings`, 0.5's one key for those routes, made of the stored row,
+         * so this key runs last there and wins over that one too. Only a non-empty, non-numeric
+         * string is honoured (Capability::filtered()):
          * `__return_true` or a number would become a legacy user-level check, so it is ignored and
          * the stored row stands. The Chat row has no filter here; the menu's
          * `alpaca_bot/admin/menu_capability` and each chat route's `alpaca_bot/capability/{route}`
@@ -254,7 +286,10 @@ final class Access
      * keeps that from becoming a blanket answer: with no listener registered nothing can have
      * moved the row, so it is false, and the label does not appear on every site in the world;
      * with one registered the honest answer is that code has a say here and this call cannot
-     * find out what it is. Counting a listener that leaves the row where it was is the cost —
+     * find out what it is. A settings row has two hooks — `alpaca_bot/capability/settings` runs
+     * before its own — and both are asked, or a site still filtering 0.5's key would be told its
+     * settings rows are the screen's alone. Counting a listener that leaves the row where it was
+     * is the cost —
      * one that returns the stored value, and equally one whose return Capability::filtered()
      * discards (a bool, a number, '', null, an array), which lands on the stored value too. That
      * is the price of not running the filter, and it is particular to this branch: nothing can
@@ -278,7 +313,12 @@ final class Access
                 // handed to Capability::filtered() has to be a string literal or bin/hooks-doc.php
                 // fails the run, so that one cannot be built from a constant, and a constant used
                 // only here would be the odd half of a pair.
-                return (bool) has_filter('alpaca_bot/capability/' . self::hook($row));
+                //
+                // Both of a settings row's hooks are asked, because either can move it and this
+                // branch is the one a screen takes for those rows: the settings rows fire with a
+                // WP_REST_Request, which no admin screen has.
+                return (bool) has_filter('alpaca_bot/capability/' . self::hook($row))
+                    || (str_starts_with($row, self::SETTINGS_PREFIX) && (bool) has_filter('alpaca_bot/capability/settings'));
             }
             return $this->effective($row, ...$args) !== $this->stored($row);
         } catch (\Throwable $e) {
