@@ -74,7 +74,7 @@ it('is refused for a length outside short, medium, long, or an empty text, befor
 
 // A tool result is text the model reads and may repeat, and on a front-end [alpacabot] turn the
 // model's output is on its way to a visitor. Tool::execute()'s own catch reports the raw
-// message, and what a provider throws quotes its endpoint -- the text Rest\Errors::provider()
+// message, and what a provider throws quotes its endpoint -- the text Errors::provider()
 // withholds from anyone but an administrator. The toolkit catches first and applies the same
 // policy the REST routes and the shortcodes do.
 it('answers a provider failure with the fixed message, never the provider\'s own text or its endpoint', function (): void {

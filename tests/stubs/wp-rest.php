@@ -3,7 +3,7 @@
 /**
  * Runtime stand-ins for the WordPress REST classes the unit suite touches. wordpress-stubs
  * is PHPStan-only (declared in bootstrapFiles, never autoloaded) and Brain Monkey stubs functions,
- * not classes, so without these `new WP_Error()` inside Rest\Errors is a fatal in the unit run.
+ * not classes, so without these `new WP_Error()` inside AlpacaBot\Errors is a fatal in the unit run.
  * tests/Pest.php requires this file only when the real classes are absent; inside a WordPress
  * process (the integration suite) core's own classes win and this file is never loaded.
  *

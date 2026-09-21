@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace AlpacaBot\Rest;
 
+use AlpacaBot\Errors;
 use AlpacaBot\Provider\Model;
 use AlpacaBot\Provider\ModelCatalog;
 use AlpacaBot\Settings\Store;

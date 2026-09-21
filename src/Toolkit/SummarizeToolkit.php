@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace AlpacaBot\Toolkit;
 
 use AlpacaBot\Chat\Pipeline;
-use AlpacaBot\Rest\Errors;
+use AlpacaBot\Errors;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Contract\ToolkitInterface;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Tool\Parameter\EnumParameter;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Tool\Parameter\StringParameter;
@@ -71,7 +71,7 @@ final class SummarizeToolkit implements ToolkitInterface
      *
      * Tool::execute() would turn the throw into a result too, but with the raw message
      * (`catch (\Throwable $e) { return ToolResult::error($e->getMessage()); }`), and what the
-     * provider throws quotes its endpoint — the text Rest\Errors::provider() withholds from
+     * provider throws quotes its endpoint — the text Errors::provider() withholds from
      * anyone who is not an administrator. A tool result is text the model reads and may repeat,
      * and on a front-end `[alpacabot]` turn the model's output is on its way to a page. So the
      * same policy every other caller of a pipeline turn applies is applied here:

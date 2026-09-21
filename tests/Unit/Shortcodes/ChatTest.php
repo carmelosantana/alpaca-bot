@@ -290,7 +290,7 @@ it('renders format="text" escaped, so a reply that spells markup shows it as tex
 });
 
 it('shows an editor the fixed provider message when the turn fails, never the provider\'s own text, and caches nothing', function (): void {
-    // Review I1, and Rest\Errors::provider()'s policy in one place: what the provider threw
+    // Review I1, and Errors::provider()'s policy in one place: what the provider threw
     // quotes its endpoint, and anyone who may view the page can make it throw by viewing while
     // the provider is down, so the raw text is the debug log's and the page gets the fixed message.
     $h = pipelineWith(pipelineProvider([new \RuntimeException('Failed to connect to localhost port 11434 after 1 ms: Couldn\'t connect to server for "http://localhost:11434/v1/chat/completions".')]));
@@ -361,7 +361,7 @@ it('shows an editor the cap and a refused model in their own words, the other tw
 
 // ---------------------------------------------------------------- the rate limit
 // Final review F2: every other surface that spends (POST /chat, the stream route, the chat
-// and summarize abilities) counts a hit on Rest\RateLimit's `chat` bucket; the shortcodes had
+// and summarize abilities) counts a hit on RateLimit's `chat` bucket; the shortcodes had
 // the cache and the monthly caps, both of which default to unlimited, and `cache="off"` is an
 // attribute any Contributor can write. Fifty distinct prompts on one page were fifty turns
 // per editor view. The same limiter, the same bucket, the same filter: a site that moves the

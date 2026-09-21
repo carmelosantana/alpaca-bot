@@ -2,13 +2,17 @@
 
 declare(strict_types=1);
 
-namespace AlpacaBot\Rest;
+namespace AlpacaBot;
 
 use AlpacaBot\Chat\CapExceeded;
 
 /**
  * The WP_Error shapes every route answers with. Each carries `status` in its data, which is how
  * the REST server picks the HTTP status for an error, so a controller returns these as they are.
+ *
+ * Outside REST, Abilities\Register returns them as they are, and Shortcodes\Chat and
+ * Toolkit\SummarizeToolkit show their messages (get_error_message()). That is why the class sits
+ * at the plugin root beside Capability, not under Rest\.
  *
  * Codes are namespaced `alpaca_bot_*` except `rest_forbidden`, which is core's own code for a
  * permission failure: clients (and core's own tooling) already special-case it, and a plugin
@@ -30,7 +34,7 @@ final class Errors
         );
     }
 
-    /** `retry_after` in the data mirrors the Retry-After header Controller adds, for clients that read the body only. */
+    /** `retry_after` in the data mirrors the Retry-After header Rest\Controller adds, for clients that read the body only. */
     public static function tooMany(int $retryAfter): \WP_Error
     {
         return new \WP_Error(

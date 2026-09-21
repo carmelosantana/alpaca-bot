@@ -93,7 +93,7 @@ final class AgentShim
      * The page's text through the web_fetch tool the registry enables for this viewer. Its
      * refusal (an address that is not public, a page that is not text, an HTTP error) and the
      * tool being switched off are thrown as the caller's mistake, the arm of
-     * Rest\Errors::fromPipeline() that shows the message: the URL is the author's and the
+     * Errors::fromPipeline() that shows the message: the URL is the author's and the
      * tool's words are written for them, and the setting is the administrator's to name.
      *
      * @throws \InvalidArgumentException with the tool's own message, or the setting's name

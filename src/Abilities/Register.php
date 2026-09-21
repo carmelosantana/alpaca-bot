@@ -5,8 +5,8 @@ declare(strict_types=1);
 namespace AlpacaBot\Abilities;
 
 use AlpacaBot\Chat\Pipeline;
-use AlpacaBot\Rest\Errors;
-use AlpacaBot\Rest\RateLimit;
+use AlpacaBot\Errors;
+use AlpacaBot\RateLimit;
 use AlpacaBot\Toolkit\DraftPostToolkit;
 use AlpacaBot\Toolkit\Registry;
 use AlpacaBot\Toolkit\SummarizeToolkit;
@@ -55,7 +55,7 @@ use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Enum\ToolResultStatus;
  * permission callback answers (Errors::forbidden(): `rest_forbidden`, 403 or 401).
  *
  * The rate limit. Chat and summarize spend tokens, and so does `POST /alpaca-bot/v1/chat`,
- * which is limited by Rest\RateLimit at thirty a minute per user. The abilities reach the
+ * which is limited by RateLimit at thirty a minute per user. The abilities reach the
  * pipeline through core's run route and every MCP client without that route's wrapper, so
  * the two execute callbacks record the same hit themselves: the same limiter, the same `chat`
  * bucket (one person on two surfaces is one person, as Rest\Controller says of two routes) and
@@ -96,7 +96,7 @@ use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Enum\ToolResultStatus;
  * setting: it is not a toolkit, and what its turn may run is the pipeline's own decision
  * through the same registry.
  *
- * Refusals keep their codes. A pipeline throw is mapped by Rest\Errors::fromPipeline() to the
+ * Refusals keep their codes. A pipeline throw is mapped by Errors::fromPipeline() to the
  * WP_Error the `/alpaca-bot/v1/chat` route answers (402 for a spent cap, 400 for the caller's
  * mistake, 502 for the provider), so one turn told two ways refuses the same way. That is why
  * summarize calls SummarizeToolkit::summarize() itself, when the toolkit under the id is the

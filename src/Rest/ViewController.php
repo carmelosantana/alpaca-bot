@@ -7,6 +7,7 @@ namespace AlpacaBot\Rest;
 use AlpacaBot\Chat\ConversationStore;
 use AlpacaBot\Chat\Message;
 use AlpacaBot\Chat\UserPrefs;
+use AlpacaBot\Errors;
 use AlpacaBot\Provider\ModelCatalog;
 use AlpacaBot\Settings\Store;
 use AlpacaBot\View\Chat\HistorySelect;

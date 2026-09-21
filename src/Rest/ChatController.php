@@ -7,6 +7,7 @@ namespace AlpacaBot\Rest;
 use AlpacaBot\Chat\Pipeline;
 use AlpacaBot\Chat\Result;
 use AlpacaBot\Context\Context;
+use AlpacaBot\Errors;
 
 /**
  * `POST /chat`: one turn through the Pipeline as the current user.

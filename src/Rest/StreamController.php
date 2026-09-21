@@ -6,6 +6,7 @@ namespace AlpacaBot\Rest;
 
 use AlpacaBot\Chat\Conversation;
 use AlpacaBot\Chat\Pipeline;
+use AlpacaBot\Errors;
 use AlpacaBot\Settings\Store;
 
 /**

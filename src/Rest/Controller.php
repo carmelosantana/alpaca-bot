@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace AlpacaBot\Rest;
 
 use AlpacaBot\Capability;
+use AlpacaBot\Errors;
+use AlpacaBot\RateLimit;
 
 /**
  * Base for every route under `alpaca-bot/v1`. A subclass lists its routes; register() hands each

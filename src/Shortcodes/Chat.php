@@ -8,9 +8,9 @@ use AlpacaBot\Admin\Assets;
 use AlpacaBot\Chat\ConversationStore;
 use AlpacaBot\Chat\Pipeline;
 use AlpacaBot\Chat\UserPrefs;
+use AlpacaBot\Errors;
 use AlpacaBot\Provider\ModelCatalog;
-use AlpacaBot\Rest\Errors;
-use AlpacaBot\Rest\RateLimit;
+use AlpacaBot\RateLimit;
 use AlpacaBot\Settings\Store;
 use AlpacaBot\View\Chat\Shell;
 use AlpacaBot\View\Markdown;
@@ -61,11 +61,11 @@ use AlpacaBot\View\Markdown;
  * render was the bug `$served` alone left open. Across requests a failure is still cached as
  * nothing, so the next view tries again -- that costs the provider's timeout per view while it
  * is down, and caching a failure would cost showing a stale one after it is back. What the notice says is
- * Rest\Errors::fromPipeline()'s decision, made once for every caller that runs a turn: the cap
+ * Errors::fromPipeline()'s decision, made once for every caller that runs a turn: the cap
  * and a refused model in their own words, and for a provider failure the fixed message, since
  * what the provider threw quotes its endpoint and the raw text is the debug log's.
  *
- * A generation is a hit on the limiter every other spending surface shares: Rest\RateLimit,
+ * A generation is a hit on the limiter every other spending surface shares: RateLimit,
  * the `chat` bucket the rate-limited REST routes (the chat POST, `/models`, `/view/models`; not
  * the stream redemption, whose own route says why) and the chat and summarize abilities
  * count against, under the one `alpaca_bot/rate_limit` filter, so a site that moves the limit moves

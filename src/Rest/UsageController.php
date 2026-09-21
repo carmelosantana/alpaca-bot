@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace AlpacaBot\Rest;
 
 use AlpacaBot\Chat\UsageMeter;
+use AlpacaBot\Errors;
 use AlpacaBot\Settings\Store;
 
 /**

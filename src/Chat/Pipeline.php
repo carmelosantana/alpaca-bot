@@ -496,7 +496,7 @@ final class Pipeline
             // written. Reproduced on PHP 8.4.25. The provider-failure site above keeps a
             // listener's exception instead, by letting PHP chain it behind the RuntimeException
             // it throws from a finally; there is nothing to chain to here, so it goes to the
-            // debug log, behind WP_DEBUG exactly as Rest\Errors::provider() puts the provider's
+            // debug log, behind WP_DEBUG exactly as Errors::provider() puts the provider's
             // own text there.
             if (defined('WP_DEBUG') && WP_DEBUG) {
                 // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log -- Deliberate diagnostic, gated on WP_DEBUG as core's own logging is; this is the only record a listener's failure can leave, since the turn is being torn down and no caller is left to tell.

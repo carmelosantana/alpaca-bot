@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace AlpacaBot\Rest;
 
 use AlpacaBot\Chat\Assistant;
+use AlpacaBot\RateLimit;
 use AlpacaBot\Settings\Store;
 
 /**
