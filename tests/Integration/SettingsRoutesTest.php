@@ -81,8 +81,14 @@ final class SettingsRoutesTest extends TestCase
 
     /**
      * The one back-compat break: 0.5's own key for the schema route is retired, folded into
-     * `settings/read`. A site that had named it is not refused anything — the effect can only
-     * widen the schema read back to whatever the read row and `settings` already allow.
+     * `settings/read`. A site that filtered it loses the filter whichever way it pointed it — 0.5
+     * applied it independently of `alpaca_bot/capability/settings`, so a site could open the
+     * schema alone to a lower role, and that role is refused now. It narrows as well as widens.
+     * `alpaca_bot/capability/settings/read` is where such a filter moves to.
+     *
+     * The filter below is the *widening* shape, and it is the one that has to go uncalled for the
+     * retirement to be real: it names a capability the current user does not hold, so were it
+     * still applied the route would answer 403 rather than 200.
      */
     public function test_the_retired_settings_schema_key_is_no_longer_consulted(): void
     {

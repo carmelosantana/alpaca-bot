@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace AlpacaBot\Rest;
 
+use AlpacaBot\Access;
 use AlpacaBot\Errors;
 use AlpacaBot\Settings\Schema;
 use AlpacaBot\Settings\Store;
@@ -71,9 +72,14 @@ use AlpacaBot\Settings\Store;
  * that filtered the old key keeps what it set and the newer key wins where both are set.
  *
  * These routes do not apply `alpaca_bot/capability/{route}`, so 0.5's
- * `alpaca_bot/capability/settings/schema` is gone, folded into `settings/read`: a site that had
- * named it to *open* the schema had to open `settings` too and is unaffected; one that had named
- * it only to tighten the schema names `settings/read` instead.
+ * `alpaca_bot/capability/settings/schema` is retired: it is no longer applied, and the schema
+ * route asks the `settings.read` row with the rest of the read. A site that filtered that key
+ * loses the filter, whichever way it pointed it. 0.5 applied it over the route's declared
+ * `manage_options` on its own, independently of `alpaca_bot/capability/settings`, so opening the
+ * schema *alone* was a thing a site could do — and a reasonable one, since the schema route
+ * answers field descriptions and no stored value, which is what a custom settings form for a
+ * lower role needs. That site's role is now refused, so this narrows as well as widens.
+ * `alpaca_bot/capability/settings/read` is where such a filter moves to.
  *
  * Splitting the verbs is what makes a read-only settings role possible: `provider.base_url` is a
  * settable field, so a role admitted to the write can point every turn the site takes at a
@@ -98,12 +104,24 @@ final class SettingsController extends Controller
      * applies 0.5's `alpaca_bot/capability/settings` over the stored row and then the row's own
      * key, and that chain is the whole of the split.
      *
-     * `$declared` is the row name the route table carries, so the verb is read off the table
-     * rather than off the request — the GET and the PUT share a path, and `routeKey()` would
-     * hand both the one key again.
+     * `$declared` is what the route table carries — a row name for all three of today's routes —
+     * so the verb is read off the table rather than off the request: the GET and the PUT share a
+     * path, and `routeKey()` would hand both the one key again.
      *
-     * The resolved capability is returned outright and never handed back to parent::capability()
-     * as its `$declared`. That is deliberate rather than a shortcut. The base reads `$declared`
+     * Only a row Access declares is resolved as one. A route added here that names a plain
+     * capability falls through to the base and is authorised like every other route in the
+     * plugin, `alpaca_bot/capability/{route}` and all. Without that test it would be handed to
+     * Access::effective() as if it were a row: an undeclared row fails closed to
+     * `manage_options`, so the route would quietly be authorised at that rather than at what it
+     * declared, and the only filter it offered a site would be one named after the capability
+     * (`alpaca_bot/capability/manage_options`) — a hook nobody documents, since bin/hooks-doc.php
+     * reads string literals and this name is built at runtime. The check is against
+     * Access::defaults() rather than a list kept here so that a row added to the access model is
+     * usable from this table the day it exists.
+     *
+     * What Access resolves is returned as it comes, and is never handed back to
+     * parent::capability() as its `$declared` — the fallback above passes the route's *declared*
+     * value, never a resolved one. That is deliberate rather than a shortcut. The base reads `$declared`
      * for Controller::CHAT, which is the literal string 'chat', while a site's
      * `alpaca_bot/capability/settings/read` filter may return any capability name it likes —
      * 'chat' among them, since Capability::filtered() honours every non-empty non-numeric string.
@@ -121,7 +139,9 @@ final class SettingsController extends Controller
      */
     protected function capability(string $route, string $declared, \WP_REST_Request $request): string
     {
-        return $this->accessRow($declared, $request);
+        return isset(Access::defaults()[$declared])
+            ? $this->accessRow($declared, $request)
+            : parent::capability($route, $declared, $request);
     }
 
     public function show(\WP_REST_Request $request): \WP_REST_Response

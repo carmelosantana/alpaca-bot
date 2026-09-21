@@ -80,6 +80,18 @@ it('runs the 0.5 settings key before a settings row\'s own, so a site that filte
     expect($access->effective('settings.read', 'ctx'))->toBe('publish_posts');
 });
 
+// The half of the chain this split adds, guarded the way every other filtered capability is: the
+// 0.5 key is a site's filter like any other, and `__return_true` on it must not become a legacy
+// level check that opens the settings routes to every Contributor.
+it('ignores a 0.5 settings key that answers anything but a capability name, and hands the row\'s own key the stored row', function (): void {
+    $access = new Access(new Store(['access.settings.write' => 'edit_others_posts']));
+    foreach ([true, false, '1', 0, 7, '', null, ['manage_options']] as $bad) {
+        Filters\expectApplied('alpaca_bot/capability/settings')->once()->andReturn($bad);
+        Filters\expectApplied('alpaca_bot/capability/settings/write')->once()->with('edit_others_posts', 'ctx')->andReturnFirstArg();
+        expect($access->effective('settings.write', 'ctx'))->toBe('edit_others_posts', var_export($bad, true));
+    }
+});
+
 it('takes the 0.5 settings key nowhere near a row that is not a settings row', function (): void {
     $access = new Access(new Store(['access.settings.read' => 'edit_others_posts']));
     Filters\expectApplied('alpaca_bot/capability/settings')->never();

@@ -111,6 +111,21 @@ it('ignores a settings/write filter that answers anything but a capability name'
         ->and($this->asked)->toBe(['manage_options']);
 });
 
+it('hands a declared capability that is not an access row back to the base, rather than resolving it as a row', function (): void {
+    // Every route in this controller's table declares a row today, so this is the guard for the
+    // next one added. Resolved as a row, a plain capability would fail closed to the unlisted
+    // default — authorising the route at `manage_options` instead of what it declared — and the
+    // only filter it would offer a site is one named after the capability itself.
+    $controller = new SettingsController(new Store());
+    $controller->useAccess(new Access(new Store()));
+    ($this->capabilities)();
+    Filters\expectApplied('alpaca_bot/capability/manage_options')->never();
+    Filters\expectApplied('alpaca_bot/capability/settings/export')->once()->with('edit_posts', Mockery::type('WP_REST_Request'))->andReturnFirstArg();
+    $gate = $controller->permission('settings/export', 'edit_posts');
+    expect($gate(restRequest('GET', '/alpaca-bot/v1/settings/export')))->toBeTrue()
+        ->and($this->asked)->toBe(['edit_posts']);
+});
+
 it('never applies alpaca_bot/capability/settings/{route} for these three routes, so the row is the only chain', function (): void {
     // The override answers outright rather than handing its answer back to the base as a
     // *declared* capability: Controller::capability() compares `$declared` against
