@@ -50,6 +50,17 @@ final class Migrate04
     public const FLAG_RETENTION = 'alpaca_bot_migrated_retention';
     public const FLAG_AUTOLOAD = 'alpaca_bot_migrated_flag_autoload';
 
+    /** Post meta on a legacy conversation row: how many batches have tried to move it out of `publish` and found it still there. */
+    public const META_ATTEMPTS = 'ab_migration_attempts';
+
+    /**
+     * Tries per row before the conversation pass stops asking for it. Three rather than one
+     * because a failure can be passing (a lock, a filter that only objects mid-request); a few
+     * rather than many because every try is one wp_update_post() and its hook chain, paid by
+     * whichever request comes next, a visitor's page view included.
+     */
+    public const MAX_ATTEMPTS = 3;
+
     private const LEGACY_PREFIX = 'alpaca_bot_';
 
     /** Rows per request: one wp_update_post() and its hook chain each. */
@@ -264,8 +275,22 @@ final class Migrate04
      * with no owner takes it from the first message: 0.4 wrote the user's id as that message's
      * role. A row that already has an owner keeps it.
      *
-     * Only `publish` rows are queried, so a row this batch flips leaves the next batch's result
-     * set: the rows are their own cursor, and the pass is complete when a batch comes back short.
+     * Only `publish` rows under MAX_ATTEMPTS failed tries are queried, so a row leaves the next
+     * batch's result set by being flipped or by reaching the cap: the rows are their own cursor,
+     * and the pass is complete when a batch comes back short.
+     *
+     * The cap is what makes the pass end. Nothing in this plugin can refuse the write: the post
+     * type supports title, excerpt and author but not `editor`
+     * (ConversationStore::registerPostType()), and wp_insert_post()'s empty-content refusal needs
+     * all three of those supports (WP 7.1 post.php:4673-4677), so it cannot fire on these rows.
+     * Another plugin can still keep a row in `publish` (`wp_insert_post_data` putting the status
+     * back, `wp_insert_post_empty_content` returning true), or an UPDATE can keep failing. Without
+     * the cap, a full batch of such rows came back on every request, forever, front-end page views
+     * included (Kanboard #4335). With it, each is tried MAX_ATTEMPTS times (countFailures()) and
+     * then left as it is: still `publish`, carrying its count under META_ATTEMPTS, where anyone
+     * investigating finds it. A request that dies inside the loop counts nothing, since the count
+     * comes after it. The bound is for a write that fails, not for one that takes the request
+     * down, which the site's error log already shows.
      */
     private function migrateConversations(): void
     {
@@ -275,6 +300,12 @@ final class Migrate04
             'numberposts' => self::BATCH,
             'orderby' => 'ID',
             'order' => 'ASC',
+            // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query -- the meta join is what ends the pass, and it is paid only while FLAG_CONVERSATIONS is unset: once the flag is set this query is never made again.
+            'meta_query' => [
+                'relation' => 'OR',
+                ['key' => self::META_ATTEMPTS, 'compare' => 'NOT EXISTS'],
+                ['key' => self::META_ATTEMPTS, 'value' => self::MAX_ATTEMPTS, 'compare' => '<', 'type' => 'NUMERIC'],
+            ],
         ]);
         foreach ($posts as $post) {
             $pid = (int) $post->ID;
@@ -291,20 +322,41 @@ final class Migrate04
             // nothing today; it is here so the rule holds at every write, whatever is added.
             wp_update_post(wp_slash($update));
         }
-        // The flag on a short batch, and nothing else: there is no progress guard, so the pass
-        // terminates only because every row it reads leaves `publish`. That holds for this
-        // plugin's own writes -- the post type supports title, excerpt and author but not
-        // `editor` (ConversationStore::registerPostType()), and wp_insert_post()'s empty-content
-        // refusal needs all three of those supports (WP 7.1 post.php:4673-4677), so it cannot
-        // fire on these rows; nothing else on this path can fail the update. What it
-        // does not survive is another plugin filtering the write (`wp_insert_post_data` putting
-        // the status back, `wp_insert_post_empty_content` returning true) or an UPDATE that
-        // keeps failing: the same BATCH rows then come back on every request, forever, front-end
-        // page views included, which is the one bound BATCH was meant to give. Reachable only
-        // from outside this plugin, so it is left as it is for 0.5 and tracked for 0.6 rather
-        // than guarded here on a release week.
+        if ($posts !== []) {
+            $this->countFailures(array_map(static fn(object $p): int => (int) $p->ID, $posts));
+        }
         if (count($posts) < self::BATCH) {
             update_option(self::FLAG_CONVERSATIONS, '1', true);
+        }
+    }
+
+    /**
+     * One more failed try on every row of the batch still in `publish` after its update: one
+     * query to find them, and a meta read and a meta write for each. On a site where every
+     * update takes, that query comes back empty and nothing is read or written.
+     *
+     * The read is a query of its own rather than a cache hit: the batch query primed these
+     * rows' meta, but wp_update_post() dropped each row's meta cache on the way past
+     * (clean_post_cache(), wp-includes/post.php), so the count comes from the database again.
+     *
+     * @param list<int> $ids the batch, in the order it was read
+     */
+    private function countFailures(array $ids): void
+    {
+        $stuck = get_posts([
+            'post_type' => 'chat_history',
+            'post_status' => 'publish',
+            'post__in' => $ids,
+            'numberposts' => count($ids),
+            'fields' => 'ids',
+            'no_found_rows' => true,
+            'update_post_meta_cache' => false,
+            'update_post_term_cache' => false,
+        ]);
+        foreach ($stuck as $post) {
+            $id = (int) $post;
+            // wp_slash() for the rule the loop above states: every write that unslashes is handed a slashed value.
+            update_post_meta($id, self::META_ATTEMPTS, wp_slash((int) get_post_meta($id, self::META_ATTEMPTS, true) + 1));
         }
     }
 }
