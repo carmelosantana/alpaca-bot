@@ -57,13 +57,13 @@ final class UsageRetentionTest extends TestCase
 
         // A 0.5 row from before the field: 0, and the rest of the row as it was.
         delete_option(Migrate04::FLAG_RETENTION);
-        update_option(Plugin::OPTION, ['models.default' => 'qwen3-vl:2b', 'provider.base_url' => 'http://ollama.internal:11434/v1']);
+        update_option(Plugin::OPTION, ['models.default' => 'qwen3-vl:2b', 'provider.base_url' => 'http://ollama.invalid:11434/v1']);
         $this->assertArrayNotHasKey('privacy.usage_retention_days', get_option(Plugin::OPTION));
         (new Migrate04(new Store()))->run();
         $row = get_option(Plugin::OPTION);
         $this->assertSame(0, $row['privacy.usage_retention_days']);
         $this->assertSame('qwen3-vl:2b', $row['models.default']);
-        $this->assertSame('http://ollama.internal:11434/v1', $row['provider.base_url']);
+        $this->assertSame('http://ollama.invalid:11434/v1', $row['provider.base_url']);
 
         // A row that carries the field was saved by someone who saw it.
         delete_option(Migrate04::FLAG_RETENTION);

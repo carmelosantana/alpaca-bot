@@ -157,7 +157,7 @@ final class SettingsPageTest extends TestCase
         $store = Plugin::instance()->get(Store::class);
         $store->replace(array_merge(Schema::defaults(), [
             'provider.api_key' => 'sk-secret-integration',
-            'provider.base_url' => 'http://ollama.internal:11434/v1',
+            'provider.base_url' => 'http://ollama.invalid:11434/v1',
             'models.default' => 'qwen3-vl:2b',
             'models.temperature' => 0.3,
             'models.overrides' => ['qwen3-vl:2b' => ['num_ctx' => 4096, 'system' => 'Be brief & kind']],

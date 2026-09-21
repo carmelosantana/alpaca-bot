@@ -7,6 +7,12 @@
 # is the suite itself: the same phpunit.integration.xml, the same tests/Integration/bootstrap.php
 # and the same tests/Integration/wp-tests-config.php, so a pass here means the same thing in both.
 #
+# The suite needs no network beyond the database, and refuses one: tests/Integration/bootstrap.php
+# turns down any WP_Http request a test did not stub and swaps the configured model provider for
+# one whose calls throw. Those are the two doors the plugin's outbound calls go through today, so
+# a pass here is the same on a runner with no provider and no DNS. A caller that builds its own
+# HTTP client is outside both guards and takes it from the test instead (Kanboard #4322).
+#
 # The suite's PHPUnit 9.6 lives in tools/integration (its composer.json says why it is not the
 # root's PHPUnit 13) and is installed here, on the host, on every run, as the root `prefix`
 # script installs tools/strauss: a no-op when vendor matches the lock, and the only way a lock

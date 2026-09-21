@@ -47,4 +47,35 @@ tests_add_filter('muplugins_loaded', static function () use ($plugin): void {
 // is filtered rather than stored because wp-phpunit reinstalls the database on every run.
 tests_add_filter('pre_option_upload_path', static fn(): string => '/tmp/alpaca-bot-integration/uploads');
 
+// Not reaching the network is a property of the suite rather than of each test's care
+// (Kanboard #4322). Two doors get a guard each, both here because both WPH_MODEs load this file
+// (bin/test-integration.sh). What is guarded is WP_Http and the provider Factory::make() builds,
+// which is what the plugin's own outbound calls go through today -- not every way PHP can open a
+// socket. Code that builds its own Symfony HttpClient, cURL handle or stream outside
+// Provider\Factory is reached by neither guard, and a test for such a caller has to hand it a
+// client of its own.
+//
+// WP_Http: a request no test stubbed is refused, naming the URL. At the last priority, so a
+// test's own `pre_http_request` stub (ToolkitsTest, ShortcodesTest) answers first and this sees
+// only what nobody answered.
+tests_add_filter('pre_http_request', static function (mixed $pre, array $args, string $url): mixed {
+    return $pre !== false
+        ? $pre
+        : new WP_Error('alpaca_bot_tests_offline', 'The integration suite makes no network requests; stub this one with pre_http_request: ' . $url);
+}, PHP_INT_MAX, 3);
+// The model provider: the configured Ollama provider talks through Symfony's HttpClient, which no
+// `pre_http_request` sees, and ModelCatalog forgives a provider that fails, so a test that touched
+// the catalog without TestCase::fakeProvider() made a real connection attempt to the stored
+// `provider.base_url` and heard nothing back. It is swapped for OfflineProvider at the first
+// priority, so fakeProvider() (default priority) still replaces it. Only an OllamaProvider is
+// swapped: a WpAiClientProvider is left as built, because WpAiClientTest asserts Factory::make()
+// returns one and registers an in-test fake model with core for it to reach.
+tests_add_filter(
+    'alpaca_bot/provider',
+    static fn(mixed $provider): mixed => $provider instanceof \AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Provider\OllamaProvider
+        ? new \AlpacaBot\Tests\Integration\OfflineProvider()
+        : $provider,
+    1,
+);
+
 require $tests . '/includes/bootstrap.php';
