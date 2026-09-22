@@ -123,8 +123,8 @@ final class Assets
      * views, plupload, the modal templates in wp_footer), and the picker it opens queries the
      * library as the viewer, which core refuses to a user without `upload_files`: an editor's
      * Contributor would load all of it for an empty modal. So it is loaded for a viewer who can
-     * upload, and the composer's image button is inert for one who cannot (chat.ts's
-     * pickImage() returns when `wp.media` is absent).
+     * upload, and the composer's image button is inert for one who cannot (`pickImage()` in
+     * `resources/ts/boot.ts` returns when `wp.media` is absent).
      */
     public function enqueueFront(): void
     {

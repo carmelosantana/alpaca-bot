@@ -1,4 +1,4 @@
-/** The few DOM helpers chat.ts leans on, and the client-side twin of View\Chat\Notice. */
+/** The few DOM helpers the chat bundle leans on, and the client-side twin of View\Chat\Notice. */
 export const $ = <T extends Element = HTMLElement>(sel: string, root: ParentNode = document): T | null => root.querySelector<T>(sel);
 export const $$ = <T extends Element = HTMLElement>(sel: string, root: ParentNode = document): T[] => Array.from(root.querySelectorAll<T>(sel));
 

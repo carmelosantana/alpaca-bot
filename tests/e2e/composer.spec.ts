@@ -14,12 +14,12 @@ import { fileURLToPath } from 'node:url';
  * which needs only `pnpm build` and a Chromium — `pnpm e2e` runs both files and the other one
  * wants a wp-env.
  *
- * This file is also, for now, the whole of resources/ts/chat.ts's error-path coverage. chat.ts
- * exports nothing, so nothing in tests/ts/ can reach it, and giving it exports would mean a DOM
- * for node:test to run against — a new dependency, which is not a release-week decision. Driving
- * the built bundle in a real browser is in any case the stronger test of the two: it exercises
- * the artifact the zip ships rather than the module the artifact is compiled from. Making chat.ts
- * unit-testable is 0.6 work; until then, an error path added to it belongs here.
+ * The units these exits run through — restoreDraft(), redeem(), refusal(), and boot() itself —
+ * are exported from resources/ts/ and tested under node:test against happy-dom in
+ * tests/ts/chat.test.ts, which carries the first case below as a unit test (Kanboard #4334).
+ * This file stays, and is still the stronger test of the two: it exercises the artifact the zip
+ * ships, in a real browser, rather than the modules the artifact is compiled from. A new error
+ * path gets a unit test there first, and a case here when the bundle's wiring is what could break.
  *
  * The markup is the part of View\Chat\Shell that send() actually reads -- the form, the four
  * hidden fields, the composer buttons, the status region and the transcript -- rather than the
