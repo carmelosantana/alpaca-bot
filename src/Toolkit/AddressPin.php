@@ -19,7 +19,10 @@ namespace AlpacaBot\Toolkit;
  * the transport to resolve the name again when it connects, and a name under someone else's
  * control with a short TTL can answer the check with a public address and the connection with
  * 127.0.0.1 or the cloud metadata address (DNS rebinding; audit H-1). The caller connects to an
- * address this returns and to no other, so the answers that were checked are the answers used.
+ * address this returns and to no other, so no answer but a checked one is ever used. The converse
+ * does not hold and is not claimed: Mcp\Egress connects to one of them, and so does CurlPin on a
+ * libcurl that reads one address from an entry. The containment runs used-inside-checked, which
+ * is the direction the rebinding case turns on.
  *
  * Every answer has to pass, not just one of them. A name that answers with a private address
  * among public ones is a name pointed at something private, and refusing it costs a legitimate
@@ -40,14 +43,15 @@ namespace AlpacaBot\Toolkit;
  * every one of which passed the table -- so it admits nothing the check had not already
  * approved; what it stops is discarding what the check approved.
  *
- * The list is the resolver's, unedited: a name that answers with the same address twice is
- * handed it back twice rather than collapsed, so nothing is dropped quietly here. A repeat costs
+ * Where a name was looked up, the list is the resolver's, unedited: a name that answers with the
+ * same address twice is handed it back twice rather than collapsed, so nothing is dropped quietly
+ * here. (An IP literal is not looked up at all and is its own one-element list.) A repeat costs
  * a caller a repeated connect attempt at worst, which is less than a rule about when an address
  * may disappear from an answer the check already passed.
  *
  * What this does not cover is the same as SpecialPurposeAddress: a public address the site's
  * own network routes somewhere private. And what it covers only holds while the caller really
- * connects to the returned address; a proxy that is sent the name resolves it again, and a
+ * connects to a returned address; a proxy that is sent the name resolves it again, and a
  * transport that never sees the pin never uses it. What a caller does about those two is the
  * caller's to state: WebFetchToolkit for web_fetch, Mcp\PinnedHttpClient for an MCP server.
  *
@@ -61,7 +65,7 @@ final class AddressPin
      * @param string $host a host name or an IP literal (brackets allowed), as wp_parse_url() gives it
      * @param string $url the URL the host came from, for core's `http_request_host_is_external` filter; '' when there is none
      * @param null|\Closure(string): list<string> $lookup every address the name answers with; lookup() over the system resolver by default, a test hands in its own
-     * @return list<string> never empty: a name with no answer is refused rather than returned as []
+     * @return non-empty-list<string> a name with no answer is refused rather than returned as []; CurlPin's $ips requires non-empty, and PHPStan holds the call site to it (an entry built from [] would be `host:port:`, which libcurl cannot parse)
      * @throws AddressRefused with a translated message naming the host
      */
     public static function resolve(string $host, string $url = '', ?\Closure $lookup = null): array

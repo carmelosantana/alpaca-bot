@@ -70,9 +70,22 @@ final class CurlPin
      * dual-stack host -- and the pin holds either way. Reachability is what an old libcurl gives
      * up here; the pin never is.
      *
-     * @param list<string>                           $ips     every address the check passed, AddressPin's order; never empty, since AddressPin refuses a name with no answer
+     * The `function_exists()` around curl_version() is load-bearing today and not a nod to old
+     * builds: WebFetchToolkit::fetch() builds the pin (`:163`) before it asks curlCarries()
+     * whether cURL would carry the request at all (`:169`), so on a server with no ext-curl --
+     * a configuration the plugin supports and answers with a refusal in the user's own words
+     * (`:170`) -- this constructor runs first. An unguarded curl_version() would be a fatal Error
+     * there, reached before that refusal could ever be returned.
+     *
+     * `$ips` is non-empty by type rather than by argument: an empty list would build `host:port:`,
+     * which is an entry libcurl cannot parse and so the unpinned-request case this class exists
+     * to prevent. This parameter is where that is enforced -- PHPStan refuses an empty list here
+     * and proves the one call site (WebFetchToolkit::pin()) hands over a non-empty one --
+     * and AddressPin::resolve() declares non-empty-list so a reader of either sees the same fact.
+     *
+     * @param non-empty-list<string>                 $ips     every address the check passed, AddressPin's order
      * @param null|\Closure(mixed, int, mixed): bool $setopt  curl_setopt() by default; a test hands in a recorder
-     * @param null|\Closure(): int                   $version libcurl's version_number by default, 0 where the extension is absent (the fetch is refused before the request in that case, WebFetchToolkit::curlCarries()); a test hands in its own
+     * @param null|\Closure(): int                   $version libcurl's version_number by default, 0 where the extension is absent; a test hands in its own
      */
     public function __construct(string $host, int $port, array $ips, private ?\Closure $setopt = null, ?\Closure $version = null)
     {

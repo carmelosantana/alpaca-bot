@@ -38,8 +38,8 @@ use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Tool\ToolResult;
  * not asked: a CurlPin hands the checked addresses to cURL in one CURLOPT_RESOLVE entry through
  * core's `http_api_curl` action, leaving cURL a choice among them and no choice outside them
  * (how many of them the entry carries is libcurl's to decide and CurlPin's to say), hooked for
- * the one request and unhooked in a `finally` (get()). Redirects are the same problem
- * once per hop, so the HTTP API is told to follow none (`redirection` 0, which core's
+ * the one request and unhooked in a `finally` (get()). Redirects are the same problem once per
+ * hop, so the HTTP API is told to follow none (`redirection` 0, which core's
  * `empty( $parsed_args['redirection'] )` branch turns into Requests' `follow_redirects` false,
  * class-wp-http.php:359-363, so a 3xx comes back as a response rather than a `toomanyredirects`
  * exception). The whole control rests on that mapping holding at 6.9, the plugin's floor, and it
