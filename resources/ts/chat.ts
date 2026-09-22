@@ -18,7 +18,7 @@ interface Settings { rest: string; nonce: string; i18n: Record<string, string>; 
 interface Attachment { url: string; sizes?: Record<string, { url: string }> }
 interface MediaFrame { on(event: string, cb: () => void): void; open(): void; state(): { get(key: string): { first(): { toJSON(): Attachment } } } }
 interface HtmxDetail { path: string; headers: Record<string, string>; xhr?: XMLHttpRequest }
-interface RestError { code?: string; message?: string }
+interface RestError { code?: string; message?: string; data?: { limit?: number; retry_after?: number } }
 type Json = Record<string, unknown>;
 
 declare global {
@@ -68,6 +68,15 @@ function boot(cfg: Settings, form: HTMLFormElement): void {
       textarea.disabled = true;
       sendButton.disabled = true;
       notice('error', t('sessionExpired'));
+      return;
+    }
+    // The concurrency refusal is "not yet", not a failure: the ticket is unspent, and send()'s
+    // finally gives the message and the image back as soon as this returns, so this says why and
+    // stays out of the error colour. The server's message already names how many streams are
+    // open, so it is shown as it stands; `data.limit` is the same number for a client that words
+    // its own.
+    if (error.code === 'alpaca_bot_stream_concurrency') {
+      notice('warning', error.message || t('failed'));
       return;
     }
     notice('error', error.message || t('failed'));

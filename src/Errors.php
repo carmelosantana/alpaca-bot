@@ -45,6 +45,36 @@ final class Errors
     }
 
     /**
+     * 429 for a stream redemption that found this person already holding as many live streams as
+     * the site allows (StreamBudget::claim()). Its own code rather than tooMany()'s, because the
+     * two 429s are different waits: the per-minute bucket turns over within the minute and the
+     * request was spent, while this one frees when one of the person's own streams ends and the
+     * ticket is left unspent for the retry. A client that keys on the code can say so; one that
+     * keys on the status alone still sees a 429 with Retry-After. The message names the number
+     * because that is the thing the person can act on, and `limit` carries it for a client that
+     * words its own.
+     *
+     * @since 0.6.0
+     */
+    public static function streamConcurrency(int $limit, int $retryAfter): \WP_Error
+    {
+        return new \WP_Error(
+            'alpaca_bot_stream_concurrency',
+            sprintf(
+                /* translators: %d: how many replies one person may have streaming at once */
+                _n(
+                    'You already have %d stream open. Wait for it to finish, then send again.',
+                    'You already have %d streams open. Wait for one to finish, then send again.',
+                    $limit,
+                    'alpaca-bot',
+                ),
+                $limit,
+            ),
+            ['status' => 429, 'retry_after' => $retryAfter, 'limit' => $limit],
+        );
+    }
+
+    /**
      * 402 Payment Required is the nearest status for "your monthly allowance is spent": not a
      * permission problem (403) and not the client's fault (4xx otherwise), and distinct enough
      * that a client can show the cap rather than a generic error. The message is CapExceeded's

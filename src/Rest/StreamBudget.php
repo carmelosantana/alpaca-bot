@@ -66,7 +66,8 @@ use AlpacaBot\Settings\Store;
  * ## The concurrency cap, and why it is SQL
  *
  * `claim()` hands out at most LIMIT slots per person at a time, and a refused redemption is a
- * 429 that leaves the ticket unspent, so the client may retry it within its 120 s life.
+ * 429 `alpaca_bot_stream_concurrency` that leaves the ticket unspent, so the client may retry it
+ * within its 120 s life.
  *
  * A cap is only a cap if the claim is atomic, and this one is the only place in `src/` that
  * reaches for `$wpdb` to make it so. That is a deliberate exception, and the reason is that
@@ -209,7 +210,11 @@ final class StreamBudget
      * wait and not a prediction of it. A slot whose row could not be read contributes no stamp,
      * and if none of them could the ceiling is a whole budget.
      *
-     * @return array{slot: string|null, retry_after: int}
+     * `limit` is the number this claim was held to, after `alpaca_bot/stream/concurrent`, so a
+     * refusal can say how many streams the person has rather than quoting the shipped LIMIT at a
+     * site that moved it.
+     *
+     * @return array{slot: string|null, retry_after: int, limit: int}
      */
     public function claim(int $userId): array
     {
@@ -218,10 +223,12 @@ final class StreamBudget
          * Filters how many streamed turns one person may have running at once. The stream route
          * is not rate limited (the turn was counted on the POST that issued the ticket), so this
          * is what stops one account's tickets redeeming into one PHP worker each; a redemption
-         * over the limit is a 429 and its ticket stays valid. `$userId` is 0 for a visitor on a
-         * site that has opened the route through `alpaca_bot/capability/chat/stream`, and the
-         * count is then kept per client address rather than for visitors as a whole. Anything
-         * below 1 is raised to 1: a filter that forgot to return should not close the route.
+         * over the limit is a 429 `alpaca_bot_stream_concurrency`, whose message and `limit` both
+         * name the limit this claim was held to, and its ticket stays valid. `$userId` is 0 for a
+         * visitor on a site that has opened the route through
+         * `alpaca_bot/capability/chat/stream`, and the count is then kept per client address
+         * rather than for visitors as a whole. Anything below 1 is raised to 1: a filter that
+         * forgot to return should not close the route.
          *
          * @since 0.5.0
          * @param int $limit  the default, StreamBudget::LIMIT (3)
@@ -240,12 +247,12 @@ final class StreamBudget
         for ($index = 0; $index < $limit; $index++) {
             $wait = $this->take(self::OPTION . $subject . '_' . $index, $held, $now);
             if ($wait === null) {
-                return ['slot' => $index . ':' . $held, 'retry_after' => 0];
+                return ['slot' => $index . ':' . $held, 'retry_after' => 0, 'limit' => $limit];
             }
             $waits[] = $wait;
         }
         $waits = array_filter($waits);
-        return ['slot' => null, 'retry_after' => max(1, ($waits === [] ? $expires : min($waits)) - $now)];
+        return ['slot' => null, 'retry_after' => max(1, ($waits === [] ? $expires : min($waits)) - $now), 'limit' => $limit];
     }
 
     /**

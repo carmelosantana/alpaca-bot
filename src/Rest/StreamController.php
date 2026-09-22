@@ -147,7 +147,7 @@ final class StreamController extends Controller
         }
         $claim = $this->budget->claim($userId);
         if ($claim['slot'] === null) {
-            $response = rest_convert_error_to_response(Errors::tooMany($claim['retry_after']));
+            $response = rest_convert_error_to_response(Errors::streamConcurrency($claim['limit'], $claim['retry_after']));
             $response->header('Retry-After', (string) $claim['retry_after']);
             return $response;
         }

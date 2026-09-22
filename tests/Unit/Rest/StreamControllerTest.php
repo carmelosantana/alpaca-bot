@@ -533,10 +533,13 @@ it('refuses a redemption past the concurrent-stream limit with a 429, and leaves
     $over = $controller->handle(restRequest('GET', '/alpaca-bot/v1/chat/42/stream', ['id' => '42', 'token' => 'tok4']));
     expect($over)->toBeInstanceOf(WP_REST_Response::class)
         ->and($over->get_status())->toBe(429)
-        ->and($over->get_data()['code'])->toBe('alpaca_bot_rate_limited')
+        // Its own code, not the per-minute bucket's: the two 429s mean different waits, and the
+        // client says which (Kanboard #4333).
+        ->and($over->get_data()['code'])->toBe('alpaca_bot_stream_concurrency')
+        ->and($over->get_data()['message'])->toBe('You already have 3 streams open. Wait for one to finish, then send again.')
+        ->and($over->get_data()['data'])->toBe(['status' => 429, 'retry_after' => 720, 'limit' => 3])
         // The soonest of this person's leases lapses then, so waiting it out gets through.
         ->and($over->get_headers())->toBe(['Retry-After' => '720'])
-        ->and($over->get_data()['data']['retry_after'])->toBe(720)
         // Unspent: the ticket is still there to redeem when a slot frees.
         ->and($h->transients)->toHaveKey(ChatController::STREAM_TRANSIENT . 'tok4')
         ->and($table->rows)->toHaveCount(StreamBudget::LIMIT);

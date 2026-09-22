@@ -76,6 +76,19 @@ it('hands out LIMIT slots to one person and then refuses, with the wait until th
         ->and(($this->slots)('8'))->toHaveCount(1);
 });
 
+it('reports the limit a refused claim was held to, the filtered one included, so the refusal can name it', function (): void {
+    $budget = ($this->budget)();
+    foreach (range(1, StreamBudget::LIMIT) as $n) {
+        expect($budget->claim(7)['limit'])->toBe(StreamBudget::LIMIT);
+    }
+    expect($budget->claim(7))->toMatchArray(['slot' => null, 'limit' => StreamBudget::LIMIT]);
+
+    // A site that raised the cap: the fourth slot is free, and the fifth refusal says 4.
+    Filters\expectApplied('alpaca_bot/stream/concurrent')->twice()->andReturn(4);
+    expect($budget->claim(7)['slot'])->toBeString()
+        ->and($budget->claim(7))->toMatchArray(['slot' => null, 'limit' => 4]);
+});
+
 it('cannot be raced past the cap: thirty claims that all read the same instant take three slots', function (): void {
     // The probe that condemned the transient version of this cap. Three batches of ten
     // redemptions from one account, every worker in a batch reading the store before any of

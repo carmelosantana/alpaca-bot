@@ -279,7 +279,7 @@ you received it. The route answers a refusal as JSON before any frame is written
 | No `token` parameter | 400 `rest_missing_callback_param` (core) |
 | Token unknown, expired, another user's, for another conversation, or already redeemed | 403 `rest_forbidden` "Invalid or expired stream token." |
 | Not logged in | 401 `rest_forbidden` |
-| This user already has the most streams the site allows running at once (3; filter `alpaca_bot/stream/concurrent`) | 429 `alpaca_bot_rate_limited`, `Retry-After` header and `data.retry_after` in seconds. **The ticket is not spent**: retry it while it lives. The wait is a ceiling — the soonest running stream's lease — so it can be longer than the 120 s the ticket has left, and then the turn has to be posted again |
+| This user already has the most streams the site allows running at once (3; filter `alpaca_bot/stream/concurrent`) | 429 `alpaca_bot_stream_concurrency`, `Retry-After` header, `data.retry_after` in seconds and `data.limit` (how many streams one person may hold). **The ticket is not spent**: retry it while it lives. The wait is a ceiling — the soonest running stream's lease — so it can be longer than the 120 s the ticket has left, and then the turn has to be posted again |
 | `HEAD` | 405 `alpaca_bot_method_not_allowed` with `Allow: GET` (core routes a HEAD to the GET handler; the handler refuses it before the ticket is touched, so a probe neither runs nor spends the turn) |
 | Any other method | 404 `rest_no_route` (core: no such route for that method) |
 
@@ -699,7 +699,8 @@ route the same object is the `error` frame's data.
 | 404 | `alpaca_bot_not_found` | A conversation that does not exist or is not yours | |
 | 404 | `rest_no_route` | Core: no such route for that method (e.g. `POST` on the stream route) | |
 | 405 | `alpaca_bot_method_not_allowed` | `HEAD` on the stream route (`Allow: GET`) | |
-| 429 | `alpaca_bot_rate_limited` | Two different causes, one code: the `chat` bucket is spent for this minute (`Retry-After` holds the seconds until it turns over); or a stream redemption found this user already at the concurrent-stream cap, where `Retry-After` is a ceiling on the wait for a slot — up to the site's whole stream budget, 720 s at the defaults — and the ticket is left unspent | `retry_after` (same number as the header) |
+| 429 | `alpaca_bot_rate_limited` | The `chat` bucket is spent for this minute (`Retry-After` holds the seconds until it turns over) | `retry_after` (same number as the header) |
+| 429 | `alpaca_bot_stream_concurrency` | A stream redemption found this user already at the concurrent-stream cap. `Retry-After` is a ceiling on the wait for a slot — up to the site's whole stream budget, 720 s at the defaults — and the ticket is left unspent | `retry_after` (same number as the header), `limit` (the cap the claim was held to, 3 at the defaults) |
 | 502 | `alpaca_bot_provider_error` | The model provider failed or could not be built; also a tool turn whose run failed without the provider saying so, or that a tool stopped before it began | `detail` (administrators only): `Provider error: …` and the provider's own text when the provider threw, or in words of its own where the provider had no part in it |
 | 504 | `alpaca_bot_stream_timeout` | A streamed turn ran past the site's wall-clock budget for one turn and was stopped; what had arrived is saved as a partial reply. Only ever an `error` frame — the response's status was already sent — so this is a code to key on, not a status a client will read | `limit` (the budget in seconds, 720 at the defaults) |
 
@@ -752,9 +753,11 @@ not limited: the POST that issued its ticket was, and the ticket can be redeemed
 
 What bounds that route instead is a concurrency cap, because one ticket holds a PHP worker for
 the length of a turn whether or not anyone is still reading: one person may have 3 streams
-running at once (filter `alpaca_bot/stream/concurrent`), and a redemption over that is the 429
-in the table above with its ticket left unspent. The one case that exceeds it is a provider that
-hangs: a stream stuck inside a provider call writes no frame, so it is still holding its PHP
+running at once (filter `alpaca_bot/stream/concurrent`), and a redemption over that is a 429
+`alpaca_bot_stream_concurrency` with its ticket left unspent, which is a different code from the
+per-minute bucket's so a client can tell "wait for the minute" from "wait for your own stream to
+finish". The one case that exceeds it is a provider that hangs: a stream stuck inside a
+provider call writes no frame, so it is still holding its PHP
 worker when its slot is released at the end of the budget — `Rest\StreamBudget` carries that
 argument in full. A turn is also bounded in wall-clock time —
 `provider.timeout × 6 × 2`, 720 s at the defaults, filter `alpaca_bot/stream/budget` — after
