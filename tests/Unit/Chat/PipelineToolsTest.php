@@ -378,6 +378,101 @@ it('stores the partial reply with the calls made so far, and lets the fiber go t
         ->and(array_map(static fn(array $w): string => $w[0], $h->writes))->toBe(['wp_insert_post', 'update_post_meta', 'wp_update_post', 'wp_insert_post']);
 });
 
+// AgentStreamObserver keeps back the few bytes that could begin a faked tool call's marker
+// (FakedToolCallStream), so a run whose text ends in one of them has bytes in hand when the
+// agent returns. Both ends of the turn have to take them: the drain loop's flush() for a
+// consumer still reading, and send()'s finally for one that walked away. Without the first the
+// deltas are short of the reply *and* $streamed no longer ends with the Output's content, so
+// the tail branch below yields the whole answer a second time.
+it('flushes the bytes the observer was still deciding about as the run\'s last delta, so the deltas are the reply and no tail is repeated', function (): void {
+    $provider = agentProvider([[new Response('a < b <', ProviderFinishReason::Stop, usage: new Usage(2, 1, 3))]]);
+    $h = pipelineWith($provider, [], [], TOOL_MODEL, null, registryWith(['echo' => echoToolkit('echo_tool')]));
+
+    $gen = $h->pipeline->send(3, 'ask');
+    $deltas = [];
+    foreach ($gen as $d) {
+        $deltas[] = [$d->text, $d->held];
+    }
+    expect($deltas)->toBe([['a < b ', false], ['<', false]])
+        ->and(implode('', array_column($deltas, 0)))->toBe('a < b <')
+        ->and($gen->getReturn()->reply->content)->toBe('a < b <');
+});
+
+it('puts the bytes the observer was still deciding about on an abandoned turn\'s stored partial reply', function (): void {
+    $provider = agentProvider([
+        [new Response('first <', ProviderFinishReason::Stop), new Response('', ProviderFinishReason::ToolUse, [new ToolCall('c1', 'echo_tool', ['text' => 'ping'])])],
+    ]);
+    $h = pipelineWith($provider, [], [], TOOL_MODEL, null, registryWith(['echo' => echoToolkit('echo_tool')]));
+    $failed = null;
+    Actions\expectDone('alpaca_bot/chat/failed')->once()->whenHappen(function (\Throwable $e, Conversation $c) use (&$failed): void {
+        $failed = $c;
+    });
+
+    $gen = $h->pipeline->send(3, 'ping');
+    expect($gen->current()->text)->toBe('first ');
+    $gen->next();
+    expect($gen->current()->text)->toBe('');  // the heartbeat before the tool runs
+    unset($gen);
+
+    // The '<' never reached the consumer, and it is still this reply's byte: the stored partial
+    // is what streamed plus what the observer was holding, not what streamed alone.
+    expect($failed->messages[1]->content)->toBe('first <')
+        ->and($failed->messages[1]->meta['partial'])->toBeTrue();
+});
+
+// settle() stores nothing once the stream has ended, so the finally's take is too late for a
+// turn that threw: the catch stores its own partial reply first, and has to take the bytes
+// before it does. The lever is the consumer's own throw, which is the one failure that reaches
+// the catch without agentTurn() having run its flush().
+it('puts them on the partial reply a turn that threw after a tool ran stores from its catch', function (): void {
+    $toolkit = echoToolkit('draft_post', 'Use it.', static fn(array $a): ToolResult => ToolResult::success('{"id": 225}'));
+    $provider = agentProvider([
+        [new Response('Drafting <', ProviderFinishReason::Stop), new Response('', ProviderFinishReason::ToolUse, [new ToolCall('c1', 'draft_post', ['text' => 'Hello'])])],
+        [new Response('Done. <', ProviderFinishReason::Stop)],
+    ]);
+    $h = pipelineWith($provider, [], [], TOOL_MODEL, null, registryWith(['draft' => $toolkit]));
+    $failed = null;
+    Actions\expectDone('alpaca_bot/chat/failed')->once()->whenHappen(function (\Throwable $e, Conversation $c) use (&$failed): void {
+        $failed = $c;
+    });
+
+    $turn = $h->pipeline->send(3, 'draft it');
+    $seen = '';
+    foreach ($turn as $delta) {
+        $seen .= $delta->text;
+        if (str_contains($seen, 'Done.')) {
+            break;
+        }
+    }
+    // The second iteration's text ends on a byte that could begin a marker, so the observer is
+    // still holding one when the throw arrives.
+    expect($seen)->toBe("Drafting <\n\nDone. ");
+    expect(fn() => $turn->throw(new \LogicException('boom')))->toThrow(\RuntimeException::class);
+    expect($failed->messages[1]->content)->toBe("Drafting <\n\nDone. <")
+        ->and($failed->messages[1]->meta['partial'])->toBeTrue();
+});
+
+// The whole feature at the pipeline's own seam, and the one thing it may never do: the deltas
+// of a faked call carry `held`, and they still concatenate to every byte the model wrote, while
+// the reply the turn stores is the recovered one. Marking, never withholding.
+it('flags a faked call\'s markup on a streamed turn\'s deltas without changing a byte of them', function (): void {
+    $leak = "Let me answer that.\n\n<tool_call>{\"name\": \"done\", \"arguments\": {\"response\": \"An alpaca is a camelid.\"}}</tool_call>";
+    $provider = agentProvider([[new Response($leak, ProviderFinishReason::Stop, usage: new Usage(2, 2, 4))]]);
+    $h = pipelineWith($provider, [], [], TOOL_MODEL, null, registryWith(['echo' => echoToolkit('echo_tool')]));
+
+    $gen = $h->pipeline->send(3, 'what is an alpaca?');
+    $deltas = [];
+    foreach ($gen as $d) {
+        $deltas[] = [$d->text, $d->held];
+    }
+    expect($deltas)->toBe([
+        ["Let me answer that.\n\n", false],
+        ['<tool_call>{"name": "done", "arguments": {"response": "An alpaca is a camelid."}}</tool_call>', true],
+    ])
+        ->and(implode('', array_column($deltas, 0)))->toBe($leak)
+        ->and($gen->getReturn()->reply->content)->toBe("Let me answer that.\n\nAn alpaca is a camelid.");
+});
+
 it('bills an abandoned tool turn for the calls the run had already made, from the usage that had arrived', function (): void {
     $provider = agentProvider([
         // The first call's usage rides on its last chunk, the tool call; the agent sums it into

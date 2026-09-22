@@ -176,6 +176,7 @@ final class Assets
                 /* translators: {size} and {max} are filled in by the browser with figures such as "7 MB". */
                 'imagesTooLarge' => __('Those images total {size}; this site takes up to {max} per message. Attach fewer or smaller images.', 'alpaca-bot'),
                 'thinking' => __('Thinking…', 'alpaca-bot'),
+                'callingTool' => __('Calling a tool…', 'alpaca-bot'),
             ],
             'offline' => __('You are offline. Messages will send once the connection is back.', 'alpaca-bot'),
         ]);

@@ -187,6 +187,9 @@ pre > .ab-code__copy:focus-visible { outline-color: var(--ab-code-text); }
 .ab-msg__reasoning summary { cursor: pointer; }
 .ab-msg__reasoning-text { max-height: 12em; margin-top: 4px; overflow-y: auto; }
 
+/* The line under a streamed reply while a faked tool call's markup is being held (resources/ts/held.ts). */
+.ab-msg__tool { margin: 4px 0 0; color: var(--ab-muted); font-size: 13px; font-style: italic; }
+
 /* ---- composer -------------------------------------------------------------------------- */
 
 /* Sticky is for iOS, where 100vh overshoots the visible viewport: the row stays in view as the page scrolls. */

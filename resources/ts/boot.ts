@@ -20,6 +20,7 @@ import { $, $$, asId, el, fromHtml, icon, notice } from './dom.ts';
 import { grow, restoreDraft, setImage } from './composer.ts';
 import { redeem, restError } from './redeem.ts';
 import { refusal } from './refusal.ts';
+import { appendText, releaseHeld } from './held.ts';
 import type { RestError } from './redeem.ts';
 
 // wp_localize_script() ships every scalar as a string, so the byte figure arrives as one; imageLimit() reads it.
@@ -190,7 +191,7 @@ export function boot(cfg: Settings, form: HTMLFormElement): void {
             if (typeof d.text === 'string' && d.text !== '') {
               if (!answered && reasoning) (reasoning.parentElement as HTMLDetailsElement).open = false;
               answered = true;
-              content.append(d.text);
+              appendText(content, d.text, d.held === true, t('callingTool'));
             }
           });
         } else if (event === 'done') {
@@ -215,6 +216,8 @@ export function boot(cfg: Settings, form: HTMLFormElement): void {
   }
   /** Leaves the streamed text as it is for good: still pre-wrapped (data-partial), without the caret (data-streaming) and no longer announced (aria-live). */
   function partial(bubble: HTMLElement): void {
+    // The turn is over and nothing will replace this bubble: what was held is shown as it came.
+    releaseHeld(bubble);
     delete bubble.dataset.streaming;
     bubble.dataset.partial = '1';
     $('.ab-msg__content', bubble)?.removeAttribute('aria-live');

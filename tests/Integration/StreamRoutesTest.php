@@ -145,8 +145,10 @@ final class StreamRoutesTest extends TestCase
         $id = $frames[0][1]['conversation_id'];
         $this->assertGreaterThan(0, $id);
         $this->assertSame('fake-model', $frames[0][1]['model']);
-        $this->assertSame(['text' => 'fake ', 'reasoning' => ''], $frames[1][1]);
-        $this->assertSame(['text' => 'reply', 'reasoning' => ''], $frames[2][1]);
+        // `held` is on every delta frame and false for a turn with no faked tool call in it
+        // (docs/api.md section 4); Unit\Rest\StreamControllerTest pins the `true` case.
+        $this->assertSame(['text' => 'fake ', 'reasoning' => '', 'held' => false], $frames[1][1]);
+        $this->assertSame(['text' => 'reply', 'reasoning' => '', 'held' => false], $frames[2][1]);
         $done = $frames[3][1];
         $this->assertSame($id, $done['conversation_id']);
         $this->assertSame('fake reply', $done['message']['content']);

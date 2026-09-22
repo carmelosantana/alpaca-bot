@@ -235,7 +235,7 @@ it('serve() takes over the redeemed request: SSE headers, then the output prepar
             ['X-Accel-Buffering', 'no'],
         ])
         ->and($server->sent)->toBe($sentBeforePrepare)
-        ->and($out)->toStartWith("event: start\ndata: {\"conversation_id\":42,\"model\":\"llama3.2\"}\n\nevent: delta\ndata: {\"text\":\"a\",\"reasoning\":\"\"}\n\nevent: delta\ndata: {\"text\":\"b\",\"reasoning\":\"\"}\n\nevent: done\ndata: {")
+        ->and($out)->toStartWith("event: start\ndata: {\"conversation_id\":42,\"model\":\"llama3.2\"}\n\nevent: delta\ndata: {\"text\":\"a\",\"reasoning\":\"\",\"held\":false}\n\nevent: delta\ndata: {\"text\":\"b\",\"reasoning\":\"\",\"held\":false}\n\nevent: done\ndata: {")
         ->and($out)->toEndWith("\n\n")
         ->and($h->meta[42]['ab_messages'][1]['content'])->toBe('ab');
 
@@ -282,9 +282,9 @@ it('writes a start frame with the real conversation id, a delta per chunk, then 
     });
     expect($frames)->toHaveCount(5)
         ->and($frames[0])->toBe("event: start\ndata: {\"conversation_id\":42,\"model\":\"qwen3:8b\"}\n\n")
-        ->and($frames[1])->toBe("event: delta\ndata: {\"text\":\"a\",\"reasoning\":\"\"}\n\n")
-        ->and($frames[2])->toBe("event: delta\ndata: {\"text\":\"\",\"reasoning\":\"thinking\"}\n\n")
-        ->and($frames[3])->toBe("event: delta\ndata: {\"text\":\"b\",\"reasoning\":\"\"}\n\n")
+        ->and($frames[1])->toBe("event: delta\ndata: {\"text\":\"a\",\"reasoning\":\"\",\"held\":false}\n\n")
+        ->and($frames[2])->toBe("event: delta\ndata: {\"text\":\"\",\"reasoning\":\"thinking\",\"held\":false}\n\n")
+        ->and($frames[3])->toBe("event: delta\ndata: {\"text\":\"b\",\"reasoning\":\"\",\"held\":false}\n\n")
         ->and($frames[4])->toStartWith("event: done\ndata: ")
         ->and($h->model)->toBe('qwen3:8b');
     $done = json_decode(substr($frames[4], strlen("event: done\ndata: ")), true);
@@ -296,6 +296,30 @@ it('writes a start frame with the real conversation id, a delta per chunk, then 
         ->and($done['contexts'])->toBe([])
         // The stored transcript is what was streamed.
         ->and($h->meta[42]['ab_messages'][1]['content'])->toBe('ab');
+});
+
+// The frames above are every delta this route's plain path can make, and all of them are
+// unheld, so `"held":false` on them would still pass if the field were written as a constant.
+// This is the other value reaching the wire: a tool turn whose model wrote its call out as text.
+it('writes held: true on the frames carrying a faked tool call\'s markup, and the bytes with them', function (): void {
+    $leak = "One moment.\n\n<tool_call>{\"name\": \"done\", \"arguments\": {\"response\": \"An alpaca is a camelid.\"}}</tool_call>";
+    $h = pipelineWith(agentProvider([[new Response($leak, ProviderFinishReason::Stop, usage: new Usage(2, 2, 4))]]), [], [], [['id' => 'llama3.2', 'tools' => true]], null, registryWith(['echo' => echoToolkit('echo_tool')]));
+    actionRuns('alpaca_bot/chat/started');
+    $frames = [];
+    (new StreamController($h->pipeline, $h->store))->stream(streamTicket(['options' => ['model' => 'llama3.2']]), function (string $f) use (&$frames): void {
+        $frames[] = $f;
+    });
+
+    $deltas = array_values(array_filter($frames, static fn(string $f): bool => str_starts_with($f, "event: delta\n")));
+    $data = array_map(static fn(string $f): array => (array) json_decode(substr(trim($f), strlen("event: delta\ndata: ")), true), $deltas);
+    expect(array_map(static fn(array $d): array => [$d['text'], $d['held']], $data))->toBe([
+        ["One moment.\n\n", false],
+        ['<tool_call>{"name": "done", "arguments": {"response": "An alpaca is a camelid."}}</tool_call>', true],
+    ])
+        // Marked, not withheld: the frames still carry every byte the model wrote, and the
+        // `done` frame carries the reply with the markup taken back out.
+        ->and(implode('', array_column($data, 'text')))->toBe($leak)
+        ->and(json_decode(substr(trim(end($frames)), strlen("event: done\ndata: ")), true)['message']['content'])->toBe("One moment.\n\nAn alpaca is a camelid.");
 });
 
 it('stops after the frame the client did not read: no done frame, the listener removed, the partial reply stored and chat/failed fired', function (): void {
@@ -391,7 +415,7 @@ it('keeps the provider\'s words out of an editor\'s error frame and hands them t
     });
     // The text that had arrived was streamed; the failure follows it, then nothing more.
     expect($frames)->toHaveCount(2)
-        ->and($frames[0])->toBe("event: delta\ndata: {\"text\":\"par\",\"reasoning\":\"\"}\n\n")
+        ->and($frames[0])->toBe("event: delta\ndata: {\"text\":\"par\",\"reasoning\":\"\",\"held\":false}\n\n")
         ->and($frames[1])->toBe("event: error\ndata: {\"code\":\"alpaca_bot_provider_error\",\"message\":\"The model provider could not complete the request.\",\"data\":{\"status\":502}}\n\n")
         ->and(implode('', $frames))->not->toContain('ollama-gateway');
 

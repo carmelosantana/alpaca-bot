@@ -82,9 +82,11 @@ final class FakedToolCall
      * being a block. Blank lines a removal leaves at the very top, along with trailing space,
      * go at the end.
      *
-     * The deltas already streamed still carry the markup; suppressing it live is separate. The
-     * front end replaces the assistant bubble wholesale when the turn ends (`POST /view/bubble`
-     * with the stored reply), so what this returns is what the user is left reading.
+     * The deltas already streamed still carry the markup, flagged `held` from the opening marker
+     * onward (FakedToolCallStream), so the screen keeps it out of sight while it arrives rather
+     * than showing raw JSON. The front end replaces the assistant bubble wholesale when the turn
+     * ends (`POST /view/bubble` with the stored reply), so what this returns is what the user is
+     * left reading.
      *
      * @since 0.5.0 as Pipeline::recovered(), moved here unchanged in 0.6.0.
      */
@@ -163,7 +165,7 @@ final class FakedToolCall
     public static function markup(string $content): array
     {
         // phpcs:ignore Universal.Operators.DisallowShortTernary.Found -- The idiomatic guard for preg_split()'s false return; ?: reads better here than repeating the whole call in a full ternary.
-        $segments = preg_split('~</?tool_call>~', $content, -1, PREG_SPLIT_OFFSET_CAPTURE) ?: [];
+        $segments = preg_split('~' . preg_quote(self::OPEN, '~') . '|' . preg_quote(self::CLOSE, '~') . '~', $content, -1, PREG_SPLIT_OFFSET_CAPTURE) ?: [];
         $last = count($segments) - 1;
         $calls = [];
         $pieces = [];

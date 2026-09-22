@@ -590,15 +590,15 @@ event: start
 data: {"conversation_id":169,"model":"minicpm-v4.6:1b"}
 
 event: delta
-data: {"text":"","reasoning":"First"}
+data: {"text":"","reasoning":"First","held":false}
 
 event: delta
-data: {"text":"","reasoning":","}
+data: {"text":"","reasoning":",","held":false}
 
 …
 
 event: delta
-data: {"text":"orange","reasoning":""}
+data: {"text":"orange","reasoning":"","held":false}
 
 event: done
 data: {"conversation_id":169,"message":{"role":"assistant","content":"orange","model":"minicpm-v4.6:1b","usage":{"prompt_tokens":18,"completion_tokens":283},"created":1788736395,"images":[],"meta":{"reasoning":"First, the user says: \"Name one colour. One word only.\" …"}},"receipt":{"user_id":1,"model":"minicpm-v4.6:1b","prompt_tokens":18,"completion_tokens":283,"total_tokens":301,"duration_ms":5282,"conversation_id":169,"log_id":170,"created":1788736395},"contexts":[]}
@@ -607,11 +607,11 @@ data: {"conversation_id":169,"message":{"role":"assistant","content":"orange","m
 | Event | Data | When |
 |---|---|---|
 | `start` | `{conversation_id, model}` | Once the conversation exists (created on the spot for a ticket that named 0), before any text. This is where a new conversation's id arrives. |
-| `delta` | `{text, reasoning}` | One per fragment, and both fields may be empty (see below). A thinking model sends its reasoning as `reasoning` deltas with empty `text` first, then the answer as `text`. |
+| `delta` | `{text, reasoning, held}` | One per fragment; `text` and `reasoning` may each be empty (see below), and `held` says the text is a faked tool call's markup (see below). A thinking model sends its reasoning as `reasoning` deltas with empty `text` first, then the answer as `text`. |
 | `done` | The exact body a direct `POST /chat` answers with: `{conversation_id, message, receipt, contexts}` | The turn finished. The connection closes after it. |
 | `error` | `{code, message, data}`, the same JSON body a non-streaming error would carry | The turn was refused or failed. A refusal (cap exceeded, bad request) is an `error` frame alone with no `start`; a provider that fails mid-reply sends its deltas first, then `error`; a turn that outran the site's stream budget ends the same way, with `alpaca_bot_stream_timeout` after the deltas that had arrived. The connection closes after it. |
 
-A `delta` frame may be wholly empty — `{"text":"","reasoning":""}` — and an empty one may
+A `delta` frame may be wholly empty — `{"text":"","reasoning":"","held":false}` — and an empty one may
 arrive before any text at all, including as the very first `delta` of a turn. That is not a bug
 to guard against: on a turn that calls tools the server writes one per tool call, all of them
 before any tool of that iteration runs, as the heartbeat that bounds an abandoned turn. An
@@ -621,6 +621,20 @@ goes away and the server learns of it only from a write that fails, so an iterat
 tool with no text before it would otherwise leave nothing to write, and the tool's side effect
 (a draft created) would land with the tab already closed. Append the empty strings and render
 nothing.
+
+`held` is `true` on the text of a faked tool call while it streams. A model whose deployed
+template cannot really call tools writes the call out as text, `<tool_call>{…}</tool_call>`, and
+every byte from the opening marker through its closing one arrives flagged. The bytes are still
+sent: a turn's `text` deltas still concatenate to exactly what the model wrote, so a client that
+ignores `held` — the reader below does — renders what it always did. The admin screen keeps held
+text out of sight, shows "Calling a tool…" while the block is open, and then either renders the
+stored reply on `done`, which has the markup taken out of it and a faked `done` call's answer put
+in its place, or, on `error` or a dropped connection, shows the held text exactly where it
+arrived. Two things are never held: a block whose opening marker the model's template swallowed
+(recognising it would mean buffering every reply to its end), and a plain turn's text, which has
+no markers in it. A marker split across two frames is not a problem — the server keeps back up to
+11 bytes that could begin one until the next fragment settles it — and the empty heartbeat
+`delta` carries `held: true` when it falls inside an open block.
 
 A client that disconnects mid-stream is not refunded: the server notices at the next write,
 stores what was sent so far with `message.meta.partial: true`, and records a receipt for the

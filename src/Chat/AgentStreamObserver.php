@@ -16,7 +16,10 @@ use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Tool\ToolResult;
  * The vendored AbstractAgent reports through SplObserver, and its notify() calls update($this)
  * with one argument, leaving the event name and payload on the agent (lastEvent(),
  * lastEventData()); both live on AbstractAgent, not on SplSubject, so anything else is ignored.
- * Events read: `agent.text_delta` and `agent.reasoning` (a string each) become Deltas;
+ * Events read: `agent.text_delta` and `agent.reasoning` (a string each) become Deltas; text
+ * deltas go through a FakedToolCallStream on the way to the queue, which flags the pieces that
+ * are a faked tool call's markup (`held`) and keeps back the few bytes of a marker split across
+ * two deltas; `flush()` and `takeUnsent()` are the two ways those come back out.
  * `agent.iteration` (an int) marks where a paragraph break goes (separated()); `agent.tool_call`
  * (a ToolCall) opens a record and queues an empty Delta, the heartbeat (below);
  * `agent.tool_result` (a ToolResult) closes the record; `agent.error` (a string) is kept as
@@ -123,9 +126,13 @@ final class AgentStreamObserver implements \SplObserver
 
     private ?string $error = null;
 
+    /** Says which streamed bytes are a faked tool call's markup (Kanboard #4329); the class docblock's event list says where it sits. */
+    private FakedToolCallStream $faked;
+
     public function __construct()
     {
         $this->deltas = new \SplQueue();
+        $this->faked = new FakedToolCallStream();
     }
 
     /**
@@ -155,7 +162,13 @@ final class AgentStreamObserver implements \SplObserver
                     $this->breakPending = false;
                 }
                 $this->streamedText .= $text;
-                $this->push(new Delta($text));
+                // One delta in, one or more out: a piece that is a faked call's markup is flagged
+                // rather than withheld, and a few bytes that might be the start of a marker are
+                // kept until the next delta (or flush()) settles it. A delta that is nothing but
+                // those few bytes therefore queues nothing at all, and so suspends nothing.
+                foreach ($this->faked->feed($text) as [$piece, $held]) {
+                    $this->push(new Delta($piece, '', $held));
+                }
                 break;
             case 'agent.reasoning':
                 $this->push(new Delta('', is_string($data) ? $data : ''));
@@ -165,8 +178,10 @@ final class AgentStreamObserver implements \SplObserver
                     $this->pending[] = ['id' => $data->id, 'name' => self::bounded($data->name, self::NAME_CHARS), 'arguments' => self::boundedArguments($data->arguments)];
                     // The heartbeat: an empty delta, so the pipeline yields (and a streaming
                     // transport writes) something before the tool runs. The event fires before
-                    // any tool of the iteration executes, which is the moment that matters.
-                    $this->push(new Delta(''));
+                    // any tool of the iteration executes, which is the moment that matters. It
+                    // carries the hold state so a screen that is hiding a faked call's markup
+                    // keeps saying so across it.
+                    $this->push(new Delta('', '', $this->faked->open()));
                 }
                 break;
             case 'agent.tool_result':
@@ -192,6 +207,29 @@ final class AgentStreamObserver implements \SplObserver
             $out[] = $this->deltas->dequeue();
         }
         return $out;
+    }
+
+    /**
+     * Queues the bytes FakedToolCallStream was still deciding about, for a run that has ended:
+     * the pipeline calls this after the agent returns, before its last drain, so they reach the
+     * client in their place and in the stored reply. Nothing suspends here: push() suspends only
+     * inside the streamed fiber, and this is called after that fiber has terminated.
+     */
+    public function flush(): void
+    {
+        foreach ($this->faked->flush() as [$text, $held]) {
+            $this->push(new Delta($text, '', $held));
+        }
+    }
+
+    /**
+     * The same bytes for a run nobody will drain again — the consumer walked away, or the turn
+     * threw — handed back as text rather than as a delta, so send() can put them on the partial
+     * reply it stores. Once: a second call has nothing.
+     */
+    public function takeUnsent(): string
+    {
+        return implode('', array_column($this->faked->flush(), 0));
     }
 
     /**

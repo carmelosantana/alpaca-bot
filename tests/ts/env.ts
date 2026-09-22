@@ -21,6 +21,15 @@ import { Window } from 'happy-dom';
  * document. An import-time capture anywhere in resources/ts would bind the first document into
  * a module every later case then shares, and this harness would stop being honest.
  *
+ * Never assert on a node from this document. Compare a primitive: a count from
+ * `querySelectorAll(...).length`, a `textContent`, a boolean. node:test renders a failed
+ * assertion by serialising both operands, and a happy-dom element's graph reaches its parent,
+ * its document and its window, so one `assert.equal(el, null)` that happens to fail allocates
+ * until the process dies. One did, on 2026-09-22: ~49 GB resident and an OOM kill that took
+ * the whole session with it, before the assertion printed anything. The same check written as
+ * `assert.equal(document.querySelectorAll('.x').length, 0)` fails in milliseconds and says more.
+ * The cost is paid only when a test fails, which is exactly when the output has to survive.
+ *
  * Script evaluation and file loading stay off — the fixtures are markup, and a DOM that ran a
  * <script> would be running code no test reviewed. That switch is a narrowing, not a sandbox:
  * happy-dom's isolation has been weaker than it looked more than once (GHSA-qpm2-6cq5-7pq5), so

@@ -285,7 +285,11 @@ final class Pipeline
                     // Only a turn that reaches its return comes through here: a consumer that
                     // walks away is settled from the finally below while this generator is
                     // still suspended in the foreach, so an abandoned turn stores the raw leak,
-                    // as it stores whatever else had streamed.
+                    // as it stores whatever else had streamed. The two paths store the same
+                    // bytes — the finally takes the observer's undecided tail the same way
+                    // agentTurn()'s flush() does — and differ only in this call: an abandoned
+                    // turn's partial reply keeps the markup it streamed. Recovering it there as
+                    // well is Kanboard #4329 comment 617 §2, and is not done here.
                     $content = FakedToolCall::recovered($content);
                     $failure = self::failure($output, $observer);
                     if ($failure !== null) {
@@ -323,6 +327,9 @@ final class Pipeline
                 // LogicException after it, a toolkit added through `alpaca_bot/toolkits` that
                 // throws outside the agent's own catch regions, a consumer throwing into the
                 // generator) lands here with the same draft made and the same duty to record it.
+                // Whatever the observer was still deciding about belongs to this reply, and this
+                // is the last moment it can reach the partial transcript below.
+                $content .= $observer?->takeUnsent() ?? '';
                 $toolCalls = $observer?->toolCalls() ?? [];
                 if ($toolCalls !== []) {
                     $this->storePartial($ephemeral, $userId, $conversation, $model, $content, $reasoning, $prompt, $completion, self::elapsedMs($started), $toolCalls);
@@ -353,6 +360,10 @@ final class Pipeline
                     throw new \RuntimeException(self::raised($e), 0, $e);
                 }
             } finally {
+                // Empty on every path that came through the catch or through agentTurn()'s
+                // flush; the bytes themselves on the one path that came through neither, the
+                // consumer who stopped iterating while the generator was suspended.
+                $content .= $observer?->takeUnsent() ?? '';
                 $this->settle($streamEnded, $ephemeral, $userId, $conversation, $model, $content, $reasoning, $prompt, $completion, $started, $observer?->toolCalls() ?? []);
             }
         } catch (\Throwable $e) {
@@ -690,10 +701,15 @@ final class Pipeline
      * text the user should already be reading sits in the queue, so a tool's side effect (a
      * draft created) would land before the sentence announcing it was shown. The drain after
      * termination is for deltas announced with no suspension (a delta raised outside the
-     * fiber), so nothing queued is ever dropped. One of the deltas is empty: the observer
-     * queues one before every tool call, so a consumer is handed control (and a streaming
-     * transport has a frame to write, and so a chance to learn its client has gone) before
-     * the tool runs, not only after the next text arrives.
+     * fiber), so nothing queued is ever dropped. The observer's own flush() and the drain after
+     * it are for the bytes its FakedToolCallStream was still deciding about: they become the
+     * run's last delta, and they do it before $streamed is compared with the Output's content
+     * below, so that comparison sees the same bytes it saw in 0.5. A consumer that walks away
+     * before that drain leaves those bytes to send()'s finally
+     * (AgentStreamObserver::takeUnsent()), so the partial reply it stores is every byte too.
+     * One of the deltas is empty: the observer queues one before every tool call, so a consumer
+     * is handed control (and a streaming transport has a frame to write, and so a chance to
+     * learn its client has gone) before the tool runs, not only after the next text arrives.
      *
      * Rejected: reimplementing the loop as a generator in this plugin (a copy of the vendored
      * loop, drifting from its tool pairing repair, its batching and its empty-reply handling as
@@ -754,6 +770,13 @@ final class Pipeline
                 break;
             }
             $fiber->resume();
+        }
+        // The bytes the observer kept back in case they began a marker are the run's last words
+        // now that it has ended, and they go out before any tail below.
+        $observer->flush();
+        foreach ($observer->drain() as $delta) {
+            $streamed .= $delta->text;
+            yield $delta;
         }
         $output = $fiber->getReturn();
         if (!$output instanceof Output) {

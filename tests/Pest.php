@@ -747,3 +747,27 @@ function mcpServerConfig(string $url = 'https://mcp.example.test/mcp', float $ti
 {
     return AlpacaBot\Mcp\ServerConfig::fromSettings(['id' => 'example', 'url' => $url, 'header_name' => 'Authorization', 'header_value' => 'Bearer t', 'prefix' => 'ex', 'timeout' => $timeout, 'max_bytes' => $maxBytes, 'approved' => []]);
 }
+
+/**
+ * FakedToolCallStreamTest: `$chunks` fed through one stream, flushed at the end, with adjacent
+ * pieces of the same flag joined — what a consumer sees whatever the provider's chunking was.
+ *
+ * @param list<string> $chunks
+ * @return list<array{0: string, 1: bool}>
+ */
+function fakedStream(array $chunks): array
+{
+    $stream = new AlpacaBot\Chat\FakedToolCallStream();
+    $out = [];
+    foreach ([...array_map(static fn(string $chunk): array => [$chunk], $chunks), []] as $call) {
+        foreach ($call === [] ? $stream->flush() : $stream->feed($call[0]) as [$text, $held]) {
+            $last = count($out) - 1;
+            if ($last >= 0 && $out[$last][1] === $held) {
+                $out[$last][0] .= $text;
+                continue;
+            }
+            $out[] = [$text, $held];
+        }
+    }
+    return $out;
+}
