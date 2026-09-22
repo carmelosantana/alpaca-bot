@@ -13,13 +13,14 @@ namespace AlpacaBot\Toolkit;
  * class-wp-http-requests-hooks.php:56-58; Requests/src/Transport/Curl.php:172-174, with
  * CURLOPT_URL set at :447), and every request gets a fresh handle (Requests.php:268-276,
  * Curl.php:102-105), so the entry set here dies with its request. CURLOPT_RESOLVE seeds that
- * handle's DNS cache with `host:port:address`: cURL connects to the address and still speaks to
- * the host, so the Host header, TLS SNI and certificate verification all use the name in the URL.
+ * handle's DNS cache with `host:port:addr[,addr]...`: cURL connects to one of those addresses
+ * and to no other, and still speaks to the host, so the Host header, TLS SNI and certificate
+ * verification all use the name in the URL.
  *
  * The entry is applied to whatever handle the hook hands over, with no check that it belongs
  * to the request it was made for, and that is safe rather than careless: an entry for
  * `host:port` changes nothing for a request to any other host or port, and pins a request to
- * the same one to the address that was checked. Matching on the URL instead would be the
+ * the same one to the addresses that were checked. Matching on the URL instead would be the
  * fragile choice, since core rewrites the URL (wp_kses_bad_protocol(), class-wp-http.php:283-289)
  * before it builds the hook's arguments (`:345`).
  *
@@ -37,15 +38,49 @@ namespace AlpacaBot\Toolkit;
  */
 final class CurlPin
 {
-    /** The CURLOPT_RESOLVE entry: `host:port:address`. */
+    /**
+     * libcurl 7.59.0, the release its changelog gives for reading more than one address from a
+     * CURLOPT_RESOLVE entry, in the form curl_version()['version_number'] reports. 8.5.0 was
+     * checked against directly and reads two; the 7.59.0 floor is the changelog's, not this
+     * suite's, and it is the safe direction to be wrong in -- a floor set too high pins one
+     * address on a build that could have taken two, which costs reachability and not the pin.
+     */
+    private const MULTI_ADDRESS = 0x073B00;
+
+    /**
+     * The CURLOPT_RESOLVE entry: `host:port:addr[,addr]...`, every address AddressPin checked,
+     * comma-joined in the order it handed them over. The comma-separated form is the option's
+     * own (`man curl`: `--resolve <[+]host:port:addr[,addr]...>`), and cURL chooses among those
+     * addresses as it would among a name's own answers, which is what keeps a dual-stack host
+     * reachable from a server that can route only one family (AddressPin says why that matters).
+     */
     public readonly string $entry;
 
     /**
-     * @param null|\Closure(mixed, int, mixed): bool $setopt curl_setopt() by default; a test hands in a recorder
+     * Why libcurl's version is read rather than assumed. The comma form is younger than the
+     * option, so a build that predates it reads `1.2.3.4,::1` as one address it cannot parse,
+     * and an entry libcurl cannot parse is an entry it may drop -- a dropped entry being a
+     * request that resolves the name for itself, unpinned, which is the one thing this class
+     * exists to prevent. 8.5.0 refuses such a request instead ("Couldn't parse CURLOPT_RESOLVE
+     * entry", connecting to nothing), and that is the half of this class's fail-closed claim
+     * that a single address has always rested on; which way a build older than the comma form
+     * answers is not something this code can find out from inside a request, and guessing it is
+     * not a guess to make about a pin. So below the floor the entry carries the first address
+     * alone -- 0.5's shape exactly, with 0.5's cost, an IPv6-only server that cannot reach a
+     * dual-stack host -- and the pin holds either way. Reachability is what an old libcurl gives
+     * up here; the pin never is.
+     *
+     * @param list<string>                           $ips     every address the check passed, AddressPin's order; never empty, since AddressPin refuses a name with no answer
+     * @param null|\Closure(mixed, int, mixed): bool $setopt  curl_setopt() by default; a test hands in a recorder
+     * @param null|\Closure(): int                   $version libcurl's version_number by default, 0 where the extension is absent (the fetch is refused before the request in that case, WebFetchToolkit::curlCarries()); a test hands in its own
      */
-    public function __construct(string $host, int $port, string $ip, private ?\Closure $setopt = null)
+    public function __construct(string $host, int $port, array $ips, private ?\Closure $setopt = null, ?\Closure $version = null)
     {
-        $this->entry = $host . ':' . $port . ':' . $ip;
+        $version ??= static function (): int {
+            $info = function_exists('curl_version') ? curl_version() : false;
+            return is_array($info) ? (int) ($info['version_number'] ?? 0) : 0;
+        };
+        $this->entry = $host . ':' . $port . ':' . implode(',', $version() >= self::MULTI_ADDRESS ? $ips : array_slice($ips, 0, 1));
     }
 
     /** The `http_api_curl` callback (accepted args: 1, the handle). */

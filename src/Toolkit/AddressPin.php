@@ -6,32 +6,44 @@ namespace AlpacaBot\Toolkit;
 
 /**
  * The plugin's one address rule: resolve a name once, both families, hold every answer to
- * SpecialPurposeAddress, and hand back the single address the connection is then pinned to.
- * web_fetch asks it and pins that address into cURL (CurlPin, through core's `http_api_curl`);
- * Mcp\Egress asks it and pins the same address into Symfony HttpClient's `resolve` option
- * (Mcp\PinnedHttpClient). That is why it is a class of its own rather than a method of
+ * SpecialPurposeAddress, and hand back every answer that passed, for the caller to pin as many
+ * of as its transport will take. web_fetch asks it and pins them into cURL in one
+ * CURLOPT_RESOLVE entry (CurlPin, through core's `http_api_curl`, all of them on a libcurl that
+ * reads more than one and the first alone below that, which CurlPin states); Mcp\Egress asks it
+ * and pins the first into Symfony HttpClient's `resolve` option, which maps a host to one
+ * address and no more (Mcp\Egress says what that costs there; Mcp\PinnedHttpClient says what
+ * else it forces). That is why it is a class of its own rather than a method of
  * WebFetchToolkit: one rule, whichever transport asks it.
  *
- * Why the address is returned and not just judged: a check that only answers yes or no leaves
+ * Why the addresses are returned and not just judged: a check that only answers yes or no leaves
  * the transport to resolve the name again when it connects, and a name under someone else's
  * control with a short TTL can answer the check with a public address and the connection with
- * 127.0.0.1 or the cloud metadata address (DNS rebinding; audit H-1). The caller connects to
- * the address this returns, so the answer that was checked is the answer that is used.
+ * 127.0.0.1 or the cloud metadata address (DNS rebinding; audit H-1). The caller connects to an
+ * address this returns and to no other, so the answers that were checked are the answers used.
  *
- * Every answer has to pass, not just the one returned. The connection only goes to the first
- * one, but a name that answers with a private address among public ones is a name pointed at
- * something private, and refusing it costs a legitimate host nothing it had. A special-purpose
- * answer is let through only when core's `http_request_host_is_external` filter opts the host
- * in, so that opt-in means the same thing here as for any plugin; what it costs is what core
- * charges for it, since a site that sets it has already told WordPress that host is reachable.
- * The first answer is the first A record when there is one (lookup() lists A before AAAA), so a
- * dual-stack host is reached over IPv4. What that costs: gethostbynamel() answers with A records
- * whether or not this server can route them, and a pin *replaces* resolution rather than seeding
- * it (CURLOPT_RESOLVE, and Symfony's `resolve` the same), so no other family is left to fall
- * back to. An IPv6-only server can therefore no longer reach a dual-stack host, where before the
- * pin it could, because the transport resolved for itself and chose the AAAA. Handing back every
- * address that passed, and leaving the family choice with the transport, is the better shape;
- * that is a change to a signature later work is written against, not one to make here.
+ * Every answer has to pass, not just one of them. A name that answers with a private address
+ * among public ones is a name pointed at something private, and refusing it costs a legitimate
+ * host nothing it had. A special-purpose answer is let through only when core's
+ * `http_request_host_is_external` filter opts the host in, so that opt-in means the same thing
+ * here as for any plugin; what it costs is what core charges for it, since a site that sets it
+ * has already told WordPress that host is reachable.
+ *
+ * All of them are handed back, in lookup()'s order, because a pin is used *instead of* a lookup
+ * and not alongside one: cURL connects to what is in the entry and to nothing else ("prevent the
+ * otherwise normally resolved address to be used", `man curl` on `--resolve`), and Symfony's
+ * `resolve` the same. Handing back only the first meant handing back an A record whenever there
+ * was one, since lookup() lists A before AAAA and gethostbynamel() answers with A records
+ * whether or not this server can route them; an IPv6-only server was then pinned to an
+ * unroutable IPv4 address and could not reach a dual-stack host at all, where before the pin it
+ * could, because the transport resolved for itself and chose the AAAA (Kanboard #4483). Handing
+ * back all of them leaves the family choice where it was, with the transport, over addresses
+ * every one of which passed the table -- so it admits nothing the check had not already
+ * approved; what it stops is discarding what the check approved.
+ *
+ * The list is the resolver's, unedited: a name that answers with the same address twice is
+ * handed it back twice rather than collapsed, so nothing is dropped quietly here. A repeat costs
+ * a caller a repeated connect attempt at worst, which is less than a rule about when an address
+ * may disappear from an answer the check already passed.
  *
  * What this does not cover is the same as SpecialPurposeAddress: a public address the site's
  * own network routes somewhere private. And what it covers only holds while the caller really
@@ -44,14 +56,15 @@ namespace AlpacaBot\Toolkit;
 final class AddressPin
 {
     /**
-     * The address to connect to for `$host`, checked.
+     * Every address to connect to for `$host`, each one checked, in lookup()'s order.
      *
      * @param string $host a host name or an IP literal (brackets allowed), as wp_parse_url() gives it
      * @param string $url the URL the host came from, for core's `http_request_host_is_external` filter; '' when there is none
      * @param null|\Closure(string): list<string> $lookup every address the name answers with; lookup() over the system resolver by default, a test hands in its own
+     * @return list<string> never empty: a name with no answer is refused rather than returned as []
      * @throws AddressRefused with a translated message naming the host
      */
-    public static function resolve(string $host, string $url = '', ?\Closure $lookup = null): string
+    public static function resolve(string $host, string $url = '', ?\Closure $lookup = null): array
     {
         $host = strtolower(trim($host, '.'));
         $literal = trim($host, '[]');
@@ -74,13 +87,13 @@ final class AddressPin
                 throw new AddressRefused(sprintf(__('%1$s resolves to %2$s, a private, local or other special-purpose address.', 'alpaca-bot'), $host, $address));
             }
         }
-        return $addresses[0];
+        return $addresses;
     }
 
     /**
      * Every address a name answers with, both families, through the system resolver: A through
-     * gethostbynamel(), AAAA through dns_get_record(). The connection is pinned to one of them,
-     * but all of them are checked (resolve() says why), so both families have to be read. Cost:
+     * gethostbynamel(), AAAA through dns_get_record(). All of them are checked and all of them
+     * are handed back (resolve() says why), so both families have to be read. Cost:
      * two lookups, and a resolver that times out costs its timeout. For web_fetch the A one is
      * normally a cache hit, since core's wp_http_validate_url() has just made it; the AAAA one
      * is a query either way, no core version having asked for it, and a caller that has not been

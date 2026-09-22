@@ -22,7 +22,7 @@ use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Tool\ToolResult;
  * loopback, RFC 1918 and 0/8 and passes the link-local address where a cloud instance's
  * metadata service answers with the instance's credentials; 7.1 refuses the IPv4 registry; no
  * version reads an AAAA record. So the plugin's own check runs second, in AddressPin: one
- * lookup, both families, every answer held to SpecialPurposeAddress, one address handed back.
+ * lookup, both families, every answer held to SpecialPurposeAddress, every answer handed back.
  * Two of core's rules are kept on purpose, and each says what it costs where it is applied: the
  * site's own host is exempt (pin()), and `http_request_host_is_external` opts a host in for this
  * tool as it does for any plugin (AddressPin). `http_allowed_safe_ports` is core's and stays
@@ -30,13 +30,15 @@ use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Tool\ToolResult;
  * tool's own message, not a WP_Error about a blocked URL, and so that nothing is built for a URL
  * that was never going anywhere.
  *
- * Wherever the pin reaches, the address the check passed is the address the connection uses.
- * Each check is its own DNS lookup and the transport would make one more when it connects, so a
- * name under an attacker's control with a short TTL could answer the checks with a public
- * address and the connection with 127.0.0.1 or the metadata address (DNS rebinding; audit H-1),
- * and the response text would come back to the model. So the transport is not asked: a CurlPin
- * hands the checked address to cURL as CURLOPT_RESOLVE through core's `http_api_curl` action,
- * hooked for the one request and unhooked in a `finally` (get()). Redirects are the same problem
+ * Wherever the pin reaches, an address the check passed is the address the connection uses, and
+ * no other is available to it. Each check is its own DNS lookup and the transport would make one
+ * more when it connects, so a name under an attacker's control with a short TTL could answer the
+ * checks with a public address and the connection with 127.0.0.1 or the metadata address (DNS
+ * rebinding; audit H-1), and the response text would come back to the model. So the transport is
+ * not asked: a CurlPin hands the checked addresses to cURL in one CURLOPT_RESOLVE entry through
+ * core's `http_api_curl` action, leaving cURL a choice among them and no choice outside them
+ * (how many of them the entry carries is libcurl's to decide and CurlPin's to say), hooked for
+ * the one request and unhooked in a `finally` (get()). Redirects are the same problem
  * once per hop, so the HTTP API is told to follow none (`redirection` 0, which core's
  * `empty( $parsed_args['redirection'] )` branch turns into Requests' `follow_redirects` false,
  * class-wp-http.php:359-363, so a 3xx comes back as a response rather than a `toomanyredirects`
@@ -210,8 +212,9 @@ final class WebFetchToolkit implements ToolkitInterface
     }
 
     /**
-     * The pin for one hop, or null when the hop needs none; AddressRefused when the hop may not
-     * be fetched. An address literal needs no pin (there is nothing to resolve), and neither does
+     * The pin for one hop, carrying the addresses AddressPin checked, or null when the hop needs
+     * none; AddressRefused when the hop may not be fetched. An address literal needs no pin
+     * (there is nothing to resolve), and neither does
      * the site's own host, which is exempt as it is in core: a local site resolves to a private
      * address and can still read its own pages. The cost of the exemption is core's too:
      * whatever else listens on that host on 80, 443 or 8080 is reachable, and the host is not
@@ -228,7 +231,7 @@ final class WebFetchToolkit implements ToolkitInterface
         if ($host === strtolower((string) wp_parse_url(home_url(), PHP_URL_HOST))) {
             return null;
         }
-        $ip = AddressPin::resolve($host, $url, $this->resolver);
+        $ips = AddressPin::resolve($host, $url, $this->resolver);
         if (SpecialPurposeAddress::isAddress(trim($host, '[]'))) {
             return null;
         }
@@ -236,7 +239,7 @@ final class WebFetchToolkit implements ToolkitInterface
         if ($port === 0) {
             $port = strtolower((string) wp_parse_url($url, PHP_URL_SCHEME)) === 'https' ? 443 : 80;
         }
-        return new CurlPin($host, $port, $ip);
+        return new CurlPin($host, $port, $ips);
     }
 
     /**

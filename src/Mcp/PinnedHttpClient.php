@@ -18,8 +18,10 @@ use AlpacaBot\Vendor\Symfony\Contracts\HttpClient\ResponseStreamInterface;
  * options win over a client's defaults (HttpClientTrait::mergeDefaultOptions(), `$options +=
  * $defaultOptions`), and each of these is load-bearing:
  *
- * - `resolve` [host => the checked address]: the connection goes to the address AddressPin
- *   passed, not to whatever the name answers at connect time. The key is the request URL's own
+ * - `resolve` [host => the checked address]: the connection goes to the address Egress took from
+ *   the ones AddressPin passed, not to whatever the name answers at connect time. One address,
+ *   where web_fetch hands cURL as many as its libcurl will take, because that is all this
+ *   option holds; Egress says what that costs. The key is the request URL's own
  *   host, so Symfony normalises both the same way (HttpClientTrait.php:209-219). A host that is
  *   already an IP literal is pinned by the URL itself and gets an empty map instead, which is
  *   still an assignment: whatever `resolve` the caller passed is gone either way.

@@ -313,7 +313,7 @@ it('honours core\'s http_request_host_is_external opt-in for a special-purpose a
     expect(webFetchTool()->execute(['url' => 'http://169.254.169.254/'])->content)->toBe('internal');
 });
 
-// ---------------------------------------------------------------- one lookup, one address, every hop
+// ---------------------------------------------------------------- one lookup, every checked address, every hop
 // The HTTP API is told to follow no redirect (redirection 0; WP 7.1 class-wp-http.php:359-363
 // turns that into Requests' follow_redirects false, so a 3xx comes back as a response) and the
 // tool follows them itself: each hop validated, looked up once, checked, and pinned into cURL by
@@ -321,7 +321,10 @@ it('honours core\'s http_request_host_is_external opt-in for a special-purpose a
 // callback, so these pin what is hooked and unhooked and with what entry; CurlPinTest pins what
 // the callback does to a handle.
 
-it('pins each hop to the address its check passed, hooking one CurlPin per request and unhooking it after', function (): void {
+// first.test is dual-stack on purpose: both of its answers passed the check, so both go into the
+// entry and cURL keeps the family choice. Pin only the first and this assertion fails, which is
+// the regression Kanboard #4483 names -- an IPv6-only server given an unroutable A record.
+it('pins each hop to every address its check passed, hooking one CurlPin per request and unhooking it after', function (): void {
     Functions\when('wp_http_validate_url')->returnArg();
     $pins = [];
     Actions\expectAdded('http_api_curl')->twice()->whenHappen(static function (CurlPin $pin, int $priority, int $accepted) use (&$pins): void {
@@ -337,10 +340,10 @@ it('pins each hop to the address its check passed, hooking one CurlPin per reque
         };
     });
     expect($tool->execute(['url' => 'https://first.test/a'])->content)->toBe('arrived')
-        ->and($pins)->toBe([['first.test:443:93.184.216.34', 10, 1], ['next.test:8080:104.20.23.154', 10, 1]]);
+        ->and($pins)->toBe([['first.test:443:93.184.216.34,2606:2800:220:1::1', 10, 1], ['next.test:8080:104.20.23.154', 10, 1]]);
 });
 
-it('asks the resolver once per hop and pins its first answer, so a name that rebinds between lookups never reaches the second', function (): void {
+it('asks the resolver once per hop and pins the answers it checked, so a name that rebinds between lookups never reaches the second', function (): void {
     Functions\when('wp_http_validate_url')->returnArg();
     $answers = [['93.184.216.34'], ['127.0.0.1']];
     $asked = 0;

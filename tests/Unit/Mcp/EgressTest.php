@@ -23,14 +23,14 @@ function egressOver(?array &$seen, MockResponse $response, ?\Closure $resolve = 
         $seen = $options;
         return $response;
     });
-    return (new Egress($resolve ?? static fn(string $host, string $url): string => '93.184.216.34', $mock))->client(mcpServerConfig());
+    return (new Egress($resolve ?? static fn(string $host, string $url): array => ['93.184.216.34'], $mock))->client(mcpServerConfig());
 }
 
 it('pins the connection to the address the check passed, turns redirects off, and takes its timeouts from the server row', function (): void {
     $asked = [];
-    $client = egressOver($seen, new MockResponse('{"jsonrpc":"2.0"}'), static function (string $host, string $url) use (&$asked): string {
+    $client = egressOver($seen, new MockResponse('{"jsonrpc":"2.0"}'), static function (string $host, string $url) use (&$asked): array {
         $asked[] = [$host, $url];
-        return '93.184.216.34';
+        return ['93.184.216.34'];
     });
     expect($client)->toBeInstanceOf(HttpClientInterface::class)
         ->and($client->request('POST', 'https://mcp.example.test/mcp', ['json' => ['jsonrpc' => '2.0']])->getContent())->toBe('{"jsonrpc":"2.0"}')
@@ -40,6 +40,18 @@ it('pins the connection to the address the check passed, turns redirects off, an
         ->and($seen['timeout'])->toBe(12.5)
         ->and($seen['max_duration'])->toBe(12.5)
         ->and($seen['no_proxy'])->toBe('*');
+});
+
+// AddressPin hands back every address it checked, and web_fetch pins all of them, but Symfony's
+// `resolve` maps a host to one address and writes it into a string ("$host:$port:$ip",
+// CurlHttpClient.php:198-204), so an array there would be pinned to the word "Array". Egress
+// takes the first and says why in its own docblock; this holds it to that, both that the map's
+// value is a string and that the one taken is the first of the list.
+it('takes the first of the checked addresses, because Symfony maps a host to one address and not a list', function (): void {
+    $client = egressOver($seen, new MockResponse('{}'), static fn(string $host, string $url): array => ['93.184.216.34', '2606:2800:220:1::1']);
+    $client->request('POST', 'https://mcp.example.test/mcp')->getContent();
+    expect($seen['resolve'])->toBe(['mcp.example.test' => '93.184.216.34'])
+        ->and($seen['resolve']['mcp.example.test'])->toBeString();
 });
 
 it('does not let the caller loosen it: its own resolve, redirects, timeouts and proxy rule are overwritten', function (): void {
@@ -100,7 +112,7 @@ it('chains a caller\'s own on_progress after the cap', function (): void {
 });
 
 it('refuses a server that is not https and one with no host name, both before any lookup, and one whose address AddressPin refuses, building nothing', function (): void {
-    $never = static fn(string $host, string $url): string => throw new LogicException('no lookup expected');
+    $never = static fn(string $host, string $url): array => throw new LogicException('no lookup expected');
     expect(static fn() => (new Egress($never, new MockHttpClient()))->client(mcpServerConfig('http://mcp.example.test/mcp')))->toThrow(AddressRefused::class, 'https');
     // `https://./mcp` parses as an https URL whose host trims to nothing, so it reaches the
     // second refusal and has to be told the thing that is actually wrong with it.
@@ -109,6 +121,6 @@ it('refuses a server that is not https and one with no host name, both before an
     foreach (['https://127.0.0.1/mcp', 'https://[::1]/mcp', 'https://169.254.169.254/'] as $url) {
         expect(static fn() => (new Egress(null, new MockHttpClient()))->client(mcpServerConfig($url)))->toThrow(AddressRefused::class);
     }
-    $refusing = static fn(string $host, string $url): string => throw new AddressRefused('mcp.example.test resolves to 10.0.0.7');
+    $refusing = static fn(string $host, string $url): array => throw new AddressRefused('mcp.example.test resolves to 10.0.0.7');
     expect(static fn() => (new Egress($refusing, new MockHttpClient()))->client(mcpServerConfig()))->toThrow(AddressRefused::class, '10.0.0.7');
 });

@@ -32,8 +32,8 @@ use AlpacaBot\Vendor\Symfony\Contracts\HttpClient\HttpClientInterface;
 final class Egress
 {
     /**
-     * @param null|\Closure(string, string): string $resolve   the address check, host and URL in, address out, AddressRefused when refused; AddressPin::resolve() by default
-     * @param HttpClientInterface|null              $transport the client the pin is laid over; HttpClient::create() by default, a test hands in Symfony's MockHttpClient
+     * @param null|\Closure(string, string): list<string> $resolve   the address check, host and URL in, every checked address out, AddressRefused when refused; AddressPin::resolve() by default
+     * @param HttpClientInterface|null                    $transport the client the pin is laid over; HttpClient::create() by default, a test hands in Symfony's MockHttpClient
      */
     public function __construct(private ?\Closure $resolve = null, private ?HttpClientInterface $transport = null) {}
 
@@ -53,7 +53,17 @@ final class Egress
         if ($host === '') {
             throw new AddressRefused(__('The address has no host name.', 'alpaca-bot'));
         }
-        $ip = ($this->resolve ?? AddressPin::resolve(...))($host, $server->url);
+        // The first of the checked addresses, and only the first, where web_fetch pins every one
+        // of them: Symfony's `resolve` maps a host to one address and writes it into a string
+        // ("$resolveHost:$port:$ip", CurlHttpClient.php:198-204), so a list there would pin the
+        // connection to the word "Array". What that costs is what AddressPin says handing back
+        // only the first cost web_fetch, and no longer does: the first address is an A record
+        // whenever the name has one, so an IPv6-only server cannot reach a dual-stack MCP
+        // server, where before the pin its own transport would have chosen the AAAA. Taking a
+        // list would mean a `resolve` option Symfony does not have; the alternative would be
+        // writing CURLOPT_RESOLVE under Symfony's client, which only its Curl transport has and
+        // which would be a pin the Native transport silently does not carry.
+        $ip = ($this->resolve ?? AddressPin::resolve(...))($host, $server->url)[0];
         return new PinnedHttpClient($this->transport ?? HttpClient::create(), $host, $ip, $server->timeout, $server->maxBytes);
     }
 }
