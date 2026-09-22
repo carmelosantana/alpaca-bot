@@ -19,9 +19,10 @@ namespace AlpacaBot\Toolkit;
  * IPv6 half of the table and never by the IPv4 half, so those prefixes go whole rather than
  * being unwrapped. What it does not cover: a public address that a site's own network routes
  * somewhere private (a split-horizon DNS name, a reverse proxy on a public address in front of
- * an internal service), which no address table can see, and a name whose answer changes between
- * this check and the connection (see WebFetchToolkit). Cost per address: a linear walk of the
- * table, microseconds.
+ * an internal service), which no address table can see. A name whose answer changes between
+ * this check and the connection is not the table's to catch; AddressPin closes that by handing
+ * back the one address that passed, so the connection can be pinned to it. Cost per address: a
+ * linear walk of the table, microseconds.
  *
  * @since 0.5.0
  */

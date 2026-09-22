@@ -202,5 +202,33 @@ final class ToolkitsTest extends TestCase
         $this->assertSame(5, $seen['args']['timeout']);
         $this->assertSame(1048576, $seen['args']['limit_response_size']);
         $this->assertTrue($seen['args']['reject_unsafe_urls']);
+        $this->assertSame(0, $seen['args']['redirection']);
+    }
+
+    /**
+     * A relative Location is resolved against the hop it came from by core's
+     * WP_Http::make_absolute_url() (class-wp-http.php:973), which the unit suite does not load,
+     * and followed by the tool itself, with the HTTP API's own redirects off on both requests.
+     * Both hops are the site's own host, the one host the tool neither looks up nor pins
+     * (WebFetchToolkit::pin()), so `pre_http_request` can serve both without DNS.
+     */
+    public function test_web_fetch_follows_a_relative_redirect_itself_with_the_http_apis_redirects_off(): void
+    {
+        $seen = [];
+        add_filter('pre_http_request', static function (mixed $pre, array $args, string $url) use (&$seen): array {
+            $seen[] = ['url' => $url, 'redirection' => $args['redirection']];
+            if (count($seen) === 1) {
+                return ['headers' => ['location' => '/moved/here/'], 'body' => '', 'response' => ['code' => 301, 'message' => 'Moved Permanently'], 'cookies' => [], 'filename' => null];
+            }
+            return ['headers' => ['content-type' => 'text/plain'], 'body' => 'arrived', 'response' => ['code' => 200, 'message' => 'OK'], 'cookies' => [], 'filename' => null];
+        }, 10, 3);
+        $tool = (new WebFetchToolkit(Plugin::instance()->get(Store::class)))->tools()[0];
+        $res = $tool->execute(['url' => home_url('/old/')]);
+        $this->assertSame(ToolResultStatus::Success, $res->status, $res->content);
+        $this->assertSame('arrived', $res->content);
+        $this->assertSame([
+            ['url' => home_url('/old/'), 'redirection' => 0],
+            ['url' => home_url('/moved/here/'), 'redirection' => 0],
+        ], $seen);
     }
 }
