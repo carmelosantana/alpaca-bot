@@ -231,4 +231,18 @@ final class ToolkitsTest extends TestCase
             ['url' => home_url('/moved/here/'), 'redirection' => 0],
         ], $seen);
     }
+
+    /**
+     * The transport question against real Requests, and the Site Health test as core would
+     * collect it: the harness and wp-env containers both have cURL with SSL and no
+     * WP_PROXY_HOST, so the test registered through `site_status_tests` answers good.
+     */
+    public function test_site_health_reports_that_web_fetch_can_run_pinned_here(): void
+    {
+        $this->assertTrue(WebFetchToolkit::curlCarries(true));
+        $tests = apply_filters('site_status_tests', ['direct' => [], 'async' => []]);
+        $this->assertArrayHasKey(\AlpacaBot\Admin\SiteHealth::TEST, $tests['direct']);
+        $result = call_user_func($tests['direct'][\AlpacaBot\Admin\SiteHealth::TEST]['test']);
+        $this->assertSame('good', $result['status'], $result['label']);
+    }
 }

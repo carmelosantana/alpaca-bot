@@ -30,9 +30,15 @@ function webFetchResponse(string $body, int $code = 200, string $contentType = '
     return ['headers' => ['content-type' => $contentType] + $headers, 'body' => $body, 'response' => ['code' => $code]];
 }
 
-function webFetchTool(string $userAgent = 'UA/1', ?\Closure $resolver = null): Tool
+function webFetchTool(string $userAgent = 'UA/1', ?\Closure $resolver = null, ?\Closure $curl = null): Tool
 {
-    $tool = (new WebFetchToolkit(new Store(['toolkits.user_agent' => $userAgent]), $resolver ?? static fn(string $host): array => ['93.184.216.34']))->tools()[0];
+    $tool = (new WebFetchToolkit(
+        new Store(['toolkits.user_agent' => $userAgent]),
+        $resolver ?? static fn(string $host): array => ['93.184.216.34'],
+        // The unit suite does not load Requests, so the real check would say "no cURL" and refuse
+        // everything; the tests about the refusal hand in their own answer.
+        $curl ?? static fn(bool $https): bool => true,
+    ))->tools()[0];
     expect($tool)->toBeInstanceOf(Tool::class);
     return $tool;
 }
@@ -390,4 +396,34 @@ it('pins neither an address literal nor the site\'s own host, and still fetches 
     $tool = webFetchTool(resolver: static fn(string $host): array => throw new LogicException("{$host} should not be looked up"));
     expect($tool->execute(['url' => 'http://93.184.216.34/'])->content)->toBe('ok')
         ->and($tool->execute(['url' => 'https://site.test/about/'])->content)->toBe('ok');
+});
+
+// ---------------------------------------------------------------- only cURL can be pinned
+// The pin is a CURLOPT_RESOLVE option, so a request WordPress would send through another
+// transport would go to whatever the name answers at connect time. Requests chooses a transport
+// per request from the scheme (WP 7.1 Requests.php:463-466), so the question is asked per hop.
+
+it('refuses to fetch when WordPress would not send the request through cURL, before any request, asking with each hop\'s scheme', function (): void {
+    Functions\when('wp_http_validate_url')->returnArg();
+    Functions\expect('wp_safe_remote_get')->never();
+    $asked = [];
+    $tool = webFetchTool(curl: static function (bool $https) use (&$asked): bool {
+        $asked[] = $https;
+        return false;
+    });
+    foreach (['https://public.test/', 'http://public.test/'] as $url) {
+        $res = $tool->execute(['url' => $url]);
+        expect($res->status)->toBe(ToolResultStatus::Error, $url)
+            ->and($res->content)->toContain('cURL')->toContain('Site Health');
+    }
+    expect($asked)->toBe([true, false]);
+});
+
+it('asks again on a redirect, so an https page that redirects to a scheme cURL cannot carry here is refused there', function (): void {
+    Functions\when('wp_http_validate_url')->returnArg();
+    $tool = webFetchTool(curl: static fn(bool $https): bool => $https);
+    Functions\expect('wp_safe_remote_get')->once()->andReturn(webFetchResponse('', 302, '', ['location' => 'http://public.test/plain']));
+    $res = $tool->execute(['url' => 'https://public.test/']);
+    expect($res->status)->toBe(ToolResultStatus::Error)
+        ->and($res->content)->toContain('cURL');
 });

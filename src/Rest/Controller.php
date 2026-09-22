@@ -166,7 +166,8 @@ abstract class Controller
          * back, included. `draft_post` re-checks a capability of its own on top. `read` and
          * `exist` are honoured strings, so `read` is every Subscriber and `exist` is every
          * visitor, logged out included. README's "Tools, and what they let the model reach" is
-         * the operator-facing version of this, with the egress policy that mitigates `web_fetch`.
+         * the operator-facing version of this, with what the address pinning covers for
+         * `web_fetch` and what it does not.
          *
          * @since 0.5.0
          * @param string           $capability the route's default: its declared capability, or for a chat route the Chat row of Settings › Access (`edit_posts` unless the site changed it)

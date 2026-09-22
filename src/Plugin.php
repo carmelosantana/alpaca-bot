@@ -194,6 +194,9 @@ final class Plugin
         add_filter('heartbeat_received', [$assets, 'heartbeat'], 10, 2);
         // The help tabs of the chat screen and the settings page; HelpTabs gates on the screen id.
         add_action('current_screen', [new Admin\HelpTabs(), 'add']);
+        // Site Health's direct test for web_fetch: whether it can run pinned here (Admin\SiteHealth).
+        // Hooked unconditionally: core applies the filter only on its own screen and cron run.
+        add_filter('site_status_tests', [new Admin\SiteHealth($store), 'register']);
         // The two shortcodes, registered now rather than on init: `$shortcode_tags` exists from
         // shortcodes.php's load, and a shortcode registered on plugins_loaded is there for
         // whatever renders content first. The shim runs the same web_fetch instance the

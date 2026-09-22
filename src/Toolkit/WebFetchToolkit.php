@@ -47,18 +47,26 @@ use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Tool\ToolResult;
  * pinned like the first. Core's wp_http_validate_url() inside the request still makes a lookup
  * of its own; it can only refuse, and the connection never uses its answer.
  *
- * Where the pin does not reach, and the rebinding window stays open. A site whose Requests has
- * no cURL transport to pick -- no ext-curl, or one built without SSL for an https URL, which the
- * plugin does not require and does not check for -- fetches through Fsockopen, which never fires
- * `http_api_curl` (Requests.php:141-144; Transport/Curl.php:604-614), so nothing is pinned and
- * the fetch is not refused for it. A proxy configured for the HTTP API (WP_PROXY_HOST) is sent
- * the name and resolves it itself (class-wp-http.php:401-410), so the pin stops at the proxy,
- * and what the proxy may reach, this tool may reach. The site's own host is neither looked up
- * nor pinned (pin()). A public address that the site's own network routes somewhere private is
- * no address check's to see (SpecialPurposeAddress). An operator who needs those closed closes
- * them where they hold for every plugin at once: an egress policy at the network, so the web
- * server's host cannot open a connection to the metadata address or the private ranges whatever
- * name it resolved.
+ * The pin is a cURL option, so a request WordPress would send another way is refused rather than
+ * sent unpinned: each hop asks curlCarries() for its own scheme before the request is made,
+ * and a no is the tool's answer, naming the reason. That check is asked of the server, not of
+ * the request, so what it cannot see is a listener that sets a transport of its own afterwards
+ * (curlCarries() says where that is possible); what it does close is the ordinary case, a PHP
+ * with no usable cURL for the scheme, on which the refusal is then the tool's whole answer.
+ * Admin\SiteHealth reports that, and the proxy below, where a site owner looks for such things.
+ *
+ * Where the pin does not reach, and the rebinding window stays open. A proxy configured for the
+ * HTTP API (WP_PROXY_HOST with WP_PROXY_PORT) is sent the name and resolves it itself
+ * (class-wp-http.php:401-410), so the pin stops at the proxy, and what the proxy may reach, this
+ * tool may reach; core bypasses the proxy for the site's own host, `localhost` and
+ * WP_PROXY_BYPASS_HOSTS (class-wp-http-proxy.php:171-226), and a request it bypasses is
+ * connected to here as any other. The site's own host is neither looked up nor pinned (pin()).
+ * A public address that the site's own network routes somewhere private is no address check's to
+ * see (SpecialPurposeAddress). An egress policy at the network is the one control that holds for
+ * every plugin at once, and it is what closes that last one: the web server's host cannot open a
+ * connection to the metadata address or the private ranges whatever name it resolved. It does
+ * not reach past a proxy that egresses from elsewhere, nor whatever listens on the site's own
+ * host; those are restricted where they run.
  *
  * Three limits that are not negotiable from the model's side: the `toolkits.user_agent`
  * setting on every request, so a site owner can name the bot to the servers it visits (a
@@ -116,8 +124,9 @@ final class WebFetchToolkit implements ToolkitInterface
 
     /**
      * @param null|\Closure(string): list<string> $resolver every address a host name answers with, A and AAAA, or [] when it does not resolve or a lookup failed; AddressPin::lookup() over the system resolver by default, a test hands in its own
+     * @param null|\Closure(bool): bool           $curl     whether WordPress would send a request (https or not) through cURL; curlCarries() by default, a test hands in its own
      */
-    public function __construct(private Store $store, private ?\Closure $resolver = null) {}
+    public function __construct(private Store $store, private ?\Closure $resolver = null, private ?\Closure $curl = null) {}
 
     public function tools(): array
     {
@@ -153,6 +162,9 @@ final class WebFetchToolkit implements ToolkitInterface
                 return ToolResult::error($hop === 0
                     ? __('That URL is not allowed: only public http(s) addresses can be fetched, never a private, local, or malformed one.', 'alpaca-bot')
                     : __('The page redirected to an address that is not allowed.', 'alpaca-bot'));
+            }
+            if (!($this->curl ?? self::curlCarries(...))(strtolower((string) wp_parse_url($safe, PHP_URL_SCHEME)) === 'https')) {
+                return ToolResult::error(__('web_fetch cannot run on this server: WordPress would send the request without cURL, and only cURL can be held to the address that was checked. Ask your host for PHP\'s cURL extension with SSL; Tools › Site Health says what this server has.', 'alpaca-bot'));
             }
             $response = $this->get($safe, $pin, $userAgent);
             if (is_wp_error($response)) {
@@ -277,6 +289,27 @@ final class WebFetchToolkit implements ToolkitInterface
         }
         $location = trim($location);
         return wp_parse_url($location, PHP_URL_SCHEME) !== null ? $location : \WP_Http::make_absolute_url($location, $base);
+    }
+
+    /**
+     * Whether WordPress would send a request of this scheme through cURL, the only transport the
+     * pin can reach. WP_Http::request() passes Requests no `transport` option (WP 7.1
+     * class-wp-http.php:341-345), so Requests picks one per request from the scheme
+     * (Requests.php:457-466): the first class in its list whose test() passes (:246-251). The
+     * list starts as Curl then Fsockopen (:141-144) and add_transport() only appends (:210-215),
+     * so cURL is used exactly when Curl::test() passes for the scheme. Requests' own
+     * get_transport_class() would say this directly but is protected (:225), and
+     * WP_Http::_get_first_available_transport() is deprecated and asks the legacy transports
+     * instead (class-wp-http.php:539-561). The one way around the answer given here is a
+     * listener on `requests-requests.before_request`, which is handed Requests' options by
+     * reference (Requests.php:455, re-fired to WordPress by class-wp-http-requests-hooks.php:75)
+     * and could set a transport of its own; nothing in core does -- its only listener on that
+     * hook is the cookie jar (Cookie/Jar.php:133).
+     */
+    public static function curlCarries(bool $https): bool
+    {
+        return class_exists(\WpOrg\Requests\Transport\Curl::class)
+            && \WpOrg\Requests\Transport\Curl::test([\WpOrg\Requests\Capability::SSL => $https]);
     }
 
     /**

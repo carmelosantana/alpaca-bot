@@ -27,8 +27,8 @@ namespace AlpacaBot\Toolkit;
  * which WP_Http::request() catches and returns as a WP_Error (class-wp-http.php:416, :424-425),
  * so an unpinned connection is never the fallback. What this cannot fail closed on is a request
  * that never fires the hook at all: a site whose Requests picks the Fsockopen transport instead
- * (Requests.php:141-144) never calls this, and WebFetchToolkit's docblock says so rather than
- * this class pretending otherwise. An IPv6 address goes in unbracketed, as Symfony HttpClient
+ * (Requests.php:141-144) never calls this, so WebFetchToolkit asks first and refuses the fetch
+ * outright (WebFetchToolkit::curlCarries()) rather than this class pretending otherwise. An IPv6 address goes in unbracketed, as Symfony HttpClient
  * writes the same option (CurlHttpClient.php:199).
  *
  * @since 0.6.0

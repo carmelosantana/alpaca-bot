@@ -120,15 +120,16 @@ final class HelpTabs
      * The Tools tab: what switching a tool on actually grants, for the person who decides it.
      *
      * This exists because two accepted risks were, until 0.5.0, argued only in source
-     * docblocks — WebFetchToolkit's on the DNS-rebinding window its two address checks cannot
-     * close, and Toolkit\Registry's on there being no capability check between "may chat" and
-     * "may call the enabled tools", which a row per tool has since closed — and a site owner is
-     * the only person who can act on either. A docblock is not where they will read it. The
-     * first is still open, and the second is now a setting an operator has to understand, which
-     * is why both are here. The wording follows the audit
-     * (docs/reviews/2026-09-09-security-audit.md, H-1 and M-3) and is deliberately not a scare:
-     * the rebinding window is a documented trade-off with a stated mitigation, and `web_fetch`
-     * reaching an author is a capability decision, not a break-in.
+     * docblocks — WebFetchToolkit's on what its fetch can reach, and Toolkit\Registry's on there
+     * being no capability check between "may chat" and "may call the enabled tools", which a row
+     * per tool has since closed — and a site owner is the only person who can act on either. A
+     * docblock is not where they will read it. The rebinding window the first named is closed
+     * wherever the pin reaches, which leaves an operator needing to know where that is, and the
+     * second is now a setting an operator has to understand, which is why both are here. The
+     * wording follows the audit (docs/reviews/2026-09-09-security-audit.md, H-1 and M-3) and is
+     * deliberately not a scare: what the fetch can reach is stated with what the pinning covers
+     * and what it does not, and `web_fetch` reaching an author is a capability decision, not a
+     * break-in.
      */
     private function tools(): string
     {
@@ -140,13 +141,13 @@ final class HelpTabs
             '<code>summarize</code>',
             '<code>draft_post</code>',
         ))
-            . self::p('<strong>' . esc_html__('web_fetch makes this server send a request and hands the reply back.', 'alpaca-bot') . '</strong> ' . esc_html__('Every URL is checked twice before the fetch — WordPress\'s own check, then the plugin\'s over every address the name resolves to, on the URL and on every redirect — and only http(s), only ports 80, 443 and 8080, and no private, loopback, link-local or other special-purpose address. What no check of that shape can cover is a name whose answer changes between the check and the connection: those are separate DNS lookups, so a host someone else controls, with a short time-to-live, can answer the checks with a public address and the connection with a local one. The page it returns then comes back as text. Pinning the resolved address into the connection is a later 0.x release.', 'alpaca-bot'))
+            . self::p('<strong>' . esc_html__('web_fetch makes this server send a request and hands the reply back.', 'alpaca-bot') . '</strong> ' . esc_html__('Every URL is checked before the fetch — WordPress\'s own check, then the plugin\'s over every address the name resolves to — and only http(s), only ports 80, 443 and 8080, and no private, loopback, link-local or other special-purpose address. The name is looked up in DNS once and the connection is pinned to the address that passed, so a host someone else controls cannot answer the check with a public address and the connection with a local one. The plugin follows redirects itself, up to three, and checks and pins each one the same way.', 'alpaca-bot'))
             . self::p(sprintf(
                 /* translators: %s: [alpacabot_agent name="get" url="…"] */
                 esc_html__('Who can reach it today, with no model involved: anyone who may write a post and whom Settings › Access lets use web_fetch and the shortcodes — by default anyone who can edit posts, a Contributor included — can put %s in their own draft and preview it. Treat the tool as a capability you are granting your authors.', 'alpaca-bot'),
                 '<code>[alpacabot_agent name="get" url="…"]</code>',
             ))
-            . self::p('<strong>' . esc_html__('An egress policy is the supported mitigation', 'alpaca-bot') . '</strong> ' . esc_html__('and it is the one that covers every plugin on the site at once: stop this host from opening outbound connections to your private ranges and to the cloud metadata address, at the network or the host firewall, and require IMDSv2 on a cloud instance. If you cannot and do not need the tool, switch web_fetch off — the chat, the summaries and the drafts all work without it.', 'alpaca-bot'))
+            . self::p('<strong>' . esc_html__('What the pin does not cover.', 'alpaca-bot') . '</strong> ' . esc_html__('A proxy set for WordPress (WP_PROXY_HOST with WP_PROXY_PORT) is sent the name and looks it up itself, so for every host it is not bypassed for the pin stops at the proxy. The site\'s own host is exempt, as in WordPress. The pin needs cURL: on a server whose PHP has none for the request, web_fetch refuses to fetch at all rather than connect unpinned, and Tools › Site Health says so. An egress policy still covers every plugin at once: stop this host from opening outbound connections to your private ranges and to the cloud metadata address, and require IMDSv2 on a cloud instance. If you do not need the tool, switch web_fetch off — the chat, the summaries and the drafts all work without it.', 'alpaca-bot'))
             . self::p('<strong>' . esc_html__('Each tool has a row of its own in Settings › Access, as well as Chat.', 'alpaca-bot') . '</strong> ' . sprintf(
                 /* translators: 1: alpaca_bot/capability/chat, 2: alpaca_bot/toolkits, 3: draft_post */
                 esc_html__('Opening the chat to a role — with the Chat row, or with %1$s in code — does not hand it the tools: a tool is offered only to a user who passes that tool\'s row, Contributors and up by default. Lower a tool\'s row to give it to a role you opened the chat to, and raise it to keep it from one. %3$s asks the post type\'s own capability as well and refuses a user who lacks it. The %2$s filter runs after the rows, so a site can still add a toolkit of its own or take one away per user, in code.', 'alpaca-bot'),

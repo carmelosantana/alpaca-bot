@@ -37,7 +37,7 @@ function agentShim(object $h): AgentShim
     // The registry the shim reads: the fetch toolkit under its id, gated by the harness's
     // `toolkits.enabled` (the schema default lists it; a test about the setting says otherwise).
     $registry = new Registry($h->store);
-    $registry->register('web_fetch', new WebFetchToolkit($h->store, static fn(string $host): array => ['93.184.216.34']));
+    $registry->register('web_fetch', new WebFetchToolkit($h->store, static fn(string $host): array => ['93.184.216.34'], static fn(bool $https): bool => true));
     return new AgentShim(shortcodeChat($h, 7), $h->pipeline, $registry);
 }
 
