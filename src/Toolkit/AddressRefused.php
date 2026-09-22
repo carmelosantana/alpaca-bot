@@ -6,8 +6,11 @@ namespace AlpacaBot\Toolkit;
 
 /**
  * An address a request may not go to, with a message fit to show the person who asked: it names
- * the host and, when a lookup was made, what the host answered with. Thrown by AddressPin, and
- * by Mcp\Egress for a server URL it will not build a client for at all.
+ * the host and, when a lookup was made, what the host answered with. AddressPin throws it, and
+ * so does Mcp\Egress for a server URL it will not build a client for at all. WebFetchToolkit
+ * constructs it too, for a hop it has already decided against, but as local control flow: those
+ * two carry no message at all, and the catch a few lines away answers with web_fetch's sentence
+ * below rather than reading one.
  *
  * web_fetch catches it and answers with a sentence of its own instead, because the URL was the
  * model's choice and telling the user which private address a name resolved to reports on the

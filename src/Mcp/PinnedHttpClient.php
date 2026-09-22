@@ -34,7 +34,9 @@ use AlpacaBot\Vendor\Symfony\Contracts\HttpClient\ResponseStreamInterface;
  *   Native rejects an empty proxy URL (HttpClientTrait.php:817-821). The cost: a server whose
  *   outbound traffic must go through a proxy cannot reach an MCP server in 0.6.
  * - `timeout` and `max_duration` from the server row, so a slow server holds a turn for at most
- *   its own timeout.
+ *   its own timeout. That they are positive numbers is ServerConfig::fromSettings()'s to keep,
+ *   and load-bearing here: Symfony reads a `max_duration` of zero as no limit at all, so a cap
+ *   this client set from a blank settings field would be no cap.
  * - `on_progress`: no option caps a body's size, and `buffer` only chooses whether and where to
  *   buffer (HttpClientInterface.php:56-60); a throw from `on_progress` aborts the transfer
  *   (:61-64; CurlResponse.php:126-146) and surfaces from getContent()/stream() as a

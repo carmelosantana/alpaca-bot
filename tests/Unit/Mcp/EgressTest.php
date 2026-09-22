@@ -82,6 +82,15 @@ it('cuts a response off once it passes the server\'s byte cap, while it streams,
     expect(strlen($at->getContent()))->toBe(1024);
 });
 
+// The cap is checked against the size the headers announce as well as the bytes read, so this
+// one is refused with none of the body streamed. Without that half, MockResponse ends the
+// transfer with "Transfer closed with 99999 bytes remaining to read" -- a TransportException
+// too, which is why the assertion is on the message and not just the class.
+it('refuses an answer that announces an oversize body before any of it streams', function (): void {
+    $response = egressOver($seen, new MockResponse('', ['response_headers' => ['content-length' => '99999']]))->request('POST', 'https://mcp.example.test/mcp');
+    expect(static fn() => $response->getContent())->toThrow(TransportException::class, '1024');
+});
+
 it('chains a caller\'s own on_progress after the cap', function (): void {
     $calls = 0;
     egressOver($seen, new MockResponse('{}'))->request('POST', 'https://mcp.example.test/mcp', ['on_progress' => static function () use (&$calls): void {
@@ -90,9 +99,12 @@ it('chains a caller\'s own on_progress after the cap', function (): void {
     expect($calls)->toBeGreaterThan(0);
 });
 
-it('refuses a server that is not https before any lookup, and one whose address AddressPin refuses, building nothing', function (): void {
+it('refuses a server that is not https and one with no host name, both before any lookup, and one whose address AddressPin refuses, building nothing', function (): void {
     $never = static fn(string $host, string $url): string => throw new LogicException('no lookup expected');
     expect(static fn() => (new Egress($never, new MockHttpClient()))->client(mcpServerConfig('http://mcp.example.test/mcp')))->toThrow(AddressRefused::class, 'https');
+    // `https://./mcp` parses as an https URL whose host trims to nothing, so it reaches the
+    // second refusal and has to be told the thing that is actually wrong with it.
+    expect(static fn() => (new Egress($never, new MockHttpClient()))->client(mcpServerConfig('https://./mcp')))->toThrow(AddressRefused::class, 'host name');
     // The default check is AddressPin's own; a literal needs no DNS, so this runs it for real.
     foreach (['https://127.0.0.1/mcp', 'https://[::1]/mcp', 'https://169.254.169.254/'] as $url) {
         expect(static fn() => (new Egress(null, new MockHttpClient()))->client(mcpServerConfig($url)))->toThrow(AddressRefused::class);

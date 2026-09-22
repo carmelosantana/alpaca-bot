@@ -11,3 +11,22 @@ it('reads a toolkits.mcp_servers row into typed fields, with the defaults for a 
     $bare = ServerConfig::fromSettings(['id' => 'x', 'url' => 'https://x.test/']);
     expect([$bare->headerName, $bare->timeout, $bare->maxBytes, $bare->approved])->toBe(['', 30.0, 1048576, []]);
 });
+
+/*
+ * `??` catches an absent key, not a blank field: a settings row saves '' for a number nobody
+ * typed, and `(float) ''` is 0.0. Symfony reads max_duration 0 as no limit at all and a negative
+ * one leaves it uncapped (ServerConfig says where), so the row that looks like it asks for
+ * nothing is the row that removes the cap. A zero byte cap fails the other way and refuses every
+ * response. Neither number was asked for, so both fall back to the shipped default.
+ */
+it('falls back to the shipped defaults for a timeout or byte cap that is not a positive number', function (string $value): void {
+    $row = ServerConfig::fromSettings(['id' => 'x', 'url' => 'https://x.test/', 'timeout' => $value, 'max_bytes' => $value]);
+    expect($row->timeout)->toBe(30.0)
+        ->and($row->maxBytes)->toBe(1048576);
+})->with(['blank' => '', 'not a number' => 'soon', 'zero' => '0', 'zero as a float' => '0.0', 'negative' => '-5', 'negative float' => '-0.5']);
+
+it('keeps a positive number the administrator did type, including a fractional timeout', function (): void {
+    $row = ServerConfig::fromSettings(['id' => 'x', 'url' => 'https://x.test/', 'timeout' => '0.5', 'max_bytes' => '1']);
+    expect($row->timeout)->toBe(0.5)
+        ->and($row->maxBytes)->toBe(1);
+});

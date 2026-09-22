@@ -44,8 +44,14 @@ final class Egress
     {
         $scheme = strtolower((string) wp_parse_url($server->url, PHP_URL_SCHEME));
         $host = strtolower(trim((string) wp_parse_url($server->url, PHP_URL_HOST), '.'));
-        if ($scheme !== 'https' || $host === '') {
+        if ($scheme !== 'https') {
             throw new AddressRefused(__('An MCP server has to be reached over https.', 'alpaca-bot'));
+        }
+        // Separately, and with AddressPin's own sentence: `https://./mcp` parses as https with a
+        // host of '.', which trims to nothing. Telling that admin to use https would name the one
+        // thing they got right.
+        if ($host === '') {
+            throw new AddressRefused(__('The address has no host name.', 'alpaca-bot'));
         }
         $ip = ($this->resolve ?? AddressPin::resolve(...))($host, $server->url);
         return new PinnedHttpClient($this->transport ?? HttpClient::create(), $host, $ip, $server->timeout, $server->maxBytes);
