@@ -7,10 +7,10 @@ namespace AlpacaBot\Toolkit;
 /**
  * The plugin's one address rule: resolve a name once, both families, hold every answer to
  * SpecialPurposeAddress, and hand back the single address the connection is then pinned to.
- * web_fetch is its only caller today, and pins that address into cURL (CurlPin, through core's
- * `http_api_curl`). It is a class of its own rather than a method of WebFetchToolkit because the
- * MCP egress client the 0.6 spec plans has to pin the same address into Symfony HttpClient's
- * `resolve` option: one rule, whichever transport asks it.
+ * web_fetch asks it and pins that address into cURL (CurlPin, through core's `http_api_curl`);
+ * Mcp\Egress asks it and pins the same address into Symfony HttpClient's `resolve` option
+ * (Mcp\PinnedHttpClient). That is why it is a class of its own rather than a method of
+ * WebFetchToolkit: one rule, whichever transport asks it.
  *
  * Why the address is returned and not just judged: a check that only answers yes or no leaves
  * the transport to resolve the name again when it connects, and a name under someone else's
@@ -36,8 +36,8 @@ namespace AlpacaBot\Toolkit;
  * What this does not cover is the same as SpecialPurposeAddress: a public address the site's
  * own network routes somewhere private. And what it covers only holds while the caller really
  * connects to the returned address; a proxy that is sent the name resolves it again, and a
- * transport that never sees the pin never uses it (WebFetchToolkit says what it does about
- * both).
+ * transport that never sees the pin never uses it. What a caller does about those two is the
+ * caller's to state: WebFetchToolkit for web_fetch, Mcp\PinnedHttpClient for an MCP server.
  *
  * @since 0.6.0
  */
@@ -81,8 +81,10 @@ final class AddressPin
      * Every address a name answers with, both families, through the system resolver: A through
      * gethostbynamel(), AAAA through dns_get_record(). The connection is pinned to one of them,
      * but all of them are checked (resolve() says why), so both families have to be read. Cost:
-     * two lookups, normally from the resolver's cache, since core's wp_http_validate_url() has
-     * just made the A one; a resolver that times out costs its timeout. dns_get_record() warns
+     * two lookups, and a resolver that times out costs its timeout. For web_fetch the A one is
+     * normally a cache hit, since core's wp_http_validate_url() has just made it; the AAAA one
+     * is a query either way, no core version having asked for it, and a caller that has not been
+     * through core's HTTP API first, as Mcp\Egress has not, pays for both. dns_get_record() warns
      * as well as returning false on a failed query, and a warning here is a refused request, not
      * an error worth logging, hence the suppression.
      *

@@ -738,3 +738,12 @@ function abilitiesRegister(object $h, array $enabled = ['summarize', 'draft_post
     $registry->register('draft_post', $draft);
     return new AlpacaBot\Abilities\Register($h->pipeline, $registry, $user, $exists);
 }
+
+/**
+ * EgressTest and the MCP tests after it: a server row as ServerConfig::fromSettings() builds it,
+ * with the three fields the egress client reads settable.
+ */
+function mcpServerConfig(string $url = 'https://mcp.example.test/mcp', float $timeout = 12.5, int $maxBytes = 1024): AlpacaBot\Mcp\ServerConfig
+{
+    return AlpacaBot\Mcp\ServerConfig::fromSettings(['id' => 'example', 'url' => $url, 'header_name' => 'Authorization', 'header_value' => 'Bearer t', 'prefix' => 'ex', 'timeout' => $timeout, 'max_bytes' => $maxBytes, 'approved' => []]);
+}
