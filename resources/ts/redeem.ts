@@ -1,7 +1,7 @@
 /** The stream redemption, and the JSON body a refused request answers with (docs/api.md section 5). */
 export interface RestError { code?: string; message?: string; data?: Record<string, unknown> }
 export type Redemption = { ok: true; stream: Response } | { ok: false; status: number; error: RestError };
-type Fetcher = (url: string, init: RequestInit) => Promise<Response>;
+export type Fetcher = (url: string, init: RequestInit) => Promise<Response>;
 
 /** A refusal's body off a response, or off the text an XHR carried; `{}` for anything that is not JSON. */
 export async function restError(res: Response | null, text = ''): Promise<RestError> {
@@ -16,9 +16,11 @@ export async function restError(res: Response | null, text = ''): Promise<RestEr
  * Redeems a stream ticket. Anything that is not `text/event-stream` is a refusal — StreamBudget's
  * concurrency 429, an expired or replayed ticket's 403 — and comes back with its status and its
  * JSON body, because the caller has to say which it was and to put the draft back for the retry
- * the ticket allows where it survives the refusal (it does on the concurrency 429, which spends
- * nothing; a 403 is the ticket already gone). A fetch that rejects is a dropped connection and is
- * left to throw, which is the other exit send() has to undo.
+ * the ticket allows where it survives the refusal: it does on the concurrency 429, which spends
+ * nothing, and it does not on the 403, which is a token that is spent, expired, or not this
+ * user's (docs/api.md section 5) — none of the three will redeem on a second try. A fetch that
+ * rejects is a dropped connection and is left to throw, which is the other exit send() has to
+ * undo.
  *
  * `fetcher` defaults to the page's fetch, resolved per call so a test can stand one in.
  */

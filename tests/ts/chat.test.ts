@@ -1,4 +1,4 @@
-import { test } from 'node:test';
+import { test, type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { installDom, until } from './env.ts';
 
@@ -86,7 +86,12 @@ test('redeem hands back an event stream, and anything else as its status and its
   assert.deepEqual(html, { ok: false, status: 502, error: {} });
 });
 
-test('a stream redemption that is not an event stream gives the message and the image back and leaves no turn in the transcript', async (t) => {
+/**
+ * Boots against SHELL with every request answered from here, the stream redemption answered with
+ * `refusal`, and a turn sent the way a submit would: composer.spec.ts's shell() and send(), one
+ * layer down. `seen` collects the paths asked for, so a case can say what did and did not happen.
+ */
+async function refusedRedemption(t: TestContext, message: string, refusal: { status: number; body: object }): Promise<{ form: HTMLFormElement; seen: string[] }> {
   const win = installDom(SHELL);
   const real = globalThis.fetch;
   t.after(() => { globalThis.fetch = real; });
@@ -100,18 +105,24 @@ test('a stream redemption that is not an event stream gives the message and the 
       return new Response(`<article class="ab-msg ab-msg--${role}"><div class="ab-msg__content">${role}</div></article>`, { headers: { 'content-type': 'text/html' } });
     }
     if (url.pathname.endsWith('/alpaca-bot/v1/chat')) return Response.json({ stream_url: `${REST}/chat/1/stream?token=t` });
-    if (url.pathname.includes('/chat/1/stream')) {
-      return Response.json({ code: 'rest_forbidden', message: 'Invalid or expired stream token.', data: { status: 403 } }, { status: 403 });
-    }
+    if (url.pathname.includes('/chat/1/stream')) return Response.json(refusal.body, { status: refusal.status });
     return new Response('', { status: 404 });
   }) as typeof fetch;
 
   const { boot } = await import('../../resources/ts/boot.ts');
   const form = document.querySelector('#ab-form') as HTMLFormElement;
   boot(CFG, form);
-  (form.querySelector('#ab-message') as HTMLTextAreaElement).value = 'the message that must survive';
+  (form.querySelector('#ab-message') as HTMLTextAreaElement).value = message;
   (form.elements.namedItem('images') as HTMLInputElement).value = IMAGE;
   form.dispatchEvent(new win.Event('submit', { cancelable: true }) as unknown as Event);
+  return { form, seen };
+}
+
+test('a stream redemption that is not an event stream gives the message and the image back and leaves no turn in the transcript', async (t) => {
+  const { form, seen } = await refusedRedemption(t, 'the message that must survive', {
+    status: 403,
+    body: { code: 'rest_forbidden', message: 'Invalid or expired stream token.', data: { status: 403 } },
+  });
 
   await until(() => (document.querySelector('#ab-status')?.textContent ?? '').includes('Invalid or expired stream token'));
   // The composer has its content back, both halves...
@@ -123,4 +134,26 @@ test('a stream redemption that is not an event stream gives the message and the 
   assert.equal(seen.filter((path) => path.includes('/chat/1/stream')).length, 1);
   // The composer is usable again: a refused redemption is not the locked state a stale nonce is.
   assert.equal((form.querySelector('[data-action="send"]') as HTMLButtonElement).disabled, false);
+  // A spent ticket is a failure, and is shown as one.
+  assert.equal(document.querySelectorAll('#ab-status .notice-error').length, 1);
+});
+
+test('a redemption refused for concurrency is shown as a warning, not an error, because the ticket survives it', async (t) => {
+  // The one refusal boot.ts colours differently: StreamBudget spends nothing on this 429, so it
+  // is "not yet" rather than a failure and says so in the warning colour (Kanboard #4333). This
+  // is the only assertion on the level anywhere under node:test, and the decision it pins —
+  // boot.ts's `refused()` reading the code — is the one line of logic this task wrote.
+  const { form } = await refusedRedemption(t, 'the message that waits its turn', {
+    status: 429,
+    body: { code: 'alpaca_bot_stream_concurrency', message: 'You already have 3 streams open. Wait for one to finish, then send again.', data: { status: 429, retry_after: 720, limit: 3 } },
+  });
+
+  await until(() => (document.querySelector('#ab-status')?.textContent ?? '').includes('You already have 3 streams open'));
+  // notice() replaces the status region's children, so this one node is the whole of what is
+  // shown: asserting it is warning says it is not also error, and a second assertion for that
+  // could not fail on its own.
+  assert.equal(document.querySelectorAll('#ab-status .notice-warning').length, 1);
+  // The draft still comes back and the transcript is still clean: the colour is the only difference.
+  assert.equal((form.querySelector('#ab-message') as HTMLTextAreaElement).value, 'the message that waits its turn');
+  assert.equal(document.querySelectorAll('#ab-messages article').length, 0);
 });

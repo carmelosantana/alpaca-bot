@@ -7,6 +7,20 @@ import { Window } from 'happy-dom';
  * the tests' sake, so a case can write `new CustomEvent(...)` or an `instanceof` without reaching
  * back through the window; resources/ts names them in types only, which are erased.
  *
+ * One thing boot.ts reads is not here at all: `document.execCommand`, which happy-dom 20.14.5
+ * does not implement (the plan says it does; it does not). writeClipboard()'s fallback calls it
+ * inside a try/catch of its own, so under this DOM the TypeError is swallowed and the fallback
+ * quietly reports failure instead of throwing — which reads as a product bug and is not one. A
+ * test of that fallback must stub `document.execCommand` itself.
+ *
+ * There is no teardown: the globals stay installed for the rest of the file. Two things make
+ * that safe, and the second is the one to keep. node:test gives each test file its own process,
+ * so nothing leaks between files; and no module under resources/ts captures a global at import
+ * time — dom.ts's `root: ParentNode = document` is a default parameter, evaluated per call, not
+ * at load — so a second installDom() in one file really does give the next case a clean
+ * document. An import-time capture anywhere in resources/ts would bind the first document into
+ * a module every later case then shares, and this harness would stop being honest.
+ *
  * Script evaluation and file loading stay off — the fixtures are markup, and a DOM that ran a
  * <script> would be running code no test reviewed. That switch is a narrowing, not a sandbox:
  * happy-dom's isolation has been weaker than it looked more than once (GHSA-qpm2-6cq5-7pq5), so
