@@ -611,7 +611,8 @@ data: {"conversation_id":169,"message":{"role":"assistant","content":"orange","m
 | `done` | The exact body a direct `POST /chat` answers with: `{conversation_id, message, receipt, contexts}` | The turn finished. The connection closes after it. |
 | `error` | `{code, message, data}`, the same JSON body a non-streaming error would carry | The turn was refused or failed. A refusal (cap exceeded, bad request) is an `error` frame alone with no `start`; a provider that fails mid-reply sends its deltas first, then `error`; a turn that outran the site's stream budget ends the same way, with `alpaca_bot_stream_timeout` after the deltas that had arrived. The connection closes after it. |
 
-A `delta` frame may be wholly empty — `{"text":"","reasoning":"","held":false}` — and an empty one may
+A `delta` frame may be wholly empty — `{"text":"","reasoning":"","held":false}`, or the same
+with `held: true` when it falls inside a faked tool call (below) — and an empty one may
 arrive before any text at all, including as the very first `delta` of a turn. That is not a bug
 to guard against: on a turn that calls tools the server writes one per tool call, all of them
 before any tool of that iteration runs, as the heartbeat that bounds an abandoned turn. An
@@ -627,18 +628,26 @@ template cannot really call tools writes the call out as text, `<tool_call>{…}
 every byte from the opening marker through its closing one arrives flagged. The bytes are still
 sent: a turn's `text` deltas still concatenate to exactly what the model wrote, so a client that
 ignores `held` — the reader below does — renders what it always did. The admin screen keeps held
-text out of sight, shows "Calling a tool…" while the block is open, and then either renders the
-stored reply on `done`, which has the markup taken out of it and a faked `done` call's answer put
-in its place, or, on `error` or a dropped connection, shows the held text exactly where it
-arrived. Two things are never held: a block whose opening marker the model's template swallowed
-(recognising it would mean buffering every reply to its end), and a plain turn's text, which has
-no markers in it. A marker split across two frames is not a problem — the server keeps back up to
-11 bytes that could begin one until the next fragment settles it — and the empty heartbeat
-`delta` carries `held: true` when it falls inside an open block.
+text out of sight and shows "Calling a tool…" under it, from the first held fragment until the
+next unheld one; the closing marker is itself held, so the line outlives the block until the
+model writes its next ordinary word. Then it either renders the stored reply on `done`, which
+has the markup taken out of it and a faked `done` call's answer put in its place, or, on `error`
+or a dropped connection, shows the held text exactly where it arrived.
+
+Two things are never held. A block whose opening marker the model's template swallowed is not,
+because recognising it would mean buffering every reply to its end. And a plain turn's text is
+not, because the plain streaming path builds its deltas without a scanner at all — only a
+tool-capable turn is scanned. That is the reason, rather than anything about what a plain turn's
+text contains: a plain turn that quotes `<tool_call>` in its prose is sent unflagged too. A
+marker split across two frames is not a problem — the server keeps back up to 11 bytes that
+could begin one until the next fragment settles it — and the empty heartbeat `delta` carries
+`held: true` when it falls inside an open block.
 
 A client that disconnects mid-stream is not refunded: the server notices at the next write,
-stores what was sent so far with `message.meta.partial: true`, and records a receipt for the
-tokens that arrived.
+stores what had arrived with `message.meta.partial: true`, and records a receipt for the
+tokens that arrived. What it stores can be up to 11 bytes longer than what it sent — the tail
+the scanner was still deciding about when the connection went belongs to the reply, so it is
+folded into the stored partial although no frame ever carried it.
 
 `EventSource` can read this, but it cannot send headers, so it only works from a cookie session
 on the same origin (the token in the URL is the only credential a ticket needs beyond that).

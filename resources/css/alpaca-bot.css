@@ -189,6 +189,10 @@ pre > .ab-code__copy:focus-visible { outline-color: var(--ab-code-text); }
 
 /* The line under a streamed reply while a faked tool call's markup is being held (resources/ts/held.ts). */
 .ab-msg__tool { margin: 4px 0 0; color: var(--ab-muted); font-size: 13px; font-style: italic; }
+/* The markup itself, in place and out of sight. `hidden` alone would leave this to the UA sheet,
+   which any rule setting `display` on a span in a message body would beat; the markup showing is
+   the one failure this feature has, so it is stated here rather than inherited. */
+.ab-msg__held[hidden] { display: none; }
 
 /* ---- composer -------------------------------------------------------------------------- */
 

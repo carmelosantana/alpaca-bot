@@ -792,7 +792,14 @@ final class Pipeline
             AgentFinishReason::EmptyResponse => __('The model gave no answer.', 'alpaca-bot'),
         };
         if ($tail !== '') {
-            yield new Delta(AgentStreamObserver::separated($streamed, $tail));
+            // Through the scanner like everything else. This is the one text a streamed turn
+            // emits that the observer's own scanner never saw — the agent's `done` answer, or
+            // any iteration whose content never arrived as a text delta — and it carries markup
+            // exactly as often as streamed text does. Its own scanner, because it is a separate
+            // message and must not inherit an open block from the text it does not continue.
+            foreach (FakedToolCallStream::pieces(AgentStreamObserver::separated($streamed, $tail)) as [$piece, $held]) {
+                yield new Delta($piece, '', $held);
+            }
         }
         return $output;
     }

@@ -473,6 +473,34 @@ it('flags a faked call\'s markup on a streamed turn\'s deltas without changing a
         ->and($gen->getReturn()->reply->content)->toBe("Let me answer that.\n\nAn alpaca is a camelid.");
 });
 
+// The tail Delta is the one text a streamed agent turn emits that the observer's live scanner
+// never sees: the answer arrives on the Output rather than as `agent.text_delta`, so $streamed
+// does not end with it and agentTurn() yields it after the run. It carries markup as often as
+// streamed text does, and unflagged it would put raw JSON on the screen — the exact symptom
+// this task removes everywhere else.
+it('flags a faked call inside the answer the agent gave through its done tool, which never streamed', function (): void {
+    $answer = "Here you are.\n\n<tool_call>{\"name\": \"web_fetch\", \"arguments\": {\"url\": \"https://example.test/\"}}</tool_call>\n\nThat is all.";
+    $provider = agentProvider([
+        [new Response('', ProviderFinishReason::ToolUse, [new ToolCall('c1', 'done', ['response' => $answer])], usage: new Usage(2, 1, 3))],
+    ]);
+    $h = pipelineWith($provider, [], [], TOOL_MODEL, null, registryWith(['echo' => echoToolkit('echo_tool')]));
+
+    $gen = $h->pipeline->send(3, 'answer');
+    $deltas = [];
+    foreach ($gen as $d) {
+        $deltas[] = [$d->text, $d->held];
+    }
+    expect($deltas)->toBe([
+        ["Here you are.\n\n", false],
+        ['<tool_call>{"name": "web_fetch", "arguments": {"url": "https://example.test/"}}</tool_call>', true],
+        ["\n\nThat is all.", false],
+    ])
+        // Still marking rather than withholding: the tail is cut into pieces and not one byte
+        // of it is changed, so what send() accumulates and stores is what it always was.
+        ->and(implode('', array_column($deltas, 0)))->toBe($answer)
+        ->and($gen->getReturn()->reply->content)->toBe("Here you are.\n\nThat is all.");
+});
+
 it('bills an abandoned tool turn for the calls the run had already made, from the usage that had arrived', function (): void {
     $provider = agentProvider([
         // The first call's usage rides on its last chunk, the tool call; the agent sums it into

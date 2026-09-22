@@ -87,6 +87,32 @@ final class FakedToolCallStream
         return $this->open;
     }
 
+    /**
+     * A complete `$text` as the pieces a streamed one would have become: one scanner's feed()
+     * and flush(), joined where the two meet.
+     *
+     * Pipeline::agentTurn()'s tail is the caller and the reason this exists. That Delta is the
+     * one text a streamed agent turn can emit that no live scanner has seen — an answer the
+     * agent gave through its `done` tool, or any iteration whose content never arrived as
+     * `agent.text_delta` — so without this it would reach the client unflagged, which is the
+     * raw JSON this whole class exists to keep off the screen.
+     *
+     * A *fresh* scanner, not the observer's, and that is the point: the tail is the Output's own
+     * content, a separate message from the one that streamed, so inheriting an open block from
+     * text it does not continue would flag its opening bytes for a marker that was never in it.
+     *
+     * @return list<array{0: string, 1: bool}>
+     */
+    public static function pieces(string $text): array
+    {
+        $stream = new self();
+        $out = $stream->feed($text);
+        foreach ($stream->flush() as [$piece, $held]) {
+            self::add($out, $piece, $held);
+        }
+        return $out;
+    }
+
     /** The length of the longest end of `$buffer` that is a proper beginning of `$marker`. */
     private static function partial(string $buffer, string $marker): int
     {
