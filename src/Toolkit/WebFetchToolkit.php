@@ -37,9 +37,13 @@ use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Tool\ToolResult;
  * and the response text would come back to the model. So the transport is not asked: a CurlPin
  * hands the checked address to cURL as CURLOPT_RESOLVE through core's `http_api_curl` action,
  * hooked for the one request and unhooked in a `finally` (get()). Redirects are the same problem
- * once per hop, so the HTTP API is told to follow none (`redirection` 0, which core turns into
- * Requests' `follow_redirects` false, WP 7.1 class-wp-http.php:359-363, so a 3xx comes back as a
- * response) and this class follows them itself, each hop validated, looked up, checked and
+ * once per hop, so the HTTP API is told to follow none (`redirection` 0, which core's
+ * `empty( $parsed_args['redirection'] )` branch turns into Requests' `follow_redirects` false,
+ * class-wp-http.php:359-363, so a 3xx comes back as a response rather than a `toomanyredirects`
+ * exception). The whole control rests on that mapping holding at 6.9, the plugin's floor, and it
+ * does: the same branch on 6.9, 7.0 and 7.1, and core's own HEAD default runs through it
+ * (`redirection` 0, class-wp-http.php:238-240), so it is not a path core leaves unexercised.
+ * This class then follows the redirects itself, each hop validated, looked up, checked and
  * pinned like the first. Core's wp_http_validate_url() inside the request still makes a lookup
  * of its own; it can only refuse, and the connection never uses its answer.
  *
@@ -167,6 +171,9 @@ final class WebFetchToolkit implements ToolkitInterface
             $location = $next;
             ++$hop;
         }
+        // 3xx, not just 4xx and 5xx: `redirection` 0 means nothing was followed on our behalf, and
+        // a 3xx only reaches this line when redirect() declined to follow it (a code it does not
+        // follow, or no usable Location), so there is no page behind it to read.
         if ($code < 200 || $code >= 300) {
             /* translators: 1: HTTP status code, 2: the URL */
             return ToolResult::error(sprintf(__('HTTP %1$d from %2$s', 'alpaca-bot'), $code, $safe));

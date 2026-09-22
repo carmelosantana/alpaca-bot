@@ -24,8 +24,14 @@ namespace AlpacaBot\Toolkit;
  * answer is let through only when core's `http_request_host_is_external` filter opts the host
  * in, so that opt-in means the same thing here as for any plugin; what it costs is what core
  * charges for it, since a site that sets it has already told WordPress that host is reachable.
- * The first answer is the first A record when there is one (lookup() lists A before AAAA): a
- * dual-stack host is reached over IPv4, which every server that can reach it at all can route.
+ * The first answer is the first A record when there is one (lookup() lists A before AAAA), so a
+ * dual-stack host is reached over IPv4. What that costs: gethostbynamel() answers with A records
+ * whether or not this server can route them, and a pin *replaces* resolution rather than seeding
+ * it (CURLOPT_RESOLVE, and Symfony's `resolve` the same), so no other family is left to fall
+ * back to. An IPv6-only server can therefore no longer reach a dual-stack host, where before the
+ * pin it could, because the transport resolved for itself and chose the AAAA. Handing back every
+ * address that passed, and leaving the family choice with the transport, is the better shape;
+ * that is a change to a signature later work is written against, not one to make here.
  *
  * What this does not cover is the same as SpecialPurposeAddress: a public address the site's
  * own network routes somewhere private. And what it covers only holds while the caller really
