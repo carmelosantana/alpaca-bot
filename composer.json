@@ -51,7 +51,8 @@
             "constant_prefix": "ALPACA_BOT_VENDOR_",
             "packages": [
                 "carmelosantana/php-agents",
-                "league/commonmark"
+                "league/commonmark",
+                "symfony/http-client"
             ],
             "delete_vendor_packages": false,
             "exclude_from_prefix": {
