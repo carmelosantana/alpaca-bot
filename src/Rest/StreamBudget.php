@@ -210,9 +210,9 @@ final class StreamBudget
      * wait and not a prediction of it. A slot whose row could not be read contributes no stamp,
      * and if none of them could the ceiling is a whole budget.
      *
-     * `limit` is the number this claim was held to, after `alpaca_bot/stream/concurrent`, so a
-     * refusal can say how many streams the person has rather than quoting the shipped LIMIT at a
-     * site that moved it.
+     * `limit` is what `alpaca_bot/stream/concurrent` left in force here, floored at 1, so a
+     * refusal can name the limit this claim was held to rather than quoting the shipped LIMIT at
+     * a site that moved it.
      *
      * @return array{slot: string|null, retry_after: int, limit: int}
      */

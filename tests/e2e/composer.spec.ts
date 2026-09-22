@@ -26,7 +26,7 @@ import { fileURLToPath } from 'node:url';
  * whole shell, because a fixture that reproduced the shell would be a copy of it to keep in step.
  * If a selector here stops matching what Shell emits, that is the bundle failing to find it too.
  *
- * Three exits end a send before the stream is consumed, and each has a test here: a bubble render
+ * Three refusals end a send before the stream is consumed, and each has a test here: a bubble render
  * that fails, a refused POST /chat, and a stream redemption that comes back as something other
  * than text/event-stream. The last of those is the one this file was written for: it used to
  * remove the empty assistant bubble and return, leaving the typed message and the attached image
