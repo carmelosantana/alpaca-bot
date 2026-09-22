@@ -240,6 +240,14 @@ final class ToolkitsTest extends TestCase
     public function test_site_health_reports_that_web_fetch_can_run_pinned_here(): void
     {
         $this->assertTrue(WebFetchToolkit::curlCarries(true));
+        // Not a restatement of curlCarries()'s own expression: Requests' own selector is asked,
+        // through reflection because it is protected (Requests.php:225), so what is pinned is
+        // that the plugin's answer is the transport Requests would actually pick for an https
+        // request here -- the agreement the refusal's correctness rests on.
+        $selector = new \ReflectionMethod(\WpOrg\Requests\Requests::class, 'get_transport_class');
+        $selector->setAccessible(true);
+        $chosen = $selector->invoke(null, [\WpOrg\Requests\Capability::SSL => true]);
+        $this->assertSame($chosen === \WpOrg\Requests\Transport\Curl::class, WebFetchToolkit::curlCarries(true), $chosen);
         $tests = apply_filters('site_status_tests', ['direct' => [], 'async' => []]);
         $this->assertArrayHasKey(\AlpacaBot\Admin\SiteHealth::TEST, $tests['direct']);
         $result = call_user_func($tests['direct'][\AlpacaBot\Admin\SiteHealth::TEST]['test']);

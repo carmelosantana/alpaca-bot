@@ -427,3 +427,17 @@ it('asks again on a redirect, so an https page that redirects to a scheme cURL c
     expect($res->status)->toBe(ToolResultStatus::Error)
         ->and($res->content)->toContain('cURL');
 });
+
+// curlCarries() itself, not a closure standing in for it. Every test above injects its own
+// answer, so nothing else here would notice a body that returned true whatever the server has --
+// the one shape that silently reopens the rebinding window on a live site. The unit runtime has
+// no Requests transport class at all (tests/Pest.php loads only an Exception stand-in), so the
+// class_exists guard is the branch this can exercise, and false is the answer it must give.
+// The other guard, Transport\Curl::test() answering false, needs a PHP without a usable cURL and
+// is not reachable from either suite; tests/Integration/ToolkitsTest.php pins the agreement
+// between this answer and the transport Requests itself would pick on a box that has one.
+it('answers false, for either scheme, when Requests has no cURL transport class to ask', function (): void {
+    expect(class_exists(\WpOrg\Requests\Transport\Curl::class))->toBeFalse()
+        ->and(WebFetchToolkit::curlCarries(true))->toBeFalse()
+        ->and(WebFetchToolkit::curlCarries(false))->toBeFalse();
+});

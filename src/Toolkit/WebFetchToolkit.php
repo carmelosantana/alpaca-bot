@@ -63,7 +63,8 @@ use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Tool\ToolResult;
  * connected to here as any other. The site's own host is neither looked up nor pinned (pin()).
  * A public address that the site's own network routes somewhere private is no address check's to
  * see (SpecialPurposeAddress). An egress policy at the network is the one control that holds for
- * every plugin at once, and it is what closes that last one: the web server's host cannot open a
+ * every plugin at once, and it is what closes that split-horizon case: the web server's host
+ * cannot open a
  * connection to the metadata address or the private ranges whatever name it resolved. It does
  * not reach past a proxy that egresses from elsewhere, nor whatever listens on the site's own
  * host; those are restricted where they run.
