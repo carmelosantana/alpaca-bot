@@ -588,10 +588,13 @@ it('shows a guest the login notice instead of the shell, and enqueues only the s
 
 it('asks the Shortcodes row for the shell too, and hands its filter the page and the tag', function (): void {
     // viewerMayGenerate()'s second call site, and the one nothing else would notice going wrong:
-    // shell() has no $tag of its own, so it passes self::postId() and self::TAG, and both are
-    // scalars, so a swapped pair still type-checks and still resolves a row. The order is
-    // answer()'s, which is alpaca_bot/shortcode/allow_guests's. A Subscriber the row refuses by
-    // default is admitted in code, so the row decides the shell and not only the prompt form.
+    // shell() has no $tag of its own, so it names both values itself. Its typed parameters stop a
+    // transposition there, but they are the last thing that can: Access::allows() takes
+    // `mixed ...$args`, so a pair reversed on the way into the variadic type-checks, resolves a
+    // row, and reaches the filter backwards with nothing static able to see it. The positional
+    // with() below is what catches that. The order is answer()'s, which is
+    // alpaca_bot/shortcode/allow_guests's. A Subscriber the row refuses by default is admitted
+    // in code, so the row decides the shell and not only the prompt form.
     $h = pipelineWith(null);
     $chat = shortcodeChat($h, 7);
     shortcodeViewer(5, ['read']);
