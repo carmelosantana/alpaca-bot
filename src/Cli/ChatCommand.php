@@ -291,7 +291,7 @@ final class ChatCommand
             if ($field['type'] === 'array') {
                 $value = json_decode($value, true);
                 if (!is_array($value)) {
-                    $this->error(sprintf('%s takes a JSON object or list.', $key));
+                    $this->error(sprintf(in_array($key, Schema::LISTS, true) ? '%s takes a JSON list.' : '%s takes a JSON object.', $key));
                     return;
                 }
             }

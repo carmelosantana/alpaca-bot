@@ -29,6 +29,9 @@ final class Schema
     /** @var list<string> the fields sanitize() applies the mask rule to */
     public const SECRETS = ['provider.api_key'];
 
+    /** @var list<string> the `array` fields whose value is a list; every other `array` field is a map */
+    public const LISTS = ['toolkits.abilities'];
+
     /**
      * Force tools on for one model: the stored value of `models.overrides[<m>][tools]` that
      * offers the enabled toolkits whatever the catalogue says (Provider\Model::$tools). One of

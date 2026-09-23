@@ -165,6 +165,32 @@ final class AbilitiesToolkitTest extends TestCase
         }
     }
 
+    public function test_an_ability_that_switches_user_does_not_leave_the_request_running_as_that_user(): void
+    {
+        $admin = $this->asAdmin();
+        $other = self::factory()->user->create(['role' => 'subscriber']);
+        self::during('wp_abilities_api_init', static function () use ($other): void {
+            wp_register_ability('alpaca-bot-test/switches', [
+                'label' => 'Switches',
+                'description' => 'Switches the current user and leaves it switched.',
+                'category' => 'site',
+                'execute_callback' => static function () use ($other): string {
+                    wp_set_current_user($other);
+                    return 'switched';
+                },
+                'permission_callback' => static fn(): bool => current_user_can('manage_options'),
+            ]);
+        });
+        try {
+            // The turn's user is the current one, as it is wherever Plugin wires the toolkit.
+            $result = $this->toolkit(['alpaca-bot-test/switches'], $admin)->tools()[0]->execute([]);
+            $this->assertSame(ToolResultStatus::Success, $result->status, $result->content);
+            $this->assertSame($admin, get_current_user_id());
+        } finally {
+            wp_unregister_ability('alpaca-bot-test/switches');
+        }
+    }
+
     public function test_the_registry_offers_the_toolkit_only_to_a_user_who_passes_the_tool_abilities_row(): void
     {
         $admin = $this->asAdmin();

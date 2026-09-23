@@ -498,7 +498,9 @@ it('takes an array setting as JSON', function (): void {
     $c->command->settings(['toolkits.abilities', 'core/get-site-info'], []);
 
     expect($c->out)->toBe("{\"llama3.2\":{\"temperature\":0.2}}\n[\"core/get-site-info\"]\n")
-        ->and($c->errors)->toBe(['models.overrides takes a JSON object or list.', 'toolkits.abilities takes a JSON object or list.']);
+        ->and($c->errors)->toBe(['models.overrides takes a JSON object.', 'toolkits.abilities takes a JSON list.']);
+    $c->command->settings(['access.mcp', 'nope'], []);
+    expect($c->errors[2])->toBe('access.mcp takes a JSON object.');
 });
 
 it('refuses a key the schema does not know', function (): void {

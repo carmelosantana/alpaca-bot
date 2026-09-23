@@ -179,7 +179,11 @@ it('tells the person switching tools on what an ability call is: another plugin\
         ->toContain('own permission check')->toContain('destructive')->toContain('same tool name')
         ->toContain('Contributors and up by default for <code>web_fetch</code>, <code>summarize</code> and <code>draft_post</code>')
         ->toContain('Administrators for the abilities tool')
-        ->not->toContain('All three')->not->toContain('three ship');
+        ->not->toContain('All three')->not->toContain('three ship')
+        // The allowlist bounds only direct calls (review I2): an ability that runs others is named as the way round it.
+        ->toContain('decides only what the model may call directly')->toContain('runs other abilities')
+        ->not->toContain('cannot call the plugin')
+        ->toContain('longer than ' . AlpacaBot\Toolkit\SchemaTool::RESULT_CHARS . ' characters is cut');
 });
 
 /** The content of one tab as add() hands it to the chat screen; how many tabs there are is the ordering test's to pin. */

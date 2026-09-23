@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace AlpacaBot\Admin;
 
+use AlpacaBot\Toolkit\SchemaTool;
+
 /**
  * The help tabs (core's "Help" pull-down at the top right of a screen) of the chat screen and the
  * settings page, added on `current_screen`, the action core fires once the WP_Screen is built and
@@ -156,11 +158,12 @@ final class HelpTabs
             ))
             . self::p('<strong>' . esc_html__('What the pin does not cover.', 'alpaca-bot') . '</strong> ' . esc_html__('A proxy set for WordPress (WP_PROXY_HOST with WP_PROXY_PORT) is sent the name and looks it up itself, so for every host it is not bypassed for the pin stops at the proxy. The site\'s own host is exempt from the address check and from the pin, as it is in WordPress, so anything else listening on it on 80, 443 or 8080 is reachable. The pin needs cURL: on a server whose PHP has none for the request, web_fetch refuses to fetch at all rather than connect unpinned, and Tools › Site Health says so. An egress policy still covers every plugin at once: stop this host from opening outbound connections to your private ranges and to the cloud metadata address, and require IMDSv2 on a cloud instance. If you do not need the tool, switch web_fetch off — the chat, the summaries and the drafts all work without it.', 'alpaca-bot'))
             . self::p('<strong>' . esc_html__('An ability is another plugin\'s code, run as the user whose turn it is.', 'alpaca-bot') . '</strong> ' . sprintf(
-                /* translators: 1: Settings › Tools, 2: alpaca-bot/*, 3: Settings › Access */
-                esc_html__('Ticking an ability under %1$s offers it to the model as a tool. Each call runs as the user whose turn it is and goes through that ability\'s own permission check, so what the call may do is the ability\'s decision, made for that user. A fetched page can ask the model to call one, so tick only abilities you would let that happen with. The list shows each description shortened and flattened exactly as the model gets it, since it is the other plugin\'s text; it flags an ability whose own annotations call it destructive, and marks two abilities that would reach the model under the same tool name, neither of which is offered while both are ticked. Alpaca Bot\'s own abilities (%2$s) are never on the list, so this tool cannot call the plugin\'s own chat from inside a turn. Its row under %3$s starts at Administrators.', 'alpaca-bot'),
+                /* translators: 1: Settings › Tools, 2: alpaca-bot/*, 3: Settings › Access, 4: the most characters of a result the model is given, e.g. 8000 */
+                esc_html__('Ticking an ability under %1$s offers it to the model as a tool. Each call runs as the user whose turn it is and goes through that ability\'s own permission check, so what the call may do is the ability\'s decision, made for that user. A fetched page can ask the model to call one, so tick only abilities you would let that happen with. The list shows each description shortened and flattened exactly as the model gets it, since it is the other plugin\'s text; an ability\'s input schema carries text of its own, which goes to the model as the plugin registered it and is not shown here. The list flags an ability whose own annotations call it destructive, and marks two abilities that would reach the model under the same tool name, neither of which is offered while both are ticked. Alpaca Bot\'s own abilities (%2$s) are never on the list, so the model is not handed them as tools. The list decides only what the model may call directly: an ability that itself runs other abilities, such as a "run any ability" tool, reaches whatever those can do, Alpaca Bot\'s own chat included, so tick one only knowing that. A result longer than %4$s characters is cut, and the model is told so. Its row under %3$s starts at Administrators.', 'alpaca-bot'),
                 '<strong>' . esc_html__('Settings › Tools', 'alpaca-bot') . '</strong>',
                 '<code>alpaca-bot/*</code>',
                 '<strong>' . esc_html__('Settings › Access', 'alpaca-bot') . '</strong>',
+                (string) SchemaTool::RESULT_CHARS,
             ))
             . self::p('<strong>' . esc_html__('Each tool has a row of its own in Settings › Access, as well as Chat.', 'alpaca-bot') . '</strong> ' . sprintf(
                 /* translators: 1: alpaca_bot/capability/chat, 2: alpaca_bot/toolkits, 3: draft_post, 4: web_fetch, 5: summarize */

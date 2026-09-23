@@ -513,10 +513,12 @@ Rules worth knowing before you write:
   abilities the `abilities` toolkit offers the model, as `namespace/name` strings. What is
   stored is each name of that form you sent, once, in the order sent; anything else (a string
   of another shape, a number, `""`) is dropped, and so is any `alpaca-bot/*` name, since the
-  plugin's own abilities are never offered. A value that is not a list stores `[]`. Whether a
-  name is registered is not checked on the way in: the toolkit skips one core does not have,
-  and the Tools tab shows it as not registered. The field's `type` is `array`; its choices are
-  the site's registered abilities, which the schema route does not list.
+  plugin's own abilities are never offered. A value that is neither a JSON array nor an object
+  stores `[]`; an object's keys are ignored and its values read as the list. Whether a name is
+  in the site's list of abilities (`wp_get_abilities()`) is not checked on the way in: the
+  toolkit skips one that is not, and the Tools tab shows it ticked and marked as not in that
+  list. The field's `type` is `array`; its choices are the site's list of abilities, which the
+  schema route does not include.
 
   ```
   $ curl -s -u "admin:$PW" -H 'Content-Type: application/json' -X PUT -d '{"toolkits.abilities": ["core/get-site-info", "alpaca-bot/chat", "Not A Name", "core/get-site-info"]}' "$B/settings" | jq -c '{"toolkits.abilities"}'
