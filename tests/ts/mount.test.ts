@@ -99,6 +99,22 @@ test('newChat changes nothing when the fragment is refused', async (t) => {
   assert.equal(host.querySelector<HTMLInputElement>('#ab-form [name="conversation_id"]')?.value, '5');
 });
 
+test('newChat answers false and changes nothing when the request fails outright', async (t) => {
+  installDom(`<aside id="host">${panel({ conversation: '5', messages: '<article class="ab-msg">old turn</article>', history: '', chips: '' })}</aside>`);
+  const { newChat, panelQuery } = await import('../../resources/ts/mount.ts');
+  const host = document.getElementById('host') as HTMLElement;
+  const real = globalThis.fetch;
+  const log = console.error;
+  t.after(() => { globalThis.fetch = real; console.error = log; });
+  globalThis.fetch = (async () => { throw new TypeError('Failed to fetch'); }) as typeof fetch;
+  const logged: string[] = [];
+  console.error = (e: unknown) => { logged.push(String(e)); };
+  assert.equal(await newChat(host, CFG, 'n', panelQuery(host, '0')), false);
+  assert.deepEqual(logged, ['TypeError: Failed to fetch']);
+  assert.equal(host.querySelectorAll('#ab-messages article').length, 1);
+  assert.equal(host.querySelector<HTMLInputElement>('#ab-form [name="conversation_id"]')?.value, '5');
+});
+
 test('postChip takes the post chip the server renders for the host\'s post into a composer that had no chips', async (t) => {
   installDom(`<div id="host" data-post="12">${panel({ conversation: '5', messages: '<article class="ab-msg">a turn</article>', history: '', chips: '' })}</div>`);
   const { postChip } = await import('../../resources/ts/mount.ts');

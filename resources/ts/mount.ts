@@ -107,12 +107,21 @@ export async function mountPanel(host: HTMLElement, cfg: MountSettings, nonce: s
  * "New chat" in place, for a host that keeps the chat on a page the chat screen's link would leave
  * (the drawer, the editor sidebar): a fresh transcript and history from GET /view/panel swapped
  * in, and the conversation set back to 0. The composer stays, because the bundle's listeners are
- * bound to it and a replaced form would have none, and so do its context chips. Answers whether
- * the fragment arrived; a refused or failed request changes nothing.
+ * bound to it and a replaced form would have none, and so do its context chips. Answers true once
+ * the fragment is swapped in. A request that is refused, answers something that is not an element,
+ * or fails outright answers false and changes nothing; the outright failure (a network error, which
+ * fetch() rejects with) is logged to the console, and the promise never rejects, so a caller that
+ * does not wait on it leaves no unhandled rejection behind.
  */
 export async function newChat(host: HTMLElement, cfg: MountSettings, nonce: string, query: Record<string, string>): Promise<boolean> {
-  const res = await fetch(withQuery(cfg.panel, query), { credentials: 'same-origin', headers: { 'X-WP-Nonce': nonce } });
-  const fresh = res.ok ? fromHtml(await res.text()) : null;
+  let fresh: HTMLElement | null;
+  try {
+    const res = await fetch(withQuery(cfg.panel, query), { credentials: 'same-origin', headers: { 'X-WP-Nonce': nonce } });
+    fresh = res.ok ? fromHtml(await res.text()) : null;
+  } catch (e) {
+    console.error(e);
+    return false;
+  }
   if (!fresh) return false;
   for (const id of ['ab-messages', 'ab-history']) {
     const next = fresh.querySelector('#' + id);
@@ -137,7 +146,9 @@ export async function newChat(host: HTMLElement, cfg: MountSettings, nonce: stri
  * composer with no row gets the fragment's. Nothing else of the fragment is taken.
  *
  * Answers whether the composer has a post chip now: true without a request when it has one
- * already, false when the fragment was refused or had none.
+ * already, false when the fragment was refused or had none. A request that fails outright (a
+ * network error) rejects, as fetch() does; editor.ts, its caller, logs that and asks again after
+ * the next save.
  */
 export async function postChip(host: HTMLElement, cfg: MountSettings, nonce: string): Promise<boolean> {
   const form = host.querySelector<HTMLFormElement>('#ab-form');
