@@ -173,3 +173,22 @@ test('"New chat" in the drawer starts a fresh transcript in place, from the head
   await expect(page.locator('#ab-drawer')).toHaveAttribute('data-conversation', '0');
   await expect(page.locator('script[src*="assets/js/chat.js"]')).toHaveCount(0);
 });
+
+test('an iframe screen gets no drawer: core defines IFRAME_REQUEST for it and it is someone else\'s modal', async ({ page }) => {
+  // media-upload.php is core's legacy upload modal, loaded into a thickbox iframe, and it defines
+  // IFRAME_REQUEST, as plugin-install.php's details modal and update.php's update and activate actions do. Its
+  // wp_iframe() fires admin_enqueue_scripts, so without the gate the loader was enqueued here.
+  // (It fires no admin_footer, so the launcher's absence here is not the gate's; the loader's is.)
+  await login(page);
+  await drawerState(page, { open: true, conversation_id: 0 });
+  await expect(page.locator('script[src*="assets/js/drawer.js"]')).toHaveCount(1);
+
+  await page.goto('/wp-admin/media-upload.php?type=image');
+  await expect(page.locator('#media-upload-header, #media-upload')).not.toHaveCount(0);
+  await expect(page.locator('script[src*="assets/js/drawer.js"]')).toHaveCount(0);
+  await expect(page.locator('link[href*="alpaca-bot-drawer.css"]')).toHaveCount(0);
+  await expect(page.locator('#ab-drawer-launcher')).toHaveCount(0);
+  await expect(page.locator('script[src*="assets/js/chat.js"]')).toHaveCount(0);
+
+  await drawerState(page, { open: false, conversation_id: 0 });
+});
