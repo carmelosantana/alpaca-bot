@@ -10,15 +10,20 @@
  *
  * Two places load this, and one of them is not wp-admin: the admin chat screen
  * (Admin\Assets::enqueue()) and a front-end page carrying `[alpacabot]` with no prompt
- * (Admin\Assets::enqueueFront()). Everything below is shared but the height arithmetic on
- * .ab-wrap, which subtracts wp-admin's chrome from the viewport, and one narrow-screen rule on
- * `.wrap.ab-wrap` that serves it; the front end has no #wpfooter and the shell there is a block
- * inside a page rather than the whole screen, so .ab-wrap--front (near the foot of this file)
- * replaces the height, and has no .wrap for the other rule to match. View\Chat\Shell puts that
- * modifier on, and leaves core's .wrap off, for a shell it was told is not on the admin screen.
+ * (Admin\Assets::enqueueFront()). The height arithmetic on .ab-wrap subtracts wp-admin's chrome
+ * from the viewport, and one narrow-screen rule on `.wrap.ab-wrap` serves it. Two modifiers
+ * replace that height and come without core's .wrap, so that rule does not match them either:
+ * .ab-wrap--front, for a front-end page, which has no #wpfooter and holds the shell as a block
+ * inside its content, and .ab-wrap--drawer, for the admin-wide drawer's panel
+ * (View\Chat\Drawer), which the shell fills. View\Chat\Shell picks the wrapper's class, and its
+ * docblock says on what.
  */
 
-.ab-wrap {
+/*
+ * The palette and the focus width, on the shell and on the drawer's panel too: the panel's
+ * close button is the panel's child, not the shell's, and inherits nothing the shell declares.
+ */
+.ab-wrap, .ab-drawer__panel {
     /* The fallbacks are core's Default scheme; without one a missing variable would blank the send button. */
     --ab-accent: var(--wp-admin-theme-color, #2271b1);
     --ab-accent-dark: var(--wp-admin-theme-color-darker-10, #135e96);
@@ -31,6 +36,9 @@
     --ab-border: #c3c4c7;
     --ab-code-bg: #1d2327;
     --ab-code-text: #f0f0f1;
+}
+
+.ab-wrap {
     --ab-max: 800px;
     --ab-admin-bar: 32px;
     /* #wpbody-content's padding-bottom, where core parks #wpfooter. */
@@ -305,16 +313,45 @@ pre > .ab-code__copy[aria-label]:hover::after {
  * on the page to subtract. A bounded box instead. This replaces the height outright rather than
  * zeroing --ab-footer, so the narrow-screen block below, which retunes those variables for
  * wp-admin, has nothing to say here either, nor does its `.wrap.ab-wrap` rule, since this shell
- * has no .wrap. Everything else in this file works on both: the
- * variables all carry fallbacks for the admin colour scheme that is not there, `.ab-status
- * .notice` is what dom.ts writes on either surface, `.wp-header-end` is Header's own <hr>, and
- * `.ab-header > .notice` is the one rule that only wp-admin can trigger -- core's notice mover
+ * has no .wrap. Everything else in this file, but the selectors that name the drawer's classes,
+ * works on both: the variables all carry fallbacks for the admin colour scheme that is not
+ * there, `.ab-status .notice` is what dom.ts writes on either surface, `.wp-header-end` is
+ * Header's own <hr>, and `.ab-header > .notice` is the one rule that only wp-admin can trigger -- core's notice mover
  * -- which costs a front-end page a selector that matches nothing. What this file does *not*
  * carry is core's own admin chrome: `.page-title-action` is styled by wp-admin's stylesheet, so
  * "New chat" is a plain link on a front-end shell.
  */
 .ab-wrap--front {
     height: min(70vh, 640px);
+}
+
+/* ---- the same shell in the admin-wide drawer --------------------------------------------- */
+
+/*
+ * View\Chat\Drawer: a panel holding a close button and the shell. The panel takes its height from
+ * whatever it is mounted in and the shell fills the panel, so .ab-wrap--drawer replaces the height
+ * .ab-wrap computes from wp-admin's chrome, and the top margin and padding it sets for core's
+ * .wrap, with its own. Its two classes outrank .ab-wrap's one wherever either rule sits.
+ *
+ * The narrow-screen block (core's 782px breakpoint) still reaches this shell. Its `.ab-wrap` rule
+ * retunes only the variables the replaced height was made of, and its `.wrap.ab-wrap` rule needs
+ * core's .wrap, which this shell does not have; its header, select, message and composer rules
+ * apply here as they do on the screen, keyed to the viewport's width and not the panel's.
+ */
+.ab-drawer__panel { position: relative; display: flex; flex-direction: column; height: 100%; }
+.ab-wrap.ab-wrap--drawer { flex: 1; min-height: 0; height: auto; margin: 0; padding: 8px 12px; }
+/* The close button sits over the header's top-right corner; the header keeps clear of it. */
+.ab-wrap--drawer .ab-header { padding-right: 32px; }
+.ab-wrap--drawer .ab-header h1 { font-size: 1.3em; }
+.ab-btn.ab-drawer__close { position: absolute; top: 4px; right: 4px; z-index: 1; font-size: 18px; }
+/* The tooltip every icon button gets, centred above it, runs past this corner's top and right
+   edges; this one goes to the left. */
+.ab-btn--icon.ab-drawer__close[aria-label]:hover::after {
+    top: 50%;
+    right: calc(100% + 6px);
+    bottom: auto;
+    left: auto;
+    transform: translateY(-50%);
 }
 
 /* ---- narrow screens (core's own admin breakpoint) --------------------------------------- */
