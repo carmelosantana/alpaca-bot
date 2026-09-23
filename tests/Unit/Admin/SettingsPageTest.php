@@ -486,7 +486,7 @@ it('lists every registered ability but Alpaca Bot\'s own as a box, with the desc
     expect($html)->toMatch('/^<input type="hidden" name="alpaca_bot_settings\[toolkits\.abilities\]\[\]" value="">/')
         ->toContain('<input type="checkbox" name="alpaca_bot_settings[toolkits.abilities][]" value="core/get-site-info"> <strong>Label of core/get-site-info</strong> <code>core/get-site-info</code>')
         ->toContain('<input type="checkbox" name="alpaca_bot_settings[toolkits.abilities][]" value="x/delete-everything" checked="checked">')
-        ->toContain('<span class="description">Returns site information.</span>')
+        ->toContain('<code>core/get-site-info</code></label><br><span class="description">Returns site information.</span>')
         ->not->toContain('value="alpaca-bot/chat"')->not->toContain('value="alpaca-bot/gone"')
         ->toContain('<input type="checkbox" name="alpaca_bot_settings[toolkits.abilities][]" value="gone/missing" checked="checked"> <code>gone/missing</code>')
         ->toContain('not in this site&#039;s list of abilities; untick to remove');
