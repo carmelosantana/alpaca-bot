@@ -494,9 +494,11 @@ it('takes an array setting as JSON', function (): void {
 
     $c->command->settings(['models.overrides', '{"llama3.2":{"temperature":"0.2"}}'], []);
     $c->command->settings(['models.overrides', 'not json'], []);
+    $c->command->settings(['toolkits.abilities', '["core/get-site-info","alpaca-bot/chat"]'], []);
+    $c->command->settings(['toolkits.abilities', 'core/get-site-info'], []);
 
-    expect($c->out)->toBe("{\"llama3.2\":{\"temperature\":0.2}}\n")
-        ->and($c->errors)->toBe(['models.overrides takes a JSON object.']);
+    expect($c->out)->toBe("{\"llama3.2\":{\"temperature\":0.2}}\n[\"core/get-site-info\"]\n")
+        ->and($c->errors)->toBe(['models.overrides takes a JSON object or list.', 'toolkits.abilities takes a JSON object or list.']);
 });
 
 it('refuses a key the schema does not know', function (): void {

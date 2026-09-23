@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace AlpacaBot\Settings;
 
 use AlpacaBot\Access;
+use AlpacaBot\Toolkit\AbilitiesToolkit;
 
 /**
  * The single source of truth for what lives in the `alpaca_bot_settings` option.
@@ -96,10 +97,13 @@ final class Schema
             'governance.user_monthly_tokens' => ['type' => 'integer', 'default' => 0, 'section' => 'governance', 'label' => __('Per-user monthly token cap', 'alpaca-bot'), 'min' => 0, 'max' => PHP_INT_MAX],
             // One list, not a boolean per toolkit: a toolkit is enabled by the id it registers
             // under (Toolkit\Registry), so a later release adds one by adding an option here and
-            // nothing else changes shape. The default switches every built-in on; the schema is
-            // the single place that knows what the built-ins are called.
-            'toolkits.enabled' => ['type' => 'checkbox-list', 'default' => ['web_fetch', 'summarize', 'draft_post'], 'section' => 'toolkits', 'label' => __('Enabled tools', 'alpaca-bot'), 'description' => __('What the assistant may do besides answer. A tool that is off is not offered to the model at all.', 'alpaca-bot'), 'options' => ['web_fetch' => __('Fetch a web page the user names', 'alpaca-bot'), 'summarize' => __('Summarize text', 'alpaca-bot'), 'draft_post' => __('Draft a post or page (never publishes)', 'alpaca-bot')]],
+            // nothing else changes shape. The schema is the single place that knows what the
+            // built-ins are called. The default names web_fetch, summarize and draft_post, the
+            // ones 0.5 shipped on; `abilities` is offered and left off, because what it can do is
+            // whatever the abilities an administrator ticks can do.
+            'toolkits.enabled' => ['type' => 'checkbox-list', 'default' => ['web_fetch', 'summarize', 'draft_post'], 'section' => 'toolkits', 'label' => __('Enabled tools', 'alpaca-bot'), 'description' => __('What the assistant may do besides answer. A tool that is off is not offered to the model at all.', 'alpaca-bot'), 'options' => ['web_fetch' => __('Fetch a web page the user names', 'alpaca-bot'), 'summarize' => __('Summarize text', 'alpaca-bot'), 'draft_post' => __('Draft a post or page (never publishes)', 'alpaca-bot'), 'abilities' => __('Call the site\'s WordPress abilities you tick', 'alpaca-bot')]],
             'toolkits.user_agent' => ['type' => 'string', 'default' => 'AlpacaBot/0.5 (+https://github.com/carmelosantana/alpaca-bot)', 'section' => 'toolkits', 'label' => __('User agent for fetch tools', 'alpaca-bot')],
+            'toolkits.abilities' => ['type' => 'array', 'default' => [], 'section' => 'toolkits', 'label' => __('Abilities the model may call', 'alpaca-bot'), 'description' => __('The WordPress abilities that WordPress and other plugins register on this site. Each one you tick becomes a tool of the abilities tool, which is offered only while it is on under Enabled tools, and only to users its Access row admits. Two ticked abilities that would reach the model under the same tool name are marked, and neither is offered. A call runs as the user whose turn it is, through the ability\'s own permission check. Alpaca Bot\'s own abilities are never offered.', 'alpaca-bot'), 'sanitize' => [self::class, 'sanitizeAbilities']],
             'access.chat' => self::access('chat', __('Chat', 'alpaca-bot'), __('Who may open the chat screen and use the chat REST routes. A tool needs its own row as well as this one.', 'alpaca-bot')),
             'access.tool.web_fetch' => self::access('tool.web_fetch', __('Tool: fetch a web page', 'alpaca-bot'), __('Who may run a turn that can fetch a page, and who may use [alpacabot_agent], which runs the same tool on the shortcode\'s behalf. It governs the next fetch, not the last one: a shortcode answer already cached on a post stands until its cache expires. The tool makes this server send an outbound request and hands the reply back; the Tools help tab says what that grants.', 'alpaca-bot')),
             'access.tool.summarize' => self::access('tool.summarize', __('Tool: summarize', 'alpaca-bot'), __('Who may run a turn that can summarize text through the model.', 'alpaca-bot')),
@@ -201,7 +205,7 @@ final class Schema
                 // sentinel the page posts ahead of the boxes (Fields::render()) is just one more
                 // unknown id: a form with every box unchecked stores []. Anything that is not
                 // a list stores [] too, not the default: `array` falls back to its default, but
-                // this field's default enables every tool, and a malformed write (a PUT of a
+                // this field's default switches tools on, and a malformed write (a PUT of a
                 // bare string) must fail closed rather than switch things on.
                 if (!is_array($raw)) {
                     return [];
@@ -258,6 +262,37 @@ final class Schema
             'edit_posts' => __('Contributors and up', 'alpaca-bot'),
             'read' => __('Any logged-in user', 'alpaca-bot'),
         ];
+    }
+
+    /**
+     * The abilities allowlist: names of the form core checks an ability name against
+     * (`/^[a-z0-9-]+\/[a-z0-9-]+$/`, WP 7.1 class-wp-abilities-registry.php:86), each once, in the
+     * order sent, never one AbilitiesToolkit::excluded() names (AbilitiesToolkit says why). The
+     * pattern here carries `D`, so a name with a trailing newline, which core's lets through, is
+     * refused. Whether a name is *registered* is not asked: that would be a read of core's
+     * registry inside a pure function, and a name whose plugin is deactivated is better kept. The
+     * toolkit skips it, and the Tools tab shows it ticked and marked as not in the site's list,
+     * so it can be seen and cleared. The '' sentinel the page posts ahead of the boxes is dropped like any
+     * other non-name, so a form with every box clear stores []. Anything that is not an array
+     * stores [] too; an array's keys are ignored.
+     *
+     * @return list<string>
+     */
+    public static function sanitizeAbilities(mixed $raw): array
+    {
+        if (!is_array($raw)) {
+            return [];
+        }
+        $out = [];
+        foreach ($raw as $name) {
+            if (is_string($name)
+                && preg_match('#^[a-z0-9-]+/[a-z0-9-]+$#D', $name) === 1
+                && !AbilitiesToolkit::excluded($name)
+                && !in_array($name, $out, true)) {
+                $out[] = $name;
+            }
+        }
+        return $out;
     }
 
     /**

@@ -128,9 +128,10 @@ final class Plugin
         // sharing the instance is what keeps that on the one memoised read of the settings option.
         $registry = new Toolkit\Registry($store, $this->get(Access::class));
         $this->set(Chat\Pipeline::class, new Chat\Pipeline($store, $factory, $this->get(Provider\ModelCatalog::class), $conversations, $meter, $caps, $collector, $prefs, $registry));
-        // The built-in toolkits, under the ids Schema's `toolkits.enabled` options name. The two
-        // that act as a user take get_current_user_id as a closure and ask it when a tool runs,
-        // never here. Not because the id is unreadable here -- this runs on plugins_loaded:9,
+        // The built-in toolkits, under the ids Schema's `toolkits.enabled` options name. The ones
+        // that act as a user (summarize, draft_post and abilities) take get_current_user_id as a
+        // closure and ask it when a tool runs, never here. Not because the id is unreadable
+        // here -- this runs on plugins_loaded:9,
         // and core has loaded pluggable.php and registered all three `determine_current_user`
         // filters before `plugins_loaded` fires (WP 7.1 wp-settings.php:612 and :154 against the
         // do_action at :630; default-filters.php:520-522), so a cookie request would resolve
@@ -148,6 +149,8 @@ final class Plugin
         $registry->register('summarize', $summarize);
         $draftPost = new Toolkit\DraftPostToolkit(get_current_user_id(...));
         $registry->register('draft_post', $draftPost);
+        $abilitiesKit = new Toolkit\AbilitiesToolkit($store, get_current_user_id(...));
+        $registry->register(Toolkit\AbilitiesToolkit::ID, $abilitiesKit);
         $this->set(Toolkit\Registry::class, $registry);
         // The abilities, on core's two hooks and no other (Abilities\Register says why there is
         // no init fallback), the category's hook first because core fires it first and refuses

@@ -105,9 +105,10 @@ final class Registry
          *
          * It is no longer the only capability gate over the tools: enabled() has already dropped
          * every toolkit whose Settings › Access row this user fails
-         * (`alpaca_bot/capability/tool/{id}`, `edit_posts` for the built-ins), so a site that
-         * opens `alpaca_bot/capability/chat` to a role hands that role the chat and no tools
-         * until a row admits them. What this filter is, is the last word: a toolkit added here
+         * (`alpaca_bot/capability/tool/{id}`: `edit_posts` by default for `web_fetch`,
+         * `summarize` and `draft_post`, `manage_options` for `abilities`), so a site that opens
+         * `alpaca_bot/capability/chat` to a role hands that role the chat and no tools until a
+         * row admits them. What this filter is, is the last word: a toolkit added here
          * has no row and no Settings entry, so `user_can($userId, …)` here is the site's own gate
          * over it, and a toolkit taken away here is gone whatever its row says.
          *

@@ -241,8 +241,8 @@ final class ChatCommand
      * With no key, prints every setting as JSON, with provider.api_key shown as `***` when it is
      * set (ask for it by key to see it). With a key, prints that setting's value as JSON; with a
      * key and a value, stores the value first (through the same schema the settings screen uses,
-     * so what is echoed is what was kept). An array setting such as models.overrides takes its
-     * value as a JSON object.
+     * so what is echoed is what was kept). An array setting takes its value as JSON: an object
+     * for a map such as models.overrides, a list for toolkits.abilities.
      *
      * ## OPTIONS
      *
@@ -291,7 +291,7 @@ final class ChatCommand
             if ($field['type'] === 'array') {
                 $value = json_decode($value, true);
                 if (!is_array($value)) {
-                    $this->error(sprintf('%s takes a JSON object.', $key));
+                    $this->error(sprintf('%s takes a JSON object or list.', $key));
                     return;
                 }
             }

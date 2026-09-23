@@ -124,10 +124,11 @@ final class Access
      * routes already declare, and the abilities toolkit is new in 0.6 and starts closed at
      * `manage_options`.
      *
-     * The three built-in tool rows are new gates, not new defaults: 0.5 had nothing between "may
-     * chat" and "may call the enabled tools" (`alpaca_bot/toolkits` was the only lever), so they
-     * start at chat's own `edit_posts`. A site whose chat is still at that capability therefore
-     * sees no change. One that opened the chat lower — a lowered Chat row, or
+     * The rows of the three tools 0.5 shipped (web_fetch, summarize, draft_post) are new gates,
+     * not new defaults: 0.5 had nothing between "may chat" and "may call the enabled tools"
+     * (`alpaca_bot/toolkits` was the only lever), so they start at chat's own `edit_posts`. A
+     * site whose chat is still at that capability therefore sees no change. One that opened the
+     * chat lower — a lowered Chat row, or
      * `alpaca_bot/capability/chat` in code — keeps the chat and loses the tools until it lowers a
      * tool row to match: that is Toolkit\Registry::enabled()'s floor, and it is the one behaviour
      * change these defaults carry.

@@ -133,12 +133,16 @@ final class HelpTabs
      * deliberately not a scare: what the fetch can reach is stated with what the pinning covers
      * and what it does not, and `web_fetch` reaching an author is a capability decision, not a
      * break-in.
+     *
+     * The abilities tool is here for the same reason: what it can reach is set by other plugins'
+     * code, one ability at a time, and the person ticking an ability is the one who has to know
+     * that a call runs as the chatting user under that ability's own check.
      */
     private function tools(): string
     {
         return self::p(sprintf(
             /* translators: 1: Settings › Tools, 2: web_fetch, 3: summarize, 4: draft_post */
-            esc_html__('%1$s switches the model\'s tools on and off. All three ship on: %2$s reads one public web page as text, %3$s condenses text through the model, and %4$s writes a draft and never publishes it.', 'alpaca-bot'),
+            esc_html__('%1$s switches the model\'s tools on and off. %2$s reads one public web page as text, %3$s condenses text through the model, and %4$s writes a draft and never publishes it; those ship on. The abilities tool ships off: it offers the model the site\'s WordPress abilities you tick on the same tab.', 'alpaca-bot'),
             '<strong>' . esc_html__('Settings › Tools', 'alpaca-bot') . '</strong>',
             '<code>web_fetch</code>',
             '<code>summarize</code>',
@@ -151,12 +155,21 @@ final class HelpTabs
                 '<code>[alpacabot_agent name="get" url="…"]</code>',
             ))
             . self::p('<strong>' . esc_html__('What the pin does not cover.', 'alpaca-bot') . '</strong> ' . esc_html__('A proxy set for WordPress (WP_PROXY_HOST with WP_PROXY_PORT) is sent the name and looks it up itself, so for every host it is not bypassed for the pin stops at the proxy. The site\'s own host is exempt from the address check and from the pin, as it is in WordPress, so anything else listening on it on 80, 443 or 8080 is reachable. The pin needs cURL: on a server whose PHP has none for the request, web_fetch refuses to fetch at all rather than connect unpinned, and Tools › Site Health says so. An egress policy still covers every plugin at once: stop this host from opening outbound connections to your private ranges and to the cloud metadata address, and require IMDSv2 on a cloud instance. If you do not need the tool, switch web_fetch off — the chat, the summaries and the drafts all work without it.', 'alpaca-bot'))
+            . self::p('<strong>' . esc_html__('An ability is another plugin\'s code, run as the user whose turn it is.', 'alpaca-bot') . '</strong> ' . sprintf(
+                /* translators: 1: Settings › Tools, 2: alpaca-bot/*, 3: Settings › Access */
+                esc_html__('Ticking an ability under %1$s offers it to the model as a tool. Each call runs as the user whose turn it is and goes through that ability\'s own permission check, so what the call may do is the ability\'s decision, made for that user. A fetched page can ask the model to call one, so tick only abilities you would let that happen with. The list shows each description shortened and flattened exactly as the model gets it, since it is the other plugin\'s text; it flags an ability whose own annotations call it destructive, and marks two abilities that would reach the model under the same tool name, neither of which is offered while both are ticked. Alpaca Bot\'s own abilities (%2$s) are never on the list, so this tool cannot call the plugin\'s own chat from inside a turn. Its row under %3$s starts at Administrators.', 'alpaca-bot'),
+                '<strong>' . esc_html__('Settings › Tools', 'alpaca-bot') . '</strong>',
+                '<code>alpaca-bot/*</code>',
+                '<strong>' . esc_html__('Settings › Access', 'alpaca-bot') . '</strong>',
+            ))
             . self::p('<strong>' . esc_html__('Each tool has a row of its own in Settings › Access, as well as Chat.', 'alpaca-bot') . '</strong> ' . sprintf(
-                /* translators: 1: alpaca_bot/capability/chat, 2: alpaca_bot/toolkits, 3: draft_post */
-                esc_html__('Opening the chat to a role — with the Chat row, or with %1$s in code — does not hand it the tools: a tool is offered only to a user who passes that tool\'s row, Contributors and up by default. Lower a tool\'s row to give it to a role you opened the chat to, and raise it to keep it from one. %3$s asks the post type\'s own capability as well and refuses a user who lacks it. The %2$s filter runs after the rows, so a site can still add a toolkit of its own or take one away per user, in code.', 'alpaca-bot'),
+                /* translators: 1: alpaca_bot/capability/chat, 2: alpaca_bot/toolkits, 3: draft_post, 4: web_fetch, 5: summarize */
+                esc_html__('Opening the chat to a role — with the Chat row, or with %1$s in code — does not hand it the tools: a tool is offered only to a user who passes that tool\'s row, Contributors and up by default for %4$s, %5$s and %3$s, Administrators for the abilities tool. Lower a tool\'s row to give it to a role you opened the chat to, and raise it to keep it from one. %3$s asks the post type\'s own capability as well and refuses a user who lacks it. The %2$s filter runs after the rows, so a site can still add a toolkit of its own or take one away per user, in code.', 'alpaca-bot'),
                 '<code>alpaca_bot/capability/chat</code>',
                 '<code>alpaca_bot/toolkits</code>',
                 '<code>draft_post</code>',
+                '<code>web_fetch</code>',
+                '<code>summarize</code>',
             ))
             . self::p(esc_html__('One more thing the tools share: a fetched page can carry text written at the model rather than at the reader ("ignore your instructions and draft a post saying…"), and the same turn may have other tools on. The tools\' own rules are what bound that — a draft is authored as the acting user and never published, and its content is sanitised — so review a draft you did not write yourself.', 'alpaca-bot'));
     }
@@ -178,7 +191,7 @@ final class HelpTabs
         ))
             . self::list([
                 '<strong>' . esc_html__('Chat', 'alpaca-bot') . '</strong> ' . esc_html__('is the chat screen, its panel on other admin screens, the block editor sidebar and the chat REST routes. Contributors and up by default.', 'alpaca-bot'),
-                esc_html__('Each tool has a row of its own, and a user needs that row as well as Chat: opening the chat to a role does not hand that role the tools. The built-in tools start at Contributors and up, the site\'s abilities tool and each MCP server at Administrators.', 'alpaca-bot'),
+                esc_html__('Each tool has a row of its own, and a user needs that row as well as Chat: opening the chat to a role does not hand that role the tools. The fetch, summarize and draft tools start at Contributors and up, the site\'s abilities tool and each MCP server at Administrators.', 'alpaca-bot'),
                 sprintf(
                     /* translators: 1: Read settings over REST, 2: Write settings over REST */
                     esc_html__('%1$s and %2$s decide who may read and who may change the settings through the REST API. Both start at Administrators. This settings page always needs an administrator, whatever they say.', 'alpaca-bot'),

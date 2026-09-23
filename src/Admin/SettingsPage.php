@@ -12,6 +12,8 @@ use AlpacaBot\Rest\RouteCapability;
 use AlpacaBot\Settings\Schema;
 use AlpacaBot\Settings\Store;
 use AlpacaBot\Shortcodes\Chat as ChatShortcode;
+use AlpacaBot\Toolkit\AbilitiesToolkit;
+use AlpacaBot\Toolkit\SchemaTool;
 
 /**
  * The Settings API page for `alpaca_bot_settings`: one setting, one group (`alpaca_bot`), a
@@ -41,6 +43,10 @@ use AlpacaBot\Shortcodes\Chat as ChatShortcode;
  * `alpaca_bot_settings[models.overrides][<model>][<field>]`; Schema::sanitizeOverrides() drops a
  * row whose fields are all empty, so clearing a row's inputs removes the override.
  *
+ * The abilities allowlist is a box per ability the site lists (AbilitiesToolkit::listed()), posted as
+ * `alpaca_bot_settings[toolkits.abilities][]` (renderAbilities()); its options are the site's,
+ * not the schema's, which is why it is not a checkbox-list field.
+ *
  * The Access tab is not one Schema field per control either. Every row is the capability select
  * the schema describes, on Access::stored(), and under a row whose filter moves it off that value,
  * or cannot be asked from this page, a line says "Set in code" (renderAccess()). The Chat row has
@@ -63,7 +69,14 @@ final class SettingsPage
     /** The last input of the form. A post of the option that arrives without it was cut short by PHP. */
     public const END_MARKER = 'alpaca_bot_settings_end';
 
-    public function __construct(private Store $store, private ModelCatalog $catalog, private Access $access) {}
+    /** @var \Closure(string): bool */
+    private \Closure $exists;
+
+    /** @param (callable(string): bool)|null $exists function_exists() or a stand-in for it, as Abilities\Register takes one */
+    public function __construct(private Store $store, private ModelCatalog $catalog, private Access $access, ?callable $exists = null)
+    {
+        $this->exists = $exists === null ? function_exists(...) : \Closure::fromCallable($exists);
+    }
 
     /** On admin_init: the setting, its sections (one page id per tab) and its fields. */
     public function register(): void
@@ -98,10 +111,11 @@ final class SettingsPage
             add_settings_field('alpaca_bot_' . $key, $f['type'] === 'boolean' ? '' : $f['label'], function () use ($key, $f): void {
                 $html = match (true) {
                     $key === 'models.overrides' => $this->renderOverrides(),
+                    $key === 'toolkits.abilities' => $this->renderAbilities($f),
                     str_starts_with($key, 'access.') => $this->renderAccess(substr($key, strlen('access.')), $f),
                     default => Fields::render($key, $f, $this->store->get($key)),
                 };
-                echo $html; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- Fields escapes every attribute and text node, and renderAccess() escapes what it adds.
+                echo $html; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- Fields escapes every attribute and text node, and renderAbilities() and renderAccess() escape what they add.
             }, self::page($f['section']), 'alpaca_bot_' . $f['section'], $args);
         }
         // One row per MCP server. The servers are the site's, not the schema's, so the rows are
@@ -140,8 +154,9 @@ final class SettingsPage
         echo '</nav><form method="post" action="options.php">';
         settings_fields(self::GROUP);
         // The carry-over before the visible tab: what PHP's max_input_vars cuts is the tail, so
-        // the tail is the last rows of an overrides table, never the key or the URL. The marker
-        // is the last input of all; a post without it was cut, and the sanitize callback refuses it.
+        // the tail is the visible tab's own controls (the last rows of an overrides table, the
+        // last boxes of the abilities list), never the key or the URL. The marker is the last
+        // input of all; a post without it was cut, and the sanitize callback refuses it.
         foreach (Schema::fields() as $key => $f) {
             // Not access.mcp: left out of the post, Schema::sanitize() keeps the stored map,
             // sanitized again, while a carried map would replace it with whatever
@@ -379,6 +394,80 @@ final class SettingsPage
     private static function postable(string $id): bool
     {
         return preg_match('/^[\x20-\x25\x27-\x5C\x5E-\x7E]+$/D', $id) === 1 && $id !== ' ' && (string) (int) $id !== $id;
+    }
+
+    /**
+     * The abilities allowlist: a checkbox per ability AbilitiesToolkit::listed() has, which is
+     * what the toolkit offers from, each with its label, its name, a flag when the
+     * ability's own `annotations` meta says `destructive` is true, and its description as the
+     * model will read it (SchemaTool::describe()), so the administrator approves the text the
+     * model gets. Each ability AbilitiesToolkit::collisions() finds sharing a tool name is marked,
+     * naming the others, since the toolkit offers none of them while they are all ticked. A stored
+     * name the list does not have (its plugin deactivated, or a `wp_get_abilities_item_include`
+     * filter hiding it) still gets a ticked box, marked as not in the list, so it can be seen and
+     * cleared rather than carried invisibly; renderOverrides() keeps a stale model's row for the
+     * same reason. A stored name of Alpaca Bot's own gets none: the toolkit never offers one, and
+     * Schema::sanitizeAbilities() drops it on the next save.
+     *
+     * The hidden '' ahead of the boxes is the sentinel Fields::render() explains for a
+     * checkbox-list: without it a form with every box clear posts nothing for the field, and
+     * Schema::sanitize() keeps what is stored. Where the Abilities API is absent there are no
+     * boxes and no sentinel, so a save leaves the stored list as it is.
+     *
+     * Labels, names and descriptions are other plugins' text: each goes through esc_html() or
+     * esc_attr() as it is printed.
+     *
+     * @param Field $f
+     */
+    private function renderAbilities(array $f): string
+    {
+        $desc = '<p class="description">' . esc_html((string) ($f['description'] ?? '')) . '</p>';
+        if (!($this->exists)('wp_get_abilities')) {
+            return '<p class="description">' . esc_html__('This site\'s WordPress has no Abilities API, so there are no abilities to offer.', 'alpaca-bot') . '</p>';
+        }
+        $stored = $this->store->get('toolkits.abilities', []);
+        $chosen = array_values(array_filter(is_array($stored) ? $stored : [], 'is_string'));
+        $listed = AbilitiesToolkit::listed();
+        $clashes = AbilitiesToolkit::collisions(array_keys($listed));
+        $name = esc_attr(Plugin::OPTION . '[toolkits.abilities][]');
+        $items = '';
+        foreach ($listed as $id => $ability) {
+            $annotations = $ability->get_meta_item('annotations', []);
+            $destructive = is_array($annotations) && ($annotations['destructive'] ?? null) === true;
+            $clash = isset($clashes[$id])
+                ? '<br><span class="description">' . sprintf(
+                    /* translators: %s: the other ability's name, or names, e.g. core/get-site-info */
+                    esc_html__('Reaches the model under the same tool name as %s, so while both are ticked neither is offered.', 'alpaca-bot'),
+                    implode(', ', array_map(static fn(string $other): string => '<code>' . esc_html($other) . '</code>', $clashes[$id])),
+                ) . '</span>'
+                : '';
+            $items .= sprintf(
+                '<li><label><input type="checkbox" name="%s" value="%s"%s> <strong>%s</strong> <code>%s</code></label>%s<br><span class="description">%s</span>%s</li>',
+                $name,
+                esc_attr($id),
+                checked(in_array($id, $chosen, true), true, false),
+                esc_html($ability->get_label()),
+                esc_html($id),
+                $destructive ? ' <strong>' . esc_html__('Destructive', 'alpaca-bot') . '</strong>' : '',
+                esc_html(SchemaTool::describe($ability->get_description())),
+                $clash,
+            );
+        }
+        foreach ($chosen as $id) {
+            if (!isset($listed[$id]) && !AbilitiesToolkit::excluded($id)) {
+                $items .= sprintf(
+                    '<li><label><input type="checkbox" name="%s" value="%s" checked="checked"> <code>%s</code></label> <em>%s</em></li>',
+                    $name,
+                    esc_attr($id),
+                    esc_html($id),
+                    esc_html__('(not in this site\'s list of abilities; untick to remove)', 'alpaca-bot'),
+                );
+            }
+        }
+        $list = $items === ''
+            ? '<p>' . esc_html__('No abilities are registered on this site besides Alpaca Bot\'s own.', 'alpaca-bot') . '</p>'
+            : '<ul>' . $items . '</ul>';
+        return '<input type="hidden" name="' . $name . '" value="">' . $list . $desc;
     }
 
     /**

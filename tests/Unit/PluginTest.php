@@ -114,9 +114,10 @@ it('registers the settings store, provider factory, model catalog, conversation 
         ->and($plugin->get(CapPolicy::class))->toBeInstanceOf(CapPolicy::class)
         ->and($plugin->get(Collector::class))->toBeInstanceOf(Collector::class)
         ->and($plugin->get(Pipeline::class))->toBeInstanceOf(Pipeline::class);
-    // The three built-in toolkits, registered under the ids the schema's default names, in that
-    // order. The setting enables all three by default, and a stubbed get_option() answers
-    // nothing here, so all three are enabled; the filter runs with the user id it was given.
+    // The built-in toolkits, registered under the ids the schema's `toolkits.enabled` options
+    // name, in that order. A stubbed get_option() answers nothing here, so the schema's default
+    // list is what enables them, and it leaves abilities off; the filter runs with the user id it
+    // was given.
     Functions\when('get_option')->justReturn([]);
     // enabled() holds each toolkit to its Access row for that user. This test is about the wiring
     // -- which toolkits are registered, under which ids, into which pipeline -- so the user
@@ -126,9 +127,10 @@ it('registers the settings store, provider factory, model catalog, conversation 
     Filters\expectApplied('alpaca_bot/toolkits')->once()->with(Mockery::type('array'), 3)->andReturnFirstArg();
     $registry = $plugin->get(Registry::class);
     expect($registry)->toBeInstanceOf(Registry::class)
-        ->and($registry->ids())->toBe(['web_fetch', 'summarize', 'draft_post']);
+        ->and($registry->ids())->toBe(['web_fetch', 'summarize', 'draft_post', 'abilities']);
     $enabled = $registry->enabled(3);
-    expect($enabled['web_fetch'])->toBeInstanceOf(WebFetchToolkit::class)
+    expect(array_keys($enabled))->toBe(['web_fetch', 'summarize', 'draft_post'])
+        ->and($enabled['web_fetch'])->toBeInstanceOf(WebFetchToolkit::class)
         ->and($enabled['summarize'])->toBeInstanceOf(SummarizeToolkit::class)
         ->and($enabled['draft_post'])->toBeInstanceOf(DraftPostToolkit::class);
     // The pipeline holds that same registry, so a chat turn can run the toolkits: the two are

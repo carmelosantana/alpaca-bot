@@ -155,14 +155,16 @@ function freshProcess(string $script, array $args): string
 
 /**
  * Admin\SettingsPageTest: a page over a pre-seeded Store and a catalog that is never asked
- * (do_settings_sections() is stubbed there, so the overrides table never renders).
+ * (do_settings_sections() is stubbed there, so the overrides table never renders). `$exists`
+ * stands in for function_exists(), as abilitiesRegister()'s does; null is the real one.
  *
  * @param array<string, mixed> $settings
+ * @param (callable(string): bool)|null $exists
  */
-function settingsPage(array $settings = []): AlpacaBot\Admin\SettingsPage
+function settingsPage(array $settings = [], ?callable $exists = null): AlpacaBot\Admin\SettingsPage
 {
     $store = new Store($settings);
-    return new AlpacaBot\Admin\SettingsPage($store, new ModelCatalog(new Factory($store)), new AlpacaBot\Access($store));
+    return new AlpacaBot\Admin\SettingsPage($store, new ModelCatalog(new Factory($store)), new AlpacaBot\Access($store), $exists);
 }
 
 /** core's selected() with $echo false: the attribute when the two values match as strings, else ''. */
@@ -178,9 +180,10 @@ function stubSelected(): void
  * without core's do_settings_sections().
  *
  * @param array<string, mixed> $settings
+ * @param (callable(string): bool)|null $exists passed to settingsPage()
  * @return array<string, array{title: string, render: Closure(): string}>
  */
-function settingsFields(array $settings = []): array
+function settingsFields(array $settings = [], ?callable $exists = null): array
 {
     $fields = [];
     Functions\when('register_setting')->justReturn(null);
@@ -192,7 +195,7 @@ function settingsFields(array $settings = []): array
             return (string) ob_get_clean();
         }];
     });
-    settingsPage($settings)->register();
+    settingsPage($settings, $exists)->register();
     return $fields;
 }
 
@@ -818,4 +821,93 @@ function adminDrawer(array $settings = []): AlpacaBot\Admin\Drawer
 {
     $store = new Store($settings);
     return new AlpacaBot\Admin\Drawer(new AlpacaBot\Access($store), new AlpacaBot\Chat\UserPrefs(), new AlpacaBot\Admin\Assets());
+}
+
+/**
+ * wp_strip_all_tags() as core's does it to a string (WP 7.1 formatting.php:5628-5635): script and
+ * style elements dropped with their content, strip_tags() over the rest, runs of line breaks,
+ * tabs and spaces made one space on request, trimmed. SchemaTool::describe() calls it, and a
+ * stand-in that did less would pass a test core would fail.
+ */
+function stubStripAllTags(): void
+{
+    Functions\when('wp_strip_all_tags')->alias(static function (string $text, bool $removeBreaks = false): string {
+        $text = strip_tags((string) preg_replace('@<(script|style)[^>]*?>.*?</\\1>@si', '', $text));
+        if ($removeBreaks) {
+            $text = (string) preg_replace('/[\r\n\t ]+/', ' ', $text);
+        }
+        return trim($text);
+    });
+}
+
+/**
+ * AbilitiesToolkitTest and SettingsPageTest: a WP_Ability double. WP_Ability is a core class the
+ * unit suite does not load, so Mockery declares it, as HelpTabsTest does WP_Screen. execute()
+ * records its input and the user current when it ran in $GLOBALS['abAbilityRuns'], so a test can
+ * see which user an ability ran as.
+ *
+ * @param array<string, mixed> $schema
+ * @param array<string, mixed> $meta
+ */
+function siteAbility(string $name, array $schema = ['type' => 'object', 'properties' => ['fields' => ['type' => 'array']]], mixed $result = ['ok' => true], string $description = 'Returns site information.', array $meta = []): Mockery\MockInterface
+{
+    $ability = Mockery::mock('WP_Ability');
+    $ability->shouldReceive('get_name')->andReturn($name);
+    $ability->shouldReceive('get_label')->andReturn('Label of ' . $name)->byDefault();
+    $ability->shouldReceive('get_description')->andReturn($description);
+    $ability->shouldReceive('get_input_schema')->andReturn($schema);
+    $ability->shouldReceive('get_meta_item')->andReturnUsing(static fn(string $key, mixed $default = null): mixed => $meta[$key] ?? $default);
+    $ability->shouldReceive('execute')->andReturnUsing(static function (mixed $input = null) use ($result): mixed {
+        $GLOBALS['abAbilityRuns'][] = ['input' => $input, 'as' => get_current_user_id()];
+        return $result;
+    })->byDefault();
+    return $ability;
+}
+
+/**
+ * Core's abilities registry, as far as the plugin asks it: wp_has_ability(), wp_get_ability() and
+ * wp_get_abilities() answer from $GLOBALS['abAbilities'], name => WP_Ability double, so a test can
+ * unregister one mid-test by unsetting it. wp_get_ability() on a name that is not there does what
+ * core's does, less the notice: it records the name in $GLOBALS['abAbilityNotFound'] (core fires
+ * _doing_it_wrong() there) and answers null. wp_get_abilities() leaves out the names in
+ * `$unlisted`, as a site's `wp_get_abilities_item_include` filter would (WP 7.1), while the other
+ * two still answer for them.
+ *
+ * @param array<string, Mockery\MockInterface> $abilities
+ * @param list<string> $unlisted
+ */
+function abilitiesRegistry(array $abilities, array $unlisted = []): void
+{
+    stubStripAllTags();
+    $GLOBALS['abAbilities'] = $abilities;
+    $GLOBALS['abAbilityNotFound'] = [];
+    Functions\when('wp_has_ability')->alias(static fn(string $name): bool => isset($GLOBALS['abAbilities'][$name]));
+    Functions\when('wp_get_ability')->alias(static function (string $name): ?object {
+        if (!isset($GLOBALS['abAbilities'][$name])) {
+            $GLOBALS['abAbilityNotFound'][] = $name;
+            return null;
+        }
+        return $GLOBALS['abAbilities'][$name];
+    });
+    Functions\when('wp_get_abilities')->alias(static fn(): array => array_diff_key($GLOBALS['abAbilities'], array_flip($unlisted)));
+}
+
+/**
+ * AbilitiesToolkitTest: the toolkit over `$abilities` as the site's registry and `$allowed` as the
+ * stored allowlist. The acting user is `$userId` and the logged-in user starts as 1 (cliUsers()),
+ * so a test can see the toolkit make the turn's user current for the call and hand the request
+ * back afterwards. `$api` false is a WordPress with no Abilities API. The 7.1-only schema preparer
+ * is reported absent, so a schema goes as registered; the branch that uses it is exercised against
+ * real core in tests/Integration/AbilitiesToolkitTest.php.
+ *
+ * @param array<string, Mockery\MockInterface> $abilities
+ * @param list<mixed> $allowed
+ * @param list<string> $unlisted passed to abilitiesRegistry()
+ */
+function abilitiesToolkit(array $abilities, array $allowed, bool $api = true, int $userId = 3, array $unlisted = []): AlpacaBot\Toolkit\AbilitiesToolkit
+{
+    $GLOBALS['abAbilityRuns'] = [];
+    abilitiesRegistry($abilities, $unlisted);
+    cliUsers([1, 3], 1);
+    return new AlpacaBot\Toolkit\AbilitiesToolkit(new Store(['toolkits.abilities' => $allowed]), static fn(): int => $userId, static fn(string $fn): bool => $api && $fn !== 'wp_prepare_json_schema_for_client');
 }

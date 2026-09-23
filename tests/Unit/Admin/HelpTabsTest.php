@@ -169,6 +169,19 @@ it('escapes every URL it prints through esc_url', function (): void {
     expect($urls)->not->toBeEmpty()->and($support)->not->toContain('href="https://');
 });
 
+// The abilities tool is the one tool whose reach is set by other plugins' code, so the person
+// switching tools on is told what a call is and who it runs as, that the list shows what the model
+// reads, and that its row starts where the other tools' rows do not.
+it('tells the person switching tools on what an ability call is: another plugin\'s code, run as the user whose turn it is', function (): void {
+    Functions\when('esc_url')->returnArg();
+    $tools = helpTabContent('alpaca-bot-tools');
+    expect($tools)->toContain('as the user whose turn it is')->toContain('<code>alpaca-bot/*</code>')
+        ->toContain('own permission check')->toContain('destructive')->toContain('same tool name')
+        ->toContain('Contributors and up by default for <code>web_fetch</code>, <code>summarize</code> and <code>draft_post</code>')
+        ->toContain('Administrators for the abilities tool')
+        ->not->toContain('All three')->not->toContain('three ship');
+});
+
 /** The content of one tab as add() hands it to the chat screen; how many tabs there are is the ordering test's to pin. */
 function helpTabContent(string $tabId): string
 {

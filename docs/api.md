@@ -411,7 +411,7 @@ stored and `""` when none is:
 
 ```
 $ curl -s -u "admin:$PW" "$B/settings"
-{"provider.kind":"ollama","provider.base_url":"http:\/\/ollama.example:11434\/v1","provider.api_key":"","provider.timeout":60,"models.default":"qwen3-vl:2b","models.temperature":0.7,"models.num_ctx":8192,"models.keep_alive":"5m","models.overrides":[],"chat.system_prompt":"","chat.welcome":"How can I help?","chat.placeholder":"Message Alpaca Bot","chat.user_can_change_model":true,"chat.context_messages":20,"chat.history_limit":20,"chat.spellcheck":true,"chat.assistant_avatar":"","privacy.save_history":true,"privacy.usage_log":true,"privacy.usage_retention_days":0,"governance.site_monthly_tokens":0,"governance.user_monthly_tokens":0,"toolkits.enabled":["web_fetch","summarize","draft_post"],"toolkits.user_agent":"AlpacaBot\/0.5 (+https:\/\/github.com\/carmelosantana\/alpaca-bot)","access.chat":"edit_posts","access.tool.web_fetch":"edit_posts","access.tool.summarize":"edit_posts","access.tool.draft_post":"edit_posts","access.tool.abilities":"manage_options","access.settings.read":"manage_options","access.settings.write":"manage_options","access.shortcode":"edit_posts","access.mcp":[]}
+{"provider.kind":"ollama","provider.base_url":"http:\/\/ollama.example:11434\/v1","provider.api_key":"","provider.timeout":60,"models.default":"qwen3-vl:2b","models.temperature":0.7,"models.num_ctx":8192,"models.keep_alive":"5m","models.overrides":[],"chat.system_prompt":"","chat.welcome":"How can I help?","chat.placeholder":"Message Alpaca Bot","chat.user_can_change_model":true,"chat.context_messages":20,"chat.history_limit":20,"chat.spellcheck":true,"chat.assistant_avatar":"","privacy.save_history":true,"privacy.usage_log":true,"privacy.usage_retention_days":0,"governance.site_monthly_tokens":0,"governance.user_monthly_tokens":0,"toolkits.enabled":["web_fetch","summarize","draft_post"],"toolkits.user_agent":"AlpacaBot\/0.5 (+https:\/\/github.com\/carmelosantana\/alpaca-bot)","toolkits.abilities":[],"access.chat":"edit_posts","access.tool.web_fetch":"edit_posts","access.tool.summarize":"edit_posts","access.tool.draft_post":"edit_posts","access.tool.abilities":"manage_options","access.settings.read":"manage_options","access.settings.write":"manage_options","access.shortcode":"edit_posts","access.mcp":[]}
 ```
 
 (`provider.base_url` is the site's own value.) What this route answers is what is *stored*, which
@@ -497,15 +497,29 @@ Rules worth knowing before you write:
 
 - **`toolkits.enabled` is a list of ids, replaced wholesale.** The built-in toolkits the
   assistant may use, by the ids the schema route lists under the field's `options`
-  (`web_fetch`, `summarize`, `draft_post`; all three by default). What is stored is the
-  subset of those ids you sent, in the schema's order: an id it does not know is dropped, a
-  duplicate is one entry, and `[]` switches every tool off. A value that is not a list at all
-  stores `[]` rather than the default, since the default switches everything on. The field's
-  `type` is `checkbox-list`, which a form renders as one checkbox per option.
+  (`web_fetch`, `summarize`, `draft_post`, `abilities`; the default is the first three). What
+  is stored is the subset of those ids you sent, in the schema's order: an id it does not know
+  is dropped, a duplicate is one entry, and `[]` switches every tool off. A value that is not a
+  list at all stores `[]` rather than the default, since the default switches tools on. The
+  field's `type` is `checkbox-list`, which a form renders as one checkbox per option.
 
   ```
   $ curl -s -u "admin:$PW" -H 'Content-Type: application/json' -X PUT -d '{"toolkits.enabled": ["draft_post", "bogus", "web_fetch"]}' "$B/settings" | jq -c '{"toolkits.enabled"}'
   {"toolkits.enabled":["web_fetch","draft_post"]}
+  ```
+
+- **`toolkits.abilities` is a list of ability names, replaced wholesale.** The WordPress
+  abilities the `abilities` toolkit offers the model, as `namespace/name` strings. What is
+  stored is each name of that form you sent, once, in the order sent; anything else (a string
+  of another shape, a number, `""`) is dropped, and so is any `alpaca-bot/*` name, since the
+  plugin's own abilities are never offered. A value that is not a list stores `[]`. Whether a
+  name is registered is not checked on the way in: the toolkit skips one core does not have,
+  and the Tools tab shows it as not registered. The field's `type` is `array`; its choices are
+  the site's registered abilities, which the schema route does not list.
+
+  ```
+  $ curl -s -u "admin:$PW" -H 'Content-Type: application/json' -X PUT -d '{"toolkits.abilities": ["core/get-site-info", "alpaca-bot/chat", "Not A Name", "core/get-site-info"]}' "$B/settings" | jq -c '{"toolkits.abilities"}'
+  {"toolkits.abilities":["core/get-site-info"]}
   ```
 
 - **`privacy.usage_retention_days`** (0-3650, 0 = keep forever) drives a daily cron event,
@@ -516,7 +530,7 @@ Rules worth knowing before you write:
 
 `GET /settings/schema` is the field list a client renders a form from, `{sections, fields,
 mask}`; a secret field is flagged `secret: true` and server-side sanitize callables are left
-out. Three of the 24 fields:
+out. Three of the fields:
 
 ```
 $ curl -s -u "admin:$PW" "$B/settings/schema"

@@ -28,7 +28,8 @@ final class ToolkitsTest extends TestCase
     {
         $admin = $this->asAdmin();
         $registry = Plugin::instance()->get(Registry::class);
-        $this->assertSame(['web_fetch', 'summarize', 'draft_post'], $registry->ids());
+        $this->assertSame(['web_fetch', 'summarize', 'draft_post', 'abilities'], $registry->ids());
+        // abilities is registered and left off by the default list.
         $this->assertSame(['web_fetch', 'summarize', 'draft_post'], array_keys($registry->enabled($admin)));
 
         $this->assertSame(200, $this->rest('PUT', '/settings', ['toolkits.enabled' => ['draft_post', 'bogus']])->get_status());
@@ -73,6 +74,7 @@ final class ToolkitsTest extends TestCase
         foreach (['web_fetch', 'summarize', 'draft_post'] as $id) {
             $this->assertMatchesRegularExpression('/<input type="checkbox"[^>]*name="alpaca_bot_settings\[toolkits\.enabled\]\[\]" value="' . $id . '"[^>]*checked/', $html, $id);
         }
+        $this->assertMatchesRegularExpression('/<input type="checkbox"[^>]*name="alpaca_bot_settings\[toolkits\.enabled\]\[\]" value="abilities">/', $html);
         // The sentinel ahead of the boxes, so "none checked" is posted at all.
         $this->assertMatchesRegularExpression('/<input type="hidden" name="alpaca_bot_settings\[toolkits\.enabled\]\[\]" value="">.*<input type="checkbox"/s', $html);
 

@@ -22,18 +22,18 @@ it('has defaults for every field and a section for each', function (): void {
 // page can render one checkbox per built-in. What is stored is always the checked subset of
 // the field's options, in option order: an unknown id (a toolkit that was removed, a typo in a
 // PUT) is dropped rather than kept for a registry to trip on, and a duplicate is one entry.
-it('stores toolkits.enabled as the checked subset of its options, in option order, all three built-ins by default', function (): void {
+it('stores toolkits.enabled as the checked subset of its options, in option order, every built-in but abilities by default', function (): void {
     $f = Schema::fields()['toolkits.enabled'];
     expect($f['type'])->toBe('checkbox-list')
         ->and($f['section'])->toBe('toolkits')
         ->and($f['default'])->toBe(['web_fetch', 'summarize', 'draft_post'])
-        ->and(array_keys($f['options'] ?? []))->toBe(['web_fetch', 'summarize', 'draft_post']);
+        ->and(array_keys($f['options'] ?? []))->toBe(['web_fetch', 'summarize', 'draft_post', 'abilities']);
     expect(Schema::sanitize(['toolkits.enabled' => ['draft_post', 'nope', '', 'web_fetch', 'web_fetch']], [])['toolkits.enabled'])->toBe(['web_fetch', 'draft_post']);
     // The page posts a hidden '' ahead of the boxes (Fields::render()), so a save with every box
     // unchecked arrives as [''] and is heard as "none", not as "absent, keep what is stored".
     expect(Schema::sanitize(['toolkits.enabled' => ['']], ['toolkits.enabled' => ['summarize']])['toolkits.enabled'])->toBe([]);
     // Not a list at all (a PUT of a bare string): fail closed. `array` falls back to its default
-    // here, but this default switches every tool on, and a malformed write must not do that.
+    // here, but this default switches tools on, and a malformed write must not do that.
     expect(Schema::sanitize(['toolkits.enabled' => 'web_fetch'], ['toolkits.enabled' => ['summarize']])['toolkits.enabled'])->toBe([]);
     // Left out of the write: keeps what is stored, as every field does.
     expect(Schema::sanitize([], ['toolkits.enabled' => ['summarize']])['toolkits.enabled'])->toBe(['summarize']);
@@ -271,4 +271,24 @@ it('reads an overrides row stored before the tools key as inherit and drops noth
     $out = Schema::sanitize([], $stored);
     expect($out['models.overrides'])->toBe($stored['models.overrides'])
         ->and($out['models.overrides']['llama3.2'])->not->toHaveKey('tools');
+});
+
+it('offers the abilities toolkit as an option of toolkits.enabled without switching it on', function (): void {
+    $f = Schema::fields()['toolkits.enabled'];
+    expect($f['options'])->toHaveKey('abilities')
+        ->and($f['default'])->not->toContain('abilities')
+        ->and(Schema::sanitize(['toolkits.enabled' => ['abilities', 'web_fetch']], [])['toolkits.enabled'])->toBe(['web_fetch', 'abilities']);
+});
+
+it('keeps an abilities allowlist of ability names only, once each, never an alpaca-bot one, and fails closed on a non-list', function (): void {
+    $f = Schema::fields()['toolkits.abilities'];
+    expect($f['type'])->toBe('array')->and($f['section'])->toBe('toolkits')->and($f['default'])->toBe([]);
+    expect(Schema::sanitizeAbilities(['core/get-site-info', '', 'core/get-site-info', 'alpaca-bot/chat', 'Not A Name', 7, ['core/x'], 'core/', '/x', 'a/b/c', "core/x\n", 'my-plugin/do-thing']))->toBe(['core/get-site-info', 'my-plugin/do-thing'])
+        ->and(Schema::sanitizeAbilities('core/get-site-info'))->toBe([])
+        ->and(Schema::sanitizeAbilities(['x' => 'core/get-site-info']))->toBe(['core/get-site-info'])
+        ->and(Schema::sanitize(['toolkits.abilities' => ['core/get-user-info']], [])['toolkits.abilities'])->toBe(['core/get-user-info'])
+        // The page's sentinel alone: every box cleared.
+        ->and(Schema::sanitize(['toolkits.abilities' => ['']], ['toolkits.abilities' => ['core/get-site-info']])['toolkits.abilities'])->toBe([])
+        // Left out of the write: kept, and cleaned again on the way through.
+        ->and(Schema::sanitize([], ['toolkits.abilities' => ['core/get-site-info', 'alpaca-bot/chat']])['toolkits.abilities'])->toBe(['core/get-site-info']);
 });

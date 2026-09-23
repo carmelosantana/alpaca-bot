@@ -466,3 +466,60 @@ it('posts nothing for the access.mcp map from another tab, and carries the entri
         ->not->toContain('alpaca_bot_settings[access.mcp][x]')
         ->and(strpos($access, '[access.mcp][gone]'))->toBeLessThan(strpos($access, '<!-- sections:'));
 });
+
+// ---------------------------------------------------------------- the abilities allowlist
+// toolkits.abilities is the one Tools field whose options are the site's, not the schema's: a box
+// per ability core has registered, read from abilitiesRegistry() (tests/Pest.php) here.
+
+it('lists every registered ability but Alpaca Bot\'s own as a box, with the description the model will read, and keeps a stored name core no longer has', function (): void {
+    Functions\when('checked')->alias(fn($a, $b = true, $echo = true) => $a == $b ? ' checked="checked"' : '');
+    abilitiesRegistry([
+        'core/get-site-info' => siteAbility('core/get-site-info', description: "Returns\n\tsite <em>information</em>."),
+        'x/delete-everything' => siteAbility('x/delete-everything', meta: ['annotations' => ['destructive' => true]]),
+        'x/maybe' => siteAbility('x/maybe', meta: ['annotations' => ['destructive' => null]]),
+        'alpaca-bot/chat' => siteAbility('alpaca-bot/chat'),
+    ]);
+    // A hand-edited option can hold one of Alpaca Bot's own names; it is not listed as a stale one.
+    $html = (settingsFields(['toolkits.abilities' => ['x/delete-everything', 'gone/missing', 'alpaca-bot/chat', 'alpaca-bot/gone']])['alpaca_bot_toolkits.abilities']['render'])();
+
+    // The sentinel ahead of the boxes, so a save with every box clear is heard.
+    expect($html)->toMatch('/^<input type="hidden" name="alpaca_bot_settings\[toolkits\.abilities\]\[\]" value="">/')
+        ->toContain('<input type="checkbox" name="alpaca_bot_settings[toolkits.abilities][]" value="core/get-site-info"> <strong>Label of core/get-site-info</strong> <code>core/get-site-info</code>')
+        ->toContain('<input type="checkbox" name="alpaca_bot_settings[toolkits.abilities][]" value="x/delete-everything" checked="checked">')
+        ->toContain('<span class="description">Returns site information.</span>')
+        ->not->toContain('value="alpaca-bot/chat"')->not->toContain('value="alpaca-bot/gone"')
+        ->toContain('<input type="checkbox" name="alpaca_bot_settings[toolkits.abilities][]" value="gone/missing" checked="checked"> <code>gone/missing</code>')
+        ->toContain('not in this site&#039;s list of abilities; untick to remove');
+    // Destructive only where the ability's own annotation says true.
+    expect(substr_count($html, 'Destructive'))->toBe(1)
+        ->and(strpos($html, 'Destructive'))->toBeGreaterThan(strpos($html, 'value="x/delete-everything"'))
+        ->and(strpos($html, 'Destructive'))->toBeLessThan(strpos($html, 'value="x/maybe"'));
+});
+
+it('escapes an ability\'s label and description, which are other plugins\' text', function (): void {
+    Functions\when('checked')->alias(fn($a, $b = true, $echo = true) => $a == $b ? ' checked="checked"' : '');
+    $evil = siteAbility('x/evil', description: '<script>alert(1)</script>"><img src=x onerror=alert(2)>');
+    $evil->shouldReceive('get_label')->andReturn('<img src=x onerror=alert(3)>');
+    abilitiesRegistry(['x/evil' => $evil]);
+    $html = (settingsFields()['alpaca_bot_toolkits.abilities']['render'])();
+    expect($html)->not->toContain('<script')->not->toContain('<img')->toContain('&lt;img src=x onerror=alert(3)&gt;');
+});
+
+// Two abilities that reach the model under one tool name are both left out of the offer
+// (AbilitiesToolkitTest); this is where an administrator is told so.
+it('marks two abilities that would share a tool name, naming the other one', function (): void {
+    Functions\when('checked')->alias(fn($a, $b = true, $echo = true) => $a == $b ? ' checked="checked"' : '');
+    $ns = str_repeat('n', 45);
+    $long = $ns . '/' . str_repeat('l', 20);
+    $short = $ns . '/' . substr(hash('sha256', 'ability__' . $ns . '__' . str_repeat('l', 20)), 0, 8);
+    abilitiesRegistry([$long => siteAbility($long), $short => siteAbility($short), 'core/get-site-info' => siteAbility('core/get-site-info')]);
+    $html = (settingsFields()['alpaca_bot_toolkits.abilities']['render'])();
+    expect(substr_count($html, 'Reaches the model under the same tool name'))->toBe(2)
+        ->and($html)->toContain('same tool name as <code>' . $short . '</code>')
+        ->and($html)->toContain('same tool name as <code>' . $long . '</code>');
+});
+
+it('says so, and posts nothing for the field, where the Abilities API is absent', function (): void {
+    $html = (settingsFields(['toolkits.abilities' => ['core/get-site-info']], static fn(string $fn): bool => false)['alpaca_bot_toolkits.abilities']['render'])();
+    expect($html)->toContain('Abilities API')->not->toContain('<input');
+});

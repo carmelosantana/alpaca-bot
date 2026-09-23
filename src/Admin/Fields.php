@@ -90,7 +90,9 @@ final class Fields
                     $desc,
                 );
             case 'array':
-                // A map has no single control; SettingsPage renders `models.overrides` as a table.
+                // An array field has no single control. SettingsPage renders each one itself
+                // (`models.overrides` as a table, `toolkits.abilities` as a list of boxes) or
+                // gives it none (`access.mcp`), and never hands one to this method.
                 return '';
             case 'checkbox-list':
                 // One box per option under the same `[]` name, and ahead of them a hidden ''
