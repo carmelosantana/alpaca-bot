@@ -132,4 +132,31 @@ final class DrawerQueriesTest extends TestCase
         $this->assertStringContainsString('data-screen-id="post" data-screen-title="Add Post" data-post="' . $GLOBALS['post']->ID . '"', $html);
         $this->assertSame(0, $queries, 'the drawer ran a query on the Add New screen before it was opened');
     }
+
+    public function test_the_editor_sidebar_adds_no_query_to_a_block_editor_screen_before_it_is_opened(): void
+    {
+        // enqueue_block_editor_assets on post.php: the sidebar's script and the two settings
+        // objects, and nothing of the chat, which the sidebar fetches when it is first opened.
+        $uid = $this->asAdmin();
+        set_current_screen('post');
+        get_current_screen()->is_block_editor(true);
+        $drawer = Plugin::instance()->get(Drawer::class);
+        get_user_meta($uid);
+        Plugin::instance()->get(Store::class)->get('access.chat');
+        wp_scripts();
+        wp_styles();
+        // rest_url() reads permalink_structure, an autoloaded option wp-admin has in memory by now.
+        // Building the registries reads it on a cold cache (the class docblock), but a test that
+        // runs after another finds them built, so the read is made here in so many words.
+        get_option('permalink_structure');
+
+        $before = get_num_queries();
+        $drawer->enqueueEditor();
+        $queries = get_num_queries() - $before;
+
+        $this->assertTrue(wp_script_is(Drawer::EDITOR_HANDLE, 'enqueued'));
+        $this->assertFalse(wp_script_is('alpaca-bot-chat', 'enqueued'));
+        $this->assertFalse(wp_style_is('alpaca-bot', 'enqueued'));
+        $this->assertSame(0, $queries, 'the editor sidebar ran a query before it was opened');
+    }
 }
