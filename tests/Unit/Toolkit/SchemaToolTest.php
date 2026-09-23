@@ -77,6 +77,23 @@ it('cuts a result longer than RESULT_CHARS characters to that many, and says whe
         ->and($error->content)->toBe(str_repeat('e', SchemaTool::RESULT_CHARS) . SchemaTool::CUT_MARKER);
 });
 
+// A result goes back to the provider inside a JSON request body, and json_encode() refuses a
+// string that is not UTF-8. So the bytes that are not UTF-8 become U+FFFD, in a success and an
+// error alike, before the cut, and the rest is kept; the site's own mbstring substitute
+// character is left as it was.
+it('replaces bytes that are not UTF-8 in a result with U+FFFD, success or error, before the cut', function (): void {
+    $substitute = mb_substitute_character();
+    $ok = (new SchemaTool('t', 'd', [], static fn(array $a): ToolResult => ToolResult::success("caf\xE9 au lait")))->execute([]);
+    expect($ok->status)->toBe(ToolResultStatus::Success)
+        ->and($ok->content)->toBe("caf\u{FFFD} au lait");
+    $error = (new SchemaTool('t', 'd', [], static fn(array $a): ToolResult => ToolResult::error("no \xE9t\xE9")))->execute([]);
+    expect($error->status)->toBe(ToolResultStatus::Error)
+        ->and($error->content)->toBe("no \u{FFFD}t\u{FFFD}");
+    $long = (new SchemaTool('t', 'd', [], static fn(array $a): ToolResult => ToolResult::success("\xE9" . str_repeat('x', SchemaTool::RESULT_CHARS))))->execute([]);
+    expect($long->content)->toBe("\u{FFFD}" . str_repeat('x', SchemaTool::RESULT_CHARS - 1) . SchemaTool::CUT_MARKER)
+        ->and(mb_substitute_character())->toBe($substitute);
+});
+
 it('leaves a result of exactly RESULT_CHARS characters whole', function (): void {
     $exact = str_repeat('😀', SchemaTool::RESULT_CHARS);
     expect((new SchemaTool('t', 'd', [], static fn(array $a): ToolResult => ToolResult::success($exact)))->execute([])->content)->toBe($exact);

@@ -55,9 +55,10 @@ use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Tool\ToolResult;
  *
  * Descriptions are other plugins' text and the model reads them, so they go through
  * SchemaTool::describe(), and the Tools tab shows the administrator that same text. The input
- * schema's own text does not: it goes to the model as the ability registered it (as core
- * prepares it on 7.1, below), uncapped, and the Tools tab does not show it. A result, success
- * or error, is cut at SchemaTool::RESULT_CHARS, and the guidelines tell the model so.
+ * schema's own text does not: apart from core's preparation on 7.1 (below), Alpaca Bot neither
+ * cleans nor caps it, and the Tools tab does not show it. A result, success or error, has bytes
+ * that are not UTF-8 replaced and is cut at SchemaTool::RESULT_CHARS (SchemaTool::execute()),
+ * and the guidelines tell the model about the cut.
  *
  * Schemas. An ability with no input schema is called with null when the model sends no
  * arguments: validate_input() refuses anything but null for it (WP 7.1 class-wp-ability.php:
@@ -68,7 +69,7 @@ use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Tool\ToolResult;
  * (WP_AI_Client_Prompt_Builder::using_abilities(), class-wp-ai-client-prompt-builder.php:264):
  * it keeps the keywords its draft-04 profile allows and folds WordPress's per-property
  * `required: true` into a `required` list. The function is new in 7.1, and before it the schema
- * goes as registered.
+ * is handed on as registered.
  *
  * Nothing is offered where the Abilities API is absent: `$exists` stands in for
  * function_exists() for the reason Abilities\Register gives (Brain Monkey cannot stub

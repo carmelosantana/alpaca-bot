@@ -23,25 +23,32 @@ use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Tool\ToolResult;
  *   `properties` is missing or an empty PHP array gets an empty object for it, because an empty
  *   PHP array encodes as the JSON array `[]`. Only that top-level `properties` is repaired. An
  *   empty object nested deeper (an inner `properties`, `items`, `additionalProperties`) still
- *   encodes as `[]`; SchemaToolTest pins that it does. Nothing else in the schema is touched:
- *   its own text (a property's description, a title, an enum, a default) goes to the model as
- *   it was handed to the constructor, not through describe() and not capped.
+ *   encodes as `[]`; SchemaToolTest pins that it does. Nothing else in the schema is touched
+ *   here: its own text (a property's description, a title, an enum, a default) is neither
+ *   cleaned nor capped by Alpaca Bot, and does not go through describe().
  * - parameters() returns []. Its one caller in the library is SystemPrompt::withTools()
  *   (Prompt/SystemPrompt.php:76), which prints a "Parameters:" block only for a non-empty list,
  *   and which the agent loop this plugin runs does not call (AbstractAgent::buildSystemPrompt()
  *   builds the prompt from the toolkits' guidelines, not the tools).
  *   The argument checks the library has are Tool::execute()'s, over Tool's own list, so an
  *   empty list here turns none of them off.
- * - execute() runs the closure and nothing else, and a throw becomes a fixed error naming the
- *   tool rather than the raw message, for the reason SummarizeToolkit::tool() gives: a tool
+ * - execute() runs the closure with no argument checks, and a throw becomes a fixed error naming
+ *   the tool rather than the raw message, for the reason SummarizeToolkit::tool() gives: a tool
  *   result is text the model reads and may repeat, and an exception's message can quote an
- *   endpoint, or a key in its query string. Whatever the tool answers, a success or an error, is
- *   then cut to RESULT_CHARS characters with CUT_MARKER after it. The agent keeps a result in
- *   the turn's conversation and sends it with each later request of the turn
+ *   endpoint, or a key in its query string.
+ * - Whatever the tool answers, a success or an error, then has every byte sequence that is not
+ *   UTF-8 replaced by U+FFFD. A result goes back to the provider in a JSON request body. The
+ *   Ollama kind sends it through Symfony HttpClient's `json` option, which throws on a string
+ *   that is not UTF-8, so there one such byte (an ability reading legacy Latin-1 content, say)
+ *   would fail the turn's next request; core's AI client encodes JSON data with
+ *   JSON_THROW_ON_ERROR (php-ai-client Request::getBody()).
+ * - It is then cut to RESULT_CHARS characters with CUT_MARKER after it. The agent keeps a result
+ *   in the turn's conversation and sends it with each later request of the turn
  *   (AbstractAgent::run()), and the monthly caps are asked only when a turn starts
  *   (Chat\Pipeline, CapPolicy::assertAllowed()), so an unbounded answer would be paid for again
  *   on each request with nothing to stop it. The cut counts characters, so it never falls inside
- *   a UTF-8 character.
+ *   a UTF-8 character, and it comes after the replacing, so a cut result carries U+FFFD where
+ *   the bytes were, as a whole one does.
  *
  * describe() is the rule for a tool description another party wrote. The model reads a
  * description as the `description` string of the tool's function schema, which is JSON. Tags are
@@ -67,7 +74,7 @@ final class SchemaTool implements ToolInterface
 
     /**
      * The most of a tool's result the model is given, in characters: web_fetch's page cap, so a
-     * page and an ability's answer cost the context the same at most.
+     * page and an ability's answer are held to the same cap.
      */
     public const RESULT_CHARS = WebFetchToolkit::MAX_CHARS;
 
@@ -103,10 +110,28 @@ final class SchemaTool implements ToolInterface
         } catch (\Throwable) {
             return self::failed($this->name);
         }
-        if (mb_strlen($result->content, 'UTF-8') <= self::RESULT_CHARS) {
-            return $result;
+        $content = self::scrub($result->content);
+        if (mb_strlen($content, 'UTF-8') > self::RESULT_CHARS) {
+            $content = mb_substr($content, 0, self::RESULT_CHARS, 'UTF-8') . self::CUT_MARKER;
         }
-        return $result->withContent(mb_substr($result->content, 0, self::RESULT_CHARS, 'UTF-8') . self::CUT_MARKER);
+        return $content === $result->content ? $result : $result->withContent($content);
+    }
+
+    /** `$text` with every byte sequence that is not UTF-8 replaced by U+FFFD (the class docblock says why). */
+    private static function scrub(string $text): string
+    {
+        if (mb_check_encoding($text, 'UTF-8')) {
+            return $text;
+        }
+        // mb_scrub() writes the substitute character the site's mbstring is set to, `?` unless
+        // configured, and that setting is global, so it is set for this call and put back.
+        $substitute = mb_substitute_character();
+        mb_substitute_character(0xFFFD);
+        try {
+            return mb_scrub($text, 'UTF-8');
+        } finally {
+            mb_substitute_character($substitute);
+        }
     }
 
     /** The fixed error a tool named `$name` answers in place of a throw's message (the class docblock says why). */

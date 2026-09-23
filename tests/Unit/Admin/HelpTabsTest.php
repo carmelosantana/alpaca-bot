@@ -183,6 +183,8 @@ it('tells the person switching tools on what an ability call is: another plugin\
         // The allowlist bounds only direct calls (review I2): an ability that runs others is named as the way round it.
         ->toContain('decides only what the model may call directly')->toContain('runs other abilities')
         ->not->toContain('cannot call the plugin')
+        // The schema's own text (review N2): what Alpaca Bot does with it, not what a provider does.
+        ->toContain('Alpaca Bot neither cleans nor caps')->not->toContain('as the plugin registered it')
         ->toContain('longer than ' . AlpacaBot\Toolkit\SchemaTool::RESULT_CHARS . ' characters is cut');
 });
 
