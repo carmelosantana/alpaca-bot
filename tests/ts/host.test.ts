@@ -20,7 +20,7 @@ const CFG = { rest: 'https://alpaca-bot.test/wp-json/alpaca-bot/v1', nonce: 'n',
 const PAGE = `<div id="wpbody">
   <a class="page-title-action" href="https://alpaca-bot.test/wp-admin/post-new.php">Add New Post</a>
   <div id="host-hx">another plugin's htmx element</div>
-  <div class="alpaca-bot-answer"><pre id="answer-pre"><code class="language-js">const answer = 1;</code></pre></div>
+  <div class="alpaca-bot-answer"><pre id="answer-pre"><code class="language-js">const answer = 1;</code></pre><button type="button" id="answer-edit" data-action="edit">edit</button></div>
   <button type="button" id="host-edit" data-action="edit">Quick Edit</button>
   <button type="button" id="host-remove" data-action="image-remove">host remove</button>
   <pre id="host-pre"><code class="language-js">const host = 1;</code></pre>
@@ -137,6 +137,12 @@ test('a prompt answer beside the shell is decorated, and its copy button copies,
   (document.querySelector('#answer-pre .ab-code__copy') as HTMLElement).click();
   await until(() => copied.length > 0);
   assert.deepEqual(copied, ['const answer = 1;']);
+
+  // Only its copy buttons: any other action inside an answer is not the chat's to act on.
+  const textarea = document.querySelector('#ab-message') as HTMLTextAreaElement;
+  textarea.value = 'half a question';
+  (document.querySelector('#answer-edit') as HTMLElement).click();
+  assert.equal(textarea.value, 'half a question');
 });
 
 test('htmx on the host page is left alone: no nonce on its requests, no refusal from its errors', async () => {
@@ -148,6 +154,9 @@ test('htmx on the host page is left alone: no nonce on its requests, no refusal 
   };
   // Another plugin's request carries no X-WP-Nonce of ours...
   assert.equal(configure('#host-hx')['X-WP-Nonce'], undefined);
+  // ...and neither does one whose element is the body, which is what htmx.ajax() without a
+  // source runs with: mount.ts signs its panel request by hand for that reason.
+  assert.equal(configure('body')['X-WP-Nonce'], undefined);
   // ...while the chat's own requests are signed.
   assert.equal(configure('#ab-history')['X-WP-Nonce'], 'n');
 
