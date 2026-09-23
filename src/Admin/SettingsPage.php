@@ -327,8 +327,8 @@ final class SettingsPage
     }
 
     /**
-     * The ids of the MCP servers `toolkits.mcp_servers` lists, each once, in list order: the ones
-     * the Access tab gives a row. A server with no id, or one a form cannot post back (postable()),
+     * The ids of the MCP servers `toolkits.mcp_servers` lists, in list order: the ones the Access
+     * tab gives a row (core keeps one field per id, so a repeated id is one row). A server with no id, or one a form cannot post back (postable()),
      * gets none, and so reads as whatever Access::stored() has for it — administrators only unless
      * something other than this page stored an entry.
      *
@@ -340,7 +340,7 @@ final class SettingsPage
         $ids = [];
         foreach (is_array($servers) ? $servers : [] as $server) {
             $id = is_array($server) ? ($server['id'] ?? null) : null;
-            if (is_string($id) && self::postable($id) && !in_array($id, $ids, true)) {
+            if (is_string($id) && self::postable($id)) {
                 $ids[] = $id;
             }
         }
