@@ -21,8 +21,7 @@
  *
  * This is an entry esbuild builds, and runs when the page loads it.
  */
-import { mountPanel, panelQuery, withQuery, type MountSettings } from './mount.ts';
-import { fromHtml } from './dom.ts';
+import { mountPanel, newChat, panelQuery, type MountSettings } from './mount.ts';
 
 function start(cfg: MountSettings, launcher: HTMLElement, host: HTMLElement): void {
   let mounted: Promise<void> | null = null;
@@ -77,26 +76,12 @@ function start(cfg: MountSettings, launcher: HTMLElement, host: HTMLElement): vo
   }
 
   /**
-   * "New chat" in the drawer: a fresh transcript and history swapped in, where the chat screen
-   * goes to a new page. The composer stays, because the bundle's listeners are bound to it and a
-   * replaced form would have none; its conversation goes back to 0.
+   * "New chat" in the drawer, where the chat screen goes to a new page (mount.ts newChat() says
+   * what it swaps and what it keeps). The mount's query, so this is the fragment the drawer would
+   * mount; the drawer then remembers that it is on no conversation.
    */
-  async function newChat(): Promise<void> {
-    // The mount's query, so this is the fragment the drawer would mount; only its transcript and
-    // history are taken below, and the composer, its context chips included, stays as it is.
-    const res = await fetch(withQuery(cfg.panel, panelQuery(host, '0')), { credentials: 'same-origin', headers: { 'X-WP-Nonce': nonce() } });
-    const fresh = res.ok ? fromHtml(await res.text()) : null;
-    if (!fresh) return;
-    for (const id of ['ab-messages', 'ab-history']) {
-      const next = fresh.querySelector('#' + id);
-      if (next) host.querySelector('#' + id)?.replaceWith(next);
-    }
-    const field = host.querySelector<HTMLInputElement>('#ab-form [name="conversation_id"]');
-    if (field) field.value = '0';
-    host.querySelector('#ab-chat')?.setAttribute('data-conversation', '0');
-    host.querySelector('#ab-status')?.replaceChildren();
-    window.htmx?.process(host);
-    remember(0);
+  async function startOver(): Promise<void> {
+    if (await newChat(host, cfg, nonce(), panelQuery(host, '0'))) remember(0);
   }
 
   launcher.addEventListener('click', () => setOpen(host.hidden, true));
@@ -107,7 +92,7 @@ function start(cfg: MountSettings, launcher: HTMLElement, host: HTMLElement): vo
     } else if (target.closest('.page-title-action')) {
       // The header's own "New chat" link, which would otherwise leave for the chat screen.
       e.preventDefault();
-      void newChat();
+      void startOver();
     }
   });
   document.addEventListener('ab:conversation', (e) => {
@@ -116,7 +101,7 @@ function start(cfg: MountSettings, launcher: HTMLElement, host: HTMLElement): vo
   document.addEventListener('ab:new-chat', (e) => {
     if (!host.contains(e.target as Node)) return;
     e.preventDefault();
-    void newChat();
+    void startOver();
   });
   if (host.dataset.open === '1') setOpen(true, false);
 }

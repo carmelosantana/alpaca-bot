@@ -10,6 +10,8 @@
  * drawer.ts calls mountPanel() again only after a mount that failed; a mounted chat it shows and
  * hides, so a turn in flight is never re-rendered.
  */
+import { fromHtml } from './dom.ts';
+
 /** What Admin\Assets::mount() localises; `title` is the chat's name, for a host that titles the panel it mounts the chat in. */
 export interface MountSettings { panel: string; prefs: string; htmx: string; chat: string; css: string; title: string; failed: string }
 
@@ -96,4 +98,59 @@ export async function mountPanel(host: HTMLElement, cfg: MountSettings, nonce: s
     host.textContent = cfg.failed;
     throw e;
   }
+}
+
+/**
+ * "New chat" in place, for a host that keeps the chat on a page the chat screen's link would leave
+ * (the drawer, the editor sidebar): a fresh transcript and history from GET /view/panel swapped
+ * in, and the conversation set back to 0. The composer stays, because the bundle's listeners are
+ * bound to it and a replaced form would have none, and so do its context chips. Answers whether
+ * the fragment arrived; a refused or failed request changes nothing.
+ */
+export async function newChat(host: HTMLElement, cfg: MountSettings, nonce: string, query: Record<string, string>): Promise<boolean> {
+  const res = await fetch(withQuery(cfg.panel, query), { credentials: 'same-origin', headers: { 'X-WP-Nonce': nonce } });
+  const fresh = res.ok ? fromHtml(await res.text()) : null;
+  if (!fresh) return false;
+  for (const id of ['ab-messages', 'ab-history']) {
+    const next = fresh.querySelector('#' + id);
+    if (next) host.querySelector('#' + id)?.replaceWith(next);
+  }
+  const field = host.querySelector<HTMLInputElement>('#ab-form [name="conversation_id"]');
+  if (field) field.value = '0';
+  host.querySelector('#ab-chat')?.setAttribute('data-conversation', '0');
+  host.querySelector('#ab-status')?.replaceChildren();
+  window.htmx?.process(host);
+  return true;
+}
+
+/**
+ * The post chip for the host's post (`data-post`, panelQuery()), taken from a fresh GET
+ * /view/panel into the composer the chat already has, for a chat mounted before its post could
+ * have one: the editor sidebar on a new post, whose auto-draft gets no chip until it is first
+ * saved or autosaved (resources/ts/editor.ts). The chip is the server's whole: its label, its
+ * hidden field and its escaping are View\Chat\Composer's, and whether there is one at all is
+ * View\Chat\Shell's rule, so a post the user may not edit, or one still an auto-draft, comes back
+ * with none and none is added. It goes first in the chips row, where Composer puts it, and a
+ * composer with no row gets the fragment's. Nothing else of the fragment is taken.
+ *
+ * Answers whether the composer has a post chip now: true without a request when it has one
+ * already, false when the fragment was refused or had none.
+ */
+export async function postChip(host: HTMLElement, cfg: MountSettings, nonce: string): Promise<boolean> {
+  const form = host.querySelector<HTMLFormElement>('#ab-form');
+  if (!form) return false;
+  if (form.querySelector('.ab-chip[data-chip="post"]')) return true;
+  const res = await fetch(withQuery(cfg.panel, panelQuery(host, '0')), { credentials: 'same-origin', headers: { 'X-WP-Nonce': nonce } });
+  const chip = (res.ok ? fromHtml(await res.text()) : null)?.querySelector('#ab-form .ab-chip[data-chip="post"]');
+  const box = form.querySelector('.ab-composer__row');
+  if (!chip || !box) return false;
+  const row = form.querySelector('.ab-composer__chips');
+  if (row) {
+    row.prepend(chip);
+  } else {
+    const fresh = chip.parentElement as HTMLElement;
+    fresh.replaceChildren(chip);
+    box.before(fresh);
+  }
+  return true;
 }
