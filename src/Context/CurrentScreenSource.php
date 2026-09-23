@@ -19,12 +19,23 @@ namespace AlpacaBot\Context;
  * The title goes into the label, and the label is a `## ` heading in the system block, so
  * line breaks in it are collapsed to a space: a title cannot start a second heading.
  *
+ * It also supplies the screen the chat was opened on, when the client names one: `screen` as
+ * `{id, title}` becomes "On: {title}", a context with no text. That is the whole of what a screen
+ * contributes: no list-table rows, no queries, no option values (Kanboard #4369), because an
+ * options page holds secrets and every word of this goes to a provider. It is not gated: an id
+ * and a title name a place and hold nothing of what is on it, so there is no capability for
+ * them to be refused by. The title is cleaned by the rule the post title is, and for the same
+ * reason (screenFrom() says how far that goes).
+ *
  * Content is tag-stripped first and only then cut at MAX_CHARS, so markup can never crowd
  * the words out of the window, and the model sees prose rather than block comments.
  */
 final class CurrentScreenSource implements ContextSourceInterface
 {
     private const int MAX_CHARS = 4000;
+
+    /** The most characters of a screen title that reach the label, the ellipsis of a cut one included. */
+    public const int TITLE_CHARS = 120;
 
     public function id(): string
     {
@@ -37,25 +48,86 @@ final class CurrentScreenSource implements ContextSourceInterface
      */
     public function collect(int $userId, array $request): array
     {
-        $postId = self::postId($request['post_id'] ?? null);
+        $out = [];
+        $post = $this->post($userId, $request['post_id'] ?? null);
+        if ($post !== null) {
+            $out[] = $post;
+        }
+        $screen = self::screenFrom($request['screen'] ?? null);
+        if ($screen !== null) {
+            // No text: the screen is a place, not a document, and the label is the whole of it.
+            $out[] = new Context("screen:{$screen['id']}", "On: {$screen['title']}", '', ['screen' => $screen['id']]);
+        }
+        return $out;
+    }
+
+    /**
+     * The screen the chat was opened on, as `{id, title}` cleaned, or null when the value is not
+     * one: anything but an array whose `id` and `title` are strings (a bare string, which is what
+     * `screen` was in 0.5, a list, a missing or non-string member), or one that cleans to an
+     * empty id or an empty title.
+     *
+     * The title is untrusted text: a page title any plugin can register, arriving through the REST
+     * request because the turn is not made on the screen. It goes through line(), the rule the post
+     * title goes through, and is then cut to TITLE_CHARS characters with the ellipsis inside the
+     * cap. A title that is not valid UTF-8 cleans to empty, and so is no screen. The id is reduced
+     * to lowercase letters, digits, `_` and `-`, at most 64 of them, so it can be written into a
+     * Context id and an attribute as it stands.
+     *
+     * Public because `GET /view/panel` cleans the two strings with it before rendering the chip
+     * whose fields the turn sends back. A cleaned screen cleans to itself, so the two ends agree.
+     *
+     * @return array{id: string, title: string}|null
+     */
+    public static function screenFrom(mixed $value): ?array
+    {
+        if (!is_array($value) || !is_string($value['id'] ?? null) || !is_string($value['title'] ?? null)) {
+            return null;
+        }
+        $id = substr((string) preg_replace('/[^a-z0-9_-]/', '', strtolower($value['id'])), 0, 64);
+        $title = self::line($value['title']);
+        if ($id === '' || $title === '') {
+            return null;
+        }
+        if (mb_strlen($title) > self::TITLE_CHARS) {
+            $title = mb_substr($title, 0, self::TITLE_CHARS - 1) . '…';
+        }
+        return ['id' => $id, 'title' => $title];
+    }
+
+    /** The post being edited, as a context, when the class docblock's gate lets it through; else null. */
+    private function post(int $userId, mixed $value): ?Context
+    {
+        $postId = self::postId($value);
         if ($postId === 0 || !user_can($userId, 'edit_post', $postId)) {
-            return [];
+            return null;
         }
         $post = get_post($postId);
         if ($post === null) {
-            return [];
+            return null;
         }
         $text = trim(wp_strip_all_tags($post->post_content));
         if (mb_strlen($text) > self::MAX_CHARS) {
             $text = mb_substr($text, 0, self::MAX_CHARS) . '…';
         }
-        $title = trim((string) preg_replace('/\s+/', ' ', wp_strip_all_tags($post->post_title)));
-        return [new Context(
+        return new Context(
             "current-screen:{$post->post_type}:{$postId}",
-            sprintf('Editing: %s (%s, %s)', $title, $post->post_type, $post->post_status),
+            sprintf('Editing: %s (%s, %s)', self::line($post->post_title), $post->post_type, $post->post_status),
             $text,
             ['post_id' => $postId],
-        )];
+        );
+    }
+
+    /**
+     * A title as one line of text for a label: tags stripped, every run of whitespace made one
+     * space, and the ends trimmed. The `u` flag is what makes `\s` match Unicode's line breaks
+     * (NEL, the line separator, the paragraph separator) as well as ASCII's; without it they pass
+     * through. It also makes the pattern refuse a string that is not valid UTF-8 whole, which
+     * comes out as ''.
+     */
+    private static function line(string $title): string
+    {
+        return trim((string) preg_replace('/\s+/u', ' ', wp_strip_all_tags($title)));
     }
 
     /**
