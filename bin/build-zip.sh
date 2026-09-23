@@ -59,8 +59,10 @@ for path in \
   alpaca-bot/src/Plugin.php \
   alpaca-bot/vendor-prefixed/autoload.php \
   alpaca-bot/assets/js/chat.js \
+  alpaca-bot/assets/js/drawer.js \
   alpaca-bot/assets/js/htmx.min.js \
   alpaca-bot/assets/css/alpaca-bot.css \
+  alpaca-bot/assets/css/alpaca-bot-drawer.css \
   alpaca-bot/assets/css/alpaca-bot-shortcode.css \
   alpaca-bot/assets/img/icons.svg \
   alpaca-bot/assets/img/alpaca-bot-avatar.png

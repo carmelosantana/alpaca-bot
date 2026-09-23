@@ -8,7 +8,7 @@ const require = createRequire(import.meta.url);
 const here = (p) => fileURLToPath(new URL(p, import.meta.url));
 const watch = process.argv.includes('--watch');
 async function copyCss() {
-  for (const name of ['alpaca-bot.css', 'alpaca-bot-shortcode.css']) {
+  for (const name of ['alpaca-bot.css', 'alpaca-bot-shortcode.css', 'alpaca-bot-drawer.css']) {
     await copyFile(here(`resources/css/${name}`), here(`assets/css/${name}`));
     console.log(`css: assets/css/${name}`);
   }
@@ -18,7 +18,7 @@ await mkdir(here('assets/css'), { recursive: true });
 await copyFile(require.resolve('htmx.org/dist/htmx.min.js'), here('assets/js/htmx.min.js'));
 await copyCss();
 await buildIcons();
-const opts = { entryPoints: [here('resources/ts/chat.ts')], bundle: true, minify: !watch, sourcemap: watch, target: ['es2022'], format: 'iife', outfile: here('assets/js/chat.js'), logLevel: 'info' };
+const opts = { entryPoints: { chat: here('resources/ts/chat.ts'), drawer: here('resources/ts/drawer.ts') }, bundle: true, minify: !watch, sourcemap: watch, target: ['es2022'], format: 'iife', outdir: here('assets/js'), logLevel: 'info' };
 if (watch) {
   const ctx = await context(opts);
   await ctx.watch();

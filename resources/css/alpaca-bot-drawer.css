@@ -1,0 +1,19 @@
+/*
+ * The admin-wide drawer's own rules (Admin\Drawer), loaded on every screen that prints the
+ * launcher, so kept to the launcher and the empty panel: the chat inside is styled by
+ * alpaca-bot.css, which resources/ts/mount.ts adds on the first open. Both sit under core's admin
+ * bar (z-index 99999) and over the admin menu.
+ */
+.ab-drawer-launcher { position: fixed; right: 20px; bottom: 20px; z-index: 99990; display: flex; align-items: center; justify-content: center; width: 48px; height: 48px; padding: 0; border: 0; border-radius: 50%; background: var(--wp-admin-theme-color, #2271b1); color: #fff; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25); cursor: pointer; }
+.ab-drawer-launcher:hover { background: var(--wp-admin-theme-color-darker-10, #135e96); }
+.ab-drawer-launcher:focus-visible { outline: var(--wp-admin-border-width-focus, 2px) solid var(--wp-admin-theme-color-darker-10, #135e96); outline-offset: 2px; }
+.ab-drawer-launcher .dashicons { width: 24px; height: 24px; font-size: 24px; }
+.ab-drawer { position: fixed; top: 32px; right: 0; bottom: 0; z-index: 99991; box-sizing: border-box; width: min(420px, 100vw); background: #fff; border-left: 1px solid #c3c4c7; box-shadow: -2px 0 8px rgba(0, 0, 0, 0.1); }
+@media screen and (max-width: 782px) { .ab-drawer { top: 46px; } }
+
+/*
+ * No image button where the screen has not loaded the media library (drawer.ts sets
+ * `data-media`, and says why this is a rule rather than the button's `hidden`). It outranks
+ * alpaca-bot.css's `display: inline-flex` on `.ab-btn`, a single class, wherever either stylesheet loads.
+ */
+.ab-drawer[data-media="0"] [data-action="image"] { display: none; }

@@ -15,11 +15,13 @@ import { Window } from 'happy-dom';
  *
  * There is no teardown: the globals stay installed for the rest of the file. Two things make
  * that safe, and the second is the one to keep. node:test gives each test file its own process,
- * so nothing leaks between files; and no module under resources/ts captures a global at import
- * time — dom.ts's `root: ParentNode = document` is a default parameter, evaluated per call, not
- * at load — so a second installDom() in one file really does give the next case a clean
- * document. An import-time capture anywhere in resources/ts would bind the first document into
- * a module every later case then shares, and this harness would stop being honest.
+ * so nothing leaks between files; and no module a test imports from resources/ts captures a
+ * global at import time — dom.ts's `root: ParentNode = document` is a default parameter,
+ * evaluated per call, not at load — so a second installDom() in one file really does give the
+ * next case a clean document. The two entries esbuild builds, chat.ts and drawer.ts, do read the
+ * page as they load, which is what an entry is for, and no test imports either. An import-time
+ * capture in a module a test does import would bind the first document into a module every later
+ * case then shares, and this harness would stop being honest.
  *
  * Never assert on a node from this document. Compare a primitive: a count from
  * `querySelectorAll(...).length`, a `textContent`, a boolean. node:test renders a failed

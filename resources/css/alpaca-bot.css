@@ -8,9 +8,11 @@
  * where none of those variables exist. The surfaces, text and borders are core's fixed greys,
  * which do not change between schemes.
  *
- * Two places load this, and one of them is not wp-admin: the admin chat screen
- * (Admin\Assets::enqueue()) and a front-end page carrying `[alpacabot]` with no prompt
- * (Admin\Assets::enqueueFront()). The height arithmetic on .ab-wrap subtracts wp-admin's chrome
+ * Whatever loads this gets its URL from Admin\Assets, and not every loader is in wp-admin:
+ * enqueueChat() enqueues it for the admin chat screen (enqueue()) and for a front-end page carrying
+ * `[alpacabot]` with no prompt (enqueueFront()), and mount() names it for a page that adds it
+ * later, which the admin-wide drawer's loader does on its first open (resources/ts/mount.ts). The
+ * height arithmetic on .ab-wrap subtracts wp-admin's chrome
  * from the viewport, and one narrow-screen rule on `.wrap.ab-wrap` serves it. Two modifiers
  * replace that height and come without core's .wrap, so that rule does not match them either:
  * .ab-wrap--front, for a front-end page, which has no #wpfooter and holds the shell as a block
@@ -343,6 +345,44 @@ pre > .ab-code__copy[aria-label]:hover::after {
 /* The close button sits over the header's top-right corner; the header keeps clear of it. */
 .ab-wrap--drawer .ab-header { padding-right: 32px; }
 .ab-wrap--drawer .ab-header h1 { font-size: 1.3em; }
+/*
+ * "New chat" as the button it is on the chat screen. Core draws `.page-title-action` only inside
+ * .wrap (common.css's `.wrap .page-title-action`, WP 7.1, which each colour scheme's colors.css
+ * recolours under the same selector), and this shell has no .wrap, so the box is restated here in
+ * core's figures and coloured with the palette's accent, which follows the user's scheme too.
+ */
+.ab-wrap--drawer .page-title-action {
+    display: inline-block;
+    box-sizing: border-box;
+    min-height: 32px;
+    padding: 0 12px;
+    border: 1px solid var(--ab-accent);
+    border-radius: 2px;
+    background: transparent;
+    color: var(--ab-accent);
+    font-size: 13px;
+    font-weight: 500;
+    line-height: 2.30769231;
+    text-decoration: none;
+    white-space: nowrap;
+}
+.ab-wrap--drawer .page-title-action:hover { border-color: var(--ab-accent-dark); color: var(--ab-accent-dark); }
+.ab-wrap--drawer .page-title-action:focus {
+    border-color: var(--ab-accent);
+    box-shadow: 0 0 0 1px var(--ab-accent);
+    outline: var(--ab-focus-width) solid transparent;
+}
+/*
+ * Above core's breakpoint the panel is still 420px wide, and the two 240px selects, each on a
+ * line of its own under the title, made the header three rows tall. Here they share one row.
+ * Under the breakpoint the panel is the viewport's width and the narrow-screen block's column
+ * layout stands.
+ */
+@media screen and (min-width: 783px) {
+    .ab-wrap--drawer .ab-header__controls { flex-basis: 100%; flex-wrap: nowrap; margin-left: 0; }
+    .ab-wrap--drawer .ab-header__controls > .ab-select, .ab-wrap--drawer .ab-history { flex: 1 1 50%; min-width: 0; }
+    .ab-wrap--drawer .ab-select { width: 100%; }
+}
 .ab-btn.ab-drawer__close { position: absolute; top: 4px; right: 4px; z-index: 1; font-size: 18px; }
 /* The tooltip every icon button gets, centred above it, runs past this corner's top and right
    edges; this one goes to the left. */
