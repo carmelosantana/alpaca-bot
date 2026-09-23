@@ -13,8 +13,8 @@ use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Tool\ToolResult;
  *
  * It is in src/ by the 0.6 plan's drafting decision 9, and so it ships in the zip with the rest of
  * src/. It holds no credentials and opens no connection. ClientFactory's default does not build
- * it: a FakeClient exists only where some code constructs one, and ClientFactoryTest fails if any
- * plugin file other than this one names the class.
+ * it: a FakeClient exists only where some code constructs one, and ClientFactoryTest fails if code
+ * in alpaca-bot.php or src/, outside this file, names the class.
  *
  * It throws whatever Throwable it was seeded with, including one that is not McpUnavailable, so a
  * test can hand a caller an exception outside the interface's contract.

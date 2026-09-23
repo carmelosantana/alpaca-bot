@@ -4,8 +4,7 @@ declare(strict_types=1);
 
 use AlpacaBot\Mcp\ToolDefinition;
 
-// The fingerprint is what ServerConfig::$approved pins each approved tool to. So it has to
-// ignore what a JSON encoder is free to reorder, and notice everything else.
+// The fingerprint is what ServerConfig::$approved pins each approved tool to.
 
 it('is a sha256 of the definition and ignores the order the keys arrived in, at any depth', function (): void {
     $a = new ToolDefinition('search', 'Search the tracker.', ['type' => 'object', 'properties' => ['q' => ['type' => 'string', 'minLength' => 1]]], ['readOnlyHint' => true]);

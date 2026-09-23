@@ -58,15 +58,18 @@ it('the fake lists what it was seeded with, records every call, and answers a ca
         ->and($fake->calls)->toBe([['name' => 'search', 'arguments' => ['q' => 'x']]])
         ->and($fake->callTool('nothing', [])->status)->toBe(ToolResultStatus::Error);
     expect(fn() => $fake->callTool('boom', []))->toThrow(RuntimeException::class);
-    expect(fn() => (new FakeClient([], [], new McpUnavailable('list failed')))->listTools())->toThrow(McpUnavailable::class);
+    expect(array_column($fake->calls, 'name'))->toBe(['search', 'nothing', 'boom']);
+    $failing = new FakeClient([], [], new McpUnavailable('list failed'));
+    expect(fn() => $failing->listTools())->toThrow(McpUnavailable::class);
+    expect($failing->listed)->toBe(1);
 });
 
 /*
  * FakeClient ships in src/, so it is in the zip and autoloadable on every site. ClientFactory's
  * default builds an UnavailableClient, so a FakeClient exists only where some code constructs one.
- * This holds the lexical half of that: it reads every PHP file the plugin ships from
- * (alpaca-bot.php and src/) as tokens, comments dropped, and fails on any name or string literal
- * outside FakeClient's own file that mentions the class. A class name assembled at run time is
+ * This holds the lexical half of that: it reads alpaca-bot.php and every PHP file under src/ as
+ * tokens, comments dropped, and fails on any name or string literal outside FakeClient's own file
+ * that mentions the class. A class name assembled at run time is
  * not something a token scan can see.
  */
 it('is named by no plugin code but its own file', function (): void {
@@ -80,7 +83,7 @@ it('is named by no plugin code but its own file', function (): void {
     $named = [];
     foreach ($files as $path) {
         foreach (token_get_all((string) file_get_contents($path)) as $token) {
-            if (is_array($token) && in_array($token[0], [T_STRING, T_NAME_QUALIFIED, T_NAME_FULLY_QUALIFIED, T_CONSTANT_ENCAPSED_STRING, T_ENCAPSED_AND_WHITESPACE], true) && str_contains($token[1], 'FakeClient')) {
+            if (is_array($token) && in_array($token[0], [T_STRING, T_NAME_QUALIFIED, T_NAME_FULLY_QUALIFIED, T_NAME_RELATIVE, T_CONSTANT_ENCAPSED_STRING, T_ENCAPSED_AND_WHITESPACE], true) && str_contains($token[1], 'FakeClient')) {
                 $named[] = substr($path, strlen($root) + 1) . ':' . $token[2];
             }
         }

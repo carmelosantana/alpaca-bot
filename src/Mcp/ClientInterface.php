@@ -7,12 +7,12 @@ namespace AlpacaBot\Mcp;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Tool\ToolResult;
 
 /**
- * What the plugin asks of an MCP client: list a server's tools, and call one. ClientFactory
- * decides which implementation a caller gets. Sessions, protocol versions, mapping content blocks
- * and retries belong to an implementation, not to this interface.
+ * What the plugin asks of an MCP client: list a server's tools, and call one. Sessions, protocol
+ * versions, mapping content blocks and retries belong to an implementation, not to this interface.
  *
  * Both methods throw McpUnavailable when the server cannot be reached or does not answer as an MCP
- * server. A ToolResult, including one whose status is an error, means the server answered.
+ * server. An implementation returns a ToolResult, including one whose status is an error, only
+ * when the server answered.
  *
  * @since 0.6.0
  */
