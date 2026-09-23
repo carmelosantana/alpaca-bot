@@ -43,6 +43,8 @@ use AlpacaBot\View\Markdown;
  * - `GET /view/panel?conversation_id=&post_id=`: the whole chat as one fragment (View\Chat\Drawer)
  *   for the admin-wide drawer, on one of the user's conversations or a new chat, as the chat
  *   screen answers `?conversation=`.
+ * - `POST /view/drawer {open, conversation_id}`: stores what the admin-wide drawer shows
+ *   (Admin\Drawer) and answers an empty fragment.
  *
  * Core renders a callback's return as JSON, so a callback answers a WP_REST_Response whose data
  * is the HTML string and whose `X-Alpaca-Bot-View: 1` header marks it; serve(), on
@@ -87,6 +89,10 @@ final class ViewController extends Controller
             ['path' => '/view/panel', 'methods' => 'GET', 'callback' => [$this, 'panel'], 'capability' => self::CHAT, 'args' => [
                 'conversation_id' => ['type' => 'integer', 'default' => 0, 'minimum' => 0],
                 'post_id' => ['type' => 'integer', 'default' => 0, 'minimum' => 0],
+            ]],
+            ['path' => '/view/drawer', 'methods' => 'POST', 'callback' => [$this, 'drawer'], 'capability' => self::CHAT, 'args' => [
+                'open' => ['type' => 'boolean'],
+                'conversation_id' => ['type' => 'integer', 'minimum' => 0],
             ]],
         ];
     }
@@ -224,6 +230,29 @@ final class ViewController extends Controller
             $this->prefs->modelFor($userId, $this->catalog, $this->store),
         );
         return self::html($drawer->render());
+    }
+
+    /**
+     * Stores what the drawer shows (Admin\Drawer): whether it is open, the conversation in it, or
+     * both. A parameter the request leaves out is left alone, and neither argument has a default,
+     * so an absent one reads as null: the two are written by different events (a launcher press,
+     * a turn starting), and a write of one must not reset the other.
+     *
+     * The conversation id is stored as sent. Whether it is the user's is decided where it is read:
+     * `GET /view/panel` loads it through ConversationStore::load(), which answers null for anyone
+     * else's, so an id that is not theirs opens as a new chat. There is nothing to swap in, so the
+     * answer is an empty fragment.
+     */
+    public function drawer(\WP_REST_Request $request): \WP_REST_Response
+    {
+        $userId = $this->userId();
+        if ($request->get_param('open') !== null) {
+            $this->prefs->setDrawerOpen($userId, (bool) $request->get_param('open'));
+        }
+        if ($request->get_param('conversation_id') !== null) {
+            $this->prefs->setDrawerConversation($userId, (int) $request->get_param('conversation_id'));
+        }
+        return self::html('');
     }
 
     /**

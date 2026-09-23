@@ -74,7 +74,7 @@ it('declares every view route on the Chat row, its filter key being Controller::
         expect($route['capability'])->toBe(Controller::CHAT);
         $byMethod[$route['methods'] . ' ' . $route['path']] = $route;
     }
-    expect(array_keys($byMethod))->toBe(['GET /view/messages/(?P<id>\d+)', 'GET /view/history', 'GET /view/models', 'POST /view/default-model', 'GET /view/bubble', 'POST /view/bubble', 'GET /view/panel'])
+    expect(array_keys($byMethod))->toBe(['GET /view/messages/(?P<id>\d+)', 'GET /view/history', 'GET /view/models', 'POST /view/default-model', 'GET /view/bubble', 'POST /view/bubble', 'GET /view/panel', 'POST /view/drawer'])
         ->and($byMethod['GET /view/models']['args'])->toBe(['refresh' => ['type' => 'boolean', 'default' => false]])
         ->and($byMethod['GET /view/history']['args']['conversation_id']['type'])->toBe('integer')
         ->and($byMethod['POST /view/default-model']['args']['model']['required'])->toBeTrue()
@@ -83,9 +83,12 @@ it('declares every view route on the Chat row, its filter key being Controller::
         ->and($byMethod['POST /view/bubble']['args']['images'])->toBe(['type' => 'array', 'items' => ['type' => 'string'], 'default' => []])
         ->and($byMethod['POST /view/bubble']['args']['tool_calls'])->toBe(['type' => 'array', 'items' => ['type' => 'object'], 'default' => []])
         ->and($byMethod['GET /view/panel']['args'])->toBe(['conversation_id' => ['type' => 'integer', 'default' => 0, 'minimum' => 0], 'post_id' => ['type' => 'integer', 'default' => 0, 'minimum' => 0]])
+        // No default on either: an absent parameter must read as null, which is how drawer() tells
+        // "not named" from "named as false or 0".
+        ->and($byMethod['POST /view/drawer']['args'])->toBe(['open' => ['type' => 'boolean'], 'conversation_id' => ['type' => 'integer', 'minimum' => 0]])
         // The filter key is Controller::routeKey() of the path, which drops the {id} segment as it
         // does for /conversations; the bubble routes share one path, so they share `view/bubble`.
-        ->and(array_map(ViewController::routeKey(...), array_column($routes, 'path')))->toBe(['view/messages', 'view/history', 'view/models', 'view/default-model', 'view/bubble', 'view/bubble', 'view/panel']);
+        ->and(array_map(ViewController::routeKey(...), array_column($routes, 'path')))->toBe(['view/messages', 'view/history', 'view/models', 'view/default-model', 'view/bubble', 'view/bubble', 'view/panel', 'view/drawer']);
     foreach ($byMethod as $key => $route) {
         expect($route['rate_limit'] ?? false)->toBe($key === 'GET /view/models', $key);
     }
@@ -93,7 +96,7 @@ it('declares every view route on the Chat row, its filter key being Controller::
 
 it('registers its routes and hooks rest_pre_serve_request to write the HTML itself', function (): void {
     $c = viewController();
-    Functions\expect('register_rest_route')->times(7)->withArgs(fn(string $ns, string $path): bool => $ns === 'alpaca-bot/v1' && str_starts_with($path, '/view/'));
+    Functions\expect('register_rest_route')->times(8)->withArgs(fn(string $ns, string $path): bool => $ns === 'alpaca-bot/v1' && str_starts_with($path, '/view/'));
     Filters\expectAdded('rest_pre_serve_request')->once()->with([$c, 'serve'], PHP_INT_MAX, 4);
     $c->register();
 });
@@ -278,4 +281,22 @@ it('renders the drawer panel on one of the user\'s conversations, and a new chat
         ->not->toContain('ab-msg--assistant')->toContain('<div id="ab-chat" data-conversation="0">')
         // Both histories were user 3's, chat.history_limit deep.
         ->and($asked)->toBe([[3, 4], [3, 4]]);
+});
+
+// ---------------------------------------------------------------- Task 18: POST /view/drawer
+
+it('stores what the drawer shows, writing only what the request named, and answers an empty fragment', function (): void {
+    Functions\expect('update_user_meta')->once()->with(3, 'alpaca_bot_drawer_open', '0');
+    $res = viewController()->drawer(restRequest('POST', '/x', ['open' => false]));
+    expect($res->get_data())->toBe('')->and($res->headers['X-Alpaca-Bot-View'])->toBe('1');
+
+    // A request that names only the conversation leaves the open state as it was: had it written
+    // both, the call for the open state would match no expectation and fail the test.
+    Functions\expect('update_user_meta')->once()->with(3, 'alpaca_bot_drawer_conversation', '9');
+    viewController()->drawer(restRequest('POST', '/x', ['conversation_id' => 9]));
+
+    // Both named: both written, the open state as the '1' drawerOpen() reads back.
+    Functions\expect('update_user_meta')->once()->with(3, 'alpaca_bot_drawer_open', '1');
+    Functions\expect('update_user_meta')->once()->with(3, 'alpaca_bot_drawer_conversation', '0');
+    viewController()->drawer(restRequest('POST', '/x', ['open' => true, 'conversation_id' => 0]));
 });

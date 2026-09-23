@@ -64,3 +64,42 @@ it('lets the preference through when the catalog is empty, as the pipeline does 
     [$catalog, $store] = userPrefsCatalog([]);
     expect((new UserPrefs())->modelFor(3, $catalog, $store))->toBe('llava:7b');
 });
+
+// ---------------------------------------------------------------- Task 18: the admin-wide drawer
+
+it('keeps the drawer\'s open state and its conversation as user meta, reading anything else as closed and no conversation', function (): void {
+    Functions\expect('update_user_meta')->once()->with(3, 'alpaca_bot_drawer_open', '1');
+    Functions\expect('update_user_meta')->once()->with(3, 'alpaca_bot_drawer_conversation', '42');
+    Functions\expect('update_user_meta')->once()->with(4, 'alpaca_bot_drawer_open', '0');
+    // A negative id is not a conversation: it is stored as the new chat it reads back as.
+    Functions\expect('update_user_meta')->once()->with(4, 'alpaca_bot_drawer_conversation', '0');
+    $prefs = new UserPrefs();
+    $prefs->setDrawerOpen(3, true);
+    $prefs->setDrawerConversation(3, 42);
+    $prefs->setDrawerOpen(4, false);
+    $prefs->setDrawerConversation(4, -7);
+
+    Functions\when('get_user_meta')->alias(static fn(int $id, string $key, bool $single): mixed => match (true) {
+        !$single => ['a list, which the reads never ask for'],
+        $id === 3 && $key === UserPrefs::META_DRAWER_OPEN => '1',
+        $id === 3 && $key === UserPrefs::META_DRAWER_CONVERSATION => '42',
+        $id === 4 && $key === UserPrefs::META_DRAWER_OPEN => 'yes',
+        $id === 4 && $key === UserPrefs::META_DRAWER_CONVERSATION => '-7',
+        $id === 6 && $key === UserPrefs::META_DRAWER_OPEN => '0',
+        $id === 6 && $key === UserPrefs::META_DRAWER_CONVERSATION => ['9'],
+        default => '',
+    });
+    expect($prefs->drawerOpen(3))->toBeTrue()
+        ->and($prefs->drawerConversation(3))->toBe(42)
+        // A row a filter or a hand edit left holding something else is closed, and no conversation.
+        ->and($prefs->drawerOpen(4))->toBeFalse()
+        ->and($prefs->drawerConversation(4))->toBe(0)
+        // No row at all: the same.
+        ->and($prefs->drawerOpen(5))->toBeFalse()
+        ->and($prefs->drawerConversation(5))->toBe(0)
+        // What setDrawerOpen(false) writes is closed; an array is not a digit string.
+        ->and($prefs->drawerOpen(6))->toBeFalse()
+        ->and($prefs->drawerConversation(6))->toBe(0)
+        ->and(UserPrefs::META_DRAWER_OPEN)->toBe('alpaca_bot_drawer_open')
+        ->and(UserPrefs::META_DRAWER_CONVERSATION)->toBe('alpaca_bot_drawer_conversation');
+});
