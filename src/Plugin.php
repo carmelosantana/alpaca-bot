@@ -200,6 +200,8 @@ final class Plugin
         $this->set(Admin\Drawer::class, $drawer);
         add_action('admin_enqueue_scripts', [$drawer, 'enqueue']);
         add_action('admin_footer', [$drawer, 'footer']);
+        // And on a block editor screen, where there is no drawer, the editor's own sidebar.
+        add_action('enqueue_block_editor_assets', [$drawer, 'enqueueEditor']);
         // Site Health's direct test for web_fetch: whether it can run pinned here (Admin\SiteHealth).
         // Hooked unconditionally: core applies the filter only on its own screen and cron run.
         add_filter('site_status_tests', [new Admin\SiteHealth($store), 'register']);

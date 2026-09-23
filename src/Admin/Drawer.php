@@ -57,6 +57,9 @@ final class Drawer
     /** The loader's script and stylesheet handle. */
     public const HANDLE = 'alpaca-bot-drawer';
 
+    /** The block editor sidebar's script handle (resources/ts/editor.ts, enqueueEditor()). */
+    public const EDITOR_HANDLE = 'alpaca-bot-editor';
+
     public function __construct(private Access $access, private UserPrefs $prefs, private Assets $assets) {}
 
     /** Whether this screen, and this user, get the drawer: the class docblock says why each. */
@@ -89,6 +92,35 @@ final class Drawer
         wp_enqueue_script(self::HANDLE, plugins_url('assets/js/drawer.js', ALPACA_BOT_FILE), ['heartbeat'], Assets::version('assets/js/drawer.js'), true);
         wp_localize_script(self::HANDLE, 'alpacaBot', $this->assets->settings());
         wp_localize_script(self::HANDLE, 'alpacaBotMount', $this->assets->mount());
+    }
+
+    /**
+     * `enqueue_block_editor_assets`: the chat as the block editor's own sidebar
+     * (resources/ts/editor.ts), which mounts the fragment the drawer mounts, for the user the
+     * drawer is for (Menu::capability(), as wanted() asks). Core fires this hook wherever it loads
+     * a block editor, and the site editor, the widgets editor and the Customizer's widgets have no
+     * post to edit, so only a screen whose base is `post` and that core says is a block editor
+     * gets the sidebar; the classic editor gets the drawer instead (wanted()).
+     *
+     * The four `wp-*` dependencies are the globals editor.ts reads off `window.wp`, so it runs
+     * after the bundles that set them. `wp-editor` depends on the other three already, and they
+     * are named anyway because editor.ts reads all four and a dependency of a dependency is not a
+     * promise. `heartbeat` is here for the reason it is on the loader (enqueue()). Both settings
+     * objects are the loader's, because the sidebar mounts the chat the way the drawer does
+     * (resources/ts/mount.ts).
+     */
+    public function enqueueEditor(): void
+    {
+        $screen = function_exists('get_current_screen') ? get_current_screen() : null;
+        if (!$screen instanceof \WP_Screen || $screen->base !== 'post' || !$screen->is_block_editor()) {
+            return;
+        }
+        if (!current_user_can(Menu::capability($this->access))) {
+            return;
+        }
+        wp_enqueue_script(self::EDITOR_HANDLE, plugins_url('assets/js/editor.js', ALPACA_BOT_FILE), ['wp-plugins', 'wp-editor', 'wp-element', 'wp-data', 'heartbeat'], Assets::version('assets/js/editor.js'), true);
+        wp_localize_script(self::EDITOR_HANDLE, 'alpacaBot', $this->assets->settings());
+        wp_localize_script(self::EDITOR_HANDLE, 'alpacaBotMount', $this->assets->mount());
     }
 
     /**

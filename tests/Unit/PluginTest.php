@@ -340,7 +340,7 @@ it('registers one Access over the container\'s Store, so every surface resolves 
         ->and($plugin->get(Access::class)->stored('chat'))->toBe('publish_posts');
 });
 
-it('puts the drawer on the other admin screens: its loader on admin_enqueue_scripts and its launcher on admin_footer, over the container\'s Access and preferences', function (): void {
+it('puts the drawer on the other admin screens: its loader on admin_enqueue_scripts and its launcher on admin_footer, and the editor sidebar on enqueue_block_editor_assets, over the container\'s Access and preferences', function (): void {
     Functions\when('add_shortcode')->justReturn();
     Actions\expectAdded('admin_enqueue_scripts')->once()->with(Mockery::on(
         static fn (mixed $cb): bool => is_array($cb) && ($cb[0] ?? null) instanceof AlpacaBot\Admin\Assets && ($cb[1] ?? null) === 'enqueue'
@@ -350,6 +350,10 @@ it('puts the drawer on the other admin screens: its loader on admin_enqueue_scri
     ));
     Actions\expectAdded('admin_footer')->once()->with(Mockery::on(
         static fn (mixed $cb): bool => is_array($cb) && ($cb[0] ?? null) instanceof AlpacaBot\Admin\Drawer && ($cb[1] ?? null) === 'footer'
+    ));
+    // And, in its place on a block editor screen, the editor's own sidebar.
+    Actions\expectAdded('enqueue_block_editor_assets')->once()->with(Mockery::on(
+        static fn (mixed $cb): bool => is_array($cb) && ($cb[0] ?? null) instanceof AlpacaBot\Admin\Drawer && ($cb[1] ?? null) === 'enqueueEditor'
     ));
     $plugin = Plugin::boot();
     $plugin->register();

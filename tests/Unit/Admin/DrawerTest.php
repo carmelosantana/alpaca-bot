@@ -193,3 +193,58 @@ it('reads the title core left, without asking get_admin_page_title() to walk the
     adminDrawer()->footer();
     expect((string) ob_get_clean())->toContain('data-screen-id="dashboard" data-screen-title="" data-post="0"');
 });
+
+// ---------------------------------------------------------------- Task 20: the block editor's sidebar
+
+it('enqueues the editor sidebar on a block editor post screen, after the wp packages it reads off window.wp, with the drawer\'s two settings objects', function (): void {
+    Functions\when('get_current_screen')->justReturn(($this->screen)('post', true, 'post'));
+    // The gate is the menu's question, as the drawer's is.
+    Functions\expect('current_user_can')->once()->with('edit_posts')->andReturn(true);
+    Functions\when('plugins_url')->alias(fn(string $p) => '/plugins/alpaca-bot/' . $p);
+    Functions\when('rest_url')->alias(fn(string $p) => '/wp-json/' . $p);
+    Functions\when('wp_create_nonce')->justReturn('n');
+    Functions\when('wp_convert_hr_to_bytes')->justReturn(8 * 1024 * 1024);
+    Functions\expect('wp_enqueue_style')->never();
+    Functions\expect('wp_enqueue_media')->never();
+    $scripts = [];
+    Functions\when('wp_enqueue_script')->alias(function (string $handle, string $src, array $deps, string $ver, bool $footer) use (&$scripts): void {
+        $scripts[$handle] = [$src, $deps, $ver, $footer];
+    });
+    $localized = [];
+    Functions\when('wp_localize_script')->alias(function (string $handle, string $name, array $data) use (&$localized): void {
+        $localized[$name] = [$handle, $data];
+    });
+
+    adminDrawer()->enqueueEditor();
+
+    expect(Drawer::EDITOR_HANDLE)->toBe('alpaca-bot-editor')
+        ->and($scripts)->toBe([Drawer::EDITOR_HANDLE => ['/plugins/alpaca-bot/assets/js/editor.js', ['wp-plugins', 'wp-editor', 'wp-element', 'wp-data', 'heartbeat'], Plugin::VERSION, true]])
+        ->and(array_keys($localized))->toBe(['alpacaBot', 'alpacaBotMount'])
+        ->and($localized['alpacaBot'])->toBe([Drawer::EDITOR_HANDLE, (new Assets())->settings()])
+        ->and($localized['alpacaBotMount'])->toBe([Drawer::EDITOR_HANDLE, (new Assets())->mount()]);
+
+    // A page is the same screen base under its post type's own id.
+    Functions\when('get_current_screen')->justReturn(($this->screen)('page', true, 'post'));
+    Functions\expect('current_user_can')->once()->with('edit_posts')->andReturn(true);
+    $scripts = [];
+    adminDrawer()->enqueueEditor();
+    expect(array_keys($scripts))->toBe([Drawer::EDITOR_HANDLE]);
+});
+
+it('enqueues no editor sidebar where enqueue_block_editor_assets fires with no post to edit, on the classic editor, or for a user who cannot open the chat', function (): void {
+    Functions\expect('wp_enqueue_script')->never();
+    Functions\expect('wp_localize_script')->never();
+    foreach ([
+        'the site editor' => [($this->screen)('site-editor', true, 'site-editor'), true],
+        'the widgets editor' => [($this->screen)('widgets', true, 'widgets'), true],
+        'the Customizer' => [($this->screen)('customize', true, 'customize'), true],
+        'the classic editor' => [($this->screen)('post', false, 'post'), true],
+        'a user without the capability' => [($this->screen)('post', true, 'post'), false],
+        'no screen at all' => [null, true],
+    ] as $case => [$screen, $can]) {
+        Functions\when('get_current_screen')->justReturn($screen);
+        Functions\when('current_user_can')->justReturn($can);
+        adminDrawer()->enqueueEditor();
+        expect(true)->toBeTrue($case);
+    }
+});
