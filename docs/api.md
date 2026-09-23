@@ -195,7 +195,8 @@ default), `images` (array of `data:` URLs), `context` (object, passed to the con
 collectors), `stream` (boolean, default false).
 
 Two `context` keys are the plugin's own. `post_id` (integer) is the post being edited, which
-reaches the model only on a turn by a user who may edit it. `screen` (`{id, title}`, two strings)
+reaches the model only on a turn by a user who may edit it, and not while it is an `auto-draft`
+(the post an Add New screen makes before anything is saved). `screen` (`{id, title}`, two strings)
 is the admin screen the chat is on, which reaches the model as the heading "On: {title}" with
 nothing under it. The title is untrusted text: its tags are stripped and every run of
 whitespace, line breaks included, becomes one space, so it cannot open a heading of its own in
@@ -555,7 +556,7 @@ header. An error is still core's JSON error shape.
 | `POST /view/default-model` | An inline admin notice; stores `model` as your default (Kanboard #565) | `model` (string, required). 403 while `chat.user_can_change_model` is off, whatever the select says |
 | `GET /view/bubble` | An empty bubble for the screen to stream into | `role` (`user`\|`assistant`, default `assistant`), `streaming` (boolean: a polite live region) |
 | `POST /view/bubble` | A finished bubble, an assistant's content rendered as markdown; a user turn with its images is the optimistic bubble the screen shows while the turn runs | `role` (required), `content`, `model`, `usage` (`{prompt_tokens, completion_tokens}` or null), `duration_ms`, `images` (array of `data:` URLs; a user turn only), `tool_calls` (the reply's `meta.tool_calls`; the receipt ends `· 2 tools`) |
-| `GET /view/panel` | The whole chat (header, transcript and composer) in the drawer's panel, with its close button | `conversation_id`: one of your own to open; 0, a missing one or anyone else's is a new chat, as `?conversation=` is on the chat screen. `post_id`: the post being edited, rendered as the composer's post chip when you may edit it, as `&post=` is on the chat screen. `screen_id` and `screen_title`: the screen's id and page title, cleaned as `POST /chat` cleans `context.screen` and rendered as the composer's screen chip; either one empty, or cleaned to nothing, is no chip. A chip's hidden fields are what the chat bundle sends as `context` |
+| `GET /view/panel` | The whole chat (header, transcript and composer) in the drawer's panel, with its close button | `conversation_id`: one of your own to open; 0, a missing one or anyone else's is a new chat, as `?conversation=` is on the chat screen. `post_id`: the post being edited, rendered as the composer's post chip when you may edit it and it is not an `auto-draft`, as `&post=` is on the chat screen. `screen_id` and `screen_title`: the screen's id and page title, cleaned as `POST /chat` cleans `context.screen` and rendered as the composer's screen chip; either one empty, or cleaned to nothing, is no chip. A chip's hidden fields are what the chat bundle sends as `context` |
 | `POST /view/drawer` | Nothing (an empty fragment); stores what the admin-wide drawer shows for you, as user meta `alpaca_bot_drawer_open` and `alpaca_bot_drawer_conversation` | `open` (boolean), `conversation_id` (integer, 0 or more). A parameter you leave out is left as it was; the conversation is not checked here, and one that is not yours opens as a new chat when `/view/panel` is asked for it |
 
 Your effective model is the one you last chose in the select (stored as user meta
@@ -868,11 +869,11 @@ capability.
 The bare chat screen is a new chat. `admin.php?page=alpaca-bot&conversation={id}` opens one of
 your own (anyone else's, or a missing one, is a new chat again), and `&post={id}` names the post
 the screen was opened from. A user who may edit that post sees it as a chip above the composer,
-and every turn sent while the chip is there carries it as `context.post_id`; anyone else gets no
-chip and sends no post, and the `current-screen` context source includes the post only on a turn
-by a user who may edit it in any case. The
-screen's requests are `/view/*` fragments (section 3) and `POST /chat`; its model select posts
-your choice to `/view/default-model` on change, and the screen opens on that choice next time.
+unless it is an `auto-draft`, and every turn sent while the chip is there carries it as
+`context.post_id`. With no chip no post is sent, and the `current-screen` context source includes
+the post only on a turn by a user who may edit it in any case. The screen's requests are
+`/view/*` fragments (section 3) and `POST /chat`; its model select posts your choice to
+`/view/default-model` on change, and the screen opens on that choice next time.
 
 On the other admin screens the same chat is a drawer: a launcher at the bottom right of the page,
 and the chat itself fetched from `GET /view/panel` the first time it is opened, which is also when
@@ -880,9 +881,10 @@ the chat's script, htmx and stylesheet are added to that page. It lists the same
 conversations as the screen, so a thread started in one continues in the other. Whether it is
 open and which conversation it holds are yours, stored through `POST /view/drawer` and read back
 on the next screen, where a drawer left open opens itself and fetches `GET /view/panel` again.
-Its composer shows the screen it is on as a chip, and on a classic editor screen, to a user who
-may edit the post, the post being edited as a second one; each is sent as `context.screen` or
-`context.post_id` until it is taken off.
+Its composer shows the screen it is on as a chip, unless the screen's page title is empty or
+cleans to nothing. On a classic editor screen it shows the post being edited as another, to a user
+who may edit it, but not on an Add New screen, whose post is an `auto-draft` nobody has saved.
+Each chip is sent as `context.screen` or `context.post_id` until it is taken off.
 It is not printed on the chat screen itself, on a block editor screen, or on any request for which
 core defines `IFRAME_REQUEST` (the plugin details modal and `media-upload.php` among them). It
 never loads the media library, so its image button is there only on a screen that loads the
