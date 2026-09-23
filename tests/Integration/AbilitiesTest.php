@@ -67,7 +67,7 @@ final class AbilitiesTest extends TestCase
             $this->assertNotNull($ability, $name);
             $this->assertSame('alpaca-bot', $ability->get_category());
             $this->assertTrue($ability->get_meta_item('show_in_rest'), $name);
-            // What the MCP Adapter keys on (McpAbilityExposure::is_public): without it the ability is registered and invisible to MCP.
+            // Pins `meta.public`: from v0.6.0 the MCP Adapter's default server lists an ability on it when `meta.mcp.public` is absent (McpAbilityExposure::is_meta_public()), and Register's class docblock says the rest.
             $this->assertTrue($ability->get_meta_item('public'), $name);
             $this->assertSame(['readonly' => false, 'destructive' => $name === 'alpaca-bot/chat', 'idempotent' => false], $ability->get_meta_item('annotations'), $name);
         }

@@ -135,9 +135,11 @@ use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Enum\ToolResultStatus;
  * `public` key they do not know, and default `show_in_rest` to false (7.0 :330). The MCP
  * Adapter reads the flag itself: at its v0.6.0 and v0.6.1, McpAbilityExposure::is_meta_public()
  * takes an explicit `meta.mcp.public` first and falls back to `public === true`, so under that
- * adapter these abilities are exposed to MCP whether or not core knows the key; its v0.5.0
- * counted only `meta.mcp.public`. `meta.mcp.public` is not set: `public` is the flag the
- * adapter reads, and core too from 7.1, and a second one is a second thing to forget. Being
+ * adapter these abilities are exposed through its default server whether or not core knows
+ * the key; its v0.5.0 counted only `meta.mcp.public`. `meta.mcp.public` is not set, so
+ * `public` decides: the adapter reads it from v0.6.0 and core from 7.1, and a second flag is
+ * a second thing to forget. The cost is the adapter's v0.5.0, whose default server does not
+ * list these abilities. Being
  * public to the adapter is also what lets its own `mcp-adapter/execute-ability` run these three
  * (v0.6.1 McpAbilityHelperTrait::check_ability_mcp_exposure()), so where an administrator has
  * allowlisted that ability under Settings › Tools, a turn offered it can reach
@@ -152,25 +154,29 @@ use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Enum\ToolResultStatus;
  * chat's `destructive` included. Core defines `destructive` against "only additive updates"
  * (7.1 :166-167), and each value below is what the ability's own code does to stored data.
  *
- * - `alpaca-bot/chat` is `destructive`. A turn adds messages and a usage receipt, but it
- *   stores the conversation through ConversationStore::save(), which rewrites the
+ * - `alpaca-bot/chat` is `destructive`. A finished turn adds messages and a usage receipt,
+ *   but it stores the conversation through ConversationStore::save(), which rewrites the
  *   conversation post's excerpt from the last message, and its title while that is empty or
- *   the default, and whose fit() drops, from a transcript past storageBudget(), the images of
- *   the oldest turn whose eviction makes room, and then, once no eviction would, whole
- *   messages, oldest first. Not `readonly`, since it writes all of that, and not
+ *   the default, and whose fit() drops, from a transcript past storageBudget(), turns' images,
+ *   oldest first, each only where evicting them makes room, and then, once no eviction would,
+ *   whole messages, oldest first. Not `readonly`, since it writes all of that, and not
  *   `idempotent`: a second identical call is a second turn, spent again.
  * - `alpaca-bot/summarize` is not `destructive`. Its turn is ephemeral, so Chat\Pipeline
  *   stores no conversation and runs no tool for it. Besides a usage receipt it writes only
  *   caches and counters: it adds one to the per-minute rate-limit count; it adds the
  *   receipt's tokens to the cached month totals or, where a cached total cannot be read or
  *   the receipt failed to insert, deletes that entry so that UsageMeter::monthSummary()
- *   recounts it from the receipts; and it rebuilds a cached month total the cap check reads,
- *   or the cached model list, when it finds that entry missing. Not `readonly` or
- *   `idempotent`: each call records a receipt and spends again. That is the plugin's own
- *   toolkit; one a site swaps in under `summarize` does what it does.
- * - `alpaca-bot/draft-post` is not `destructive`: it inserts a new draft post and writes
- *   nothing else of its own. Not `readonly`, since it inserts, and not `idempotent`: a second
- *   call inserts a second draft.
+ *   recounts it from the receipts; and where a cached month total the cap check reads, or
+ *   the cached model list, is missing or cannot be read, it writes a fresh one in its place
+ *   (the model list only when the provider lists a model that ModelCatalog does not filter
+ *   out as an embedding model). Not `readonly` or `idempotent`: a call that finishes records
+ *   a receipt, and a second identical one spends again. That is the plugin's own toolkit;
+ *   one a site swaps in under `summarize` does what it does.
+ * - `alpaca-bot/draft-post` is not `destructive`: the plugin's own toolkit inserts a new
+ *   draft post and makes no other write of its own. Not `readonly`, since it inserts, and not
+ *   `idempotent`: a second call inserts a second draft. One a site swaps in under
+ *   `draft_post` does what it does, since draft() runs whatever toolkit is enabled under
+ *   that id.
  *
  * A chat turn also runs the tools its user is offered, and an ability an administrator
  * allowlisted under Settings › Tools may be destructive; these annotations do not describe
@@ -279,7 +285,7 @@ final class Register
             ),
             self::SUMMARIZE => $this->ability(
                 __('Summarize', 'alpaca-bot'),
-                __('Condense a piece of text with the site\'s model. Nothing is stored; the tokens count against the caller\'s monthly usage.', 'alpaca-bot'),
+                __('Condense a piece of text with the site\'s model. Neither the text nor the summary is stored; the tokens count against the caller\'s monthly usage.', 'alpaca-bot'),
                 [
                     'text' => ['type' => 'string', 'minLength' => 1, 'description' => __('The text to summarize.', 'alpaca-bot')],
                     'length' => ['type' => 'string', 'enum' => ['short', 'medium', 'long'], 'description' => __('How long the summary should be; medium is the default.', 'alpaca-bot')],
