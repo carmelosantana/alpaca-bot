@@ -29,6 +29,15 @@ it('keeps the order of a list', function (): void {
     expect($one->fingerprint())->not->toBe($other->fingerprint());
 });
 
+// SORT_STRING, not ksort()'s default: in an object that mixes numeric and other keys, the default
+// puts 9 before 10, and SORT_STRING puts "10" before "9". php-agents' McpToolDefinition sorts with
+// SORT_STRING too. The expected value is the canonical encoding written out by hand.
+it('sorts an object\'s keys as strings, so "10" comes before "9"', function (): void {
+    $schema = json_decode('{"properties":{"a":{"type":"string"},"9":{"type":"string"},"10":{"type":"string"}}}', true);
+    $canonical = '{"annotations":[],"description":"d","inputSchema":{"properties":{"10":{"type":"string"},"9":{"type":"string"},"a":{"type":"string"}}},"name":"t"}';
+    expect((new ToolDefinition('t', 'd', $schema))->fingerprint())->toBe(hash('sha256', $canonical));
+});
+
 it('reports the server\'s destructive hint, and only that hint being exactly true', function (): void {
     expect((new ToolDefinition('t', 'd', [], ['destructiveHint' => true]))->destructive())->toBeTrue()
         ->and((new ToolDefinition('t', 'd', [], ['destructiveHint' => 'yes']))->destructive())->toBeFalse()

@@ -31,9 +31,9 @@ namespace AlpacaBot\Mcp;
  * destructive() is true only when the `destructiveHint` annotation is exactly `true`. The MCP
  * specification says a client must treat annotations as untrusted unless they come from a trusted
  * server, so this is a hint for when to ask a person, never grounds to grant anything.
- * php-agents' McpToolDefinition::destructive() answers differently: it reads a missing or
- * non-boolean destructiveHint as true, and reads any tool whose readOnlyHint is exactly `true` as
- * not destructive.
+ * php-agents' McpToolDefinition::destructive() answers differently: it reads a tool whose
+ * readOnlyHint is exactly `true` as not destructive, and any other tool as destructive unless its
+ * destructiveHint is exactly `false`.
  *
  * @since 0.6.0
  */
