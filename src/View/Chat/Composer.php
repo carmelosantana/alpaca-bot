@@ -42,7 +42,7 @@ final class Composer extends Component
             $chips .= $this->chip('screen', sprintf(__('On: %s', 'alpaca-bot'), $this->screen['title']), ['context[screen][id]' => $this->screen['id'], 'context[screen][title]' => $this->screen['title']]);
         }
         if ($chips !== '') {
-            $chips = $this->tag('div', ['class' => 'ab-composer__chips', 'aria-label' => __('What this chat can see', 'alpaca-bot')], $chips);
+            $chips = $this->tag('div', ['class' => 'ab-composer__chips', 'role' => 'group', 'aria-label' => __('What this chat can see', 'alpaca-bot')], $chips);
         }
         $buttons = $this->tag('button', ['type' => 'button', 'class' => 'ab-btn ab-btn--icon', 'data-action' => 'image', 'aria-label' => __('Attach an image', 'alpaca-bot')], Icon::svg('image'))
             . $this->tag('button', ['type' => 'button', 'class' => 'ab-btn ab-btn--icon', 'data-action' => 'image-remove', 'aria-label' => __('Remove image', 'alpaca-bot'), 'hidden' => 'hidden'], Icon::svg('image-off'))

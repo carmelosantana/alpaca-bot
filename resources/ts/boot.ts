@@ -336,6 +336,12 @@ export function boot(cfg: Settings, form: HTMLFormElement): void {
       return ok;
     }
   }
+  /** Takes a context chip off the composer, and the chips row once it holds no chip. */
+  function removeChip(button: HTMLElement): void {
+    const row = button.closest('.ab-composer__chips');
+    button.closest('.ab-chip')?.remove();
+    if (row && !row.querySelector('.ab-chip')) row.remove();
+  }
   function connectivity(): void {
     if (navigator.onLine) {
       // The offline notice took the status line; hand it back to the session-expired notice if that is what it displaced.
@@ -371,8 +377,9 @@ export function boot(cfg: Settings, form: HTMLFormElement): void {
       case 'image': pickImage(); break;
       case 'image-remove': setImage(form, ''); break;
       // The chip's hidden fields go with it, so the next turn's context (contextFrom()) has no
-      // key for it. The button was focused and is gone, so the focus goes back to the box.
-      case 'chip-remove': button.closest('.ab-chip')?.remove(); textarea.focus(); break;
+      // key for it; the last chip takes its row with it, which would otherwise stay as an empty
+      // group with its margin. The button was focused and is gone, so the focus goes back to the box.
+      case 'chip-remove': removeChip(button); textarea.focus(); break;
     }
   });
   document.addEventListener('change', (e) => {

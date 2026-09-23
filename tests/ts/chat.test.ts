@@ -213,3 +213,19 @@ test('a composer with no chips sends an empty context, not a post of 0', async (
   const { body } = await sentContext(t, SHELL, () => {});
   assert.deepEqual(body.context, {});
 });
+
+test('taking the last chip off takes the chips row with it, and not before', async () => {
+  const win = installDom(SHELL_WITH_CHIPS);
+  const { boot } = await import('../../resources/ts/boot.ts');
+  const form = document.querySelector('#ab-form') as HTMLFormElement;
+  boot(CFG, form);
+  const remove = (chip: string): void => {
+    (form.querySelector(`[data-chip="${chip}"] [data-action="chip-remove"]`) as HTMLElement).dispatchEvent(new win.MouseEvent('click', { bubbles: true }) as unknown as MouseEvent);
+  };
+  remove('post');
+  assert.equal(form.querySelectorAll('.ab-chip').length, 1);
+  assert.equal(form.querySelectorAll('.ab-composer__chips').length, 1);
+  remove('screen');
+  assert.equal(form.querySelectorAll('.ab-chip').length, 0);
+  assert.equal(form.querySelectorAll('.ab-composer__chips').length, 0);
+});

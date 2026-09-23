@@ -326,7 +326,7 @@ it('drawer puts the shell in its own panel: the drawer layout, no core .wrap, an
 it('composer renders a chip per context key, each carrying its own hidden fields and its own remove button', function (): void {
     $html = (new Composer(new Store(), 0, 'llama3.2', 12, 'Hello world', ['id' => 'edit-post', 'title' => 'Posts']))->render();
 
-    expect($html)->toContain('<div class="ab-composer__chips" aria-label="What this chat can see">')
+    expect($html)->toContain('<div class="ab-composer__chips" role="group" aria-label="What this chat can see">')
         ->toContain('<span class="ab-chip" data-chip="post"><input type="hidden" name="context[post_id]" value="12"><span class="ab-chip__label">Editing: Hello world</span><button type="button" class="ab-chip__remove" data-action="chip-remove" aria-label="Remove Editing: Hello world">')
         ->toContain('<span class="ab-chip" data-chip="screen"><input type="hidden" name="context[screen][id]" value="edit-post"><input type="hidden" name="context[screen][title]" value="Posts"><span class="ab-chip__label">On: Posts</span><button type="button" class="ab-chip__remove" data-action="chip-remove" aria-label="Remove On: Posts">')
         ->toContain('<use href="#lucide-x"></use>')
