@@ -287,3 +287,29 @@ test('on a new post an autosave is enough for the sidebar to name it', async ({ 
   await expect(sidebar.locator('#ab-form .ab-chip[data-chip="post"] .ab-chip__label')).toHaveText('Editing: ab-e2e-editor-autosaved');
   await expect(sidebar.locator('#ab-form input[name="context[post_id]"]')).toHaveValue(String(id));
 });
+
+test('two saves that finish while the post chip is still being fetched ask for it once, and add it once', async ({ page }) => {
+  await login(page);
+  const panels = panelRequests(page);
+  const toggle = await openEditor(page, '/wp-admin/post-new.php');
+  await toggle.click();
+  const sidebar = page.locator('.ab-sidebar');
+  await booted(sidebar);
+  expect(panels.count).toBe(1);
+
+  // Every later GET /view/panel is held until both saves have finished.
+  const isPanel = (u: URL): boolean => /view(\/|%2F)panel/.test(u.toString());
+  let release: () => void = () => {};
+  const saved = new Promise<void>((resolve) => { release = resolve; });
+  await page.route(isPanel, async (r) => { await saved; await r.continue(); });
+  await save(page, 'ab-e2e-editor-twice');
+  await save(page, 'ab-e2e-editor-twice again');
+  // Time for a second fetch the second save should not start, since what is asserted is its absence.
+  await page.waitForTimeout(1000);
+  expect(panels.count).toBe(2);
+  release();
+
+  await expect(sidebar.locator('#ab-form .ab-chip[data-chip="post"] .ab-chip__label')).toHaveText('Editing: ab-e2e-editor-twice again');
+  await page.unroute(isPanel);
+  await expect(sidebar.locator('#ab-form .ab-chip')).toHaveCount(1);
+});
