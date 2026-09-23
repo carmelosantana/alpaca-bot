@@ -66,6 +66,18 @@ async function turnDone(drawer: ReturnType<Page['locator']>): Promise<void> {
   await expect(drawer.locator('#ab-form [data-action="send"]')).toBeEnabled();
 }
 
+/**
+ * Waits for the chat bundle to have booted in the drawer a launcher press opened. The fragment
+ * (and its chips) is in the page before the bundle is, since mount.ts adds chat.js only after the
+ * swap, and an Enter pressed before boot() binds its keydown handler is a newline in the box, not
+ * a turn. The box taking the focus is the signal: drawer.ts focuses it once mountPanel() has
+ * resolved, which is after chat.js has loaded and run, and boot() focuses it as it finishes.
+ * Nothing before that focuses it, and fill() would, so this is asserted before anything is typed.
+ */
+async function booted(drawer: ReturnType<Page['locator']>): Promise<void> {
+  await expect(drawer.locator('#ab-message')).toBeFocused();
+}
+
 /** The `context` of the next POST /chat the page sends, once the request is made. */
 function nextContext(page: Page): Promise<Record<string, unknown>> {
   return page.waitForRequest((req) => req.method() === 'POST' && /\/alpaca-bot\/v1\/chat(?:$|[?&])/.test(decodeURIComponent(req.url())))
@@ -209,6 +221,7 @@ test('on the posts list the drawer\'s composer shows the screen as a chip, whose
   const drawer = page.locator('#ab-drawer');
   const panel = page.waitForRequest((req) => /view(\/|%2F)panel/.test(req.url()));
   await page.click('#ab-drawer-launcher');
+  await booted(drawer);
   const query = new URL((await panel).url()).searchParams;
   expect([query.get('screen_id'), query.get('screen_title'), query.get('post_id')]).toEqual(['edit-post', 'Posts', '0']);
 
@@ -257,6 +270,7 @@ test('on a classic editor screen the drawer\'s composer names the post as well, 
   const drawer = page.locator('#ab-drawer');
   await expect(drawer).toHaveAttribute('data-post', String(id));
   await page.click('#ab-drawer-launcher');
+  await booted(drawer);
   await expect(drawer.locator('#ab-form .ab-chip[data-chip="post"] .ab-chip__label')).toHaveText('Editing: ab-e2e-classic');
   await expect(drawer.locator('#ab-form .ab-chip[data-chip="screen"] .ab-chip__label')).toHaveText('On: Edit Media');
 
