@@ -17,6 +17,9 @@ import { expect, test, type Page } from '@playwright/test';
  *   the chat screen itself, keep it.
  * - "New chat" inside the drawer swaps a fresh transcript in rather than leaving the page, and
  *   closing is remembered.
+ * - The composer's context chips: the screen's on the posts list, and the post's as well on a
+ *   classic editor screen (an attachment's, which core never opens in the block editor), each in
+ *   the turn's POST /chat body until it is taken off.
  *
  * Each test puts the drawer's state where it needs it through the route rather than relying on
  * what an earlier test or run left behind.
@@ -61,6 +64,12 @@ async function turnDone(drawer: ReturnType<Page['locator']>): Promise<void> {
   await expect(assistant.locator('.ab-msg__content')).toContainText(REPLY, { timeout: 30_000 });
   await expect(assistant.locator('footer.ab-receipt')).toContainText('18 tokens');
   await expect(drawer.locator('#ab-form [data-action="send"]')).toBeEnabled();
+}
+
+/** The `context` of the next POST /chat the page sends, once the request is made. */
+function nextContext(page: Page): Promise<Record<string, unknown>> {
+  return page.waitForRequest((req) => req.method() === 'POST' && /\/alpaca-bot\/v1\/chat(?:$|[?&])/.test(decodeURIComponent(req.url())))
+    .then((req) => (req.postDataJSON() as { context: Record<string, unknown> }).context);
 }
 
 /** Whether core's media library is on this page: what drawer.ts reads to keep or hide the image button. */
@@ -189,6 +198,73 @@ test('an iframe screen gets no drawer: core defines IFRAME_REQUEST for it and it
   await expect(page.locator('link[href*="alpaca-bot-drawer.css"]')).toHaveCount(0);
   await expect(page.locator('#ab-drawer-launcher')).toHaveCount(0);
   await expect(page.locator('script[src*="assets/js/chat.js"]')).toHaveCount(0);
+
+  await drawerState(page, { open: false, conversation_id: 0 });
+});
+
+test('on the posts list the drawer\'s composer shows the screen as a chip, whose removal takes it off the next turn', async ({ page }) => {
+  await login(page);
+  await drawerState(page, { open: false, conversation_id: 0 });
+  await page.goto('/wp-admin/edit.php');
+  const drawer = page.locator('#ab-drawer');
+  const panel = page.waitForRequest((req) => /view(\/|%2F)panel/.test(req.url()));
+  await page.click('#ab-drawer-launcher');
+  const query = new URL((await panel).url()).searchParams;
+  expect([query.get('screen_id'), query.get('screen_title'), query.get('post_id')]).toEqual(['edit-post', 'Posts', '0']);
+
+  const chip = drawer.locator('#ab-form .ab-chip[data-chip="screen"]');
+  await expect(chip.locator('.ab-chip__label')).toHaveText('On: Posts');
+  await expect(drawer.locator('#ab-form .ab-chip')).toHaveCount(1);
+
+  // With the chip on, the turn names the screen.
+  let sent = nextContext(page);
+  await drawer.locator('#ab-message').fill('hello');
+  await drawer.locator('#ab-message').press('Enter');
+  expect(await sent).toEqual({ screen: { id: 'edit-post', title: 'Posts' } });
+  await turnDone(drawer);
+
+  // Taken off before sending: gone from the composer, and from the body.
+  await chip.locator('[data-action="chip-remove"]').click();
+  await expect(drawer.locator('#ab-form .ab-chip')).toHaveCount(0);
+  await expect(drawer.locator('#ab-message')).toBeFocused();
+  sent = nextContext(page);
+  await drawer.locator('#ab-message').fill('hello again');
+  await drawer.locator('#ab-message').press('Enter');
+  expect(await sent).toEqual({});
+  await turnDone(drawer);
+
+  await drawerState(page, { open: false, conversation_id: 0 });
+});
+
+test('on a classic editor screen the drawer\'s composer names the post as well, and the turn carries both', async ({ page }) => {
+  await login(page);
+  await drawerState(page, { open: false, conversation_id: 0 });
+  // An attachment to edit, found by its title or uploaded once: a 1x1 PNG.
+  const id = await page.evaluate(async () => {
+    const wp = window as unknown as { alpacaBot: { nonce: string; rest: string } };
+    const media = wp.alpacaBot.rest.replace('alpaca-bot/v1', 'wp/v2/media');
+    const headers = { 'X-WP-Nonce': wp.alpacaBot.nonce };
+    const found = await (await fetch(`${media}${media.includes('?') ? '&' : '?'}search=ab-e2e-classic`, { credentials: 'same-origin', headers })).json() as { id: number }[];
+    if (found.length > 0) return found[0]!.id;
+    const png = Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII='), (c) => c.charCodeAt(0));
+    const res = await fetch(media, { method: 'POST', credentials: 'same-origin', headers: { ...headers, 'Content-Type': 'image/png', 'Content-Disposition': 'attachment; filename="ab-e2e-classic.png"' }, body: png });
+    return (await res.json() as { id: number }).id;
+  });
+  expect(id).toBeGreaterThan(0);
+
+  await page.goto(`/wp-admin/post.php?post=${id}&action=edit`);
+  await expect(page.locator('body.block-editor-page')).toHaveCount(0);
+  const drawer = page.locator('#ab-drawer');
+  await expect(drawer).toHaveAttribute('data-post', String(id));
+  await page.click('#ab-drawer-launcher');
+  await expect(drawer.locator('#ab-form .ab-chip[data-chip="post"] .ab-chip__label')).toHaveText('Editing: ab-e2e-classic');
+  await expect(drawer.locator('#ab-form .ab-chip[data-chip="screen"] .ab-chip__label')).toHaveText('On: Edit Media');
+
+  const sent = nextContext(page);
+  await drawer.locator('#ab-message').fill('hello');
+  await drawer.locator('#ab-message').press('Enter');
+  expect(await sent).toEqual({ post_id: id, screen: { id: 'attachment', title: 'Edit Media' } });
+  await turnDone(drawer);
 
   await drawerState(page, { open: false, conversation_id: 0 });
 });
