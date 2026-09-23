@@ -12,11 +12,12 @@
  * and `max(1, (int) apply_filters(...))` alike.
  *
  * Four of the plugin's hooks are not spelled at an `apply_filters` call at all: the REST
- * permission callbacks (`alpaca_bot/capability/{route}`, Rest\Controller), the admin menu
- * (`alpaca_bot/admin/menu_capability`, Admin\Menu), the Settings › Access rows
- * (`alpaca_bot/capability/{hook}`, Access) and the one 0.5 key the two settings rows still run
- * first (`alpaca_bot/capability/settings`, Access) hand their names to Capability::filtered(),
- * which applies the filter and reduces the result to a capability name. So `Capability::filtered(`
+ * permission callbacks (`alpaca_bot/capability/{route}`, Rest\RouteCapability for
+ * Rest\Controller), the admin menu (`alpaca_bot/admin/menu_capability`, Admin\Menu), the
+ * Settings › Access rows (`alpaca_bot/capability/{hook}`, Access) and the one 0.5 key the two
+ * settings rows still run first (`alpaca_bot/capability/settings`, Access) hand their names to
+ * Capability::filtered(), which applies the filter and reduces the result to a capability name.
+ * So `Capability::filtered(`
  * is treated as a filter call site, its first argument the hook, and the `apply_filters($hook, ...)`
  * inside the body of Capability::filtered() itself, the one place a hook name is legitimately a
  * variable, is the only non-literal name the scanner skips: that method, in that file, not the

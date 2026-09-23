@@ -8,6 +8,7 @@ use AlpacaBot\Access;
 use AlpacaBot\Plugin;
 use AlpacaBot\Provider\ModelCatalog;
 use AlpacaBot\Rest\Controller;
+use AlpacaBot\Rest\RouteCapability;
 use AlpacaBot\Settings\Schema;
 use AlpacaBot\Settings\Store;
 use AlpacaBot\Shortcodes\Chat as ChatShortcode;
@@ -231,7 +232,7 @@ final class SettingsPage
      *
      * The Chat row has no filter in Access, so overridden('chat') would answer false whatever a
      * site did. The menu's filter (Menu::capability(), which the chat screen, the drawer and the
-     * editor sidebar ask) and the `/chat` route's (Controller::filteredCapability(), with a
+     * editor sidebar ask) and the `/chat` route's (Rest\RouteCapability::filtered(), with a
      * `POST /chat` request) are asked instead, and the line names the one that moved. Every other
      * chat route has a filter of its own, under its own route key, which this does not ask.
      *
@@ -247,7 +248,7 @@ final class SettingsPage
                 self::setInCode(
                     /* translators: %s: the chat route, POST /chat */
                     sprintf(esc_html__('for the chat REST route (%s)', 'alpaca-bot'), '<code>POST /chat</code>'),
-                    static fn(): string => Controller::filteredCapability('chat', $stored, new \WP_REST_Request('POST', '/' . Controller::NAMESPACE . '/chat')),
+                    static fn(): string => RouteCapability::filtered('chat', $stored, new \WP_REST_Request('POST', '/' . Controller::NAMESPACE . '/chat')),
                     $stored,
                     $f,
                 ),
