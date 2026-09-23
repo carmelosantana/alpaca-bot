@@ -195,8 +195,8 @@ default), `images` (array of `data:` URLs), `context` (object, passed to the con
 collectors), `stream` (boolean, default false).
 
 Two `context` keys are the plugin's own. `post_id` (integer) is the post being edited, which
-reaches the model only on a turn by a user who may edit it, and not while it is an `auto-draft`
-(the post an Add New screen makes before anything is saved). `screen` (`{id, title}`, two strings)
+reaches the model only on a turn by a user who may edit it, and not while its status is
+`auto-draft` (the post core makes for an Add New screen, until it is first saved or autosaved). `screen` (`{id, title}`, two strings)
 is the admin screen the chat is on, which reaches the model as the heading "On: {title}" with
 nothing under it. The title is untrusted text: its tags are stripped and every run of
 whitespace, line breaks included, becomes one space, so it cannot open a heading of its own in
@@ -883,9 +883,9 @@ open and which conversation it holds are yours, stored through `POST /view/drawe
 on the next screen, where a drawer left open opens itself and fetches `GET /view/panel` again.
 Its composer shows the screen it is on as a chip, unless the screen's page title is empty or
 cleans to nothing. On a classic editor screen it shows the post being edited as another, to a user
-who may edit it, but not on an Add New screen, whose post is an `auto-draft` nobody has saved.
-Each chip is sent as `context.screen` or `context.post_id` until it is taken off.
-It is not printed on the chat screen itself, on a block editor screen, or on any request for which
+who may edit it, but not while its status is `auto-draft`, which is the post core makes for an
+Add New screen until it is first saved or autosaved. Each chip is sent as `context.screen` or
+`context.post_id` until it is taken off. It is not printed on the chat screen itself, on a block editor screen, or on any request for which
 core defines `IFRAME_REQUEST` (the plugin details modal and `media-upload.php` among them). It
 never loads the media library, so its image button is there only on a screen that loads the
 library itself.

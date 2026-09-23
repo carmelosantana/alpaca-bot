@@ -383,7 +383,7 @@ it('shell names the post in a chip only for a user who may edit it, by its store
         ->and($shell->render())->not->toContain('ab-chip')->not->toContain('context[');
 });
 
-it('shell names no post for an auto-draft, the Add New screen\'s post that has not been started', function (): void {
+it('shell names no post whose status is auto-draft', function (): void {
     Functions\when('get_transient')->justReturn([['id' => 'llama3.2', 'label' => 'llama3.2']]);
     Functions\when('wp_get_current_user')->justReturn((object) ['display_name' => 'Carmelo', 'ID' => 3]);
     Functions\when('get_avatar_url')->justReturn('/u.png');

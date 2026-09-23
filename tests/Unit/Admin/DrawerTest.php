@@ -12,7 +12,7 @@ use Brain\Monkey\Functions;
 // adminDrawer() lives in tests/Pest.php. WP_Screen is a class Mockery declares (as HelpTabsTest
 // does): `id` and `base` are the properties core sets, is_block_editor() the method core answers
 // the editor question with, and get_current_screen() is how a hook gets at it. The page title is
-// the global `$title`, as core's admin-header.php leaves it.
+// the global `$title`, which footer() reads as it stands.
 beforeEach(function (): void {
     $this->screen = static function (string $id, bool $blockEditor = false, ?string $base = null): Mockery\MockInterface {
         $screen = Mockery::mock('WP_Screen');

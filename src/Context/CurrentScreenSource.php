@@ -15,9 +15,11 @@ namespace AlpacaBot\Context;
  * could not open. Anything else in the request — a missing id, 0, a negative, a string with
  * junk in it, an array, a bool, a float — is treated as "no post" without touching WordPress
  * at all. A post whose status is `auto-draft` (UNSTARTED) is no post either, which is known
- * only once it is loaded: it is the one post-new.php stores before its form is shown, titled
- * "Auto Draft" for a type with titles, and the title is blanked only on the copy core keeps in
- * memory, so the stored row would tell the model it is editing a post called "Auto Draft".
+ * only once it is loaded. post-new.php stores such a post before its form is shown, titled
+ * "Auto Draft" for a type with titles, and blanks the title only on the copy core keeps in
+ * memory, so the stored row would tell the model it is editing a post called "Auto Draft". Its
+ * first save or autosave gives it another status (wp_autosave() makes it a `draft`), and from
+ * then on it is a post like any other.
  *
  * The title goes into the label, and the label is a `## ` heading in the system block, so
  * line breaks in it are collapsed to a space: a title cannot start a second heading.
@@ -42,7 +44,7 @@ final class CurrentScreenSource implements ContextSourceInterface
 {
     private const int MAX_CHARS = 4000;
 
-    /** The status of a post core has made for an Add New screen and nobody has saved: no post yet (the class docblock). */
+    /** The status core gives the post it makes for an Add New screen, until that post is first saved or autosaved: no post yet (the class docblock). */
     public const string UNSTARTED = 'auto-draft';
 
     /** The most characters of a screen title that reach the label, the ellipsis of a cut one included. */

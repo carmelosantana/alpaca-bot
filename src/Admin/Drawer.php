@@ -96,16 +96,17 @@ final class Drawer
      * element also names what the chat's context chips show (View\Chat\Composer), which only this
      * request knows: the screen's id and page title, and on the classic editor the post.
      *
-     * The title is the global `$title` as core's admin-header.php left it: that file calls
-     * get_admin_page_title(), which answers with `$title` when a screen has set it and otherwise
-     * walks the admin menus and stores what it finds there, and then strips `$title`'s tags. Read
-     * here, it is that answer without a second walk of the menus. A page that fires `admin_footer`
-     * without admin-header.php has no title here unless it set `$title` itself, and no title is
-     * no screen chip. The title is HTML
-     * (edit-comments.php, for one post's comments, puts the post's title between `&#8220;` and
-     * `&#8221;`), so its tags are stripped again and its entities decoded to make it text; the
-     * panel cleans it for the chip by Context\CurrentScreenSource::screenFrom(), and the turn
-     * cleans it again.
+     * The title is the global `$title`, read as it stands when `admin_footer` fires. Whoever set
+     * it last is not this method's concern: get_admin_page_title() answers with that global
+     * whenever it is not empty, and otherwise walks the admin menus and stores what it finds in
+     * it; admin-header.php calls it and strips the global's tags; and a screen may set the global
+     * again after its header (update.php does, while it installs a plugin or a theme). So a
+     * non-empty global is the title get_admin_page_title() would give at this point, and an empty
+     * one is left empty, not walked for here, which is no title and so no screen chip. The title is
+     * HTML (edit-comments.php, for one post's comments, puts the post's title between `&#8220;`
+     * and `&#8221;`), so its tags are stripped and its entities decoded to make it text; the panel
+     * cleans it for the chip by Context\CurrentScreenSource::screenFrom(), and the turn cleans it
+     * again.
      *
      * The post is get_post() of the global the screen's own file set. On post.php that is the post
      * it loaded, which get_post() reads back from the object cache that load filled; on

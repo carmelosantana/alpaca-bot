@@ -215,8 +215,8 @@ it('cleans a screen to itself, so what /view/panel renders into the chip is what
     }
 });
 
-it('treats an auto-draft as no post: the classic editor\'s Add New screen has not started one yet', function (): void {
-    // post-new.php stores the draft titled "Auto Draft" and blanks the title only in memory, so
+it('treats a post whose status is auto-draft as no post', function (): void {
+    // post-new.php stores such a post titled "Auto Draft" and blanks the title only in memory, so
     // the stored row would tell the model it is editing a post called "Auto Draft", with no text.
     Functions\when('user_can')->justReturn(true);
     Functions\when('get_post')->justReturn(currentScreenPost(40, 'Auto Draft', '', 'post', 'auto-draft'));
