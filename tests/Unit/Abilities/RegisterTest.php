@@ -45,7 +45,8 @@ it('defines the three abilities, in order, with the shapes a client is told to e
             // Nothing a client sends besides the named keys reaches a callback: an unknown key is a 400, not ignored.
             ->and($def['input_schema']['additionalProperties'])->toBeFalse()
             ->and($def['output_schema']['type'])->toBe('object')
-            ->and($def['meta'])->toBe(['show_in_rest' => true, 'public' => true, 'annotations' => ['readonly' => false, 'destructive' => false, 'idempotent' => false]], $id);
+            // Only chat is destructive: its save rewrites a conversation's excerpt, and fit() drops stored images and messages past the packet budget (the class docblock).
+            ->and($def['meta'])->toBe(['show_in_rest' => true, 'public' => true, 'annotations' => ['readonly' => false, 'destructive' => $id === 'alpaca-bot/chat', 'idempotent' => false]], $id);
     }
     $chat = $defs['alpaca-bot/chat']['input_schema'];
     expect(array_keys($chat['properties']))->toBe(['message', 'conversation_id', 'model'])

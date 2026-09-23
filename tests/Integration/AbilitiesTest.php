@@ -69,7 +69,7 @@ final class AbilitiesTest extends TestCase
             $this->assertTrue($ability->get_meta_item('show_in_rest'), $name);
             // What the MCP Adapter keys on (McpAbilityExposure::is_public): without it the ability is registered and invisible to MCP.
             $this->assertTrue($ability->get_meta_item('public'), $name);
-            $this->assertSame(['readonly' => false, 'destructive' => false, 'idempotent' => false], $ability->get_meta_item('annotations'), $name);
+            $this->assertSame(['readonly' => false, 'destructive' => $name === 'alpaca-bot/chat', 'idempotent' => false], $ability->get_meta_item('annotations'), $name);
         }
     }
 
