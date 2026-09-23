@@ -137,7 +137,8 @@ it('tells a site owner what the tools grant: the fetch is an outbound request pi
 
 // The Access tab is the capability model in the product's own words: a row is a default a filter
 // may override, not an answer, and "Set in code" under a row is that override showing. It names
-// every row by the label Settings › Access gives it, so an operator can find the one it means.
+// every row but the tool rows by the label Settings › Access gives it, and the tool rows
+// together, so an operator can find the one it means.
 it('says what each Settings › Access row decides and what "Set in code" under one means', function (): void {
     Functions\when('esc_url')->returnArg();
     $access = helpTabContent('alpaca-bot-access');
@@ -153,6 +154,8 @@ it('says what each Settings › Access row decides and what "Set in code" under 
         // The Chat row's two surfaces, each behind a filter of its own, and which one a note names.
         ->toContain('alpaca_bot/admin/menu_capability')->toContain('alpaca_bot/capability/chat')
         ->toContain('once no filter changes it')
+        // What the note does not cover: it asks as [alpacabot] outside a post, not per post or tag.
+        ->toContain('outside any post')->toContain('<code>[alpacabot_agent]</code>, gets no note')
         ->not->toMatch('/(?<![\\d.])1\\.\\d/');
 });
 

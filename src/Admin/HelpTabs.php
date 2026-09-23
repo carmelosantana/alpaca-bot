@@ -193,10 +193,12 @@ final class HelpTabs
                 ),
             ])
             . self::p('<strong>' . esc_html__('Set in code', 'alpaca-bot') . '</strong> ' . sprintf(
-                /* translators: 1: the alpaca_bot/capability/… filter names, 2: alpaca_bot/capability/settings */
-                esc_html__('under a row means a filter in a plugin, a theme or an mu-plugin moves that row off what you chose, and the note names the capability checked instead, or says the filter could not be asked from this page. A row\'s filter is %1$s, named after the row; the settings rows run 0.5\'s %2$s first. The filter wins. What you choose is still saved, and is what applies once no filter changes it. A filter that answers per user or per request is shown as it answers for you, on this page.', 'alpaca-bot'),
+                /* translators: 1: the alpaca_bot/capability/… filter names, 2: alpaca_bot/capability/settings, 3: [alpacabot], 4: [alpacabot_agent] */
+                esc_html__('under a row means a filter in a plugin, a theme or an mu-plugin moves that row off what you chose, and the note names the capability checked instead, or says the filter could not be asked from this page. A row\'s filter is %1$s, named after the row; the settings rows run 0.5\'s %2$s first. The filter wins. What you choose is still saved, and is what applies once no filter changes it. The note is what the filter answers when this page asks it: for you, with a request the page builds, and for the Shortcodes row as %3$s outside any post. A filter that answers differently for another user, request or post, or for %4$s, gets no note for that.', 'alpaca-bot'),
                 '<code>alpaca_bot/capability/…</code>',
                 '<code>alpaca_bot/capability/settings</code>',
+                '<code>[alpacabot]</code>',
+                '<code>[alpacabot_agent]</code>',
             ))
             . self::p(sprintf(
                 /* translators: 1: alpaca_bot/admin/menu_capability, 2: alpaca_bot/capability/chat, 3: POST /chat, 4: alpaca_bot/capability/{route} */

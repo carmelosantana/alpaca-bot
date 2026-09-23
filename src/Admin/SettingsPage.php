@@ -315,8 +315,10 @@ final class SettingsPage
      * request. The shortcode row gets post id 0 and the `[alpacabot]` tag, which is what
      * Shortcodes\Chat passes for a shortcode rendered outside a post.
      *
-     * A listener that reads them answers for this administrator and this made-up request, not for
-     * everyone, so the note under a row is what the filter says here and now.
+     * A listener that reads them answers for this administrator, this made-up request, or an
+     * `[alpacabot]` outside any post, not for everyone, so the note under a row is what the filter
+     * says here and now: one that changes the row only for another user, a post or
+     * `[alpacabot_agent]` gets no note.
      *
      * @return list<mixed>
      */
