@@ -50,7 +50,7 @@ use AlpacaBot\Shortcodes\Chat as ChatShortcode;
  * `alpaca_bot_settings[access.mcp][<server id>]`. A save from another tab posts nothing for the
  * map, which Fields::hidden() does not carry since its keys are server ids, so Schema::sanitize()
  * keeps it as stored; the Access tab carries every stored entry it shows no select for as a
- * hidden input, so saving it drops none that a form can post back (postable() says which cannot).
+ * hidden input, so saving it drops none whose id postable() admits.
  *
  * @phpstan-import-type Field from Schema
  */
@@ -330,9 +330,9 @@ final class SettingsPage
 
     /**
      * The ids of the MCP servers `toolkits.mcp_servers` lists, in list order: the ones the Access
-     * tab gives a row (core keeps one field per id, so a repeated id is one row). A server with no id, or one a form cannot post back (postable()),
-     * gets none, and so reads as whatever Access::stored() has for it — administrators only unless
-     * something other than this page stored an entry.
+     * tab gives a row (core keeps one field per id, so a repeated id is one row). A server with no
+     * id, or one postable() does not admit, gets none, and so reads as whatever Access::stored()
+     * has for it: administrators only unless something other than this page stored an entry.
      *
      * @return list<string>
      */
@@ -350,15 +350,23 @@ final class SettingsPage
     }
 
     /**
-     * Whether a server id comes back as itself when the form posts it as
-     * `alpaca_bot_settings[access.mcp][<id>]`. PHP ends a bracketed name segment at its first
-     * `]`, so `a]b` would post as `a` and set another server's row; it cuts the name at a NUL
-     * byte; and it makes an int key of a string that is an integer written the way PHP writes one
-     * (`12`, not `012` or ` 12`), which Schema::sanitizeAccessMcp() drops.
+     * Whether the page gives a server id a select posting as
+     * `alpaca_bot_settings[access.mcp][<id>]`: only when every character is one the round trip
+     * through esc_attr(), a browser and PHP's form parser hands back unchanged, so the select
+     * cannot write some other server's key. That is an allowlist, printable ASCII other than `]`
+     * and `&`, and not the whole set that survives: CRLF, a tab or `é` come back intact in
+     * Chromium and are refused all the same.
+     *
+     * What is left out, and why. PHP ends a bracketed segment at its first `]`, so `a]b` posts as
+     * `a`, and cuts the name at a NUL byte. A browser posts a lone LF or CR as CRLF, so `a\nb`
+     * would post as `a\r\nb`. esc_attr() leaves an entity such as `&amp;` as it is, and the browser
+     * decodes it, so `a&amp;b` posts as `a&b`. Anything else outside printable ASCII is refused
+     * rather than argued one by one. And an id that is an integer as PHP writes one (`12`, not
+     * `012` or ` 12`) becomes an int key, which Schema::sanitizeAccessMcp() drops.
      */
     private static function postable(string $id): bool
     {
-        return $id !== '' && strpbrk($id, "]\0") === false && (string) (int) $id !== $id;
+        return preg_match('/^[\x20-\x25\x27-\x5C\x5E-\x7E]+$/', $id) === 1 && (string) (int) $id !== $id;
     }
 
     /**

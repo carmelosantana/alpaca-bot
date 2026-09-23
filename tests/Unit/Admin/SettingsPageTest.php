@@ -402,15 +402,21 @@ it('adds an Access row for each MCP server the settings hold, and none for the a
 
 // A server id comes from the settings, so it may be anything. It reaches the page escaped in the
 // row's title (core prints a field title as it is given), its id and its field name; and an id a
-// form cannot post back as itself gets no select at all. PHP ends a bracketed name segment at
-// the first `]`, so `x]"<y` would post as `x` and set another server's row.
+// form cannot post back as itself gets no select at all, or its select would write another key.
+// The page admits only printable ASCII other than `]` and `&`, and not an integer. Most refused ids
+// below change on the way back: PHP ends a bracketed name segment at the first `]` (`x]"<y` posts
+// as `x`) and cuts it at NUL; a browser posts LF and CR as CRLF (`lf\nx` would overwrite
+// `lf\r\nx`'s row); esc_attr() leaves `&amp;` as it is, which a browser then decodes to `&`; and
+// `12` becomes an int key, which Schema::sanitizeAccessMcp() drops. CRLF, a tab and `é` come back
+// intact in Chromium, and are refused anyway: they are outside the characters the page admits.
 it('escapes a hostile MCP server id everywhere it reaches the page, and gives no select to one a form cannot post back', function (): void {
     stubSelected();
     Functions\when('get_current_user_id')->justReturn(7);
     Functions\when('esc_attr')->alias(fn($s) => htmlspecialchars((string) $s, ENT_QUOTES));
     Functions\when('esc_html')->alias(fn($s) => htmlspecialchars((string) $s, ENT_QUOTES));
     $evil = 'a"<b>c';
-    $fields = settingsFields(['toolkits.mcp_servers' => [['id' => $evil], ['id' => 'x]"<y'], ['id' => "nul\0byte"], ['id' => '12']]]);
+    $refused = ['x]"<y', "nul\0byte", "lf\nx", "cr\rx", "crlf\r\nx", "tab\tx", 'ent&amp;x', "e\u{e9}x", '12'];
+    $fields = settingsFields(['toolkits.mcp_servers' => array_map(static fn(string $id): array => ['id' => $id], [$evil, ...$refused])]);
 
     expect(array_values(array_filter(array_keys($fields), static fn(string $id): bool => str_starts_with($id, 'alpaca_bot_access.mcp'))))->toBe(['alpaca_bot_access.mcp.' . $evil]);
     $row = $fields['alpaca_bot_access.mcp.' . $evil];
@@ -449,7 +455,7 @@ it('posts nothing for the access.mcp map from another tab, and carries the entri
     expect($access)->toContain('<input type="hidden" name="alpaca_bot_settings[access.mcp][gone]" value="publish_posts">')
         // docs has its select on this tab; a second input under its name would race it.
         ->not->toContain('name="alpaca_bot_settings[access.mcp][docs]"')
-        // An id a form cannot post back as itself is not carried either: it would post as `x`.
+        // An id postable() does not admit is not carried either: this one would post as `x`.
         ->not->toContain('alpaca_bot_settings[access.mcp][x]')
         ->and(strpos($access, '[access.mcp][gone]'))->toBeLessThan(strpos($access, '<!-- sections:'));
 });
