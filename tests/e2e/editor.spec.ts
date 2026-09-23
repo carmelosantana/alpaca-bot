@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { expect, test, type Locator, type Page, type Request } from '@playwright/test';
 
 /**
@@ -34,8 +35,49 @@ type EditorGlobals = {
   alpacaBot: { nonce: string; rest: string };
 };
 
-/** Every post this spec makes is titled with this prefix, and the afterAll hook below deletes them by it. */
+/** The start of the title this spec gives each post it saves. */
 const TITLE = 'ab-e2e-editor-';
+
+/**
+ * The ids of what this spec makes on the development site, for the afterAll hook to delete and
+ * nothing else: the draft draft() creates, the post each editor it opens is on (an Add New
+ * screen's auto-draft, saved or not), and each turn's conversation (chat_history) and usage
+ * receipt (chat_log), which track() reads off the turn's stream. Kept per worker, and a failing
+ * test ends its worker, which runs the hook for what that worker made.
+ */
+const made = new Set<number>();
+
+/**
+ * Collects the conversation and the receipt of every turn the page streams: the `start` frame
+ * names the conversation and the `done` frame its receipt's `log_id` (docs/api.md, section 4).
+ * The stream is read where the page reads it, through a tee of the body its fetch() returns,
+ * because the browser keeps no copy of a streamed body for Playwright to ask for afterwards
+ * (Network.getResponseBody answers "No data found for resource with given identifier"); the chat
+ * reads the other branch as it streams. A turn cut off before `done` leaves its receipt unnamed.
+ */
+async function track(page: Page): Promise<void> {
+  await page.exposeFunction('abE2eMade', (id: number) => { made.add(id); });
+  await page.addInitScript(() => {
+    const report = (window as unknown as { abE2eMade: (id: number) => void }).abE2eMade;
+    const real = window.fetch.bind(window);
+    window.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+      const res = await real(input, init);
+      const url = decodeURIComponent(input instanceof Request ? input.url : String(input));
+      if (!/\/chat\/\d+\/stream(?:$|[?&])/.test(url) || !res.body) return res;
+      const [page, spec] = res.body.tee();
+      void new Response(spec).text().then((body) => {
+        for (const line of body.split('\n')) {
+          if (!line.startsWith('data: ')) continue;
+          try {
+            const frame = JSON.parse(line.slice(6)) as { conversation_id?: unknown; receipt?: { log_id?: unknown } };
+            for (const id of [frame.conversation_id, frame.receipt?.log_id]) if (typeof id === 'number' && id > 0) void report(id);
+          } catch { /* not a JSON frame */ }
+        }
+      });
+      return new Response(page, { status: res.status, statusText: res.statusText, headers: res.headers });
+    };
+  });
+}
 
 async function login(page: Page): Promise<void> {
   await page.goto('/wp-login.php');
@@ -44,7 +86,7 @@ async function login(page: Page): Promise<void> {
   await Promise.all([page.waitForURL(/wp-admin/), page.click('#wp-submit')]);
 }
 
-/** A draft post with this title, found or made once through the REST API, from a screen that carries the chat's settings. */
+/** A new draft post with this title, made through the REST API from a screen that carries the chat's settings. */
 async function draft(page: Page, title: string): Promise<number> {
   await page.goto('/wp-admin/index.php');
   const id = await page.evaluate(async (title) => {
@@ -52,12 +94,11 @@ async function draft(page: Page, title: string): Promise<number> {
     const posts = wp.alpacaBot.rest.replace('alpaca-bot/v1', 'wp/v2/posts');
     const headers = { 'X-WP-Nonce': wp.alpacaBot.nonce, 'Content-Type': 'application/json' };
     const sep = posts.includes('?') ? '&' : '?';
-    const found = await (await fetch(`${posts}${sep}search=${encodeURIComponent(title)}&status=draft`, { credentials: 'same-origin', headers })).json() as { id: number }[];
-    if (found.length > 0) return found[0]!.id;
     const res = await fetch(posts, { method: 'POST', credentials: 'same-origin', headers, body: JSON.stringify({ title, status: 'draft', content: 'Draft body.' }) });
     return (await res.json() as { id: number }).id;
   }, title);
   expect(id).toBeGreaterThan(0);
+  made.add(id);
   return id;
 }
 
@@ -69,6 +110,7 @@ async function openEditor(page: Page, path: string): Promise<Locator> {
     const wp = (window as unknown as Partial<EditorGlobals>).wp;
     return typeof wp?.data?.select('core/editor').getCurrentPostId() === 'number';
   });
+  made.add(await postId(page));
   await page.evaluate(() => {
     (window as unknown as EditorGlobals).wp.data.dispatch('core/preferences').set!('core/edit-post', 'welcomeGuide', false);
   });
@@ -122,34 +164,20 @@ async function send(sidebar: Locator, text: string): Promise<void> {
   await sidebar.locator('#ab-message').press('Enter');
 }
 
+test.beforeEach(async ({ page }) => { await track(page); });
+
 /**
- * Deletes, for good, every post whose title starts with TITLE, through the REST API as the admin,
- * so runs do not pile drafts up on the development site. A post saved under another title is not
- * this spec's and is left alone.
+ * Deletes, for good, exactly the posts in `made`, with wp-cli in wp-env's development container,
+ * since a usage receipt has no REST route to delete it by; `wp post delete --force` takes a post's
+ * revisions with it. Then checks that none of them is left.
  */
-test.afterAll(async ({ browser }, testInfo) => {
-  const page = await browser.newPage({ baseURL: testInfo.project.use.baseURL });
-  try {
-    await login(page);
-    await page.goto('/wp-admin/index.php');
-    const left = await page.evaluate(async (prefix) => {
-      const wp = window as unknown as EditorGlobals;
-      const posts = wp.alpacaBot.rest.replace('alpaca-bot/v1', 'wp/v2/posts');
-      const sep = posts.includes('?') ? '&' : '?';
-      const headers = { 'X-WP-Nonce': wp.alpacaBot.nonce };
-      const mine = async (): Promise<number[]> => {
-        const res = await fetch(`${posts}${sep}search=${encodeURIComponent(prefix)}&status=draft,publish,pending,private,future&context=edit&per_page=100`, { credentials: 'same-origin', headers });
-        return (await res.json() as { id: number; title: { raw: string } }[]).filter((p) => p.title.raw.startsWith(prefix)).map((p) => p.id);
-      };
-      for (const id of await mine()) {
-        await fetch(`${posts.replace(/\/posts(?=$|[?&])/, `/posts/${id}`)}${sep}force=true`, { method: 'DELETE', credentials: 'same-origin', headers });
-      }
-      return (await mine()).length;
-    }, TITLE);
-    expect(left).toBe(0);
-  } finally {
-    await page.close();
-  }
+test.afterAll(async () => {
+  const ids = [...made].map(String);
+  if (ids.length === 0) return;
+  const wpCli = (...args: string[]): string => execFileSync('pnpm', ['exec', 'wp-env', 'run', 'cli', 'wp', ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  wpCli('post', 'delete', ...ids, '--force');
+  const left = wpCli('eval', `echo 'left:' . count(array_filter(array_map('get_post', [${ids.join(',')}])));`);
+  expect(left).toContain('left:0');
 });
 
 test('the block editor has the chat as its own sidebar, on the post being edited, with the image button and no footer drawer, and keeps it through a close', async ({ page }) => {
