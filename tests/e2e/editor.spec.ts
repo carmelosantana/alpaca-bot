@@ -1,0 +1,266 @@
+import { expect, test, type Locator, type Page, type Request } from '@playwright/test';
+
+/**
+ * The chat in the block editor (Admin\Drawer::enqueueEditor(), resources/ts/editor.ts): a
+ * PluginSidebar mounting the fragment the drawer mounts, against the wp-env development site and
+ * its fake provider (tests/e2e/chat.spec.ts says what that is and why its reply text is the
+ * assertion).
+ *
+ * What it pins that no unit test can:
+ *
+ * - The editor has the sidebar and not the footer drawer, and none of the chat until the sidebar
+ *   is opened. Opened on a saved post, the composer names that post and a whole turn carries it.
+ * - The image button stays, because the block editor loads the media library, and it opens it.
+ * - Closing and reopening the sidebar keeps the chat, a turn that finishes while it is closed
+ *   included: a PluginSidebar unmounts its children when it closes, and the chat must not go with
+ *   them. Reopening fetches no fragment and adds no second chat bundle.
+ * - "New chat" starts over in the sidebar and does not leave the editor.
+ * - On a new post the composer names no post until the post is first saved or autosaved, and
+ *   then names it without a reload or a remount: the first turn carries no `post_id`, a turn after
+ *   the save carries the post's.
+ */
+const REPLY = 'Hello from the Alpaca Bot end-to-end fake provider.';
+const ADMIN_USER = process.env.WP_ADMIN_USER ?? 'admin';
+const ADMIN_PASSWORD = process.env.WP_ADMIN_PASSWORD ?? 'password';
+
+type EditorGlobals = {
+  wp: {
+    data: {
+      dispatch(store: string): Record<string, (...args: unknown[]) => unknown>;
+      select(store: string): Record<string, (...args: unknown[]) => unknown>;
+    };
+    media?: unknown;
+  };
+  alpacaBot: { nonce: string; rest: string };
+};
+
+async function login(page: Page): Promise<void> {
+  await page.goto('/wp-login.php');
+  await page.fill('#user_login', ADMIN_USER);
+  await page.fill('#user_pass', ADMIN_PASSWORD);
+  await Promise.all([page.waitForURL(/wp-admin/), page.click('#wp-submit')]);
+}
+
+/** A draft post with this title, found or made once through the REST API, from a screen that carries the chat's settings. */
+async function draft(page: Page, title: string): Promise<number> {
+  await page.goto('/wp-admin/index.php');
+  const id = await page.evaluate(async (title) => {
+    const wp = window as unknown as EditorGlobals;
+    const posts = wp.alpacaBot.rest.replace('alpaca-bot/v1', 'wp/v2/posts');
+    const headers = { 'X-WP-Nonce': wp.alpacaBot.nonce, 'Content-Type': 'application/json' };
+    const sep = posts.includes('?') ? '&' : '?';
+    const found = await (await fetch(`${posts}${sep}search=${encodeURIComponent(title)}&status=draft`, { credentials: 'same-origin', headers })).json() as { id: number }[];
+    if (found.length > 0) return found[0]!.id;
+    const res = await fetch(posts, { method: 'POST', credentials: 'same-origin', headers, body: JSON.stringify({ title, status: 'draft', content: 'Draft body.' }) });
+    return (await res.json() as { id: number }).id;
+  }, title);
+  expect(id).toBeGreaterThan(0);
+  return id;
+}
+
+/** Opens the block editor at `path`, once core/editor has its post, with the first-visit welcome guide put away. */
+async function openEditor(page: Page, path: string): Promise<Locator> {
+  await page.goto(path);
+  await expect(page.locator('body.block-editor-page')).toHaveCount(1);
+  await page.waitForFunction(() => {
+    const wp = (window as unknown as Partial<EditorGlobals>).wp;
+    return typeof wp?.data?.select('core/editor').getCurrentPostId() === 'number';
+  });
+  await page.evaluate(() => {
+    (window as unknown as EditorGlobals).wp.data.dispatch('core/preferences').set!('core/edit-post', 'welcomeGuide', false);
+  });
+  // The sidebar's pinned toggle, in the editor's top bar.
+  const toggle = page.getByRole('region', { name: 'Editor top bar' }).getByRole('button', { name: 'Alpaca Bot', exact: true });
+  await expect(toggle).toBeVisible();
+  return toggle;
+}
+
+const postId = (page: Page): Promise<number> => page.evaluate(() => (window as unknown as EditorGlobals).wp.data.select('core/editor').getCurrentPostId() as number);
+const postStatus = (page: Page): Promise<string> => page.evaluate(() => (window as unknown as EditorGlobals).wp.data.select('core/editor').getCurrentPostAttribute('status') as string);
+
+/** Waits for the chat bundle to have booted in the sidebar: tests/e2e/drawer.spec.ts booted() says why the form's `novalidate` is the signal. */
+async function booted(sidebar: Locator): Promise<void> {
+  await expect(sidebar.locator('#ab-form')).toHaveAttribute('novalidate', '');
+}
+
+/** A turn in the sidebar run to its end: the reply, its receipt, and the composer free again. */
+async function turnDone(sidebar: Locator): Promise<void> {
+  const assistant = sidebar.locator('article.ab-msg--assistant').last();
+  await expect(assistant.locator('.ab-msg__content')).toContainText(REPLY, { timeout: 30_000 });
+  await expect(assistant.locator('footer.ab-receipt')).toContainText('18 tokens');
+  await expect(sidebar.locator('#ab-form [data-action="send"]')).toBeEnabled();
+}
+
+const isChat = (req: Request): boolean => req.method() === 'POST' && /\/alpaca-bot\/v1\/chat(?:$|[?&])/.test(decodeURIComponent(req.url()));
+
+/** The `context` of the next POST /chat the page sends. */
+function nextContext(page: Page): Promise<Record<string, unknown>> {
+  return page.waitForRequest(isChat).then((req) => (req.postDataJSON() as { context: Record<string, unknown> }).context);
+}
+
+/** Counts the page's requests for GET /view/panel from now on. */
+function panelRequests(page: Page): { count: number } {
+  const seen = { count: 0 };
+  page.on('request', (req) => { if (/view(\/|%2F)panel/.test(req.url())) seen.count++; });
+  return seen;
+}
+
+async function send(sidebar: Locator, text: string): Promise<void> {
+  await sidebar.locator('#ab-message').fill(text);
+  await sidebar.locator('#ab-message').press('Enter');
+}
+
+test('the block editor has the chat as its own sidebar, on the post being edited, with the image button and no footer drawer, and keeps it through a close', async ({ page }) => {
+  await login(page);
+  const id = await draft(page, 'ab-e2e-editor-draft');
+  const panels = panelRequests(page);
+  const toggle = await openEditor(page, `/wp-admin/post.php?post=${id}&action=edit`);
+
+  // No drawer here, and none of the chat until the sidebar is opened.
+  await expect(page.locator('#ab-drawer-launcher')).toHaveCount(0);
+  await expect(page.locator('script[src*="assets/js/drawer.js"]')).toHaveCount(0);
+  await expect(page.locator('script[src*="assets/js/editor.js"]')).toHaveCount(1);
+  await expect(page.locator('script[src*="assets/js/chat.js"]')).toHaveCount(0);
+  await expect(page.locator('#ab-form')).toHaveCount(0);
+  expect(panels.count).toBe(0);
+
+  await toggle.click();
+  const sidebar = page.locator('.ab-sidebar');
+  await expect(sidebar.locator('#ab-form')).toBeVisible();
+  await booted(sidebar);
+  await expect(page.locator('script[src*="assets/js/chat.js"]')).toHaveCount(1);
+  await expect(sidebar.locator('#ab-form .ab-chip[data-chip="post"] .ab-chip__label')).toHaveText('Editing: ab-e2e-editor-draft');
+  await expect(sidebar.locator('#ab-form input[name="context[post_id]"]')).toHaveValue(String(id));
+  // The editor names no screen: the post is its context.
+  await expect(sidebar.locator('#ab-form .ab-chip')).toHaveCount(1);
+  // The sidebar has its own close button, so the drawer's is not shown; and the chat fills the
+  // sidebar under its header, the composer at the foot rather than under the transcript's end.
+  await expect(sidebar.locator('[data-action="drawer-close"]')).toBeHidden();
+  const gap = await page.evaluate(() => {
+    const area = document.querySelector('.ab-sidebar')!.closest('.interface-complementary-area')!.getBoundingClientRect();
+    return Math.round(area.bottom - document.querySelector('.ab-sidebar #ab-form')!.getBoundingClientRect().bottom);
+  });
+  expect(gap).toBeLessThan(40);
+
+  // The block editor loads the media library, so the image button stays, and it opens the library.
+  expect(await page.evaluate(() => typeof (window as unknown as EditorGlobals).wp.media)).toBe('function');
+  const image = sidebar.locator('#ab-form [data-action="image"]');
+  await expect(image).toBeVisible();
+  await image.click();
+  await expect(page.locator('.media-modal')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.locator('.media-modal')).toBeHidden();
+
+  const sent = nextContext(page);
+  await send(sidebar, 'hello');
+  expect(await sent).toEqual({ post_id: id });
+  await turnDone(sidebar);
+  expect(Number(await sidebar.locator('#ab-form input[name="conversation_id"]').inputValue())).toBeGreaterThan(0);
+
+  expect(panels.count).toBe(1);
+
+  // "New chat" starts over here, and the editor stays.
+  const url = page.url();
+  await sidebar.locator('.page-title-action').click();
+  await expect(sidebar.locator('#ab-messages article')).toHaveCount(0);
+  await expect(sidebar.locator('#ab-form input[name="conversation_id"]')).toHaveValue('0');
+  await expect(sidebar.locator('#ab-form .ab-chip[data-chip="post"]')).toHaveCount(1);
+  expect(page.url()).toBe(url);
+
+  // A turn that runs while the sidebar is closed: POST /chat is held until the close, so the
+  // streaming bubble, the finished reply and the history's refresh (the new conversation listed)
+  // all land in a closed sidebar.
+  const route = (u: URL): boolean => /\/alpaca-bot\/v1\/chat(?:$|[?&])/.test(decodeURIComponent(u.toString()));
+  let release: () => void = () => {};
+  const closed = new Promise<void>((resolve) => { release = resolve; });
+  await page.route(route, async (r) => {
+    if (r.request().method() === 'POST') await closed;
+    await r.continue();
+  });
+  const held = page.waitForRequest(isChat);
+  await send(sidebar, 'hello again');
+  await held;
+  await toggle.click();
+  await expect(page.locator('.ab-sidebar #ab-form')).toBeHidden();
+  const refreshed = page.waitForResponse((res) => /view(\/|%2F)history/.test(res.url()));
+  release();
+  await refreshed;
+  await page.unroute(route);
+
+  await toggle.click();
+  await expect(sidebar.locator('#ab-form')).toBeVisible();
+  await expect(sidebar.locator('article.ab-msg--user')).toHaveCount(1);
+  await turnDone(sidebar);
+  const conversation = await sidebar.locator('#ab-form input[name="conversation_id"]').inputValue();
+  expect(Number(conversation)).toBeGreaterThan(0);
+  await expect(sidebar.locator(`#ab-history-select option[data-id="${conversation}"]`)).toHaveCount(1);
+  // Nothing of the chat went anywhere but the sidebar.
+  await expect(page.locator('.ab-msg')).toHaveCount(2);
+  // No fragment but New chat's, and one chat bundle for the page, whatever the sidebar did.
+  expect(panels.count).toBe(2);
+  await expect(page.locator('script[src*="assets/js/chat.js"]')).toHaveCount(1);
+
+  // The history select's own "New chat" starts over here too.
+  await sidebar.locator('#ab-history-select').selectOption({ index: 0 });
+  await expect(sidebar.locator('#ab-messages article')).toHaveCount(0);
+  await expect(sidebar.locator('#ab-form input[name="conversation_id"]')).toHaveValue('0');
+  expect(page.url()).toBe(url);
+});
+
+test('on a new post the sidebar names no post until the post is saved, and then names it in the chat it has', async ({ page }) => {
+  await login(page);
+  const panels = panelRequests(page);
+  const toggle = await openEditor(page, '/wp-admin/post-new.php');
+  expect(await postStatus(page)).toBe('auto-draft');
+  await toggle.click();
+  const sidebar = page.locator('.ab-sidebar');
+  await booted(sidebar);
+
+  // The auto-draft is no post yet: no chip, and the turn names none.
+  await expect(sidebar.locator('#ab-form .ab-chip')).toHaveCount(0);
+  let sent = nextContext(page);
+  await send(sidebar, 'hello');
+  expect(await sent).toEqual({});
+  await turnDone(sidebar);
+  // Marks the chat as it is, to tell it apart from a remounted one.
+  await sidebar.locator('#ab-form').evaluate((form) => { (form as HTMLFormElement & { abMark?: number }).abMark = 1; });
+
+  // Saved: the chip comes, without a reload and without a remount.
+  await page.evaluate(async () => {
+    const editor = (window as unknown as EditorGlobals).wp.data.dispatch('core/editor');
+    await editor.editPost!({ title: 'ab-e2e-editor-new' });
+    await editor.savePost!();
+  });
+  expect(await postStatus(page)).toBe('draft');
+  const id = await postId(page);
+  await expect(sidebar.locator('#ab-form .ab-chip[data-chip="post"] .ab-chip__label')).toHaveText('Editing: ab-e2e-editor-new');
+  await expect(sidebar.locator('#ab-form input[name="context[post_id]"]')).toHaveValue(String(id));
+  expect(await sidebar.locator('#ab-form').evaluate((form) => (form as HTMLFormElement & { abMark?: number }).abMark)).toBe(1);
+  await expect(sidebar.locator('article.ab-msg--assistant')).toHaveCount(1);
+  await expect(page.locator('script[src*="assets/js/chat.js"]')).toHaveCount(1);
+  expect(panels.count).toBe(2);
+
+  sent = nextContext(page);
+  await send(sidebar, 'hello again');
+  expect(await sent).toEqual({ post_id: id });
+  await turnDone(sidebar);
+});
+
+test('on a new post an autosave is enough for the sidebar to name it', async ({ page }) => {
+  await login(page);
+  const toggle = await openEditor(page, '/wp-admin/post-new.php');
+  await toggle.click();
+  const sidebar = page.locator('.ab-sidebar');
+  await booted(sidebar);
+  await expect(sidebar.locator('#ab-form .ab-chip')).toHaveCount(0);
+
+  await page.evaluate(async () => {
+    const editor = (window as unknown as EditorGlobals).wp.data.dispatch('core/editor');
+    await editor.editPost!({ title: 'ab-e2e-editor-autosaved' });
+    await editor.autosave!();
+  });
+  expect(await postStatus(page)).toBe('draft');
+  const id = await postId(page);
+  await expect(sidebar.locator('#ab-form .ab-chip[data-chip="post"] .ab-chip__label')).toHaveText('Editing: ab-e2e-editor-autosaved');
+  await expect(sidebar.locator('#ab-form input[name="context[post_id]"]')).toHaveValue(String(id));
+});

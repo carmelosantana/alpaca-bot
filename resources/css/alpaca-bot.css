@@ -403,6 +403,23 @@ pre > .ab-code__copy[aria-label]:hover::after {
     transform: translateY(-50%);
 }
 
+/* ---- the same shell in the block editor's sidebar ----------------------------------------- */
+
+/*
+ * resources/ts/editor.ts mounts the drawer's panel in a PluginSidebar, whose own header carries
+ * the title and the close button, so the drawer's close button is not wanted here, nor the room
+ * the header keeps for it. The sidebar scrolls as a whole (core's .interface-complementary-area),
+ * which would scroll the composer away under a long transcript; this makes it a column whose panel
+ * (the PluginSidebar's `className`, .ab-sidebar-panel) takes what the sidebar's header leaves, so
+ * the panel's height is definite and the drawer's layout, the transcript scrolling between the
+ * header and the composer, holds as it does in the drawer.
+ */
+.interface-complementary-area:has(> .ab-sidebar-panel) { display: flex; flex-direction: column; }
+.ab-sidebar-panel { flex: 1; min-height: 0; }
+.ab-sidebar__slot, .ab-sidebar { height: 100%; }
+.ab-sidebar .ab-drawer__close { display: none; }
+.ab-sidebar .ab-wrap--drawer .ab-header { padding-right: 0; }
+
 /* ---- narrow screens (core's own admin breakpoint) --------------------------------------- */
 
 @media screen and (max-width: 782px) {

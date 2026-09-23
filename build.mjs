@@ -18,7 +18,7 @@ await mkdir(here('assets/css'), { recursive: true });
 await copyFile(require.resolve('htmx.org/dist/htmx.min.js'), here('assets/js/htmx.min.js'));
 await copyCss();
 await buildIcons();
-const opts = { entryPoints: { chat: here('resources/ts/chat.ts'), drawer: here('resources/ts/drawer.ts') }, bundle: true, minify: !watch, sourcemap: watch, target: ['es2022'], format: 'iife', outdir: here('assets/js'), logLevel: 'info' };
+const opts = { entryPoints: { chat: here('resources/ts/chat.ts'), drawer: here('resources/ts/drawer.ts'), editor: here('resources/ts/editor.ts') }, bundle: true, minify: !watch, sourcemap: watch, target: ['es2022'], format: 'iife', outdir: here('assets/js'), logLevel: 'info' };
 if (watch) {
   const ctx = await context(opts);
   await ctx.watch();
