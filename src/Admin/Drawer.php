@@ -94,12 +94,13 @@ final class Drawer
      * `admin_footer`: the launcher, and the empty element the loader fills on the first open. The
      * element also names what the chat's context chips show (View\Chat\Composer), which only this
      * request knows: the screen's id and page title, and on the classic editor the post. The
-     * title is core's get_admin_page_title(), which is HTML (edit-comments.php puts `&#8220;` in
-     * its own), so its markup is stripped and its entities decoded here to make it text; the panel
-     * cleans it for the chip by Context\CurrentScreenSource::screenFrom(), and the turn again.
-     * The post is the one core loaded for the screen (post.php's global), read back through
-     * get_post() and so from the object cache that load filled; whether the user may edit it is
-     * the panel's question to ask (View\Chat\Shell), when it is opened.
+     * title is core's get_admin_page_title(), which is HTML (edit-comments.php, for one post's
+     * comments, puts the post's title between `&#8220;` and `&#8221;`), so its markup is stripped
+     * and its entities decoded here to make it text; the panel cleans it for the chip by
+     * Context\CurrentScreenSource::screenFrom(), and the turn cleans it again. The post is the one
+     * core loaded for the screen (post.php's global), read back through get_post() and so from
+     * the object cache that load filled; whether the user may edit it is the panel's question to
+     * ask (View\Chat\Shell), when it is opened.
      */
     public function footer(): void
     {

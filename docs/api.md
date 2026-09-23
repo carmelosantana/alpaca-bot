@@ -173,7 +173,7 @@ that returned a boolean by mistake would otherwise open the route rather than cl
 | `POST` | `/view/default-model` | Chat row (`edit_posts`) | no |
 | `GET` | `/view/bubble?role=&streaming=` | Chat row (`edit_posts`) | no |
 | `POST` | `/view/bubble` | Chat row (`edit_posts`) | no |
-| `GET` | `/view/panel?conversation_id=&post_id=` | Chat row (`edit_posts`) | no |
+| `GET` | `/view/panel?conversation_id=&post_id=&screen_id=&screen_title=` | Chat row (`edit_posts`) | no |
 | `POST` | `/view/drawer` | Chat row (`edit_posts`) | no |
 
 Every response is JSON except a redeemed stream, which is `text/event-stream`, and the `/view/*`
@@ -193,6 +193,17 @@ Body (JSON): `message` (string; may be omitted for an images-only turn), `conver
 (integer, 0 or omitted starts a new conversation), `model` (string, empty for the site
 default), `images` (array of `data:` URLs), `context` (object, passed to the context
 collectors), `stream` (boolean, default false).
+
+Two `context` keys are the plugin's own. `post_id` (integer) is the post being edited, which
+reaches the model only on a turn by a user who may edit it. `screen` (`{id, title}`, two strings)
+is the admin screen the chat is on, which reaches the model as the heading "On: {title}" with
+nothing under it. The title is untrusted text: its tags are stripped and every run of
+whitespace, line breaks included, becomes one space, so it cannot open a heading of its own in
+the context block; it is then cut to 120 characters, the ellipsis of a cut one included. The id
+is reduced to lowercase letters, digits, `_` and `-`, at most 64 of them. A `screen` that is not
+an object of two strings, or that cleans to an empty id or title, is ignored. The chat screen and
+the drawer send a key for each context chip above the composer, so a chip the user takes off
+before sending is not in the body.
 
 ```
 $ curl -s -u "admin:$PW" -H 'Content-Type: application/json' \
@@ -544,7 +555,7 @@ header. An error is still core's JSON error shape.
 | `POST /view/default-model` | An inline admin notice; stores `model` as your default (Kanboard #565) | `model` (string, required). 403 while `chat.user_can_change_model` is off, whatever the select says |
 | `GET /view/bubble` | An empty bubble for the screen to stream into | `role` (`user`\|`assistant`, default `assistant`), `streaming` (boolean: a polite live region) |
 | `POST /view/bubble` | A finished bubble, an assistant's content rendered as markdown; a user turn with its images is the optimistic bubble the screen shows while the turn runs | `role` (required), `content`, `model`, `usage` (`{prompt_tokens, completion_tokens}` or null), `duration_ms`, `images` (array of `data:` URLs; a user turn only), `tool_calls` (the reply's `meta.tool_calls`; the receipt ends `· 2 tools`) |
-| `GET /view/panel` | The whole chat (header, transcript and composer) in the drawer's panel, with its close button | `conversation_id`: one of your own to open; 0, a missing one or anyone else's is a new chat, as `?conversation=` is on the chat screen. `post_id`: the post being edited, written into the composer's hidden `context[post_id]` field (the field the chat bundle sends as `context.post_id`), as `&post=` is on the chat screen |
+| `GET /view/panel` | The whole chat (header, transcript and composer) in the drawer's panel, with its close button | `conversation_id`: one of your own to open; 0, a missing one or anyone else's is a new chat, as `?conversation=` is on the chat screen. `post_id`: the post being edited, rendered as the composer's post chip when you may edit it, as `&post=` is on the chat screen. `screen_id` and `screen_title`: the screen's id and page title, cleaned as `POST /chat` cleans `context.screen` and rendered as the composer's screen chip; either one empty, or cleaned to nothing, is no chip. A chip's hidden fields are what the chat bundle sends as `context` |
 | `POST /view/drawer` | Nothing (an empty fragment); stores what the admin-wide drawer shows for you, as user meta `alpaca_bot_drawer_open` and `alpaca_bot_drawer_conversation` | `open` (boolean), `conversation_id` (integer, 0 or more). A parameter you leave out is left as it was; the conversation is not checked here, and one that is not yours opens as a new chat when `/view/panel` is asked for it |
 
 Your effective model is the one you last chose in the select (stored as user meta
@@ -856,8 +867,10 @@ capability.
 
 The bare chat screen is a new chat. `admin.php?page=alpaca-bot&conversation={id}` opens one of
 your own (anyone else's, or a missing one, is a new chat again), and `&post={id}` names the post
-the screen was opened from, which the screen sends with every turn as `context.post_id`; the
-`current-screen` context source includes the post only on a turn by a user who may edit it. The
+the screen was opened from. A user who may edit that post sees it as a chip above the composer,
+and every turn sent while the chip is there carries it as `context.post_id`; anyone else gets no
+chip and sends no post, and the `current-screen` context source includes the post only on a turn
+by a user who may edit it in any case. The
 screen's requests are `/view/*` fragments (section 3) and `POST /chat`; its model select posts
 your choice to `/view/default-model` on change, and the screen opens on that choice next time.
 
@@ -867,6 +880,9 @@ the chat's script, htmx and stylesheet are added to that page. It lists the same
 conversations as the screen, so a thread started in one continues in the other. Whether it is
 open and which conversation it holds are yours, stored through `POST /view/drawer` and read back
 on the next screen, where a drawer left open opens itself and fetches `GET /view/panel` again.
+Its composer shows the screen it is on as a chip, and on a classic editor screen, to a user who
+may edit the post, the post being edited as a second one; each is sent as `context.screen` or
+`context.post_id` until it is taken off.
 It is not printed on the chat screen itself, on a block editor screen, or on any request for which
 core defines `IFRAME_REQUEST` (the plugin details modal and `media-upload.php` among them). It
 never loads the media library, so its image button is there only on a screen that loads the
