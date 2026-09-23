@@ -542,7 +542,7 @@ header. An error is still core's JSON error shape.
 | `POST /view/default-model` | An inline admin notice; stores `model` as your default (Kanboard #565) | `model` (string, required). 403 while `chat.user_can_change_model` is off, whatever the select says |
 | `GET /view/bubble` | An empty bubble for the screen to stream into | `role` (`user`\|`assistant`, default `assistant`), `streaming` (boolean: a polite live region) |
 | `POST /view/bubble` | A finished bubble, an assistant's content rendered as markdown; a user turn with its images is the optimistic bubble the screen shows while the turn runs | `role` (required), `content`, `model`, `usage` (`{prompt_tokens, completion_tokens}` or null), `duration_ms`, `images` (array of `data:` URLs; a user turn only), `tool_calls` (the reply's `meta.tool_calls`; the receipt ends `· 2 tools`) |
-| `GET /view/panel` | The whole chat (header, transcript and composer) in the drawer's panel, with its close button | `conversation_id`: one of your own to open; 0, a missing one or anyone else's is a new chat, as `?conversation=` is on the chat screen. `post_id`: the post being edited, carried in the composer as the turn's context, as `&post=` is on the chat screen |
+| `GET /view/panel` | The whole chat (header, transcript and composer) in the drawer's panel, with its close button | `conversation_id`: one of your own to open; 0, a missing one or anyone else's is a new chat, as `?conversation=` is on the chat screen. `post_id`: the post being edited, sent with every turn as `context.post_id`, as `&post=` is on the chat screen |
 
 Your effective model is the one you last chose in the select (stored as user meta
 `alpaca_bot_default_model`) while the site lets users choose and the provider still lists it,
@@ -853,9 +853,10 @@ capability.
 
 The bare chat screen is a new chat. `admin.php?page=alpaca-bot&conversation={id}` opens one of
 your own (anyone else's, or a missing one, is a new chat again), and `&post={id}` names the post
-the screen was opened from, which rides on the first turn as its context. The screen's requests
-are `/view/*` fragments (section 3) and `POST /chat`; its model select posts your choice to
-`/view/default-model` on change, and the screen opens on that choice next time.
+the screen was opened from, which the screen sends with every turn as `context.post_id`; the
+plugin's own context source includes the post only on a turn by a user who may edit it. The
+screen's requests are `/view/*` fragments (section 3) and `POST /chat`; its model select posts
+your choice to `/view/default-model` on change, and the screen opens on that choice next time.
 
 ## 8. Adding routes
 
