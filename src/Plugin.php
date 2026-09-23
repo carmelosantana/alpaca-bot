@@ -179,7 +179,7 @@ final class Plugin
         // are built, and it would decide wrong where is_admin() is false at plugins_loaded but a
         // test (wp-phpunit sets no screen until a test does) later fires the actions itself.
         // options.php, which every save posts to, is wp-admin and fires admin_init as any screen.
-        $settingsPage = new Admin\SettingsPage($store, $this->get(Provider\ModelCatalog::class));
+        $settingsPage = new Admin\SettingsPage($store, $this->get(Provider\ModelCatalog::class), $this->get(Access::class));
         $this->set(Admin\SettingsPage::class, $settingsPage);
         add_action('admin_init', [$settingsPage, 'register']);
         $chatScreen = new Admin\ChatScreen($store, $this->get(Provider\ModelCatalog::class), $conversations, $prefs);

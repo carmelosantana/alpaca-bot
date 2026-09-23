@@ -40,11 +40,17 @@ final class Fields
         return 'ab-' . str_replace('.', '-', $key);
     }
 
-    /** @param Field $f */
-    public static function render(string $key, array $f, mixed $value): string
+    /**
+     * `$name` is the name the control posts under when it is not the key's own (name()): an entry
+     * of a map field, such as one server's row of `access.mcp`, which posts as
+     * `alpaca_bot_settings[access.mcp][<server id>]`.
+     *
+     * @param Field $f
+     */
+    public static function render(string $key, array $f, mixed $value, ?string $name = null): string
     {
         $value = self::display($key, $value);
-        $name = esc_attr(self::name($key));
+        $name = esc_attr($name ?? self::name($key));
         $id = esc_attr(self::id($key));
         $desc = isset($f['description']) ? '<p class="description">' . esc_html((string) $f['description']) . '</p>' : '';
         $desc .= self::override($key);

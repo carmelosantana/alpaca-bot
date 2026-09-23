@@ -6,6 +6,7 @@ use AlpacaBot\Admin\SettingsPage;
 use AlpacaBot\Plugin;
 use AlpacaBot\Provider\ModelCatalog;
 use AlpacaBot\Settings\Schema;
+use Brain\Monkey\Filters;
 use Brain\Monkey\Functions;
 
 // Core calls the sanitize callback with the option *name* as its second argument, so the
@@ -57,7 +58,9 @@ it('refuses a form post that PHP cut short, keeping the option as it was and tel
     $_POST = [];
 });
 
-it('adds a section per schema section on its own page and a field per schema field on that page', function (): void {
+// Every schema field but `access.mcp`, which has no control of its own: a row per MCP server
+// stands in for it, and with no server there is none.
+it('adds a section per schema section on its own page and a field per schema field but the MCP map on that page', function (): void {
     Functions\when('register_setting')->justReturn(null);
     $sections = [];
     $fields = [];
@@ -65,7 +68,7 @@ it('adds a section per schema section on its own page and a field per schema fie
         $sections[$page] = $id;
         return true;
     });
-    Functions\expect('add_settings_field')->times(count(Schema::fields()))->withArgs(function (string $id, string $title, callable $cb, string $page, string $section, array $args) use (&$fields): bool {
+    Functions\expect('add_settings_field')->times(count(Schema::fields()) - 1)->withArgs(function (string $id, string $title, callable $cb, string $page, string $section, array $args) use (&$fields): bool {
         $fields[$id] = [$page, $section, $args];
         return true;
     });
@@ -79,7 +82,8 @@ it('adds a section per schema section on its own page and a field per schema fie
         ->and($fields['alpaca_bot_models.overrides'][2])->not->toHaveKey('label_for')
         ->and($fields['alpaca_bot_chat.spellcheck'][2])->not->toHaveKey('label_for')
         // A checkbox-list has a box per option and no single control for a label to point at.
-        ->and($fields['alpaca_bot_toolkits.enabled'][2])->not->toHaveKey('label_for');
+        ->and($fields['alpaca_bot_toolkits.enabled'][2])->not->toHaveKey('label_for')
+        ->and($fields)->not->toHaveKey('alpaca_bot_access.mcp');
 });
 
 // The table's model ids come from the provider's JSON and its values from the option: both are
@@ -94,7 +98,7 @@ it('renders the overrides table with every model id and stored value escaped, la
     $evilValue = '"><img src=x onerror=alert(2)>';
     Functions\when('get_transient')->alias(fn(string $key): mixed => $key === ModelCatalog::TRANSIENT ? [['id' => $evilId, 'label' => 'x'], ['id' => 'llama3.2', 'label' => 'llama3.2']] : false);
     $render = null;
-    Functions\expect('add_settings_field')->times(count(Schema::fields()))->withArgs(function (string $id, string $title, callable $cb) use (&$render): bool {
+    Functions\expect('add_settings_field')->times(count(Schema::fields()) - 1)->withArgs(function (string $id, string $title, callable $cb) use (&$render): bool {
         if ($id === 'alpaca_bot_models.overrides') {
             $render = $cb;
         }
@@ -204,7 +208,7 @@ it('renders the tools override as a three-state select per model, with the store
     Functions\when('esc_html')->alias(fn($s) => htmlspecialchars((string) $s, ENT_QUOTES));
     Functions\when('get_transient')->alias(fn(string $key): mixed => $key === ModelCatalog::TRANSIENT ? [['id' => 'faker:2b', 'label' => 'faker'], ['id' => 'llama3.2', 'label' => 'llama3.2']] : false);
     $render = null;
-    Functions\expect('add_settings_field')->times(count(Schema::fields()))->withArgs(function (string $id, string $title, callable $cb) use (&$render): bool {
+    Functions\expect('add_settings_field')->times(count(Schema::fields()) - 1)->withArgs(function (string $id, string $title, callable $cb) use (&$render): bool {
         if ($id === 'alpaca_bot_models.overrides') {
             $render = $cb;
         }
@@ -244,7 +248,7 @@ it('renders an unreadable tools cell as inherit rather than casting it to a stri
     Functions\when('esc_html')->alias(fn($s) => htmlspecialchars((string) $s, ENT_QUOTES));
     Functions\when('get_transient')->alias(fn(string $key): mixed => $key === ModelCatalog::TRANSIENT ? [['id' => 'faker:2b', 'label' => 'faker']] : false);
     $render = null;
-    Functions\expect('add_settings_field')->times(count(Schema::fields()))->withArgs(function (string $id, string $title, callable $cb) use (&$render): bool {
+    Functions\expect('add_settings_field')->times(count(Schema::fields()) - 1)->withArgs(function (string $id, string $title, callable $cb) use (&$render): bool {
         if ($id === 'alpaca_bot_models.overrides') {
             $render = $cb;
         }
@@ -270,4 +274,182 @@ it('renders an unreadable tools cell as inherit rather than casting it to a stri
         // Inherit, and only inherit: the same row a readable cell would render for a blank.
         ->and($html)->toContain('<option value="" selected="selected">')
         ->and(substr_count($html, 'selected="selected"'))->toBe(1);
+});
+
+// ---------------------------------------------------------------- the Access tab
+// The Access rows are the one field type on this page that shows something the option does not
+// hold: what a capability filter did to the row. Every row is a select over the five
+// capabilities, on the stored value; a line under it says when code has changed that value, and
+// to what. These drive register()'s field callbacks (settingsFields()), which is how the page
+// renders one row.
+
+it('renders every Access row as its capability select on the stored value, and says nothing about code when nothing changed it', function (): void {
+    stubSelected();
+    Functions\when('get_current_user_id')->justReturn(7);
+    $fields = settingsFields(['access.chat' => 'publish_posts']);
+
+    $chat = ($fields['alpaca_bot_access.chat']['render'])();
+    expect($chat)->toContain('<select id="ab-access-chat" name="alpaca_bot_settings[access.chat]">')
+        ->toContain('<option value="publish_posts" selected="selected">Authors and up</option>')
+        ->toContain('<option value="manage_options">Administrators</option>')
+        ->not->toContain('Set in code');
+    foreach (['tool.web_fetch', 'tool.summarize', 'tool.draft_post', 'tool.abilities', 'settings.read', 'settings.write', 'shortcode'] as $row) {
+        $html = ($fields['alpaca_bot_access.' . $row]['render'])();
+        expect($html)->toContain('<select id="ab-access-' . str_replace('.', '-', $row) . '" name="alpaca_bot_settings[access.' . $row . ']">')
+            ->not->toContain('Set in code');
+    }
+});
+
+// Merge point 5: a row's filter is asked with the arguments the runtime passes it, in the same
+// shape, so a listener registered for its row's arguments is called with them here too.
+it('marks a tool row a filter changes as set in code, asking the filter with a user id as a turn does', function (): void {
+    stubSelected();
+    Functions\when('get_current_user_id')->justReturn(7);
+    Filters\expectApplied('alpaca_bot/capability/tool/web_fetch')->atLeast()->once()->with('edit_posts', 7)->andReturn('manage_options');
+
+    $html = (settingsFields(['access.tool.web_fetch' => 'edit_posts'])['alpaca_bot_access.tool.web_fetch']['render'])();
+
+    expect($html)->toContain('<strong>Set in code</strong>: a filter changes this to Administrators (<code>manage_options</code>).')
+        // The select is still there and still saves, on what the site stored.
+        ->toContain('name="alpaca_bot_settings[access.tool.web_fetch]"')
+        ->toContain('<option value="edit_posts" selected="selected">')
+        ->toContain('is what applies once no filter changes it');
+});
+
+it('asks a settings row with the REST request its route authorises, and a shortcode row with a post id and the shortcode tag', function (): void {
+    stubSelected();
+    Filters\expectApplied('alpaca_bot/capability/settings/write')->atLeast()->once()
+        ->with('manage_options', Mockery::on(static fn(mixed $r): bool => $r instanceof WP_REST_Request && $r->get_method() === 'PUT' && $r->get_route() === '/alpaca-bot/v1/settings'))
+        ->andReturn('edit_others_posts');
+    Filters\expectApplied('alpaca_bot/capability/settings/read')->atLeast()->once()
+        ->with('manage_options', Mockery::on(static fn(mixed $r): bool => $r instanceof WP_REST_Request && $r->get_method() === 'GET' && $r->get_route() === '/alpaca-bot/v1/settings'))
+        ->andReturn('manage_options');
+    // A capability that is not one of the five is named as itself.
+    Filters\expectApplied('alpaca_bot/capability/shortcode')->atLeast()->once()->with('edit_posts', 0, 'alpacabot')->andReturn('exist');
+    $fields = settingsFields();
+
+    expect(($fields['alpaca_bot_access.settings.write']['render'])())->toContain('a filter changes this to Editors and up (<code>edit_others_posts</code>).')
+        ->and(($fields['alpaca_bot_access.settings.read']['render'])())->not->toContain('Set in code')
+        ->and(($fields['alpaca_bot_access.shortcode']['render'])())->toContain('a filter changes this to <code>exist</code>.');
+});
+
+it('reports a row whose filter throws as set in code without a figure, and still renders its select', function (): void {
+    stubSelected();
+    Functions\when('get_current_user_id')->justReturn(7);
+    Filters\expectApplied('alpaca_bot/capability/tool/summarize')->zeroOrMoreTimes()->andReturnUsing(static function (): never {
+        throw new ArgumentCountError('Too few arguments to function {closure}(), 2 passed and exactly 3 expected');
+    });
+
+    $html = (settingsFields()['alpaca_bot_access.tool.summarize']['render'])();
+
+    expect($html)->toContain('<select id="ab-access-tool-summarize"')
+        ->toContain('<strong>Set in code</strong>: a filter decides this, and asking it from this page failed')
+        ->not->toContain('a filter changes this to');
+});
+
+// Merge point 4: the Chat row has no filter of its own (Access::effective('chat') applies none),
+// so asking Access would always say "not set in code". The two surfaces that read the row are
+// asked instead, each with its own hook, and the line says which one a filter changed.
+it('asks the Chat row of each surface that reads it, and names the surface a filter changed', function (): void {
+    stubSelected();
+    Filters\expectApplied('alpaca_bot/admin/menu_capability')->atLeast()->once()->with('edit_posts')->andReturn('read');
+    Filters\expectApplied('alpaca_bot/capability/chat')->atLeast()->once()
+        ->with('edit_posts', Mockery::on(static fn(mixed $r): bool => $r instanceof WP_REST_Request && $r->get_method() === 'POST' && $r->get_route() === '/alpaca-bot/v1/chat'))
+        ->andReturn('edit_posts');
+
+    $screen = (settingsFields()['alpaca_bot_access.chat']['render'])();
+
+    expect($screen)->toContain('<strong>Set in code</strong> for the chat screen, its panel on other admin screens and the block editor sidebar: a filter changes this to Any logged-in user (<code>read</code>).')
+        ->not->toContain('POST /chat');
+});
+
+it('says when a filter changed the Chat row for the chat REST route and not for the screen', function (): void {
+    stubSelected();
+    Filters\expectApplied('alpaca_bot/admin/menu_capability')->atLeast()->once()->with('edit_posts')->andReturn('edit_posts');
+    Filters\expectApplied('alpaca_bot/capability/chat')->atLeast()->once()->andReturn('manage_options');
+
+    $api = (settingsFields()['alpaca_bot_access.chat']['render'])();
+
+    expect($api)->toContain('<strong>Set in code</strong> for the chat REST route (<code>POST /chat</code>): a filter changes this to Administrators (<code>manage_options</code>).')
+        ->not->toContain('for the chat screen');
+});
+
+it('adds an Access row for each MCP server the settings hold, and none for the access.mcp map itself', function (): void {
+    stubSelected();
+    Functions\when('get_current_user_id')->justReturn(7);
+    $none = settingsFields();
+    expect($none)->not->toHaveKey('alpaca_bot_access.mcp')
+        ->and(array_filter(array_keys($none), static fn(string $id): bool => str_starts_with($id, 'alpaca_bot_access.mcp')))->toBe([]);
+
+    Filters\expectApplied('alpaca_bot/capability/mcp/wiki')->atLeast()->once()->with('publish_posts', 7)->andReturn('edit_others_posts');
+    $fields = settingsFields([
+        'toolkits.mcp_servers' => [['id' => 'docs', 'url' => 'https://mcp.example.test/mcp'], ['url' => 'https://nameless.example.test/'], ['id' => 'wiki']],
+        'access.mcp' => ['wiki' => 'publish_posts'],
+    ]);
+
+    expect($fields)->not->toHaveKey('alpaca_bot_access.mcp')
+        ->and(array_values(array_filter(array_keys($fields), static fn(string $id): bool => str_starts_with($id, 'alpaca_bot_access.mcp'))))->toBe(['alpaca_bot_access.mcp.docs', 'alpaca_bot_access.mcp.wiki'])
+        ->and($fields['alpaca_bot_access.mcp.docs']['title'])->toBe('MCP server: docs');
+    $docs = ($fields['alpaca_bot_access.mcp.docs']['render'])();
+    // Posted into the access.mcp map, which is where Access::stored('mcp.docs') reads it.
+    expect($docs)->toContain('<select id="ab-access-mcp-docs" name="alpaca_bot_settings[access.mcp][docs]">')
+        // A server nobody has chosen for is an administrator's (Kanboard #4370).
+        ->toContain('<option value="manage_options" selected="selected">')
+        ->not->toContain('Set in code');
+    expect(($fields['alpaca_bot_access.mcp.wiki']['render'])())->toContain('<option value="publish_posts" selected="selected">')
+        ->toContain('a filter changes this to Editors and up (<code>edit_others_posts</code>).');
+});
+
+// A server id comes from the settings, so it may be anything. It reaches the page escaped in the
+// row's title (core prints a field title as it is given), its id and its field name; and an id a
+// form cannot post back as itself gets no select at all. PHP ends a bracketed name segment at
+// the first `]`, so `x]"<y` would post as `x` and set another server's row.
+it('escapes a hostile MCP server id everywhere it reaches the page, and gives no select to one a form cannot post back', function (): void {
+    stubSelected();
+    Functions\when('get_current_user_id')->justReturn(7);
+    Functions\when('esc_attr')->alias(fn($s) => htmlspecialchars((string) $s, ENT_QUOTES));
+    Functions\when('esc_html')->alias(fn($s) => htmlspecialchars((string) $s, ENT_QUOTES));
+    $evil = 'a"<b>c';
+    $fields = settingsFields(['toolkits.mcp_servers' => [['id' => $evil], ['id' => 'x]"<y'], ['id' => "nul\0byte"], ['id' => '12']]]);
+
+    expect(array_values(array_filter(array_keys($fields), static fn(string $id): bool => str_starts_with($id, 'alpaca_bot_access.mcp'))))->toBe(['alpaca_bot_access.mcp.' . $evil]);
+    $row = $fields['alpaca_bot_access.mcp.' . $evil];
+    $html = ($row['render'])();
+    expect($row['title'])->toBe('MCP server: a&quot;&lt;b&gt;c')
+        ->and($html)->toContain('<select id="ab-access-mcp-a&quot;&lt;b&gt;c" name="alpaca_bot_settings[access.mcp][a&quot;&lt;b&gt;c]">')
+        ->not->toContain('<b>');
+});
+
+// Schema::sanitize() keeps the stored value of a key a post leaves out, so a save from another
+// tab keeps the whole access.mcp map by not posting it. The Access tab posts the map (one select
+// per server), so it carries the entries it has no select for, or saving it would drop them.
+it('posts nothing for the access.mcp map from another tab, and carries the entries with no select from the Access tab', function (): void {
+    Functions\when('settings_errors')->justReturn(null);
+    Functions\when('settings_fields')->justReturn(null);
+    Functions\when('do_settings_sections')->alias(function (string $page): void { echo "<!-- sections:{$page} -->"; });
+    Functions\when('submit_button')->justReturn(null);
+    Functions\when('admin_url')->justReturn('http://x/wp-admin/admin.php');
+    Functions\when('add_query_arg')->justReturn('http://x/');
+    Functions\when('sanitize_key')->returnArg();
+    $settings = ['toolkits.mcp_servers' => [['id' => 'docs']], 'access.mcp' => ['docs' => 'read', 'gone' => 'publish_posts', 'x]y' => 'read']];
+
+    $_GET['tab'] = 'chat';
+    ob_start();
+    settingsPage($settings)->render();
+    $other = (string) ob_get_clean();
+    $_GET['tab'] = 'access';
+    ob_start();
+    settingsPage($settings)->render();
+    $access = (string) ob_get_clean();
+    unset($_GET['tab']);
+
+    expect($other)->not->toContain('alpaca_bot_settings[access.mcp]')
+        // The Access tab's own rows are not carried from another tab either: they are schema fields like any other.
+        ->toContain('name="alpaca_bot_settings[access.chat]"');
+    expect($access)->toContain('<input type="hidden" name="alpaca_bot_settings[access.mcp][gone]" value="publish_posts">')
+        // docs has its select on this tab; a second input under its name would race it.
+        ->not->toContain('name="alpaca_bot_settings[access.mcp][docs]"')
+        // An id a form cannot post back as itself is not carried either: it would post as `x`.
+        ->not->toContain('alpaca_bot_settings[access.mcp][x]')
+        ->and(strpos($access, '[access.mcp][gone]'))->toBeLessThan(strpos($access, '<!-- sections:'));
 });

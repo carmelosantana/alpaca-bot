@@ -66,6 +66,7 @@ final class HelpTabsTest extends TestCase
         (new Menu(new SettingsPage(
             \AlpacaBot\Plugin::instance()->get(\AlpacaBot\Settings\Store::class),
             \AlpacaBot\Plugin::instance()->get(\AlpacaBot\Provider\ModelCatalog::class),
+            \AlpacaBot\Plugin::instance()->get(\AlpacaBot\Access::class),
         ), $renderer, \AlpacaBot\Plugin::instance()->get(\AlpacaBot\Access::class)))->register();
 
         return [

@@ -162,7 +162,38 @@ function freshProcess(string $script, array $args): string
 function settingsPage(array $settings = []): AlpacaBot\Admin\SettingsPage
 {
     $store = new Store($settings);
-    return new AlpacaBot\Admin\SettingsPage($store, new ModelCatalog(new Factory($store)));
+    return new AlpacaBot\Admin\SettingsPage($store, new ModelCatalog(new Factory($store)), new AlpacaBot\Access($store));
+}
+
+/** core's selected() with $echo false: the attribute when the two values match as strings, else ''. */
+function stubSelected(): void
+{
+    Functions\when('selected')->alias(fn($a, $b, $e = true): string => (string) $a === (string) $b ? ' selected="selected"' : '');
+}
+
+/**
+ * Admin\SettingsPageTest: register()'s settings fields over a page seeded with `$settings`, as
+ * field id => [the title core would print, a closure returning what the field's callback prints].
+ * The field callback is how the page renders one row, so this is how the Access tab is read
+ * without core's do_settings_sections().
+ *
+ * @param array<string, mixed> $settings
+ * @return array<string, array{title: string, render: Closure(): string}>
+ */
+function settingsFields(array $settings = []): array
+{
+    $fields = [];
+    Functions\when('register_setting')->justReturn(null);
+    Functions\when('add_settings_section')->justReturn(null);
+    Functions\when('add_settings_field')->alias(function (string $id, string $title, callable $render) use (&$fields): void {
+        $fields[$id] = ['title' => $title, 'render' => static function () use ($render): string {
+            ob_start();
+            $render();
+            return (string) ob_get_clean();
+        }];
+    });
+    settingsPage($settings)->register();
+    return $fields;
 }
 
 /**

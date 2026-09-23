@@ -13,7 +13,7 @@ use Brain\Monkey\Functions;
 
 it('registers the top-level menu, the chat page as its first entry and Settings under manage_options, with the capability filtered', function (): void {
     $store = new Store([]);
-    $settings = new SettingsPage($store, new ModelCatalog(new Factory($store)));
+    $settings = new SettingsPage($store, new ModelCatalog(new Factory($store)), new Access($store));
     $chat = static function (): void {};
     // The icon is assets/img/menu-icon.svg, handed to core as the base64 data URI
     // menu-header.php inlines; computed from the file here rather than from Menu::ICON so the
@@ -60,7 +60,7 @@ it('ignores a menu capability filter that returns anything but a capability name
     // the site settled on. Anything that is not a capability name is no opinion; the integration
     // suite asserts the same against a real WordPress, where the two checks come apart.
     $store = new Store([]);
-    $settings = new SettingsPage($store, new ModelCatalog(new Factory($store)));
+    $settings = new SettingsPage($store, new ModelCatalog(new Factory($store)), new Access($store));
     $chat = static function (): void {};
     $caps = [];
     Functions\when('add_menu_page')->alias(function (mixed ...$args) use (&$caps): void {
@@ -81,7 +81,7 @@ it('ignores a menu capability filter that returns anything but a capability name
 
 it('shows the menu at the Chat row, so a site that opens the row opens the screen', function (): void {
     $store = new Store(['access.chat' => 'read']);
-    $settings = new SettingsPage($store, new ModelCatalog(new Factory($store)));
+    $settings = new SettingsPage($store, new ModelCatalog(new Factory($store)), new Access($store));
     $chat = static function (): void {};
     Filters\expectApplied('alpaca_bot/admin/menu_capability')->once()->with('read')->andReturn('read');
     Functions\expect('add_menu_page')->once()->withArgs(static fn(mixed ...$a): bool => $a[2] === 'read');

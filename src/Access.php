@@ -255,6 +255,9 @@ final class Access
          * row pass the turn's user id, the settings rows the WP_REST_Request, `shortcode` the
          * post id and the shortcode tag. A caller that passes fewer is refused before the filter
          * runs, so a listener registered for its row's arguments is always called with them.
+         * Settings › Access also fires each of these rows it shows, to say which code has moved, with
+         * arguments of the same shape built for that screen: the administrator viewing it as the
+         * user, a request built for the route it authorises, post id 0 and the `alpacabot` tag.
          *
          * @since 0.6.0
          * @param string $capability the row as the site saved it, its default when it never was
@@ -282,7 +285,7 @@ final class Access
      *
      * The second case is why this is the guarded one, and the only one. It is the question a
      * screen asks, and a screen must not be fatal — but a screen also may not have a row's
-     * arguments (the settings page has no post id for the shortcode row), and effective()
+     * arguments (one with no post in hand has no post id for the shortcode row), and effective()
      * refuses a short argument list before any filter runs. Asking has_filter() first is what
      * keeps that from becoming a blanket answer: with no listener registered nothing can have
      * moved the row, so it is false, and the label does not appear on every site in the world;

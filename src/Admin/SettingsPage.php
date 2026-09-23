@@ -4,10 +4,13 @@ declare(strict_types=1);
 
 namespace AlpacaBot\Admin;
 
+use AlpacaBot\Access;
 use AlpacaBot\Plugin;
 use AlpacaBot\Provider\ModelCatalog;
+use AlpacaBot\Rest\Controller;
 use AlpacaBot\Settings\Schema;
 use AlpacaBot\Settings\Store;
+use AlpacaBot\Shortcodes\Chat as ChatShortcode;
 
 /**
  * The Settings API page for `alpaca_bot_settings`: one setting, one group (`alpaca_bot`), a
@@ -35,6 +38,19 @@ use AlpacaBot\Settings\Store;
  * Per-model overrides are a table with a row per model the catalog knows, posted as
  * `alpaca_bot_settings[models.overrides][<model>][<field>]`; Schema::sanitizeOverrides() drops a
  * row whose fields are all empty, so clearing a row's inputs removes the override.
+ *
+ * The Access tab is not one Schema field per control either. Every row is the capability select
+ * the schema describes, on Access::stored(), and under a row whose filter moves it off that value,
+ * or cannot be asked from this page, a line says "Set in code" (renderAccess()). The Chat row has
+ * no filter of its own, so the menu's filter and the `/chat` route's are asked instead, and the
+ * line names the one that moved. `access.mcp` has no control of its own: each MCP server
+ * `toolkits.mcp_servers` lists gets a row posting one entry of that map, as
+ * `alpaca_bot_settings[access.mcp][<server id>]`. A save from another tab posts nothing for the
+ * map, which Fields::hidden() does not carry since its keys are server ids, so Schema::sanitize()
+ * keeps it as stored; the Access tab carries every stored entry it shows no select for as a
+ * hidden input, so saving it drops none that a form can post back (postable() says which cannot).
+ *
+ * @phpstan-import-type Field from Schema
  */
 final class SettingsPage
 {
@@ -44,7 +60,7 @@ final class SettingsPage
     /** The last input of the form. A post of the option that arrives without it was cut short by PHP. */
     public const END_MARKER = 'alpaca_bot_settings_end';
 
-    public function __construct(private Store $store, private ModelCatalog $catalog) {}
+    public function __construct(private Store $store, private ModelCatalog $catalog, private Access $access) {}
 
     /** On admin_init: the setting, its sections (one page id per tab) and its fields. */
     public function register(): void
@@ -67,13 +83,36 @@ final class SettingsPage
                 echo '<p>' . esc_html($section['description']) . '</p>';
             }, self::page($id));
         }
-        foreach (Schema::fields() as $key => $f) {
+        $fields = Schema::fields();
+        foreach ($fields as $key => $f) {
+            if ($key === 'access.mcp') {
+                // No control of its own; the MCP rows below each post one entry of it.
+                continue;
+            }
             // A checkbox carries its own label (its row title is blank, and a label_for there
             // would be an empty second label); a table has no single control to point a label at.
             $args = in_array($f['type'], ['array', 'boolean', 'checkbox-list'], true) ? [] : ['label_for' => Fields::id($key)];
             add_settings_field('alpaca_bot_' . $key, $f['type'] === 'boolean' ? '' : $f['label'], function () use ($key, $f): void {
-                echo $key === 'models.overrides' ? $this->renderOverrides() : Fields::render($key, $f, $this->store->get($key)); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- Fields escapes every attribute and text node.
+                $html = match (true) {
+                    $key === 'models.overrides' => $this->renderOverrides(),
+                    str_starts_with($key, 'access.') => $this->renderAccess(substr($key, strlen('access.')), $f),
+                    default => Fields::render($key, $f, $this->store->get($key)),
+                };
+                echo $html; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- Fields escapes every attribute and text node, and renderAccess() escapes what it adds.
             }, self::page($f['section']), 'alpaca_bot_' . $f['section'], $args);
+        }
+        // One row per MCP server. The servers are the site's, not the schema's, so the rows are
+        // not fields(); each borrows the Chat row's field, the capability select with its
+        // labelled options, under a label and a description of its own. Core prints a field's
+        // title as it is handed it, and a server id is the settings' to say, so it is escaped here.
+        foreach ($this->mcpServers() as $id) {
+            $row = Access::MCP_PREFIX . $id;
+            /* translators: %s: an MCP server's id */
+            $label = sprintf(__('MCP server: %s', 'alpaca-bot'), $id);
+            $field = ['label' => $label, 'description' => __('Who may use this server\'s tools. A server nobody has chosen a capability for is administrators only.', 'alpaca-bot')] + $fields['access.chat'];
+            add_settings_field('alpaca_bot_access.' . $row, esc_html($label), function () use ($row, $field, $id): void {
+                echo $this->renderAccess($row, $field, Plugin::OPTION . '[access.mcp][' . $id . ']'); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- as above.
+            }, self::page('access'), 'alpaca_bot_access', ['label_for' => Fields::id('access.' . $row)]);
         }
     }
 
@@ -103,6 +142,18 @@ final class SettingsPage
         foreach (Schema::fields() as $key => $f) {
             if ($f['section'] !== $active) {
                 echo Fields::hidden($key, $this->store->get($key)); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- escaped in Fields.
+            }
+        }
+        if ($active === 'access') {
+            // This tab posts the access.mcp map, one entry per MCP row, and a posted map replaces
+            // the stored one whole: an entry with no row here (a server the list no longer has)
+            // is carried, or saving the tab would drop it. Fields::hidden() prints nothing for a
+            // map keyed by server id, so the inputs are written here.
+            $stored = $this->store->get('access.mcp', []);
+            foreach (is_array($stored) ? $stored : [] as $id => $capability) {
+                if (is_string($id) && is_string($capability) && self::postable($id) && !in_array($id, $this->mcpServers(), true)) {
+                    printf('<input type="hidden" name="%s" value="%s">', esc_attr(Plugin::OPTION . '[access.mcp][' . $id . ']'), esc_attr($capability));
+                }
             }
         }
         do_settings_sections(self::page($active));
@@ -146,7 +197,7 @@ final class SettingsPage
      * `$admin_page_hooks[$slug]` and `get_plugin_page_hookname()` uses it as the prefix
      * (wp-admin/includes/plugin.php:1397, :2140-2158) — so on a locale that translates
      * "Alpaca Bot" this page is not `alpaca-bot_page_alpaca-bot-settings` at all, and a
-     * hard-coded id once lost all four help tabs there. The top-level page is unaffected: its
+     * hard-coded id once lost every help tab there. The top-level page is unaffected: its
      * own slug is in `$admin_page_hooks`, which takes the `toplevel` branch of the same function
      * and never reads the title, which is why Assets::HOOK can be a constant.
      *
@@ -164,6 +215,148 @@ final class SettingsPage
         return function_exists('get_plugin_page_hookname')
             ? get_plugin_page_hookname(self::SLUG, Menu::SLUG)
             : 'alpaca-bot_page_' . self::SLUG;
+    }
+
+    /**
+     * One Access row: the capability select on the stored value, posted under `$name` when that is
+     * not the row's own key (an MCP row's entry of the `access.mcp` map), and a line under it for
+     * each filter that moves the row off that value or cannot be asked (setInCode()).
+     *
+     * A row with a filter of its own is asked through Access, with the arguments that filter is
+     * given at runtime (accessArgs()), so a listener registered for its row's arguments is called
+     * with them here too. Access::overridden() asks first: it never throws, and when resolving
+     * the row does, it leaves a line in the debug log under WP_DEBUG. effective() is then asked
+     * again for the figure, inside setInCode()'s catch, so a listener on such a row runs twice.
+     *
+     * The Chat row has no filter in Access, so overridden('chat') would answer false whatever a
+     * site did. The menu's filter (Menu::capability(), which the chat screen, the drawer and the
+     * editor sidebar ask) and the `/chat` route's (Controller::filteredCapability(), with a
+     * `POST /chat` request) are asked instead, and the line names the one that moved. Every other
+     * chat route has a filter of its own, under its own route key, which this does not ask.
+     *
+     * @param Field $f
+     */
+    private function renderAccess(string $row, array $f, ?string $name = null): string
+    {
+        $stored = $this->access->stored($row);
+        $html = Fields::render('access.' . $row, $f, $stored, $name);
+        if ($row === 'chat') {
+            $lines = [
+                self::setInCode(esc_html__('for the chat screen, its panel on other admin screens and the block editor sidebar', 'alpaca-bot'), fn(): string => Menu::capability($this->access), $stored, $f),
+                self::setInCode(
+                    /* translators: %s: the chat route, POST /chat */
+                    sprintf(esc_html__('for the chat REST route (%s)', 'alpaca-bot'), '<code>POST /chat</code>'),
+                    static fn(): string => Controller::filteredCapability('chat', $stored, new \WP_REST_Request('POST', '/' . Controller::NAMESPACE . '/chat')),
+                    $stored,
+                    $f,
+                ),
+            ];
+        } else {
+            $args = self::accessArgs($row);
+            $lines = $this->access->overridden($row, ...$args)
+                ? [self::setInCode('', fn(): string => $this->access->effective($row, ...$args), $stored, $f)]
+                : [];
+        }
+        $lines = array_values(array_filter($lines, static fn(string $line): bool => $line !== ''));
+        if ($lines === []) {
+            return $html;
+        }
+        return $html . '<p class="description">' . implode('<br>', $lines) . ' '
+            . esc_html__('Your choice above is still saved, and is what applies once no filter changes it.', 'alpaca-bot') . '</p>';
+    }
+
+    /**
+     * "Set in code", for `$surface` (already-escaped HTML, or '' for a row with one surface), when
+     * what `$resolve` answers is not `$stored`: naming the capability, by its label when it is one
+     * the select offers. '' when it is `$stored`. Anything `$resolve` throws — a site's listener that
+     * throws, or one declaring more arguments than its hook fires with, which core calls into an
+     * ArgumentCountError — is reported as set in code with no figure, so a site's filter cannot
+     * take the settings page down.
+     *
+     * @param \Closure(): string $resolve
+     * @param Field $f
+     */
+    private static function setInCode(string $surface, \Closure $resolve, string $stored, array $f): string
+    {
+        $head = '<strong>' . esc_html__('Set in code', 'alpaca-bot') . '</strong>' . ($surface === '' ? '' : ' ' . $surface) . ': ';
+        try {
+            $effective = $resolve();
+        } catch (\Throwable) {
+            return $head . esc_html__('a filter decides this, and asking it from this page failed, so what it would return is not shown.', 'alpaca-bot');
+        }
+        if ($effective === $stored) {
+            return '';
+        }
+        $label = $f['options'][$effective] ?? null;
+        return $head . ($label !== null
+            ? sprintf(
+                /* translators: 1: a capability's label, such as "Administrators", 2: the capability's name */
+                esc_html__('a filter changes this to %1$s (%2$s).', 'alpaca-bot'),
+                esc_html($label),
+                '<code>' . esc_html($effective) . '</code>',
+            )
+            : sprintf(
+                /* translators: %s: the name of a capability a filter returned that is not one the select offers */
+                esc_html__('a filter changes this to %s.', 'alpaca-bot'),
+                '<code>' . esc_html($effective) . '</code>',
+            ));
+    }
+
+    /**
+     * The arguments `$row`'s filter is given at runtime, in the same shape, for the page to ask
+     * it with. A tool row and an MCP row get a user id, which is what Access declares they fire
+     * with (Toolkit\Registry::enabled() passes a tool row the turn's user); here it is the
+     * administrator viewing the page. A settings row gets a
+     * WP_REST_Request of the verb it authorises on `/settings`, as SettingsController passes the
+     * request. The shortcode row gets post id 0 and the `[alpacabot]` tag, which is what
+     * Shortcodes\Chat passes for a shortcode rendered outside a post.
+     *
+     * A listener that reads them answers for this administrator and this made-up request, not for
+     * everyone, so the note under a row is what the filter says here and now.
+     *
+     * @return list<mixed>
+     */
+    private static function accessArgs(string $row): array
+    {
+        return match (true) {
+            $row === 'settings.read' => [new \WP_REST_Request('GET', '/' . Controller::NAMESPACE . '/settings')],
+            $row === 'settings.write' => [new \WP_REST_Request('PUT', '/' . Controller::NAMESPACE . '/settings')],
+            $row === 'shortcode' => [0, ChatShortcode::TAG],
+            default => [get_current_user_id()],
+        };
+    }
+
+    /**
+     * The ids of the MCP servers `toolkits.mcp_servers` lists, each once, in list order: the ones
+     * the Access tab gives a row. A server with no id, or one a form cannot post back (postable()),
+     * gets none, and so reads as whatever Access::stored() has for it — administrators only unless
+     * something other than this page stored an entry.
+     *
+     * @return list<string>
+     */
+    private function mcpServers(): array
+    {
+        $servers = $this->store->get('toolkits.mcp_servers', []);
+        $ids = [];
+        foreach (is_array($servers) ? $servers : [] as $server) {
+            $id = is_array($server) ? ($server['id'] ?? null) : null;
+            if (is_string($id) && self::postable($id) && !in_array($id, $ids, true)) {
+                $ids[] = $id;
+            }
+        }
+        return $ids;
+    }
+
+    /**
+     * Whether a server id comes back as itself when the form posts it as
+     * `alpaca_bot_settings[access.mcp][<id>]`. PHP ends a bracketed name segment at its first
+     * `]`, so `a]b` would post as `a` and set another server's row; it cuts the name at a NUL
+     * byte; and it makes an int key of a string that is an integer written the way PHP writes one
+     * (`12`, not `012` or ` 12`), which Schema::sanitizeAccessMcp() drops.
+     */
+    private static function postable(string $id): bool
+    {
+        return $id !== '' && strpbrk($id, "]\0") === false && (string) (int) $id !== $id;
     }
 
     /**

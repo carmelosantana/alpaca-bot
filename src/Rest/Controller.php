@@ -149,6 +149,19 @@ abstract class Controller
     protected function capability(string $route, string $declared, \WP_REST_Request $request): string
     {
         $default = $declared === self::CHAT ? $this->accessRow(self::CHAT) : $declared;
+        return self::filteredCapability($route, $default, $request);
+    }
+
+    /**
+     * `alpaca_bot/capability/{$route}` over `$default`, for `$request`, reduced to a capability
+     * name. capability() applies it to every request a route authorises, and Admin\SettingsPage
+     * asks it of the `chat` key to show whether code changed the Chat row for the API, which is
+     * why it is public and static: that page has no controller to ask.
+     *
+     * @since 0.6.0
+     */
+    public static function filteredCapability(string $route, string $default, \WP_REST_Request $request): string
+    {
         /**
          * Filters the capability a REST route's permission callback checks, per request. `{route}`
          * is the route's key (Controller::routeKey(): `chat`, `conversations`, `chat/stream`,
@@ -170,6 +183,11 @@ abstract class Controller
          * visitor, logged out included. README's "Tools, and what they let the model reach" is
          * the operator-facing version of this, with what the address pinning covers for
          * `web_fetch` and what it does not.
+         *
+         * Settings › Access asks the `chat` key as well, to say under the Chat row whether code
+         * has changed it for the `/chat` route: with the Chat row as `$capability` and a
+         * `POST /chat` request built for that question, which no client sent and nothing is
+         * authorised by.
          *
          * @since 0.5.0
          * @param string           $capability the route's default: its declared capability, or for a chat route the Chat row of Settings › Access (`edit_posts` unless the site changed it)
