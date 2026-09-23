@@ -214,3 +214,14 @@ it('cleans a screen to itself, so what /view/panel renders into the chip is what
         expect($once)->not->toBeNull()->and(CurrentScreenSource::screenFrom($once))->toBe($once);
     }
 });
+
+it('treats an auto-draft as no post: the classic editor\'s Add New screen has not started one yet', function (): void {
+    // post-new.php stores the draft titled "Auto Draft" and blanks the title only in memory, so
+    // the stored row would tell the model it is editing a post called "Auto Draft", with no text.
+    Functions\when('user_can')->justReturn(true);
+    Functions\when('get_post')->justReturn(currentScreenPost(40, 'Auto Draft', '', 'post', 'auto-draft'));
+    expect((new CurrentScreenSource())->collect(1, ['post_id' => 40]))->toBe([]);
+    // The screen still goes.
+    $out = (new CurrentScreenSource())->collect(1, ['post_id' => 40, 'screen' => ['id' => 'post', 'title' => 'Add Post']]);
+    expect(array_map(static fn($c): string => $c->id, $out))->toBe(['screen:post']);
+});

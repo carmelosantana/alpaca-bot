@@ -263,7 +263,7 @@ it('renders the drawer panel on one of the user\'s conversations, and a new chat
     Functions\when('get_post')->alias(static fn(int $id): ?object => match ($id) {
         5 => conversationChatPost(5, '3'),
         6 => (object) (['post_title' => 'Their private thread'] + (array) conversationChatPost(6, '9')),
-        12 => (object) ['ID' => 12, 'post_title' => 'Hello world'],
+        12 => (object) ['ID' => 12, 'post_title' => 'Hello world', 'post_status' => 'draft'],
         default => null,
     });
     Functions\when('get_post_meta')->alias(static fn(int $id, string $key): mixed => $key === 'ab_messages'

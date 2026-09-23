@@ -8,6 +8,7 @@ use AlpacaBot\Admin\Assets;
 use AlpacaBot\Admin\ChatScreen;
 use AlpacaBot\Chat\ConversationStore;
 use AlpacaBot\Chat\Message;
+use AlpacaBot\Context\CurrentScreenSource;
 use AlpacaBot\Plugin;
 use AlpacaBot\Rest\ViewController;
 use AlpacaBot\Settings\Store;
@@ -207,6 +208,28 @@ final class ViewRoutesTest extends TestCase
         $this->assertStringNotContainsString('context[post_id]', $html);
         $this->assertStringNotContainsString('Carmelo', $html);
         $this->assertStringContainsString('data-chip="screen"', $html);
+    }
+
+    public function test_an_auto_draft_is_no_post_to_the_chip_or_to_the_model_and_the_screen_chip_stays(): void
+    {
+        $uid = $this->asAdmin();
+        // What post-new.php makes before it shows the classic editor's form.
+        $draft = get_default_post_to_edit('post', true);
+        $this->assertSame('auto-draft', get_post($draft->ID)->post_status);
+        $this->assertSame('Auto Draft', get_post($draft->ID)->post_title);
+
+        $html = $this->rest('GET', '/view/panel', ['post_id' => (string) $draft->ID, 'screen_id' => 'post', 'screen_title' => 'Add Post'])->get_data();
+        $this->assertStringNotContainsString('context[post_id]', $html);
+        $this->assertStringNotContainsString('Auto Draft', $html);
+        $this->assertStringContainsString('<span class="ab-chip__label">On: Add Post</span>', $html);
+
+        $contexts = (new CurrentScreenSource())->collect($uid, ['post_id' => $draft->ID, 'screen' => ['id' => 'post', 'title' => 'Add Post']]);
+        $this->assertSame(['screen:post'], array_map(static fn($c): string => $c->id, $contexts));
+
+        // Saved as a draft, it is a post being edited.
+        wp_update_post(['ID' => $draft->ID, 'post_title' => 'Now started', 'post_status' => 'draft']);
+        $html = $this->rest('GET', '/view/panel', ['post_id' => (string) $draft->ID])->get_data();
+        $this->assertStringContainsString('<span class="ab-chip__label">Editing: Now started</span>', $html);
     }
 
     public function test_panel_opens_another_users_conversation_as_a_new_chat_with_nothing_of_theirs(): void

@@ -290,7 +290,7 @@ it('renders a placeholder for the images the store evicted, escaped, and nothing
 
 it('drawer puts the shell in its own panel: the drawer layout, no core .wrap, and a close button the drawer script reads', function (): void {
     Functions\when('current_user_can')->justReturn(true);
-    Functions\when('get_post')->justReturn((object) ['ID' => 12, 'post_title' => 'Hello']);
+    Functions\when('get_post')->justReturn((object) ['ID' => 12, 'post_title' => 'Hello', 'post_status' => 'draft']);
     Functions\when('wp_strip_all_tags')->alias(static fn(string $s): string => trim(strip_tags($s)));
     Functions\when('get_transient')->justReturn([['id' => 'llama3.2', 'label' => 'llama3.2']]);
     Functions\when('wp_get_current_user')->justReturn((object) ['display_name' => 'Carmelo', 'ID' => 3]);
@@ -374,13 +374,29 @@ it('shell names the post in a chip only for a user who may edit it, by its store
     // Asked twice, once per render below: yes, then no.
     Functions\expect('current_user_can')->twice()->with('edit_post', 12)->andReturn(true, false);
     // Read once: the refused render must not load the post at all.
-    Functions\expect('get_post')->once()->with(12)->andReturn((object) ['ID' => 12, 'post_title' => "Carmelo's <em>draft</em>"]);
+    Functions\expect('get_post')->once()->with(12)->andReturn((object) ['ID' => 12, 'post_title' => "Carmelo's <em>draft</em>", 'post_status' => 'draft']);
 
     // The stored title, tags stripped (tests/Integration/ViewRoutesTest.php shows why it is not
     // get_the_title()).
     expect($shell->render())->toContain('<span class="ab-chip__label">Editing: Carmelo\'s draft</span>')->toContain('name="context[post_id]" value="12"')
         // Someone who may not edit it gets no chip, and so no id on the turn.
         ->and($shell->render())->not->toContain('ab-chip')->not->toContain('context[');
+});
+
+it('shell names no post for an auto-draft, the Add New screen\'s post that has not been started', function (): void {
+    Functions\when('get_transient')->justReturn([['id' => 'llama3.2', 'label' => 'llama3.2']]);
+    Functions\when('wp_get_current_user')->justReturn((object) ['display_name' => 'Carmelo', 'ID' => 3]);
+    Functions\when('get_avatar_url')->justReturn('/u.png');
+    Functions\when('plugins_url')->alias(fn(string $p) => '/plugins/alpaca-bot/' . $p);
+    Functions\when('admin_url')->alias(fn(string $p) => '/wp-admin/' . $p);
+    Functions\when('wp_strip_all_tags')->alias(static fn(string $s): string => trim(strip_tags($s)));
+    Functions\when('current_user_can')->justReturn(true);
+    Functions\when('get_post')->justReturn((object) ['ID' => 40, 'post_title' => 'Auto Draft', 'post_status' => 'auto-draft']);
+    $store = new Store(['models.default' => 'llama3.2']);
+    $html = (new Shell($store, new ModelCatalog(new Factory($store)), null, [], 40, sys_get_temp_dir() . '/ab-missing-' . getmypid() . '.svg', null, null, true, ['id' => 'post', 'title' => 'Add Post']))->render();
+    expect($html)->not->toContain('data-chip="post"')->not->toContain('context[post_id]')->not->toContain('Auto Draft')
+        // The screen chip stays.
+        ->toContain('<span class="ab-chip__label">On: Add Post</span>');
 });
 
 it('shell and drawer hand the screen to the composer as its chip', function (): void {

@@ -6,6 +6,7 @@ namespace AlpacaBot\View\Chat;
 
 use AlpacaBot\Admin\Menu;
 use AlpacaBot\Chat\Conversation;
+use AlpacaBot\Context\CurrentScreenSource;
 use AlpacaBot\Provider\ModelCatalog;
 use AlpacaBot\Settings\Store;
 use AlpacaBot\View\Component;
@@ -72,8 +73,12 @@ final class Shell extends Component
         // and so no id on the turn. It names it by the stored title, which is what
         // Context\CurrentScreenSource tells the model, not by get_the_title(), whose filters
         // texturize it and which, outside wp-admin (GET /view/panel is a REST request), prefixes
-        // a private post's with "Private: ".
+        // a private post's with "Private: ". An auto-draft gets no chip either, as the source
+        // sends none for it (CurrentScreenSource::UNSTARTED says why).
         $post = $this->postId > 0 && current_user_can('edit_post', $this->postId) ? get_post($this->postId) : null;
+        if ($post !== null && $post->post_status === CurrentScreenSource::UNSTARTED) {
+            $post = null;
+        }
         $composer = new Composer($this->store, $id, $model, $post === null ? 0 : $this->postId, $post === null ? '' : wp_strip_all_tags($post->post_title), $this->screen);
 
         $class = match (true) {

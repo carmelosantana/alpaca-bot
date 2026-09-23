@@ -76,7 +76,9 @@ it('opens the conversation ?conversation= names when it is the user\'s, and the 
     $posts = Functions\when('get_post');
     $posts->alias(static fn(int $id): ?object => match ($id) {
         5 => conversationChatPost(5, '3'),
-        12 => (object) ['ID' => 12, 'post_title' => 'Hello world'],
+        12 => (object) ['ID' => 12, 'post_title' => 'Hello world', 'post_status' => 'draft'],
+        // A post that exists, for a user who may not edit it: the gate, not a missing post, is what refuses it.
+        13 => (object) ['ID' => 13, 'post_title' => 'Not yours', 'post_status' => 'publish'],
         default => null,
     });
     ob_start();

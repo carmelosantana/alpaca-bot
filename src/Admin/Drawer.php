@@ -39,9 +39,10 @@ use AlpacaBot\Chat\UserPrefs;
  * miss there reads every row of the user's meta in one query (get_metadata_raw(),
  * update_meta_cache()). The Chat row is the settings option and the URLs are built from core's,
  * all autoloaded. What footer() adds for the context chips is read off globals core has set by
- * then: the screen, its page title, and on the classic editor the post, which post.php loaded
- * and get_post() reads back from the object cache that load filled.
- * tests/Integration/DrawerQueriesTest.php counts it, on the dashboard and on the classic editor.
+ * then: the screen, its page title, and on the classic editor the post, which get_post() reads
+ * from memory (footer() says how, for post.php and for post-new.php).
+ * tests/Integration/DrawerQueriesTest.php counts it on the dashboard, on the classic editor, and
+ * on the classic editor's Add New screen.
  *
  * Open or closed, and the conversation shown, are the user's (Chat\UserPrefs), stored through
  * `POST /view/drawer`, so the drawer comes back the way it was left on the next screen. A drawer
@@ -93,14 +94,24 @@ final class Drawer
     /**
      * `admin_footer`: the launcher, and the empty element the loader fills on the first open. The
      * element also names what the chat's context chips show (View\Chat\Composer), which only this
-     * request knows: the screen's id and page title, and on the classic editor the post. The
-     * title is core's get_admin_page_title(), which is HTML (edit-comments.php, for one post's
-     * comments, puts the post's title between `&#8220;` and `&#8221;`), so its markup is stripped
-     * and its entities decoded here to make it text; the panel cleans it for the chip by
-     * Context\CurrentScreenSource::screenFrom(), and the turn cleans it again. The post is the one
-     * core loaded for the screen (post.php's global), read back through get_post() and so from
-     * the object cache that load filled; whether the user may edit it is the panel's question to
-     * ask (View\Chat\Shell), when it is opened.
+     * request knows: the screen's id and page title, and on the classic editor the post.
+     *
+     * The title is the global `$title` as core's admin-header.php left it: that file calls
+     * get_admin_page_title(), which answers with `$title` when a screen has set it and otherwise
+     * walks the admin menus and stores what it finds there, and then strips `$title`'s tags. Read
+     * here, it is that answer without a second walk of the menus. A page that fires `admin_footer`
+     * without admin-header.php has no title here unless it set `$title` itself, and no title is
+     * no screen chip. The title is HTML
+     * (edit-comments.php, for one post's comments, puts the post's title between `&#8220;` and
+     * `&#8221;`), so its tags are stripped again and its entities decoded to make it text; the
+     * panel cleans it for the chip by Context\CurrentScreenSource::screenFrom(), and the turn
+     * cleans it again.
+     *
+     * The post is get_post() of the global the screen's own file set. On post.php that is the post
+     * it loaded, which get_post() reads back from the object cache that load filled; on
+     * post-new.php it is the auto-draft get_default_post_to_edit() made, which get_post() hands back
+     * as it is. Whether it is a post the chip may name is the panel's question (View\Chat\Shell),
+     * asked when the drawer is opened: not one the user may not edit, and not an auto-draft.
      */
     public function footer(): void
     {
@@ -109,7 +120,7 @@ final class Drawer
         }
         $userId = (int) get_current_user_id();
         $screen = get_current_screen();
-        $title = html_entity_decode(wp_strip_all_tags((string) get_admin_page_title()), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        $title = is_string($GLOBALS['title'] ?? null) ? html_entity_decode(wp_strip_all_tags($GLOBALS['title']), ENT_QUOTES | ENT_HTML5, 'UTF-8') : '';
         $post = $screen instanceof \WP_Screen && $screen->base === 'post' ? get_post() : null;
         printf(
             '<button type="button" id="ab-drawer-launcher" class="ab-drawer-launcher" aria-controls="ab-drawer" aria-expanded="false"><span class="dashicons dashicons-format-chat" aria-hidden="true"></span><span class="screen-reader-text">%1$s</span></button>'

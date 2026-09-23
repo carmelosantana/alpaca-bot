@@ -32,9 +32,11 @@ use AlpacaBot\Settings\Store;
  *
  * The footer also names the screen, its page title and, on the classic editor, the post, for the
  * context chips. Those are globals core has set by then, and this suite's request sets them as
- * the screen's own file would: `$title` as admin-header.php reads it, and on the editor the post
+ * the screen's own file would: `$title` as admin-header.php leaves it, and on the editor the post
  * as post.php loads it, once through get_post() (which fills the object cache) and once more as
- * the edit form's global.
+ * the edit form's global, or on the Add New screen as post-new.php makes it,
+ * get_default_post_to_edit()'s auto-draft, whose cache entry this suite drops to show that the
+ * footer's get_post() does not go back to it.
  *
  * @group performance
  */
@@ -103,5 +105,31 @@ final class DrawerQueriesTest extends TestCase
         $this->assertStringContainsString('data-screen-id="post" data-screen-title="Edit Post" data-post="' . $postId . '"', $html);
         $this->assertTrue(wp_script_is(Drawer::HANDLE, 'enqueued'));
         $this->assertSame(0, $queries, 'the drawer ran a query on the classic editor before it was opened');
+    }
+
+    public function test_the_drawer_adds_no_query_to_the_classic_editors_add_new_screen_before_it_is_opened(): void
+    {
+        $uid = $this->asAdmin();
+        // post-new.php: the global is the auto-draft as get_default_post_to_edit() returns it.
+        $GLOBALS['post'] = get_default_post_to_edit('post', true);
+        clean_post_cache($GLOBALS['post']->ID);
+        set_current_screen('post');
+        get_current_screen()->is_block_editor(false);
+        $GLOBALS['title'] = 'Add Post';
+        $drawer = Plugin::instance()->get(Drawer::class);
+        get_user_meta($uid);
+        Plugin::instance()->get(Store::class)->get('access.chat');
+        wp_scripts();
+        wp_styles();
+
+        $before = get_num_queries();
+        ob_start();
+        $drawer->footer();
+        $html = (string) ob_get_clean();
+        $queries = get_num_queries() - $before;
+
+        // The auto-draft's id: the panel is what declines to name it (View\Chat\Shell).
+        $this->assertStringContainsString('data-screen-id="post" data-screen-title="Add Post" data-post="' . $GLOBALS['post']->ID . '"', $html);
+        $this->assertSame(0, $queries, 'the drawer ran a query on the Add New screen before it was opened');
     }
 }
