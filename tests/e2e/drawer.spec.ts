@@ -67,15 +67,18 @@ async function turnDone(drawer: ReturnType<Page['locator']>): Promise<void> {
 }
 
 /**
- * Waits for the chat bundle to have booted in the drawer a launcher press opened. The fragment
- * (and its chips) is in the page before the bundle is, since mount.ts adds chat.js only after the
- * swap, and an Enter pressed before boot() binds its keydown handler is a newline in the box, not
- * a turn. The box taking the focus is the signal: drawer.ts focuses it once mountPanel() has
- * resolved, which is after chat.js has loaded and run, and boot() focuses it as it finishes.
- * Nothing before that focuses it, and fill() would, so this is asserted before anything is typed.
+ * Waits for the chat bundle to have booted in the drawer. The fragment (and its chips) is in the
+ * page before the bundle is, since mount.ts adds chat.js only after the swap, and an Enter pressed
+ * before boot() binds its keydown handler is a newline in the box, not a turn.
+ *
+ * The signal is the form's `novalidate`: View\Chat\Composer does not print it, and boot() sets
+ * `form.noValidate`, which reflects to the attribute, in the same synchronous run that binds the
+ * form's submit and the box's keydown handlers, so by the time anything else can see it, boot()
+ * has finished. The box's focus is not the signal: a drawer that opens itself on a new screen
+ * gives the focus back (drawer.ts giveFocusBack()), so the box is not focused when it has booted.
  */
 async function booted(drawer: ReturnType<Page['locator']>): Promise<void> {
-  await expect(drawer.locator('#ab-message')).toBeFocused();
+  await expect(drawer.locator('#ab-form')).toHaveAttribute('novalidate', '');
 }
 
 /** The `context` of the next POST /chat the page sends, once the request is made. */
@@ -105,6 +108,7 @@ test('the drawer loads the chat on first open, runs a turn in it with no image b
   const saved = page.waitForResponse((res) => /view(\/|%2F)drawer/.test(res.url()) && (res.request().postData() ?? '').includes('conversation_id'));
   await page.click('#ab-drawer-launcher');
   await expect(drawer.locator('#ab-form')).toBeVisible();
+  await booted(drawer);
   await expect(page.locator('#ab-drawer-launcher')).toHaveAttribute('aria-expanded', 'true');
   await expect(page.locator('script[src*="assets/js/chat.js"]')).toHaveCount(1);
   await expect(page.locator('script[src*="htmx.min.js"]')).toHaveCount(1);
@@ -158,6 +162,7 @@ test('"New chat" in the drawer starts a fresh transcript in place, from the head
   await drawerState(page, { open: true, conversation_id: 0 });
   const drawer = page.locator('#ab-drawer');
   await expect(drawer.locator('#ab-form')).toBeVisible();
+  await booted(drawer);
   await drawer.locator('#ab-message').fill('hello');
   await drawer.locator('#ab-message').press('Enter');
   await turnDone(drawer);
