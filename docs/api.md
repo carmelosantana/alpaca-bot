@@ -531,7 +531,7 @@ total is. Both are `SettingsRoutesTest::test_usage_route_reports_the_month`.
 
 The chat screen (section 7) is server-rendered, and these routes render its pieces again on
 demand: htmx swaps the selects, the screen's script asks for the bubbles, and `/view/panel`
-renders the whole chat for the admin-wide drawer. They are for the plugin's own chat. A client
+renders the whole chat for the admin-wide drawer, whose state `/view/drawer` stores. They are for the plugin's own chat. A client
 that wants data reads the JSON routes above; these answer HTML, escaped where
 it is built, under `Content-Type: text/html; charset=utf-8` and an `X-Alpaca-Bot-View: 1`
 header. An error is still core's JSON error shape.

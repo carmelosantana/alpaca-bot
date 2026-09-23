@@ -78,20 +78,21 @@ final class Menu
     public function __construct(private SettingsPage $settings, private $chatRenderer, private Access $access) {}
 
     /**
-     * The capability that shows the menu and the chat screen, and the chat on every other admin
-     * screen through Admin\Drawer, which asks this rather than a question of its own: it is the
-     * same chat under a different chrome.
+     * The capability that shows the menu and the chat screen, and the drawer on the other admin
+     * screens (Admin\Drawer), which asks this rather than a question of its own: it is the same
+     * chat under a different chrome.
      *
      * @since 0.6.0
      */
     public static function capability(Access $access): string
     {
         /**
-         * Filters the capability that shows the Alpaca Bot menu and its chat screen. Filtered apart
-         * from the REST routes' `alpaca_bot/capability/chat`, so a site can open the screen to a
-         * role and not the API, or the reverse. Only a non-empty, non-numeric string is honoured
-         * (Capability::filtered()): `true`, `__return_true` or a number would turn the check into a
-         * legacy user level, so they are ignored and the Chat row stands.
+         * Filters the capability that shows the Alpaca Bot menu, its chat screen and the chat
+         * drawer on the other admin screens (Admin\Drawer). Filtered apart from the REST routes'
+         * `alpaca_bot/capability/chat`, so a site can open the screen to a role and not the API, or
+         * the reverse. Only a non-empty, non-numeric string is honoured (Capability::filtered()):
+         * `true`, `__return_true` or a number would turn the check into a legacy user level, so
+         * they are ignored and the Chat row stands.
          *
          * @since 0.5.0
          * @param string $capability the Chat row of Settings › Access, `edit_posts` by default

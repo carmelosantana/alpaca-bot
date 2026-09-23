@@ -1,8 +1,9 @@
 /**
  * The admin-wide drawer's loader (Admin\Drawer): a small script on each screen that prints the
  * launcher, which does nothing until the launcher is pressed. The first open mounts the chat
- * (mount.ts); every open and close after that only shows and hides it, so a turn streaming into
- * the drawer is never re-rendered and the chat bundle's listeners are never bound twice.
+ * (mount.ts), and a later open mounts it only if that failed; once it is mounted, opening and
+ * closing only show and hide it, so a turn streaming into the drawer is never re-rendered and the
+ * chat bundle's listeners are never bound twice.
  *
  * What the drawer remembers goes to POST /view/drawer and comes back on the next screen as the
  * drawer element's data attributes, where a drawer left open opens itself. That open does not
