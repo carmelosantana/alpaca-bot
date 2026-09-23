@@ -7,13 +7,19 @@
  * time (the nonce header, the history select's conversation id) is changed on the
  * htmx:configRequest event instead. Every fragment it inserts came from a /view/* route.
  *
- * Its listeners sit on the document, but it acts only inside the shell, the `.ab-wrap` around the
- * form: the admin-wide drawer (Admin\Drawer) puts the shell on wp-admin screens whose own buttons
- * carry `data-action` too (the comments list's Quick Edit is `data-action="edit"`) and whose own
- * pages may hold code blocks. And it tells whatever hosts the shell two things, as events on the
- * form: `ab:conversation` (`detail.id`) whenever the conversation the transcript shows is set,
- * and `ab:new-chat`, cancelable, before the history select's "New chat" leaves the page.
- * resources/ts/drawer.ts listens for both.
+ * Its listeners on the document and the body hear the whole page, but what they act on is the
+ * shell, the `.ab-wrap` around the form: a click on a `data-action` button inside it, an htmx
+ * request, swap or error whose element is inside it, a code block inside it. The admin-wide drawer
+ * (Admin\Drawer) puts the shell on wp-admin screens whose own buttons carry `data-action` too (the
+ * comments list's Quick Edit is `data-action="edit"`), whose pages may hold code blocks, and where
+ * another plugin's htmx must not have this chat's REST nonce added to its requests or its errors
+ * shown in this chat's status line. One thing outside the shell is the chat's too: a prompt answer
+ * (`.alpaca-bot-answer`, Shortcodes\Chat) on a page that also carries a shell, whose code blocks
+ * are decorated and whose copy buttons copy, as they were when this decorated the whole page. And
+ * it tells whatever hosts the shell two things, as events on the form: `ab:conversation`
+ * (`detail.id`) whenever the conversation the transcript shows is set, and `ab:new-chat`,
+ * cancelable, before the history select's "New chat" leaves the page. resources/ts/drawer.ts
+ * listens for both.
  *
  * boot() is exported rather than run on import, so node:test can drive it against a document of
  * its own (tests/ts/chat.test.ts, Kanboard #4334); chat.ts is the entry that finds the shell and
@@ -61,6 +67,13 @@ export function boot(cfg: Settings, form: HTMLFormElement): void {
   // What this boot acts on: the shell (the file docblock says why), or the document for a form
   // that is not in one.
   const shell: ParentNode = form.closest('.ab-wrap') ?? document;
+  /** Whether an event's target is the shell's: the htmx listeners below ask this. */
+  const ours = (target: EventTarget | null): boolean => target instanceof Node && shell.contains(target);
+  /** The shell's code blocks, and a prompt answer's on the same page (the file docblock). */
+  function decorateOwn(): void {
+    decorate(shell, t('copyCode'));
+    for (const answer of $$('.alpaca-bot-answer')) decorate(answer, t('copyCode'));
+  }
   let busy = false;
   let expired = false;
   let offlineShown = false;
@@ -345,7 +358,9 @@ export function boot(cfg: Settings, form: HTMLFormElement): void {
   });
   document.addEventListener('click', (e) => {
     const button = (e.target as Element).closest<HTMLElement>('[data-action]');
-    if (!button || !shell.contains(button)) return;
+    if (!button) return;
+    const answersCopy = button.dataset.action === 'copy-code' && button.closest('.alpaca-bot-answer') !== null;
+    if (!shell.contains(button) && !answersCopy) return;
     const turn = button.closest('.ab-msg');
     switch (button.dataset.action) {
       case 'copy': void copy(button, turn ? ($('.ab-msg__content', turn)?.innerText ?? '') : ''); break;
@@ -362,6 +377,7 @@ export function boot(cfg: Settings, form: HTMLFormElement): void {
   document.body.addEventListener('htmx:configRequest', (e) => {
     const ev = e as CustomEvent<HtmxDetail>;
     const target = ev.target as HTMLElement;
+    if (!ours(target)) return;
     ev.detail.headers['X-WP-Nonce'] = cfg.nonce;
     if (target.id !== 'ab-history-select') return;
     // HistorySelect asks for /messages/0; the chosen option's data-id replaces the 0 here.
@@ -377,12 +393,14 @@ export function boot(cfg: Settings, form: HTMLFormElement): void {
     }
     ev.detail.path = ev.detail.path.replace(/(messages(?:\/|%2F))0(?=$|[?&#])/i, '$1' + id);
   });
-  document.body.addEventListener('htmx:afterSwap', () => {
+  document.body.addEventListener('htmx:afterSwap', (e) => {
+    if (!ours(e.target)) return;
     const list = $('#ab-messages');
     if (list) setConversation(list.dataset.conversation);
-    decorate(shell, t('copyCode'));
+    decorateOwn();
   });
   document.body.addEventListener('htmx:responseError', (e) => {
+    if (!ours(e.target)) return;
     const xhr = (e as CustomEvent<HtmxDetail>).detail.xhr;
     void restError(null, xhr?.responseText ?? '').then((error) => refused(xhr?.status ?? 0, error));
   });
@@ -390,7 +408,7 @@ export function boot(cfg: Settings, form: HTMLFormElement): void {
   window.addEventListener('offline', connectivity);
   watchNonce((nonce) => { cfg.nonce = nonce; });
 
-  decorate(shell, t('copyCode'));
+  decorateOwn();
   connectivity();
   grow(textarea);
   textarea.focus();
