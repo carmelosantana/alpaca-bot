@@ -117,6 +117,7 @@ only the default the route's own filters are handed.
 | `view/default-model` | `POST /view/default-model` | Chat row (`edit_posts`) |
 | `view/bubble` | `GET\|POST /view/bubble` | Chat row (`edit_posts`) |
 | `view/panel` | `GET /view/panel` | Chat row (`edit_posts`) |
+| `view/drawer` | `POST /view/drawer` | Chat row (`edit_posts`) |
 
 The filter is `alpaca_bot/capability/{key}` with signature `(string $capability,
 \WP_REST_Request $request)`, and the key is the route path with its `{id}` segment removed, so
@@ -173,6 +174,7 @@ that returned a boolean by mistake would otherwise open the route rather than cl
 | `GET` | `/view/bubble?role=&streaming=` | Chat row (`edit_posts`) | no |
 | `POST` | `/view/bubble` | Chat row (`edit_posts`) | no |
 | `GET` | `/view/panel?conversation_id=&post_id=` | Chat row (`edit_posts`) | no |
+| `POST` | `/view/drawer` | Chat row (`edit_posts`) | no |
 
 Every response is JSON except a redeemed stream, which is `text/event-stream`, and the `/view/*`
 fragments, which are `text/html` (section 3, "The `/view/*` fragments"). In the examples,
@@ -543,6 +545,7 @@ header. An error is still core's JSON error shape.
 | `GET /view/bubble` | An empty bubble for the screen to stream into | `role` (`user`\|`assistant`, default `assistant`), `streaming` (boolean: a polite live region) |
 | `POST /view/bubble` | A finished bubble, an assistant's content rendered as markdown; a user turn with its images is the optimistic bubble the screen shows while the turn runs | `role` (required), `content`, `model`, `usage` (`{prompt_tokens, completion_tokens}` or null), `duration_ms`, `images` (array of `data:` URLs; a user turn only), `tool_calls` (the reply's `meta.tool_calls`; the receipt ends `· 2 tools`) |
 | `GET /view/panel` | The whole chat (header, transcript and composer) in the drawer's panel, with its close button | `conversation_id`: one of your own to open; 0, a missing one or anyone else's is a new chat, as `?conversation=` is on the chat screen. `post_id`: the post being edited, written into the composer's hidden `context[post_id]` field (the field the chat bundle sends as `context.post_id`), as `&post=` is on the chat screen |
+| `POST /view/drawer` | Nothing (an empty fragment); stores what the admin-wide drawer shows for you, as user meta `alpaca_bot_drawer_open` and `alpaca_bot_drawer_conversation` | `open` (boolean), `conversation_id` (integer, 0 or more). A parameter you leave out is left as it was; the conversation is not checked here, and one that is not yours opens as a new chat when `/view/panel` is asked for it |
 
 Your effective model is the one you last chose in the select (stored as user meta
 `alpaca_bot_default_model`) while the site lets users choose and the provider still lists it,
@@ -833,7 +836,8 @@ govern the REST routes and nothing else.
 
 The chat screen's capability is the Chat row of **Settings › Access** (`edit_posts` by default)
 through `alpaca_bot/admin/menu_capability`, with signature `(string $capability)` — no request,
-since a menu is built once per admin load. The row is the same one the chat REST routes take as
+since a menu is built once per admin load. The admin-wide drawer (below) asks the same filter, on
+every admin screen that could show it, so it opens to exactly the users the screen does. The row is the same one the chat REST routes take as
 their default, so moving it moves the screen and the API together; the two filters stay separate,
 so a site can still open the screen to a role without the API or the reverse:
 
@@ -857,6 +861,15 @@ the screen was opened from, which the screen sends with every turn as `context.p
 `current-screen` context source includes the post only on a turn by a user who may edit it. The
 screen's requests are `/view/*` fragments (section 3) and `POST /chat`; its model select posts
 your choice to `/view/default-model` on change, and the screen opens on that choice next time.
+
+On the other admin screens the same chat is a drawer: a launcher at the bottom right of the page,
+and the chat itself fetched from `GET /view/panel` the first time it is opened, which is also when
+the chat's script, htmx and stylesheet are added to that page. It lists the same per-user
+conversations as the screen, so a thread started in one continues in the other. Whether it is
+open and which conversation it holds are yours, stored through `POST /view/drawer` and read back
+on the next screen, where a drawer left open opens itself and fetches `GET /view/panel` again.
+It is not printed on the chat screen itself or on a block editor screen. It never loads the media
+library, so its image button is there only on a screen that loads the library itself.
 
 ## 8. Adding routes
 

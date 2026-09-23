@@ -84,6 +84,8 @@ it('describes what the chat screen does now, and points support at the wordpress
     Functions\when('esc_url')->returnArg();
     $chat = helpTabContent('alpaca-bot-chat');
     expect($chat)->toContain('New chat')->toContain('Enter')->toContain('Shift')->toContain('image')->toContain('Copy')->toContain('Edit and resend')
+        // The drawer (Admin\Drawer): where it is, where it is not, and the image button it lacks.
+        ->toContain('round button')->toContain('except the block editor')->toContain('already loads the media library')
         // The image cap is Assets::maxImageBytes(), which reads post_max_size alone; the tab must name that setting, not the upload limit that has no say.
         ->toContain('post_max_size')->not->toMatch('/is the site.s own upload limit/');
     // A question goes to the wordpress.org forum, premium help is a call booked on
