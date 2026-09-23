@@ -244,7 +244,8 @@ it('serve() writes a view response as HTML and leaves every other response to co
 
 it('renders the drawer panel on one of the user\'s conversations, and a new chat for anyone else\'s, with the post as the composer\'s context', function (): void {
     Functions\when('admin_url')->alias(fn(string $p) => '/wp-admin/' . $p);
-    Functions\when('get_transient')->justReturn([['id' => 'llama3.2', 'label' => 'llama3.2']]);
+    Functions\when('get_transient')->justReturn([['id' => 'llama3.2', 'label' => 'llama3.2'], ['id' => 'llava:7b', 'label' => 'llava']]);
+    Functions\when('get_user_meta')->justReturn('llava:7b');
     $asked = [];
     Functions\when('get_posts')->alias(static function (array $query) use (&$asked): array {
         $asked[] = [$query['author'], $query['numberposts']];
@@ -255,12 +256,14 @@ it('renders the drawer panel on one of the user\'s conversations, and a new chat
     $res = $c->panel(restRequest('GET', '/x', ['conversation_id' => 5, 'post_id' => 12]));
     expect($res->headers['X-Alpaca-Bot-View'])->toBe('1')
         ->and($res->get_data())->toStartWith('<div class="ab-drawer__panel">')->toContain('<div class="ab-wrap ab-wrap--drawer">')
-        ->toContain('<div id="ab-chat" data-conversation="5">')->toContain('ab-msg--assistant')
-        ->toContain('<option value="8" data-id="8">Listed</option>')->toContain('name="context[post_id]" value="12"');
+        ->toContain('<div id="ab-chat" data-conversation="5">')->toContain('<option value="8" data-id="8">Listed</option>')
+        // The user's effective model (UserPrefs), not the site default, and the post as the turn's context.
+        ->toContain('name="model" value="llava:7b"')->toContain('name="context[post_id]" value="12"');
 
-    // Post 6 is user 9's (this file's stubs): not an error, a new chat, as ?conversation= is on the screen.
+    // Post 6 is user 9's (this file's stubs): its transcript is not rendered, and it is not an
+    // error either but a new chat, as ?conversation= is on the screen.
     $theirs = $c->panel(restRequest('GET', '/x', ['conversation_id' => 6]))->get_data();
-    expect($theirs)->toContain('<div id="ab-chat" data-conversation="0">')->not->toContain('ab-msg--assistant')->toContain('name="context[post_id]" value="0"')
+    expect($theirs)->not->toContain('ab-msg--assistant')->toContain('<div id="ab-chat" data-conversation="0">')
         // Both histories were user 3's, chat.history_limit deep.
         ->and($asked)->toBe([[3, 4], [3, 4]]);
 });

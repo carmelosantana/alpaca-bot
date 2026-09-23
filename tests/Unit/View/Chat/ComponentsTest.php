@@ -294,8 +294,13 @@ it('drawer puts the shell in its own panel: the drawer layout, no core .wrap, an
     Functions\when('plugins_url')->alias(fn(string $p) => '/plugins/alpaca-bot/' . $p);
     Functions\when('admin_url')->alias(fn(string $p) => '/wp-admin/' . $p);
     $store = new Store(['models.default' => 'llama3.2']);
-
-    $html = (new Drawer($store, new ModelCatalog(new Factory($store)), new Conversation(5, 3, 'T', [new Message('assistant', 'a', 'llama3.2')]), [], 12, 'llama3.2', sys_get_temp_dir() . '/ab-missing-' . getmypid() . '.svg'))->render();
+    $sprite = sys_get_temp_dir() . '/ab-drawer-icons-' . getmypid() . '.svg';
+    file_put_contents($sprite, '<svg xmlns="http://www.w3.org/2000/svg" style="display:none"><symbol id="ab-drawer-probe"></symbol></svg>');
+    try {
+        $html = (new Drawer($store, new ModelCatalog(new Factory($store)), new Conversation(5, 3, 'T', [new Message('assistant', 'a', 'llama3.2')]), [], 12, 'qwen3:8b', $sprite))->render();
+    } finally {
+        unlink($sprite);
+    }
 
     expect($html)->toStartWith('<div class="ab-drawer__panel"><button type="button" class="ab-btn ab-btn--icon ab-drawer__close" data-action="drawer-close" aria-label="Close the chat">')
         ->toContain('<div class="ab-wrap ab-wrap--drawer">')
@@ -303,9 +308,11 @@ it('drawer puts the shell in its own panel: the drawer layout, no core .wrap, an
         ->not->toContain('class="wrap ab-wrap"')
         ->not->toContain('ab-wrap--front')
         // It is the same chat: the header, the transcript and the form the chat screen renders,
-        // on the conversation, the post and the model it was handed.
+        // on the conversation, the post, the model and the sprite it was handed.
         ->toContain('href="/wp-admin/admin.php?page=alpaca-bot"')
         ->toContain('<div id="ab-chat" data-conversation="5">')->toContain('id="ab-messages"')->toContain('ab-msg--assistant')
-        ->toContain('id="ab-form"')->toContain('name="context[post_id]" value="12"')->toContain('name="model" value="llama3.2"')
+        ->toContain('id="ab-form"')->toContain('name="context[post_id]" value="12"')->toContain('name="model" value="qwen3:8b"')
+        ->toContain('<symbol id="ab-drawer-probe">')
+        // The shell is inside the panel, not beside it.
         ->toEndWith('</div></div>');
 });
