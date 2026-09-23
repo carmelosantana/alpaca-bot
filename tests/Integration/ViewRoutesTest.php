@@ -53,7 +53,7 @@ final class ViewRoutesTest extends TestCase
     public function test_the_routes_are_registered_and_the_controller_serves_the_html_itself(): void
     {
         $routes = rest_get_server()->get_routes();
-        foreach (['/alpaca-bot/v1/view/messages/(?P<id>\d+)', '/alpaca-bot/v1/view/history', '/alpaca-bot/v1/view/models', '/alpaca-bot/v1/view/default-model', '/alpaca-bot/v1/view/bubble'] as $route) {
+        foreach (['/alpaca-bot/v1/view/messages/(?P<id>\d+)', '/alpaca-bot/v1/view/history', '/alpaca-bot/v1/view/models', '/alpaca-bot/v1/view/default-model', '/alpaca-bot/v1/view/bubble', '/alpaca-bot/v1/view/panel'] as $route) {
             $this->assertArrayHasKey($route, $routes);
         }
         $hooked = [];
@@ -143,10 +143,25 @@ final class ViewRoutesTest extends TestCase
     {
         $subscriber = self::factory()->user->create(['role' => 'subscriber']);
         wp_set_current_user($subscriber);
-        foreach ([['GET', '/view/history'], ['GET', '/view/models'], ['GET', '/view/bubble'], ['POST', '/view/default-model', ['model' => 'x']], ['GET', '/view/messages/1']] as $call) {
+        foreach ([['GET', '/view/history'], ['GET', '/view/models'], ['GET', '/view/bubble'], ['POST', '/view/bubble', ['role' => 'user']], ['POST', '/view/default-model', ['model' => 'x']], ['GET', '/view/messages/1'], ['GET', '/view/panel']] as $call) {
             $res = $this->rest($call[0], $call[1], $call[2] ?? []);
             $this->assertSame(403, $res->get_status(), $call[1]);
         }
+    }
+
+    public function test_panel_renders_the_drawer_chat_on_the_users_own_conversation(): void
+    {
+        $uid = $this->asAdmin();
+        $conversation = Plugin::instance()->get(ConversationStore::class)->create($uid, 'Drawer thread');
+
+        $res = $this->rest('GET', '/view/panel', ['conversation_id' => (string) $conversation->id]);
+        $this->assertSame(200, $res->get_status(), print_r($res->get_data(), true));
+        $this->assertSame('1', $res->get_headers()['X-Alpaca-Bot-View']);
+        $html = $res->get_data();
+        $this->assertStringStartsWith('<div class="ab-drawer__panel">', $html);
+        $this->assertStringContainsString('<div class="ab-wrap ab-wrap--drawer">', $html);
+        $this->assertStringContainsString('<div id="ab-chat" data-conversation="' . $conversation->id . '">', $html);
+        $this->assertStringContainsString('id="ab-form"', $html);
     }
 
     public function test_the_chat_screen_renders_the_shell_and_the_assets_enqueue_on_its_hook_only(): void

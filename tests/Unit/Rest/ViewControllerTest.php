@@ -67,14 +67,14 @@ it('persists the default model and returns a notice', function (): void {
 
 // ---------------------------------------------------------------- beyond the brief's two
 
-it('declares the five view routes for editors, with the model list rate limited like /models', function (): void {
+it('declares every view route on the Chat row, each under its own filter key, with only the model list rate limited, like /models', function (): void {
     $routes = viewController()->routes();
     $byMethod = [];
     foreach ($routes as $route) {
         expect($route['capability'])->toBe(Controller::CHAT);
         $byMethod[$route['methods'] . ' ' . $route['path']] = $route;
     }
-    expect(array_keys($byMethod))->toBe(['GET /view/messages/(?P<id>\d+)', 'GET /view/history', 'GET /view/models', 'POST /view/default-model', 'GET /view/bubble', 'POST /view/bubble'])
+    expect(array_keys($byMethod))->toBe(['GET /view/messages/(?P<id>\d+)', 'GET /view/history', 'GET /view/models', 'POST /view/default-model', 'GET /view/bubble', 'POST /view/bubble', 'GET /view/panel'])
         ->and($byMethod['GET /view/models']['args'])->toBe(['refresh' => ['type' => 'boolean', 'default' => false]])
         ->and($byMethod['GET /view/history']['args']['conversation_id']['type'])->toBe('integer')
         ->and($byMethod['POST /view/default-model']['args']['model']['required'])->toBeTrue()
@@ -82,8 +82,9 @@ it('declares the five view routes for editors, with the model list rate limited 
         ->and($byMethod['POST /view/bubble']['args']['role']['enum'])->toBe(['user', 'assistant'])
         ->and($byMethod['POST /view/bubble']['args']['images'])->toBe(['type' => 'array', 'items' => ['type' => 'string'], 'default' => []])
         ->and($byMethod['POST /view/bubble']['args']['tool_calls'])->toBe(['type' => 'array', 'items' => ['type' => 'object'], 'default' => []])
+        ->and($byMethod['GET /view/panel']['args'])->toBe(['conversation_id' => ['type' => 'integer', 'default' => 0, 'minimum' => 0], 'post_id' => ['type' => 'integer', 'default' => 0, 'minimum' => 0]])
         // One capability filter key per fragment, the {id} segment removed as for /conversations.
-        ->and(array_map(ViewController::routeKey(...), array_column($routes, 'path')))->toBe(['view/messages', 'view/history', 'view/models', 'view/default-model', 'view/bubble', 'view/bubble']);
+        ->and(array_map(ViewController::routeKey(...), array_column($routes, 'path')))->toBe(['view/messages', 'view/history', 'view/models', 'view/default-model', 'view/bubble', 'view/bubble', 'view/panel']);
     foreach ($byMethod as $key => $route) {
         expect($route['rate_limit'] ?? false)->toBe($key === 'GET /view/models', $key);
     }
@@ -91,7 +92,7 @@ it('declares the five view routes for editors, with the model list rate limited 
 
 it('registers its routes and hooks rest_pre_serve_request to write the HTML itself', function (): void {
     $c = viewController();
-    Functions\expect('register_rest_route')->times(6)->withArgs(fn(string $ns, string $path): bool => $ns === 'alpaca-bot/v1' && str_starts_with($path, '/view/'));
+    Functions\expect('register_rest_route')->times(7)->withArgs(fn(string $ns, string $path): bool => $ns === 'alpaca-bot/v1' && str_starts_with($path, '/view/'));
     Filters\expectAdded('rest_pre_serve_request')->once()->with([$c, 'serve'], PHP_INT_MAX, 4);
     $c->register();
 });
@@ -237,4 +238,29 @@ it('serve() writes a view response as HTML and leaves every other response to co
     ob_start();
     expect($c->serve(false, $view, restRequest('HEAD', '/alpaca-bot/v1/view/history'), $server))->toBeTrue();
     expect(ob_get_clean())->toBe('')->and($server->sent)->toBe([['Content-Type', 'text/html; charset=utf-8']]);
+});
+
+// ---------------------------------------------------------------- Task 17: GET /view/panel
+
+it('renders the drawer panel on one of the user\'s conversations, and a new chat for anyone else\'s, with the post as the composer\'s context', function (): void {
+    Functions\when('admin_url')->alias(fn(string $p) => '/wp-admin/' . $p);
+    Functions\when('get_transient')->justReturn([['id' => 'llama3.2', 'label' => 'llama3.2']]);
+    $asked = [];
+    Functions\when('get_posts')->alias(static function (array $query) use (&$asked): array {
+        $asked[] = [$query['author'], $query['numberposts']];
+        return [(object) ['ID' => 8, 'post_title' => 'Listed', 'post_date_gmt' => '2024-01-01 00:00:00']];
+    });
+    $c = viewController(['chat.history_limit' => 4]);
+
+    $res = $c->panel(restRequest('GET', '/x', ['conversation_id' => 5, 'post_id' => 12]));
+    expect($res->headers['X-Alpaca-Bot-View'])->toBe('1')
+        ->and($res->get_data())->toStartWith('<div class="ab-drawer__panel">')->toContain('<div class="ab-wrap ab-wrap--drawer">')
+        ->toContain('<div id="ab-chat" data-conversation="5">')->toContain('ab-msg--assistant')
+        ->toContain('<option value="8" data-id="8">Listed</option>')->toContain('name="context[post_id]" value="12"');
+
+    // Post 6 is user 9's (this file's stubs): not an error, a new chat, as ?conversation= is on the screen.
+    $theirs = $c->panel(restRequest('GET', '/x', ['conversation_id' => 6]))->get_data();
+    expect($theirs)->toContain('<div id="ab-chat" data-conversation="0">')->not->toContain('ab-msg--assistant')->toContain('name="context[post_id]" value="0"')
+        // Both histories were user 3's, chat.history_limit deep.
+        ->and($asked)->toBe([[3, 4], [3, 4]]);
 });

@@ -4,8 +4,11 @@ declare(strict_types=1);
 
 use AlpacaBot\Chat\Conversation;
 use AlpacaBot\Chat\Message;
+use AlpacaBot\Provider\Factory;
 use AlpacaBot\Provider\Model;
+use AlpacaBot\Provider\ModelCatalog;
 use AlpacaBot\View\Chat\Composer;
+use AlpacaBot\View\Chat\Drawer;
 use AlpacaBot\View\Chat\Header;
 use AlpacaBot\View\Chat\HistorySelect;
 use AlpacaBot\View\Chat\MessageBubble;
@@ -282,3 +285,27 @@ it('renders a placeholder for the images the store evicted, escaped, and nothing
     expect($bubble(new Message('assistant', 'hi', 'm', null, 0, [], ['images_evicted' => 1])))->not->toContain('ab-msg__images');
 });
 
+// ---------------------------------------------------------------- Task 17: the drawer's panel
+
+it('drawer puts the shell in its own panel: the drawer layout, no core .wrap, and a close button the drawer script reads', function (): void {
+    Functions\when('get_transient')->justReturn([['id' => 'llama3.2', 'label' => 'llama3.2']]);
+    Functions\when('wp_get_current_user')->justReturn((object) ['display_name' => 'Carmelo', 'ID' => 3]);
+    Functions\when('get_avatar_url')->justReturn('/u.png');
+    Functions\when('plugins_url')->alias(fn(string $p) => '/plugins/alpaca-bot/' . $p);
+    Functions\when('admin_url')->alias(fn(string $p) => '/wp-admin/' . $p);
+    $store = new Store(['models.default' => 'llama3.2']);
+
+    $html = (new Drawer($store, new ModelCatalog(new Factory($store)), new Conversation(5, 3, 'T', [new Message('assistant', 'a', 'llama3.2')]), [], 12, 'llama3.2', sys_get_temp_dir() . '/ab-missing-' . getmypid() . '.svg'))->render();
+
+    expect($html)->toStartWith('<div class="ab-drawer__panel"><button type="button" class="ab-btn ab-btn--icon ab-drawer__close" data-action="drawer-close" aria-label="Close the chat">')
+        ->toContain('<div class="ab-wrap ab-wrap--drawer">')
+        // Core's .wrap is the admin screen's layout, and a fixed panel is not laid out inside it.
+        ->not->toContain('class="wrap ab-wrap"')
+        ->not->toContain('ab-wrap--front')
+        // It is the same chat: the header, the transcript and the form the chat screen renders,
+        // on the conversation, the post and the model it was handed.
+        ->toContain('href="/wp-admin/admin.php?page=alpaca-bot"')
+        ->toContain('<div id="ab-chat" data-conversation="5">')->toContain('id="ab-messages"')->toContain('ab-msg--assistant')
+        ->toContain('id="ab-form"')->toContain('name="context[post_id]" value="12"')->toContain('name="model" value="llama3.2"')
+        ->toEndWith('</div></div>');
+});

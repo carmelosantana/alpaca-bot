@@ -10,6 +10,7 @@ use AlpacaBot\Chat\UserPrefs;
 use AlpacaBot\Errors;
 use AlpacaBot\Provider\ModelCatalog;
 use AlpacaBot\Settings\Store;
+use AlpacaBot\View\Chat\Drawer;
 use AlpacaBot\View\Chat\HistorySelect;
 use AlpacaBot\View\Chat\MessageBubble;
 use AlpacaBot\View\Chat\MessageList;
@@ -20,9 +21,9 @@ use AlpacaBot\View\Markdown;
 
 /**
  * The `/view/*` routes: the chat screen's fragments, rendered server-side by the same components
- * the screen is built from, for htmx (the selects) and chat.ts (the bubbles) to swap in. Each
- * answers `text/html`, not JSON, and is for the screen: a client that wants data reads the JSON
- * routes. Every route takes the Chat row of Settings › Access (`edit_posts` by default), as the
+ * the screen is built from, for htmx (the selects) and chat.ts (the bubbles) to swap in, and the
+ * whole chat for the admin-wide drawer (`/view/panel`). Each answers `text/html`, not JSON, and is
+ * for those: a client that wants data reads the JSON routes. Every route takes the Chat row of Settings › Access (`edit_posts` by default), as the
  * screen and the chat routes do, under its own `alpaca_bot/capability/view/{name}` filter.
  *
  * - `GET /view/messages/{id}`: the transcript (#ab-messages) of one of the user's conversations;
@@ -39,6 +40,9 @@ use AlpacaBot\View\Markdown;
  *   the streamed text, its receipt counting the `tool_calls` the done frame carried; a user
  *   turn with its `images` (data URLs) is the optimistic bubble chat.ts shows while the turn
  *   runs.
+ * - `GET /view/panel?conversation_id=&post_id=`: the whole chat as one fragment (View\Chat\Drawer)
+ *   for the admin-wide drawer, on one of the user's conversations or a new chat, as the chat
+ *   screen answers `?conversation=`.
  *
  * Core renders a callback's return as JSON, so a callback answers a WP_REST_Response whose data
  * is the HTML string and whose `X-Alpaca-Bot-View: 1` header marks it; serve(), on
@@ -57,8 +61,10 @@ final class ViewController extends Controller
 
     /**
      * `/view/models` shares the chat rate limit for the reason `/models` does: `refresh=1` is a
-     * synchronous provider call. The rest are reads of the site's own database, or a bubble
-     * built from the request, and are not limited.
+     * synchronous provider call. The rest are not limited. Each works on the site's own database or
+     * builds a bubble from the request, and `/view/panel` also renders the model select through
+     * the catalog, which asks the provider when its cache is empty, as the chat screen's own
+     * render does; that screen is not rate limited either.
      */
     public function routes(): array
     {
@@ -77,6 +83,10 @@ final class ViewController extends Controller
                 'duration_ms' => ['type' => 'integer', 'default' => 0, 'minimum' => 0],
                 'images' => ['type' => 'array', 'items' => ['type' => 'string'], 'default' => []],
                 'tool_calls' => ['type' => 'array', 'items' => ['type' => 'object'], 'default' => []],
+            ]],
+            ['path' => '/view/panel', 'methods' => 'GET', 'callback' => [$this, 'panel'], 'capability' => self::CHAT, 'args' => [
+                'conversation_id' => ['type' => 'integer', 'default' => 0, 'minimum' => 0],
+                'post_id' => ['type' => 'integer', 'default' => 0, 'minimum' => 0],
             ]],
         ];
     }
@@ -189,6 +199,31 @@ final class ViewController extends Controller
             ['duration_ms' => max(0, (int) $request->get_param('duration_ms')), 'tool_calls' => array_values(array_filter((array) $request->get_param('tool_calls'), 'is_array'))],
         );
         return $this->renderBubble($message, false);
+    }
+
+    /**
+     * The whole chat as one fragment, built as Admin\ChatScreen builds the chat screen:
+     * `conversation_id` opens one of the user's own, and anyone else's, or a missing one, is a
+     * new chat rather than an error, as `?conversation=` is on the screen; the history is the
+     * user's, `chat.history_limit` deep; the model is the user's effective one (UserPrefs).
+     * `post_id` is carried into the composer as the turn's context and is not checked here:
+     * Context\CurrentScreenSource decides per turn, for the turn's user, whether the post is sent.
+     */
+    public function panel(\WP_REST_Request $request): \WP_REST_Response
+    {
+        $userId = $this->userId();
+        $wanted = max(0, (int) $request->get_param('conversation_id'));
+        $conversation = $wanted > 0 ? $this->conversations->load($wanted, $userId) : null;
+        $history = $this->conversations->listFor($userId, max(1, (int) $this->store->get('chat.history_limit')));
+        $drawer = new Drawer(
+            $this->store,
+            $this->catalog,
+            $conversation,
+            $history,
+            max(0, (int) $request->get_param('post_id')),
+            $this->prefs->modelFor($userId, $this->catalog, $this->store),
+        );
+        return self::html($drawer->render());
     }
 
     /**
