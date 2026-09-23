@@ -28,8 +28,8 @@ it('gives an object schema with no properties an empty object for them, which Op
     expect(json_encode($declared))->toBe('{"type":"object","properties":{}}');
 });
 
-// The known gap until Task 28: only the top level is repaired. A nested empty object still goes
-// out as a JSON array, and this pins that it does, so the day it stops is noticed.
+// Only the top level is repaired. A nested empty object still goes out as a JSON array, and this
+// pins that it does, so the day it stops is noticed.
 it('repairs only the top-level properties, and leaves a nested empty one as it came', function (): void {
     $schema = ['type' => 'object', 'properties' => ['inner' => ['type' => 'object', 'properties' => []]]];
     $params = (new SchemaTool('t', 'd', $schema, static fn(array $a): ToolResult => ToolResult::success('')))->toFunctionSchema()['function']['parameters'];
