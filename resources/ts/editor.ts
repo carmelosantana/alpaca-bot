@@ -16,15 +16,17 @@
  * ComplementaryArea), and the chat must outlive a close: a turn may be streaming into it, and the
  * chat bundle is bound to the composer it booted against. So the chat lives in one element made
  * here, once, which each mount of the sidebar's content takes into its slot, and which an unmount
- * puts back in the page, hidden, only if its slot still holds it. On WordPress 7.1.2 the content
- * mounts, unmounts and mounts again within one opening, and the chat follows each step. Back
- * in the page and not merely detached, because the bundle and htmx look for the chat in the
- * document: the bundle finds the transcript with document.querySelector() (boot.ts messages()) and
- * would append a reply that arrives while the sidebar is closed to the body instead, and htmx
- * drops the history select's
- * `ab:refresh from:body` listener the first time it fires on an element that is not in the page.
- * The chat is mounted the first time the sidebar opens, and again only after a mount that failed;
- * chat.js is added once (mount.ts).
+ * puts back in the page, hidden, only if its slot still holds it. The chat follows each step,
+ * however many an opening takes: with React's production build the content mounts once, and with
+ * the development build, which WordPress loads when SCRIPT_DEBUG is on, it mounts, unmounts and
+ * mounts again, because edit-post.js renders the editor inside React's StrictMode, which runs
+ * effects twice in development. Back in the page and not merely detached, because the bundle and
+ * htmx look for the chat in the document: the bundle finds the transcript with
+ * document.querySelector() (boot.ts messages()) and would append a reply that arrives while the
+ * sidebar is closed to the body instead, and htmx drops the history select's `ab:refresh from:body`
+ * listener the first time it fires on an element that is not in the page. The chat is mounted the
+ * first time the sidebar opens, and again only after a mount that failed; chat.js is added once
+ * (mount.ts).
  *
  * The post is the editor's (`core/editor`'s getCurrentPostId()). On a new post that is an
  * auto-draft, and the panel renders no chip for an auto-draft (View\Chat\Shell), so a chat mounted

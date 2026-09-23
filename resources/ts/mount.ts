@@ -107,11 +107,13 @@ export async function mountPanel(host: HTMLElement, cfg: MountSettings, nonce: s
  * "New chat" in place, for a host that keeps the chat on a page the chat screen's link would leave
  * (the drawer, the editor sidebar): a fresh transcript and history from GET /view/panel swapped
  * in, and the conversation set back to 0. The composer stays, because the bundle's listeners are
- * bound to it and a replaced form would have none, and so do its context chips. Answers true once
- * the fragment is swapped in. A request that is refused, answers something that is not an element,
- * or fails outright answers false and changes nothing; the outright failure (a network error, which
- * fetch() rejects with) is logged to the console, and the promise never rejects, so a caller that
- * does not wait on it leaves no unhandled rejection behind.
+ * bound to it and a replaced form would have none, and so do its context chips. Answers true for a
+ * 2xx response whose body parses to an element, once it has swapped in the transcript and the
+ * history that element holds (one it lacks is left as it was) and set the conversation back to 0.
+ * A request that is refused, a body that is not an element, or a request that fails outright
+ * answers false and changes nothing; the outright failure (a network error, which fetch() rejects
+ * with) is caught and logged to the console. So neither the request nor its parse rejects the
+ * promise, and a caller that does not wait on it is left no unhandled rejection by them.
  */
 export async function newChat(host: HTMLElement, cfg: MountSettings, nonce: string, query: Record<string, string>): Promise<boolean> {
   let fresh: HTMLElement | null;
