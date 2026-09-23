@@ -20,15 +20,15 @@ use AlpacaBot\Shortcodes\Chat as ChatShortcode;
  * options.php.
  *
  * Core saves an option whole, so a form that shows one tab posts every tab: the fields of the
- * tabs not shown go out as hidden inputs (Fields::hidden()), and the sanitize callback receives
- * the entire array every time. Under that, Schema::sanitize() keeps the stored value for any key
- * a post does not name, so a save can never reset a field it did not carry (the old first-save
- * bug, where saving one tab reset the others to their defaults). The two together cover PHP's
- * max_input_vars, which drops the tail of a long post (an overrides table is five controls per
- * model) and tells no one: the carry-over is printed before the visible tab so the tail is never
- * the key or the URL, a dropped field keeps its stored value, and the form ends with END_MARKER,
- * whose absence from a post means it was cut and the whole save is refused with a notice rather
- * than stored in part.
+ * tabs not shown go out as hidden inputs (Fields::hidden()), `access.mcp` aside (below), so the
+ * sanitize callback receives every other field every time. Under that, Schema::sanitize() keeps
+ * the stored value for any key a post does not name, so a save can never reset a field it did not
+ * carry (the old first-save bug, where saving one tab reset the others to their defaults). The
+ * two together cover PHP's max_input_vars, which drops the tail of a long post (an overrides table
+ * is five controls per model) and tells no one: the carry-over is printed before the visible tab
+ * so the tail is never the key or the URL, a dropped field keeps its stored value, and the form
+ * ends with END_MARKER, whose absence from a post means it was cut and the whole save is refused
+ * with a notice rather than stored in part.
  *
  * The sanitize callback is a closure, not `[Schema::class, 'sanitize']`: core calls it with the
  * option *name* second, and Schema::sanitize() wants the stored array there so a secret posted
@@ -47,10 +47,10 @@ use AlpacaBot\Shortcodes\Chat as ChatShortcode;
  * no filter of its own, so the menu's filter and the `/chat` route's are asked instead, and the
  * line names the one that moved. `access.mcp` has no control of its own: each MCP server
  * `toolkits.mcp_servers` lists gets a row posting one entry of that map, as
- * `alpaca_bot_settings[access.mcp][<server id>]`. A save from another tab posts nothing for the
- * map, which Fields::hidden() does not carry since its keys are server ids, so Schema::sanitize()
- * keeps it as stored; the Access tab carries every stored entry it shows no select for as a
- * hidden input, so saving it drops none whose id postable() admits.
+ * `alpaca_bot_settings[access.mcp][<server id>]`. The carry-over leaves the map out, so a save
+ * from another tab posts nothing for it and Schema::sanitize() keeps it as stored; the Access tab
+ * carries every stored entry it shows no select for as a hidden input, so saving it drops none
+ * whose id postable() admits and whose value is a string.
  *
  * @phpstan-import-type Field from Schema
  */
@@ -142,15 +142,17 @@ final class SettingsPage
         // the tail is the last rows of an overrides table, never the key or the URL. The marker
         // is the last input of all; a post without it was cut, and the sanitize callback refuses it.
         foreach (Schema::fields() as $key => $f) {
-            if ($f['section'] !== $active) {
+            // Not access.mcp: left out of the post, Schema::sanitize() keeps the whole stored map,
+            // while a carried map would replace it with whatever Fields::hidden() could print.
+            if ($f['section'] !== $active && $key !== 'access.mcp') {
                 echo Fields::hidden($key, $this->store->get($key)); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- escaped in Fields.
             }
         }
         if ($active === 'access') {
             // This tab posts the access.mcp map, one entry per MCP row, and a posted map replaces
             // the stored one whole: an entry with no row here (a server the list no longer has)
-            // is carried, or saving the tab would drop it. Fields::hidden() prints nothing for a
-            // map keyed by server id, so the inputs are written here.
+            // is carried, or saving the tab would drop it. Only an entry this page could have
+            // written is carried: a string under an id postable() admits.
             $stored = $this->store->get('access.mcp', []);
             foreach (is_array($stored) ? $stored : [] as $id => $capability) {
                 if (is_string($id) && is_string($capability) && self::postable($id) && !in_array($id, $this->mcpServers(), true)) {

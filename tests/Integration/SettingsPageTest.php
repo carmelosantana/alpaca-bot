@@ -166,7 +166,7 @@ final class SettingsPageTest extends TestCase
             'models.default' => 'qwen3-vl:2b',
             'models.temperature' => 0.3,
             'models.overrides' => ['qwen3-vl:2b' => ['num_ctx' => 4096, 'system' => 'Be brief & kind']],
-            // A flat map, which Fields::hidden() prints nothing for: it is absent from the post,
+            // A map the carry-over leaves out (SettingsPage::render()): it is absent from the post,
             // Schema::sanitize() keeps what is stored, and the round trip below is what proves
             // it. Seeded non-empty on purpose -- with an empty map the assertion passes whatever
             // the carry-over does, and what would be lost is access-control data.
@@ -297,6 +297,34 @@ final class SettingsPageTest extends TestCase
         $this->assertSame('Saved from the Chat tab', get_option(Plugin::OPTION)['chat.welcome']);
         $this->assertSame('publish_posts', $fresh()->stored('mcp.docs'));
         $this->assertSame('edit_posts', $fresh()->stored('mcp.gone'));
+    }
+
+    /**
+     * A save from another tab must leave the access.mcp map alone, whatever the stored map holds.
+     * Here a hand edit left one entry holding an array, written to the row directly because every
+     * writer through the option would sanitize it away. Were the map carried like other fields,
+     * Fields::hidden() would post that entry alone, the post would replace the map, and
+     * Schema::sanitizeAccessMcp() would store []: every server back to administrators only.
+     */
+    public function test_saving_another_tab_keeps_the_access_mcp_map_even_with_a_hand_edited_entry_in_it(): void
+    {
+        global $wpdb;
+        $raw = get_option(Plugin::OPTION);
+        $raw['access.mcp'] = ['docs' => 'read', 'bad' => ['x' => 'read']];
+        $wpdb->update($wpdb->options, ['option_value' => maybe_serialize($raw)], ['option_name' => Plugin::OPTION]);
+        wp_cache_delete('alloptions', 'options');
+        wp_cache_delete(Plugin::OPTION, 'options');
+        $this->assertSame(['docs' => 'read', 'bad' => ['x' => 'read']], get_option(Plugin::OPTION)['access.mcp']);
+
+        $html = $this->renderAccessPage('chat');
+        $this->assertStringNotContainsString('alpaca_bot_settings[access.mcp]', $html);
+        $posted = self::postedFrom($html);
+        $posted['chat.welcome'] = 'Saved from the Chat tab';
+        self::save($posted);
+
+        $this->assertSame('Saved from the Chat tab', get_option(Plugin::OPTION)['chat.welcome']);
+        // The readable entry is kept; the one holding an array is dropped, as any save drops it.
+        $this->assertSame(['docs' => 'read'], get_option(Plugin::OPTION)['access.mcp']);
     }
 
     /**

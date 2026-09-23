@@ -437,7 +437,9 @@ it('posts nothing for the access.mcp map from another tab, and carries the entri
     Functions\when('admin_url')->justReturn('http://x/wp-admin/admin.php');
     Functions\when('add_query_arg')->justReturn('http://x/');
     Functions\when('sanitize_key')->returnArg();
-    $settings = ['toolkits.mcp_servers' => [['id' => 'docs']], 'access.mcp' => ['docs' => 'read', 'gone' => 'publish_posts', 'x]y' => 'read']];
+    // `bad` is a hand-edited entry holding an array, which Fields::hidden() would print as
+    // `[access.mcp][bad][x]`: a post holding only that would replace the map, and sanitize it to [].
+    $settings = ['toolkits.mcp_servers' => [['id' => 'docs']], 'access.mcp' => ['docs' => 'read', 'gone' => 'publish_posts', 'x]y' => 'read', 'bad' => ['x' => 'read']]];
 
     $_GET['tab'] = 'chat';
     ob_start();
