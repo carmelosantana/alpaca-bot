@@ -9,17 +9,18 @@
  *
  * Its listeners on the document and the body hear the whole page, but what they act on is the
  * shell, the `.ab-wrap` around the form: a click on a `data-action` button inside it, an htmx
- * request, swap or error whose element is inside it, a code block inside it. The admin-wide drawer
- * (Admin\Drawer) puts the shell on wp-admin screens whose own buttons carry `data-action` too (the
- * comments list's Quick Edit is `data-action="edit"`), whose pages may hold code blocks, and where
- * another plugin's htmx must not have this chat's REST nonce added to its requests or its errors
- * shown in this chat's status line. One thing outside the shell is the chat's too: a prompt answer
- * (`.alpaca-bot-answer`, Shortcodes\Chat) on a page that also carries a shell, whose code blocks
- * are decorated and whose copy buttons copy, as they were when this decorated the whole page. And
- * it tells whatever hosts the shell two things, as events on the form: `ab:conversation`
- * (`detail.id`) whenever the conversation the transcript shows is set, and `ab:new-chat`,
- * cancelable, before the history select's "New chat" leaves the page. resources/ts/drawer.ts
- * listens for both.
+ * request, swap or error whose element is inside it, a code block inside it, and a change of
+ * `#ab-model`, an id only View\Chat\ModelSelect prints, which a page gets in the shell's header.
+ * The admin-wide drawer (Admin\Drawer) puts the shell on wp-admin screens whose own buttons carry
+ * `data-action` too (the comments list's Quick Edit is `data-action="edit"`), whose pages may hold
+ * code blocks, and where another plugin's htmx must not have this chat's REST nonce added to its
+ * requests or its errors shown in this chat's status line. One thing outside the shell is the
+ * chat's too: a prompt answer (`.alpaca-bot-answer`, Shortcodes\Chat) on a page that also carries
+ * a shell, whose code blocks are decorated and whose copy buttons copy, as they were when this
+ * decorated the whole page. And it tells whatever hosts the shell two things, as events on the
+ * form: `ab:conversation` (`detail.id`) whenever the conversation the transcript shows is set, and
+ * `ab:new-chat`, cancelable, before the history select's "New chat" leaves the page.
+ * resources/ts/drawer.ts listens for both.
  *
  * boot() is exported rather than run on import, so node:test can drive it against a document of
  * its own (tests/ts/chat.test.ts, Kanboard #4334); chat.ts is the entry that finds the shell and

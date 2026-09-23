@@ -67,7 +67,7 @@ final class HelpTabs
                 esc_html__('The image button attaches a picture from the media library to your next message, for a model that can see. The largest image it takes is set by the site\'s PHP post_max_size, not its upload limit: the image travels inside the message, not as an upload.', 'alpaca-bot'),
                 esc_html__('Replies stream in as they are written. Every message has a Copy button; your own messages have "Edit and resend", which puts the text back in the box; a code block has its own copy button.', 'alpaca-bot'),
                 esc_html__('Under a reply is its receipt: the model, the tokens it used and how long it took. Monthly usage caps set on the settings page apply here, and the screen says so when one is reached.', 'alpaca-bot'),
-                esc_html__('On the other admin screens, except the block editor, the same chat opens from the round button at the bottom right. It is one chat, not a second one: it lists the conversations this screen lists, and opens on the one you last had open in it. It stays open, on that conversation, as you move between screens until you close it. Its image button is there only on a screen that already loads the media library.', 'alpaca-bot'),
+                esc_html__('Most other admin screens have a round button at the bottom right that opens the same chat as a panel. It is one chat, not a second one: it lists the conversations this screen lists, and opens on the one you last had open in it. It stays open, on that conversation, as you move between screens that have the button, until you close it. Its image button is there only on a screen that already loads the media library.', 'alpaca-bot'),
             ]);
     }
 

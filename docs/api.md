@@ -867,9 +867,10 @@ the chat's script, htmx and stylesheet are added to that page. It lists the same
 conversations as the screen, so a thread started in one continues in the other. Whether it is
 open and which conversation it holds are yours, stored through `POST /view/drawer` and read back
 on the next screen, where a drawer left open opens itself and fetches `GET /view/panel` again.
-It is not printed on the chat screen itself, on a block editor screen, or on a page core loads
-into a modal (one that defines `IFRAME_REQUEST`). It never loads the media library, so its image
-button is there only on a screen that loads the library itself.
+It is not printed on the chat screen itself, on a block editor screen, or on any request for which
+core defines `IFRAME_REQUEST` (the plugin details modal and `media-upload.php` among them). It
+never loads the media library, so its image button is there only on a screen that loads the
+library itself.
 
 The launcher is shown to the users the screen's capability admits, through
 `alpaca_bot/admin/menu_capability` above: the question the menu asks (`Admin\Menu::capability()`).

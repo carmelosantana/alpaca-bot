@@ -18,11 +18,13 @@ use AlpacaBot\Chat\UserPrefs;
  * Three kinds of screen are left out. The plugin's own chat screen, where this would be the chat
  * twice over; a block editor screen, which owns the whole viewport and where Kanboard #4369
  * settled on an editor sidebar rather than a panel fixed over the block settings
- * (`WP_Screen::is_block_editor()` is how core answers that); and a request that defines
- * `IFRAME_REQUEST`, core's mark for a page it loads into a modal: the plugin details modal and
- * update.php's update and activate actions, which print through iframe_header() and
- * iframe_footer() and so fire both hooks this listens on, and media-upload.php, whose wp_iframe()
- * fires the first. A drawer there would be a second, hidden chat inside someone else's dialog.
+ * (`WP_Screen::is_block_editor()` is how core answers that); and any request on which core has
+ * defined `IFRAME_REQUEST`. That guard keys on the constant, not on how the page is shown. Core
+ * defines it on pages it prints through its iframe templates (the plugin details modal,
+ * update.php's update and activate actions, media-upload.php, among others) and on some it does
+ * not (customize.php). A page printed through iframe_header() and iframe_footer() fires both hooks
+ * this listens on, and iframe_footer() puts admin_footer's output in a hidden div, so a drawer
+ * there would be a second chat nobody can see; media-upload.php's wp_iframe() fires the first.
  *
  * Who sees it is Menu::capability(), the question the menu and the chat screen ask: the Chat row
  * of Settings › Access through `alpaca_bot/admin/menu_capability`. Not Access::allows($user,

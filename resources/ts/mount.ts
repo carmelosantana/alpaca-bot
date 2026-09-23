@@ -70,8 +70,10 @@ export async function mountPanel(host: HTMLElement, cfg: MountSettings, nonce: s
     await script(cfg.htmx);
     const htmx = window.htmx;
     if (!htmx) throw new Error('Alpaca Bot: htmx did not load.');
-    // The nonce by hand: the bundle's htmx:configRequest listener, which signs every other
-    // request, is in the bundle this has not added yet.
+    // The nonce by hand. The chat bundle's htmx:configRequest listener signs only requests whose
+    // element is inside the chat's shell (boot.ts), and htmx.ajax() with no source runs with the
+    // body as its element, so this request would go out unsigned whether or not the bundle is on
+    // the page.
     await htmx.ajax('GET', withQuery(cfg.panel, query), { target: host, swap: 'innerHTML', headers: { 'X-WP-Nonce': nonce } });
     if (!host.querySelector('#ab-form')) throw new Error('Alpaca Bot: the panel fragment did not arrive.');
     await script(cfg.chat);
