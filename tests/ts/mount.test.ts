@@ -92,7 +92,8 @@ test('newChat changes nothing when the fragment is refused', async (t) => {
   installDom(`<aside id="host">${panel({ conversation: '5', messages: '<article class="ab-msg">old turn</article>', history: '', chips: '' })}</aside>`);
   const { newChat, panelQuery } = await import('../../resources/ts/mount.ts');
   const host = document.getElementById('host') as HTMLElement;
-  serve(t, '{"code":"rest_forbidden"}', 403);
+  // A body that would parse, so the status is what refuses it.
+  serve(t, panel({ conversation: '0', messages: '', history: '', chips: '' }), 403);
   assert.equal(await newChat(host, CFG, 'n', panelQuery(host, '0')), false);
   assert.equal(host.querySelectorAll('#ab-messages article').length, 1);
   assert.equal(host.querySelector<HTMLInputElement>('#ab-form [name="conversation_id"]')?.value, '5');
