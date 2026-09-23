@@ -196,7 +196,9 @@ it('treats anything that is not an {id, title} pair of strings as no screen, and
     ] as $shape => $screen) {
         expect($source->collect(1, ['screen' => $screen]))->toBe([], "shape: {$shape}");
     }
-    expect($source->collect(1, ['screen' => ['id' => 'Edit-Post<script>', 'title' => 'Posts']])[0]->id)->toBe('screen:edit-postscript');
+    expect($source->collect(1, ['screen' => ['id' => 'Edit-Post<script>', 'title' => 'Posts']])[0]->id)->toBe('screen:edit-postscript')
+        // At most 64 of them.
+        ->and($source->collect(1, ['screen' => ['id' => str_repeat('a', 100), 'title' => 'Posts']])[0]->id)->toBe('screen:' . str_repeat('a', 64));
 });
 
 it('cleans a screen to itself, so what /view/panel renders into the chip is what the turn cleans it to', function (): void {
