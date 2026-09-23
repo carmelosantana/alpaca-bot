@@ -116,6 +116,7 @@ only the default the route's own filters are handed.
 | `view/models` | `GET /view/models` | Chat row (`edit_posts`) |
 | `view/default-model` | `POST /view/default-model` | Chat row (`edit_posts`) |
 | `view/bubble` | `GET\|POST /view/bubble` | Chat row (`edit_posts`) |
+| `view/panel` | `GET /view/panel` | Chat row (`edit_posts`) |
 
 The filter is `alpaca_bot/capability/{key}` with signature `(string $capability,
 \WP_REST_Request $request)`, and the key is the route path with its `{id}` segment removed, so
@@ -171,6 +172,7 @@ that returned a boolean by mistake would otherwise open the route rather than cl
 | `POST` | `/view/default-model` | Chat row (`edit_posts`) | no |
 | `GET` | `/view/bubble?role=&streaming=` | Chat row (`edit_posts`) | no |
 | `POST` | `/view/bubble` | Chat row (`edit_posts`) | no |
+| `GET` | `/view/panel?conversation_id=&post_id=` | Chat row (`edit_posts`) | no |
 
 Every response is JSON except a redeemed stream, which is `text/event-stream`, and the `/view/*`
 fragments, which are `text/html` (section 3, "The `/view/*` fragments"). In the examples,
@@ -526,8 +528,9 @@ total is. Both are `SettingsRoutesTest::test_usage_route_reports_the_month`.
 ### The `/view/*` fragments
 
 The chat screen (section 7) is server-rendered, and these routes render its pieces again on
-demand: htmx swaps the selects, and the screen's script asks for the bubbles. They are for the
-screen. A client that wants data reads the JSON routes above; these answer HTML, escaped where
+demand: htmx swaps the selects, the screen's script asks for the bubbles, and `/view/panel`
+renders the whole chat for the admin-wide drawer. They are for the plugin's own chat. A client
+that wants data reads the JSON routes above; these answer HTML, escaped where
 it is built, under `Content-Type: text/html; charset=utf-8` and an `X-Alpaca-Bot-View: 1`
 header. An error is still core's JSON error shape.
 
@@ -539,6 +542,7 @@ header. An error is still core's JSON error shape.
 | `POST /view/default-model` | An inline admin notice; stores `model` as your default (Kanboard #565) | `model` (string, required). 403 while `chat.user_can_change_model` is off, whatever the select says |
 | `GET /view/bubble` | An empty bubble for the screen to stream into | `role` (`user`\|`assistant`, default `assistant`), `streaming` (boolean: a polite live region) |
 | `POST /view/bubble` | A finished bubble, an assistant's content rendered as markdown; a user turn with its images is the optimistic bubble the screen shows while the turn runs | `role` (required), `content`, `model`, `usage` (`{prompt_tokens, completion_tokens}` or null), `duration_ms`, `images` (array of `data:` URLs; a user turn only), `tool_calls` (the reply's `meta.tool_calls`; the receipt ends `· 2 tools`) |
+| `GET /view/panel` | The whole chat (header, transcript and composer) in the drawer's panel, with its close button | `conversation_id`: one of your own to open; 0, a missing one or anyone else's is a new chat, as `?conversation=` is on the chat screen. `post_id`: the post being edited, carried in the composer as the turn's context, as `&post=` is on the chat screen |
 
 Your effective model is the one you last chose in the select (stored as user meta
 `alpaca_bot_default_model`) while the site lets users choose and the provider still lists it,
@@ -850,7 +854,7 @@ capability.
 The bare chat screen is a new chat. `admin.php?page=alpaca-bot&conversation={id}` opens one of
 your own (anyone else's, or a missing one, is a new chat again), and `&post={id}` names the post
 the screen was opened from, which rides on the first turn as its context. The screen's requests
-are the `/view/*` fragments (section 3) and `POST /chat`; its model select posts your choice to
+are `/view/*` fragments (section 3) and `POST /chat`; its model select posts your choice to
 `/view/default-model` on change, and the screen opens on that choice next time.
 
 ## 8. Adding routes
