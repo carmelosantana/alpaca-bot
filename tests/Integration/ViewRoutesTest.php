@@ -7,6 +7,7 @@ namespace AlpacaBot\Tests\Integration;
 use AlpacaBot\Admin\Assets;
 use AlpacaBot\Admin\ChatScreen;
 use AlpacaBot\Chat\ConversationStore;
+use AlpacaBot\Chat\Message;
 use AlpacaBot\Plugin;
 use AlpacaBot\Rest\ViewController;
 use AlpacaBot\Settings\Store;
@@ -162,6 +163,28 @@ final class ViewRoutesTest extends TestCase
         $this->assertStringContainsString('<div class="ab-wrap ab-wrap--drawer">', $html);
         $this->assertStringContainsString('<div id="ab-chat" data-conversation="' . $conversation->id . '">', $html);
         $this->assertStringContainsString('id="ab-form"', $html);
+    }
+
+    public function test_panel_opens_another_users_conversation_as_a_new_chat_with_nothing_of_theirs(): void
+    {
+        $owner = $this->asAdmin();
+        $store = Plugin::instance()->get(ConversationStore::class);
+        $conversation = $store->create($owner, 'Owner private thread');
+        $conversation->append(new Message('user', 'owner question'));
+        $conversation->append(new Message('assistant', 'owner answer', 'fake-model'));
+        $store->save($conversation);
+        $this->assertSame('owner answer', $store->load($conversation->id, $owner)?->last()?->content);
+
+        // A second administrator: same capability, not the owner.
+        $this->asAdmin();
+        $res = $this->rest('GET', '/view/panel', ['conversation_id' => (string) $conversation->id]);
+        $this->assertSame(200, $res->get_status(), print_r($res->get_data(), true));
+        $html = $res->get_data();
+        foreach (['Owner private thread', 'owner question', 'owner answer'] as $theirs) {
+            $this->assertStringNotContainsString($theirs, $html);
+        }
+        $this->assertStringContainsString('<div id="ab-chat" data-conversation="0">', $html);
+        $this->assertStringNotContainsString('data-conversation="' . $conversation->id . '"', $html);
     }
 
     public function test_the_chat_screen_renders_the_shell_and_the_assets_enqueue_on_its_hook_only(): void

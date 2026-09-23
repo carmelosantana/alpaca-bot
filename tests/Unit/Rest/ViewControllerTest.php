@@ -67,7 +67,7 @@ it('persists the default model and returns a notice', function (): void {
 
 // ---------------------------------------------------------------- beyond the brief's two
 
-it('declares every view route on the Chat row, each under its own filter key, with only the model list rate limited, like /models', function (): void {
+it('declares every view route on the Chat row, its filter key being its path without the {id} segment, and only the model list rate limited, like /models', function (): void {
     $routes = viewController()->routes();
     $byMethod = [];
     foreach ($routes as $route) {
@@ -251,6 +251,16 @@ it('renders the drawer panel on one of the user\'s conversations, and a new chat
         $asked[] = [$query['author'], $query['numberposts']];
         return [(object) ['ID' => 8, 'post_title' => 'Listed', 'post_date_gmt' => '2024-01-01 00:00:00']];
     });
+    // Post 6 is user 9's, with a title and a transcript of its own, so a leak through the panel
+    // would show as text here rather than as the 'T' and the turns post 5 has too.
+    Functions\when('get_post')->alias(static fn(int $id): ?object => match ($id) {
+        5 => conversationChatPost(5, '3'),
+        6 => (object) (['post_title' => 'Their private thread'] + (array) conversationChatPost(6, '9')),
+        default => null,
+    });
+    Functions\when('get_post_meta')->alias(static fn(int $id, string $key): mixed => $key === 'ab_messages'
+        ? ($id === 6 ? [['role' => 'user', 'content' => 'their question'], ['role' => 'assistant', 'content' => 'their answer', 'model' => 'm']] : [['role' => 'user', 'content' => 'q'], ['role' => 'assistant', 'content' => 'a', 'model' => 'm']])
+        : '');
     $c = viewController(['chat.history_limit' => 4]);
 
     $res = $c->panel(restRequest('GET', '/x', ['conversation_id' => 5, 'post_id' => 12]));
@@ -263,7 +273,8 @@ it('renders the drawer panel on one of the user\'s conversations, and a new chat
     // Post 6 is user 9's (this file's stubs): its transcript is not rendered, and it is not an
     // error either but a new chat, as ?conversation= is on the screen.
     $theirs = $c->panel(restRequest('GET', '/x', ['conversation_id' => 6]))->get_data();
-    expect($theirs)->not->toContain('ab-msg--assistant')->toContain('<div id="ab-chat" data-conversation="0">')
+    expect($theirs)->not->toContain('Their private thread')->not->toContain('their question')->not->toContain('their answer')
+        ->not->toContain('ab-msg--assistant')->toContain('<div id="ab-chat" data-conversation="0">')
         // Both histories were user 3's, chat.history_limit deep.
         ->and($asked)->toBe([[3, 4], [3, 4]]);
 });
