@@ -33,9 +33,9 @@ use AlpacaBot\View\Markdown;
  * the chat screen's and keeps core's `.wrap`, whose margins the screen is laid out inside; with a
  * URL it is `ab-wrap--front`. Neither modifier comes with `.wrap`. On a front-end page it is an
  * admin class the front end does not style, and a class name themes use for their own layout;
- * in the drawer, core's margins for it would inset the chat inside its panel. The stylesheet's
- * front-end and drawer blocks are what the two modifiers select, and each replaces the height
- * .ab-wrap computes from wp-admin's chrome.
+ * in the drawer, core's `.wrap` rule sets the admin screen's margins, and the drawer's panel is
+ * not that screen. The stylesheet's front-end and drawer blocks are what the two modifiers
+ * select, and each replaces the height .ab-wrap computes from wp-admin's chrome.
  */
 final class Shell extends Component
 {
