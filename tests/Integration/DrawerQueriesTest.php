@@ -12,8 +12,9 @@ use AlpacaBot\Settings\Store;
  * The drawer's budget (spec §4): until it is opened, it adds no database query to the screen it
  * is on. Counted with core's own get_num_queries(), the counter the performance baseline's probe
  * recorded (docs/reviews/2026-09-09-performance-baseline.md, "Method") and the one
- * UsageSummaryQueriesTest already makes this kind of claim with, around the two hooks the drawer
- * listens on, run as core runs them for a logged-in administrator on an ordinary screen.
+ * UsageSummaryQueriesTest already makes this kind of claim with, around the drawer's two
+ * callbacks, called directly in the order core fires their hooks (`admin_enqueue_scripts`, then
+ * `admin_footer`) for a logged-in administrator on an ordinary screen.
  *
  * The reads before the count are not part of the measurement. They are what wp-admin has already
  * done by the time these hooks fire, done here because this suite's request is not an admin

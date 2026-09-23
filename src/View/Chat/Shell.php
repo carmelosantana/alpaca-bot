@@ -24,11 +24,12 @@ use AlpacaBot\View\Markdown;
  * The sprite is a build output (pnpm build) and gitignored, so a checkout without it must
  * still render: the icons are missing then, and nothing else is.
  *
- * `$home` and `$drawer` say where the shell is. `$home` is where "New chat" goes: null is the
- * wp-admin chat screen, `admin.php?page=alpaca-bot`, and a URL is a front-end page
+ * `$home` and `$drawer` say where the shell is. `$home` is the "New chat" link's href (Header):
+ * null is the wp-admin chat screen, `admin.php?page=alpaca-bot`, and a URL is a front-end page
  * (Shortcodes\Chat passes the page's own permalink), so a visitor is not sent out of the site
- * into wp-admin. `$drawer` marks the admin-wide drawer's shell (View\Chat\Drawer), whose "New
- * chat" is the chat screen's, so it leaves `$home` null. The wrapper's class follows from the
+ * into wp-admin. `$drawer` marks the admin-wide drawer's shell (View\Chat\Drawer), which leaves
+ * `$home` null: its link points at the chat screen, but the drawer does not follow it, and starts
+ * the new chat in place (resources/ts/drawer.ts). The wrapper's class follows from the
  * two, `$drawer` first: the drawer's shell is `ab-wrap--drawer`; with `$home` null the shell is
  * the chat screen's and keeps core's `.wrap`, whose margins the screen is laid out inside; with a
  * URL it is `ab-wrap--front`. Neither modifier comes with `.wrap`. On a front-end page it is an
@@ -44,7 +45,7 @@ final class Shell extends Component
      * @param int $postId the post being edited when the screen was opened from one, else 0
      * @param string|null $sprite path to the icon sprite; null means the plugin's own assets/img/icons.svg
      * @param string|null $model the model the select and the composer start on (the user's effective model, UserPrefs::modelFor()); null means the catalog's default
-     * @param string|null $home where "New chat" returns to: null is the chat screen, a URL is a front-end page, and marks this shell as that page's (the class docblock)
+     * @param string|null $home the "New chat" link's href: null is the chat screen, a URL is a front-end page, and marks this shell as that page's (the class docblock)
      * @param bool $drawer whether this is the admin-wide drawer's shell (View\Chat\Drawer); it chooses the wrapper's class ahead of `$home` (the class docblock)
      */
     public function __construct(private Store $store, private ModelCatalog $catalog, private ?Conversation $conversation, private array $history, private int $postId = 0, private ?string $sprite = null, private ?string $model = null, private ?string $home = null, private bool $drawer = false) {}

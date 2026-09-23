@@ -836,8 +836,7 @@ govern the REST routes and nothing else.
 
 The chat screen's capability is the Chat row of **Settings › Access** (`edit_posts` by default)
 through `alpaca_bot/admin/menu_capability`, with signature `(string $capability)` — no request,
-since a menu is built once per admin load. The admin-wide drawer (below) asks the same filter, on
-every admin screen that could show it, so it opens to exactly the users the screen does. The row is the same one the chat REST routes take as
+since a menu is built once per admin load. The row is the same one the chat REST routes take as
 their default, so moving it moves the screen and the API together; the two filters stay separate,
 so a site can still open the screen to a role without the API or the reverse:
 
@@ -868,8 +867,16 @@ the chat's script, htmx and stylesheet are added to that page. It lists the same
 conversations as the screen, so a thread started in one continues in the other. Whether it is
 open and which conversation it holds are yours, stored through `POST /view/drawer` and read back
 on the next screen, where a drawer left open opens itself and fetches `GET /view/panel` again.
-It is not printed on the chat screen itself or on a block editor screen. It never loads the media
-library, so its image button is there only on a screen that loads the library itself.
+It is not printed on the chat screen itself, on a block editor screen, or on a page core loads
+into a modal (one that defines `IFRAME_REQUEST`). It never loads the media library, so its image
+button is there only on a screen that loads the library itself.
+
+The launcher is shown to the users the screen's capability admits, through
+`alpaca_bot/admin/menu_capability` above: the question the menu asks (`Admin\Menu::capability()`).
+What the drawer then requests is not gated by that filter. `GET /view/panel`, `POST /view/drawer`
+and each request of the chat inside the drawer meet their own route's
+`alpaca_bot/capability/{route}` filter, as the chat screen's requests do, so a site that opens the
+screen to a role and not the view routes gives that role a launcher whose chat does not load.
 
 ## 8. Adding routes
 
