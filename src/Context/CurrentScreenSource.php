@@ -22,10 +22,15 @@ namespace AlpacaBot\Context;
  * It also supplies the screen the chat was opened on, when the client names one: `screen` as
  * `{id, title}` becomes "On: {title}", a context with no text. That is the whole of what a screen
  * contributes: no list-table rows, no queries, no option values (Kanboard #4369), because an
- * options page holds secrets and every word of this goes to a provider. It is not gated: an id
- * and a title name a place and hold nothing of what is on it, so there is no capability for
- * them to be refused by. The title is cleaned by the rule the post title is, and for the same
- * reason (screenFrom() says how far that goes).
+ * options page holds secrets and every word of this goes to a provider. It is not gated. That
+ * is not because the title is harmless: it can carry what the screen shows (edit-comments.php
+ * titles one post's comments with the post's title, and a plugin may title its own page with a
+ * record's name). It is because the id and the title are the caller's own words, as the message
+ * is. The one caller in the plugin that passes a `screen` is POST /chat, which takes `context`
+ * from the request of the user the turn is for, so whatever the title says, that user sent it,
+ * and there is nothing of anyone else's in it for a capability to keep from them. The title is
+ * cleaned by the rule the post title is, and for the same reason (screenFrom() says how far that
+ * goes).
  *
  * Content is tag-stripped first and only then cut at MAX_CHARS, so markup can never crowd
  * the words out of the window, and the model sees prose rather than block comments.
@@ -70,7 +75,7 @@ final class CurrentScreenSource implements ContextSourceInterface
      * The title is untrusted text: a page title any plugin can register, arriving through the REST
      * request because the turn is not made on the screen. It goes through line(), the rule the post
      * title goes through, and is then cut to TITLE_CHARS characters with the ellipsis inside the
-     * cap. A title that is not valid UTF-8 cleans to empty, and so is no screen. The id is reduced
+     * cap and no space before it. A title that is not valid UTF-8 cleans to empty, and so is no screen. The id is reduced
      * to lowercase letters, digits, `_` and `-`, at most 64 of them, so it can be written into a
      * Context id and an attribute as it stands.
      *
@@ -90,7 +95,8 @@ final class CurrentScreenSource implements ContextSourceInterface
             return null;
         }
         if (mb_strlen($title) > self::TITLE_CHARS) {
-            $title = mb_substr($title, 0, self::TITLE_CHARS - 1) . '…';
+            // Trimmed first, so a cut that lands after a space does not end "… …".
+            $title = rtrim(mb_substr($title, 0, self::TITLE_CHARS - 1)) . '…';
         }
         return ['id' => $id, 'title' => $title];
     }

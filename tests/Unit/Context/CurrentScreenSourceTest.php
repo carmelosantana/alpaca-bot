@@ -161,6 +161,9 @@ it('caps the screen title at 120 characters, the ellipsis included, counting cha
     // Exactly at the cap is left whole, with nothing added.
     $exact = (new CurrentScreenSource())->collect(1, ['screen' => ['id' => 'x', 'title' => str_repeat('a', 120)]]);
     expect($exact[0]->label)->toBe('On: ' . str_repeat('a', 120));
+    // A cut that lands after a space does not leave the space before the ellipsis.
+    $spaced = (new CurrentScreenSource())->collect(1, ['screen' => ['id' => 'x', 'title' => str_repeat('a', 118) . "\n## X"]]);
+    expect($spaced[0]->label)->toBe('On: ' . str_repeat('a', 118) . '…');
     // Under the cap in characters and over it in bytes: whole.
     $wide = (new CurrentScreenSource())->collect(1, ['screen' => ['id' => 'x', 'title' => str_repeat('é', 100)]]);
     expect($wide[0]->label)->toBe('On: ' . str_repeat('é', 100));
