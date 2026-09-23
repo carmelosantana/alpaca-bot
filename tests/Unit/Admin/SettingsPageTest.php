@@ -444,7 +444,7 @@ it('posts nothing for the access.mcp map from another tab, and carries the entri
     unset($_GET['tab']);
 
     expect($other)->not->toContain('alpaca_bot_settings[access.mcp]')
-        // The Access tab's own rows are not carried from another tab either: they are schema fields like any other.
+        // The Access tab's schema rows are carried from another tab like any other field; only the map is left out.
         ->toContain('name="alpaca_bot_settings[access.chat]"');
     expect($access)->toContain('<input type="hidden" name="alpaca_bot_settings[access.mcp][gone]" value="publish_posts">')
         // docs has its select on this tab; a second input under its name would race it.

@@ -209,10 +209,10 @@ final class SettingsPageTest extends TestCase
 
     /**
      * The Access tab arrives with the section: SettingsPage builds a tab per Schema section and a
-     * control per field, so a row added to Schema is a select on this screen with nothing else
-     * written. Asserted by rendering it rather than by counting tabs, because an empty tab counts
-     * the same as a working one. A later release redesigns this screen; this is what it has to
-     * keep.
+     * control per field, `access.mcp` aside, so a row added to Schema is a select on this screen
+     * with nothing else written. Asserted by rendering it rather than by counting tabs, because an
+     * empty tab counts the same as a working one. `access.mcp` gets no row of its own, empty or
+     * otherwise: with no MCP server there are exactly the declared rows' selects and nothing else.
      */
     public function test_the_access_tab_renders_a_control_for_every_row(): void
     {
@@ -229,6 +229,7 @@ final class SettingsPageTest extends TestCase
         }
         $this->assertSame(count(Access::defaults()), preg_match_all('/<select id="ab-access-/', $html));
         $this->assertStringContainsString('value="edit_posts" selected', $html);
+        $this->assertStringNotContainsString('>' . Schema::fields()['access.mcp']['label'] . '<', $html);
         // A PHP notice from a field the page cannot render would be printed into this markup.
         $this->assertStringNotContainsString('Notice:', $html);
         $this->assertStringNotContainsString('Warning:', $html);

@@ -14,8 +14,9 @@ use AlpacaBot\Shortcodes\Chat as ChatShortcode;
 
 /**
  * The Settings API page for `alpaca_bot_settings`: one setting, one group (`alpaca_bot`), a
- * section per Schema section, a field per Schema field, shown one section at a time as tabs
- * (`?tab=`) and posted to core's options.php.
+ * section per Schema section, a field per Schema field (the Access tab's MCP rows stand in for
+ * `access.mcp`, below), shown one section at a time as tabs (`?tab=`) and posted to core's
+ * options.php.
  *
  * Core saves an option whole, so a form that shows one tab posts every tab: the fields of the
  * tabs not shown go out as hidden inputs (Fields::hidden()), and the sanitize callback receives
