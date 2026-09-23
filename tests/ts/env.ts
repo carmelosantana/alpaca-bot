@@ -18,8 +18,8 @@ import { Window } from 'happy-dom';
  * so nothing leaks between files; and no module a test imports from resources/ts captures a
  * global at import time — dom.ts's `root: ParentNode = document` is a default parameter,
  * evaluated per call, not at load — so a second installDom() in one file really does give the
- * next case a clean document. The two entries esbuild builds, chat.ts and drawer.ts, do read the
- * page as they load, which is what an entry is for, and no test imports either. An import-time
+ * next case a clean document. The entries esbuild builds (build.mjs's entryPoints) do read the
+ * page as they load, which is what an entry is for, and no test imports one. An import-time
  * capture in a module a test does import would bind the first document into a module every later
  * case then shares, and this harness would stop being honest.
  *

@@ -20,7 +20,7 @@
  * decorated the whole page. And it tells whatever hosts the shell two things, as events on the
  * form: `ab:conversation` (`detail.id`) whenever the conversation the transcript shows is set, and
  * `ab:new-chat`, cancelable, before the history select's "New chat" leaves the page.
- * resources/ts/drawer.ts listens for both.
+ * resources/ts/drawer.ts listens for both, and resources/ts/editor.ts for `ab:new-chat`.
  *
  * boot() is exported rather than run on import, so node:test can drive it against a document of
  * its own (tests/ts/chat.test.ts, Kanboard #4334); chat.ts is the entry that finds the shell and
@@ -46,7 +46,7 @@ interface MediaFrame { on(event: string, cb: () => void): void; open(): void; st
 interface HtmxDetail { path: string; headers: Record<string, string>; xhr?: XMLHttpRequest }
 type Json = Record<string, unknown>;
 
-/** The part of htmx's API this bundle and the drawer's loader call (resources/ts/mount.ts, drawer.ts). */
+/** The part of htmx's API this bundle and resources/ts/mount.ts call. */
 interface Htmx {
   trigger(target: Element, name: string): void;
   ajax(verb: string, path: string, context: { target: Element; swap: string; headers?: Record<string, string> }): Promise<void>;

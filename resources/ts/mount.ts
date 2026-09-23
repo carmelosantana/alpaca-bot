@@ -1,14 +1,16 @@
 /**
- * Puts the chat into a page that did not load it: the admin-wide drawer on its first open
- * (drawer.ts). What it is told comes from Admin\Assets::mount() as `alpacaBotMount`.
+ * Puts the chat into a page that did not load it, the first time its host is opened: the admin-wide
+ * drawer (drawer.ts) and the block editor's sidebar (editor.ts). What it is told comes from
+ * Admin\Assets::mount() as `alpacaBotMount`.
  *
  * The order is the whole of it. The chat's stylesheet goes in first so the fragment lands styled.
  * htmx comes next, because the fragment is fetched through it: GET /view/panel is swapped in with
  * htmx.ajax(), which also wires the hx-* attributes the header's selects carry. The chat bundle
  * comes last, once the fragment is in the document, because chat.ts boots against the #ab-form it
  * finds when it runs and would find none if it ran first. A file that loaded is not added again.
- * drawer.ts calls mountPanel() again only after a mount that failed; a mounted chat it shows and
- * hides, so a turn in flight is never re-rendered.
+ * A host calls mountPanel() again only after a mount that failed; a mounted chat it shows and
+ * hides (the sidebar moves it as well, and editor.ts says why), so a turn in flight is never
+ * re-rendered.
  */
 import { fromHtml } from './dom.ts';
 
@@ -63,9 +65,10 @@ export function withQuery(base: string, query: Record<string, string>): string {
 
 /**
  * The query every fetch of GET /view/panel into `host` carries: the conversation to open, and
- * what the composer's context chips name, off the data attributes Admin\Drawer::footer() prints
- * on the drawer element (the post on the classic editor, the screen's id and page title). An
- * element without them asks for no chips.
+ * what the composer's context chips name, off the host's data attributes: the ones
+ * Admin\Drawer::footer() prints on the drawer element (the post on the classic editor, the
+ * screen's id and page title), or the post editor.ts sets on the sidebar's. An element without
+ * them asks for no chips.
  */
 export function panelQuery(host: HTMLElement, conversation: string): Record<string, string> {
   return {

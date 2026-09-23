@@ -11,14 +11,15 @@
  * Whatever loads this gets its URL from Admin\Assets, and not every loader is in wp-admin:
  * enqueueChat() enqueues it for the admin chat screen (enqueue()) and for a front-end page carrying
  * `[alpacabot]` with no prompt (enqueueFront()), and mount() names it for a page that adds it
- * later, which the admin-wide drawer's loader does on its first open (resources/ts/mount.ts). The
+ * later, which the admin-wide drawer and the block editor's sidebar do the first time they are
+ * opened (resources/ts/mount.ts). The
  * height arithmetic on .ab-wrap subtracts wp-admin's chrome
  * from the viewport, and one narrow-screen rule on `.wrap.ab-wrap` serves it. Two modifiers
  * replace that height and come without core's .wrap, so that rule does not match them either:
  * .ab-wrap--front, for a front-end page, which has no #wpfooter and holds the shell as a block
  * inside its content, and .ab-wrap--drawer, for the admin-wide drawer's panel
- * (View\Chat\Drawer), which the shell fills. View\Chat\Shell picks the wrapper's class, and its
- * docblock says on what.
+ * (View\Chat\Drawer), which the shell fills, and which the block editor's sidebar mounts too.
+ * View\Chat\Shell picks the wrapper's class, and its docblock says on what.
  */
 
 /*
@@ -382,8 +383,9 @@ pre > .ab-code__copy[aria-label]:hover::after {
     outline: var(--ab-focus-width) solid transparent;
 }
 /*
- * Above core's breakpoint the panel is still 420px wide, and the two 240px selects, each on a
- * line of its own under the title, made the header three rows tall. Here they share one row.
+ * Above core's breakpoint the panel is still 420px wide in the drawer (280px in the block
+ * editor's sidebar), and the two 240px selects, each on a line of its own under the title, made
+ * the header three rows tall. Here they share one row.
  * Under the breakpoint the panel is the viewport's width and the narrow-screen block's column
  * layout stands.
  */

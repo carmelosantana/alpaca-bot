@@ -23,7 +23,7 @@ use AlpacaBot\View\Markdown;
 /**
  * The `/view/*` routes: the chat screen's fragments, rendered server-side by the same components
  * the screen is built from, for htmx (the selects) and chat.ts (the bubbles) to swap in, and the
- * whole chat for the admin-wide drawer (`/view/panel`). Each answers `text/html`, not JSON, and is
+ * whole chat for the admin-wide drawer and the block editor's sidebar (`/view/panel`). Each answers `text/html`, not JSON, and is
  * for those: a client that wants data reads the JSON routes. Every route takes the Chat row of Settings › Access (`edit_posts` by default), as the
  * screen and the chat routes do, under its own `alpaca_bot/capability/view/{name}` filter.
  *
@@ -42,9 +42,9 @@ use AlpacaBot\View\Markdown;
  *   turn with its `images` (data URLs) is the optimistic bubble chat.ts shows while the turn
  *   runs.
  * - `GET /view/panel?conversation_id=&post_id=&screen_id=&screen_title=`: the whole chat as one
- *   fragment (View\Chat\Drawer) for the admin-wide drawer, on one of the user's conversations or
- *   a new chat, as the chat screen answers `?conversation=`, with the post and the screen as the
- *   composer's context chips.
+ *   fragment (View\Chat\Drawer) for the admin-wide drawer and the block editor's sidebar, on one
+ *   of the user's conversations or a new chat, as the chat screen answers `?conversation=`, with
+ *   the post and the screen as the composer's context chips.
  * - `POST /view/drawer {open, conversation_id}`: stores what the admin-wide drawer shows
  *   (Admin\Drawer) and answers an empty fragment.
  *

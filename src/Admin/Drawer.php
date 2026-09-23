@@ -13,12 +13,15 @@ use AlpacaBot\Chat\UserPrefs;
  * Opening the drawer is what loads the chat: resources/ts/mount.ts adds the chat's stylesheet and
  * htmx, fetches `GET /view/panel` into the drawer through htmx, and adds the chat bundle once that
  * fragment is in the page. Until the first open, the screen carries the launcher, the loader and
- * their stylesheet, and none of the chat.
+ * their stylesheet, and none of the chat. On a block editor screen for a post, the same chat is
+ * the editor's own sidebar instead, enqueued on `enqueue_block_editor_assets` (enqueueEditor())
+ * and loaded the same way the first time the sidebar is opened (resources/ts/editor.ts).
  *
  * Three kinds of screen are left out. The plugin's own chat screen, where this would be the chat
  * twice over; a block editor screen, which owns the whole viewport and where Kanboard #4369
  * settled on an editor sidebar rather than a panel fixed over the block settings
- * (`WP_Screen::is_block_editor()` is how core answers that); and any request on which core has
+ * (`WP_Screen::is_block_editor()` is how core answers that, and enqueueEditor() says which of
+ * those screens get the sidebar); and any request on which core has
  * defined `IFRAME_REQUEST`. That guard keys on the constant, not on how the page is shown. Core
  * defines it on pages it prints through its iframe templates (the plugin details modal,
  * update.php's update and activate actions, media-upload.php, among others) and on some it does
@@ -32,8 +35,10 @@ use AlpacaBot\Chat\UserPrefs;
  * Chat row before any hook), so a site that opened or closed the chat screen through the menu
  * filter would get a drawer that disagreed with it.
  *
- * The budget (spec §4): until it is opened, this adds no database query to a screen. What it reads
- * is in memory by the time these hooks fire. The capability check answers from the WP_User core
+ * The budget (spec §4): until it is opened, this adds no database query to a screen, and neither
+ * does the editor sidebar until it is opened. What they read is in memory by the time their hooks
+ * fire, `enqueue_block_editor_assets` included, which edit-form-blocks.php fires before it loads
+ * admin-header.php. The capability check answers from the WP_User core
  * built when it loaded the current user, and both preferences are user meta, whose cache that
  * load primed whole: WP_User::get_caps_data() reads the capabilities with get_user_meta(), and a
  * miss there reads every row of the user's meta in one query (get_metadata_raw(),
@@ -42,7 +47,7 @@ use AlpacaBot\Chat\UserPrefs;
  * then: the screen, its page title, and on the classic editor the post, which get_post() reads
  * from memory (footer() says how, for post.php and for post-new.php).
  * tests/Integration/DrawerQueriesTest.php counts it on the dashboard, on the classic editor, and
- * on the classic editor's Add New screen.
+ * on the classic editor's Add New screen, and counts enqueueEditor() on a block editor screen.
  *
  * Open or closed, and the conversation shown, are the user's (Chat\UserPrefs), stored through
  * `POST /view/drawer`, so the drawer comes back the way it was left on the next screen. A drawer

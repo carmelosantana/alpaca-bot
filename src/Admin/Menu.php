@@ -79,16 +79,17 @@ final class Menu
 
     /**
      * The capability that shows the menu and the chat screen, and the drawer on the other admin
-     * screens (Admin\Drawer), which asks this rather than a question of its own: it is the same
-     * chat under a different chrome.
+     * screens and the block editor's sidebar (Admin\Drawer), which ask this rather than a question
+     * of their own: it is the same chat under a different chrome.
      *
      * @since 0.6.0
      */
     public static function capability(Access $access): string
     {
         /**
-         * Filters the capability that shows the Alpaca Bot menu, its chat screen and the chat
-         * drawer on the other admin screens (Admin\Drawer). Filtered apart from the REST routes'
+         * Filters the capability that shows the Alpaca Bot menu, its chat screen, the chat
+         * drawer on the other admin screens and the chat sidebar in the block editor
+         * (Admin\Drawer). Filtered apart from the REST routes'
          * `alpaca_bot/capability/chat`, so a site can open the screen to a role and not the API, or
          * the reverse. Only a non-empty, non-numeric string is honoured (Capability::filtered()):
          * `true`, `__return_true` or a number would turn the check into a legacy user level, so

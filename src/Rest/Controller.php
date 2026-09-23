@@ -32,7 +32,8 @@ abstract class Controller
     /**
      * The Chat row of Settings › Access, as a route declares it in place of a capability name.
      * capability() resolves it per request for a route; Admin\Menu::capability() reads the same row
-     * for the menu, its chat screen and the admin-wide drawer (Admin\Drawer). Two readers of one
+     * for the menu, its chat screen, the admin-wide drawer and the block editor's sidebar
+     * (Admin\Drawer). Two readers of one
      * row, not one mechanism serving both —
      * which is what makes a site that moves the row move the screen and the API together, each
      * still behind its own filter (`alpaca_bot/capability/{route}` and

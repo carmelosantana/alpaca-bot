@@ -543,7 +543,8 @@ total is. Both are `SettingsRoutesTest::test_usage_route_reports_the_month`.
 
 The chat screen (section 7) is server-rendered, and these routes render its pieces again on
 demand: htmx swaps the selects, the screen's script asks for the bubbles, and `/view/panel`
-renders the whole chat for the admin-wide drawer, whose state `/view/drawer` stores. They are for the plugin's own chat. A client
+renders the whole chat for the admin-wide drawer, whose state `/view/drawer` stores, and for
+the block editor's sidebar. They are for the plugin's own chat. A client
 that wants data reads the JSON routes above; these answer HTML, escaped where
 it is built, under `Content-Type: text/html; charset=utf-8` and an `X-Alpaca-Bot-View: 1`
 header. An error is still core's JSON error shape.
@@ -556,7 +557,7 @@ header. An error is still core's JSON error shape.
 | `POST /view/default-model` | An inline admin notice; stores `model` as your default (Kanboard #565) | `model` (string, required). 403 while `chat.user_can_change_model` is off, whatever the select says |
 | `GET /view/bubble` | An empty bubble for the screen to stream into | `role` (`user`\|`assistant`, default `assistant`), `streaming` (boolean: a polite live region) |
 | `POST /view/bubble` | A finished bubble, an assistant's content rendered as markdown; a user turn with its images is the optimistic bubble the screen shows while the turn runs | `role` (required), `content`, `model`, `usage` (`{prompt_tokens, completion_tokens}` or null), `duration_ms`, `images` (array of `data:` URLs; a user turn only), `tool_calls` (the reply's `meta.tool_calls`; the receipt ends `· 2 tools`) |
-| `GET /view/panel` | The whole chat (header, transcript and composer) in the drawer's panel, with its close button | `conversation_id`: one of your own to open; 0, a missing one or anyone else's is a new chat, as `?conversation=` is on the chat screen. `post_id`: the post being edited, rendered as the composer's post chip when you may edit it and it is not an `auto-draft`, as `&post=` is on the chat screen. `screen_id` and `screen_title`: the screen's id and page title, cleaned as `POST /chat` cleans `context.screen` and rendered as the composer's screen chip; either one empty, or cleaned to nothing, is no chip. A chip's hidden fields are what the chat bundle sends as `context` |
+| `GET /view/panel` | The whole chat (header, transcript and composer) in the drawer's panel, with its close button, which the block editor's sidebar hides in favour of its own | `conversation_id`: one of your own to open; 0, a missing one or anyone else's is a new chat, as `?conversation=` is on the chat screen. `post_id`: the post being edited, rendered as the composer's post chip when you may edit it and it is not an `auto-draft`, as `&post=` is on the chat screen. `screen_id` and `screen_title`: the screen's id and page title, cleaned as `POST /chat` cleans `context.screen` and rendered as the composer's screen chip; either one empty, or cleaned to nothing, is no chip. A chip's hidden fields are what the chat bundle sends as `context` |
 | `POST /view/drawer` | Nothing (an empty fragment); stores what the admin-wide drawer shows for you, as user meta `alpaca_bot_drawer_open` and `alpaca_bot_drawer_conversation` | `open` (boolean), `conversation_id` (integer, 0 or more). A parameter you leave out is left as it was; the conversation is not checked here, and one that is not yours opens as a new chat when `/view/panel` is asked for it |
 
 Your effective model is the one you last chose in the select (stored as user meta
@@ -890,12 +891,24 @@ core defines `IFRAME_REQUEST` (the plugin details modal and `media-upload.php` a
 never loads the media library, so its image button is there only on a screen that loads the
 library itself.
 
-The launcher is shown to the users the screen's capability admits, through
-`alpaca_bot/admin/menu_capability` above: the question the menu asks (`Admin\Menu::capability()`).
-What the drawer then requests is not gated by that filter. `GET /view/panel`, `POST /view/drawer`
-and each request of the chat inside the drawer meet their own route's
-`alpaca_bot/capability/{route}` filter, as the chat screen's requests do, so a site that opens the
-screen to a role and not the view routes gives that role a launcher whose chat does not load.
+In the block editor, on a post's screen, the same `GET /view/panel` fragment is mounted in a
+`PluginSidebar` instead, which the editor opens from the Alpaca Bot button in its top bar, with
+`post_id` taken from `core/editor`, so a turn started there carries the post being edited. It
+starts on a new chat. It is fetched the first time the sidebar is opened, and closing the sidebar
+keeps the chat, a turn in flight included. On a new post, which is an `auto-draft` until it is
+first saved or autosaved, the composer shows no post chip; once the editor has saved the post,
+the sidebar fetches `GET /view/panel` for it again and takes only the post chip from it, into the
+chat it already has, so the next turn carries the post with no reload. The image button stays,
+because the block editor loads the media library. The site editor, the widgets editor and the
+Customizer's widgets, which have no post to edit, get neither the drawer nor the sidebar.
+
+The launcher and the editor's sidebar are shown to the users the screen's capability admits,
+through `alpaca_bot/admin/menu_capability` above: the question the menu asks
+(`Admin\Menu::capability()`). What the drawer or the sidebar then requests is not gated by that
+filter. `GET /view/panel`, `POST /view/drawer` and each request of the chat inside either meet
+their own route's `alpaca_bot/capability/{route}` filter, as the chat screen's requests do, so a
+site that opens the screen to a role and not the view routes gives that role a launcher, or a
+sidebar, whose chat does not load.
 
 ## 8. Adding routes
 
