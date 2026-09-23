@@ -15,11 +15,13 @@
  * A PluginSidebar renders its children only while it is open or animating shut (core's
  * ComplementaryArea), and the chat must outlive a close: a turn may be streaming into it, and the
  * chat bundle is bound to the composer it booted against. So the chat lives in one element made
- * here, once, which each mount of the sidebar's content takes into its slot and each unmount puts
- * back in the page, hidden. Back in the page and not merely
- * detached, because the bundle and htmx look for the chat in the document: the bundle finds the
- * transcript with document.querySelector() (boot.ts messages()) and would append a reply that
- * arrives while the sidebar is closed to the body instead, and htmx drops the history select's
+ * here, once, which each mount of the sidebar's content takes into its slot, and which an unmount
+ * puts back in the page, hidden, only if its slot still holds it. On WordPress 7.1.2 the content
+ * mounts, unmounts and mounts again within one opening, and the chat follows each step. Back
+ * in the page and not merely detached, because the bundle and htmx look for the chat in the
+ * document: the bundle finds the transcript with document.querySelector() (boot.ts messages()) and
+ * would append a reply that arrives while the sidebar is closed to the body instead, and htmx
+ * drops the history select's
  * `ab:refresh from:body` listener the first time it fires on an element that is not in the page.
  * The chat is mounted the first time the sidebar opens, and again only after a mount that failed;
  * chat.js is added once (mount.ts).
