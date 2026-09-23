@@ -20,8 +20,8 @@ use AlpacaBot\Shortcodes\Chat as ChatShortcode;
  * options.php.
  *
  * Core saves an option whole, so a form that shows one tab posts every tab: the fields of the
- * tabs not shown go out as hidden inputs (Fields::hidden()), `access.mcp` aside (below), so the
- * sanitize callback receives every other field every time. Under that, Schema::sanitize() keeps
+ * tabs not shown go out as hidden inputs (Fields::hidden()), `access.mcp` aside (below), though a
+ * carried empty list or map posts no input at all. Under that, Schema::sanitize() keeps
  * the stored value for any key a post does not name, so a save can never reset a field it did not
  * carry (the old first-save bug, where saving one tab reset the others to their defaults). The
  * two together cover PHP's max_input_vars, which drops the tail of a long post (an overrides table
@@ -48,9 +48,10 @@ use AlpacaBot\Shortcodes\Chat as ChatShortcode;
  * line names the one that moved. `access.mcp` has no control of its own: each MCP server
  * `toolkits.mcp_servers` lists gets a row posting one entry of that map, as
  * `alpaca_bot_settings[access.mcp][<server id>]`. The carry-over leaves the map out, so a save
- * from another tab posts nothing for it and Schema::sanitize() keeps it as stored; the Access tab
- * carries every stored entry it shows no select for as a hidden input, so saving it drops none
- * whose id postable() admits and whose value is a string.
+ * from another tab posts nothing for it and Schema::sanitize() keeps the stored map, sanitized
+ * again, rather than replacing it with what the page could print of it. The Access tab carries
+ * every stored entry it shows no select for as a hidden input, so saving it drops no entry whose
+ * id postable() admits and whose value is one of Access::CAPABILITIES.
  *
  * @phpstan-import-type Field from Schema
  */
@@ -142,8 +143,9 @@ final class SettingsPage
         // the tail is the last rows of an overrides table, never the key or the URL. The marker
         // is the last input of all; a post without it was cut, and the sanitize callback refuses it.
         foreach (Schema::fields() as $key => $f) {
-            // Not access.mcp: left out of the post, Schema::sanitize() keeps the whole stored map,
-            // while a carried map would replace it with whatever Fields::hidden() could print.
+            // Not access.mcp: left out of the post, Schema::sanitize() keeps the stored map,
+            // sanitized again, while a carried map would replace it with whatever
+            // Fields::hidden() could print.
             if ($f['section'] !== $active && $key !== 'access.mcp') {
                 echo Fields::hidden($key, $this->store->get($key)); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- escaped in Fields.
             }
@@ -151,8 +153,9 @@ final class SettingsPage
         if ($active === 'access') {
             // This tab posts the access.mcp map, one entry per MCP row, and a posted map replaces
             // the stored one whole: an entry with no row here (a server the list no longer has)
-            // is carried, or saving the tab would drop it. Only an entry this page could have
-            // written is carried: a string under an id postable() admits.
+            // is carried, or saving the tab would drop it. Only a string under an id postable()
+            // admits is carried; Schema::sanitizeAccessMcp() then drops one that is not a
+            // capability it accepts.
             $stored = $this->store->get('access.mcp', []);
             foreach (is_array($stored) ? $stored : [] as $id => $capability) {
                 if (is_string($id) && is_string($capability) && self::postable($id) && !in_array($id, $this->mcpServers(), true)) {

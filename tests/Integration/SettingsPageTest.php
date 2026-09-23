@@ -300,11 +300,13 @@ final class SettingsPageTest extends TestCase
     }
 
     /**
-     * A save from another tab must leave the access.mcp map alone, whatever the stored map holds.
-     * Here a hand edit left one entry holding an array, written to the row directly because every
-     * writer through the option would sanitize it away. Were the map carried like other fields,
-     * Fields::hidden() would post that entry alone, the post would replace the map, and
-     * Schema::sanitizeAccessMcp() would store []: every server back to administrators only.
+     * A save from another tab must keep the access.mcp map, sanitized again, whatever the stored
+     * map holds, rather than replace it with what the page could print of it. Here a hand edit
+     * left one entry holding an array, written to the row directly: update_option() in this test
+     * would run the sanitize callback set_up() registered, which drops such an entry. Were the map
+     * carried like other fields, Fields::hidden() would post that entry alone, the post would
+     * replace the map, and Schema::sanitizeAccessMcp() would store []: every server back to
+     * administrators only.
      */
     public function test_saving_another_tab_keeps_the_access_mcp_map_even_with_a_hand_edited_entry_in_it(): void
     {
