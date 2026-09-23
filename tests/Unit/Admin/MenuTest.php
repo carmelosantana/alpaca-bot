@@ -88,3 +88,15 @@ it('shows the menu at the Chat row, so a site that opens the row opens the scree
     Functions\expect('add_submenu_page')->twice()->withArgs(static fn(mixed ...$a): bool => in_array($a[3], ['read', 'manage_options'], true));
     (new Menu($settings, $chat, new Access($store)))->register();
 });
+
+// ---------------------------------------------------------------- Task 18: the drawer asks the same question
+
+it('answers the chat capability as the menu does, the Chat row through the menu filter, for the drawer to ask too', function (): void {
+    // One question with two askers: register() for the menu and the screen, Admin\Drawer for the
+    // chat on every other screen. The row and the filter, and nothing else.
+    Filters\expectApplied('alpaca_bot/admin/menu_capability')->once()->with('read')->andReturn('publish_posts');
+    expect(Menu::capability(new Access(new Store(['access.chat' => 'read']))))->toBe('publish_posts');
+    // A filter that answers a non-capability is ignored here as it is for the menu.
+    Filters\expectApplied('alpaca_bot/admin/menu_capability')->once()->with('edit_posts')->andReturn(true);
+    expect(Menu::capability(new Access(new Store([]))))->toBe('edit_posts');
+});

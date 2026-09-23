@@ -194,6 +194,12 @@ final class Plugin
         add_filter('heartbeat_received', [$assets, 'heartbeat'], 10, 2);
         // The help tabs of the chat screen and the settings page; HelpTabs gates on the screen id.
         add_action('current_screen', [new Admin\HelpTabs(), 'add']);
+        // The chat on the other admin screens: a launcher and an empty drawer, and the chat itself
+        // only once it is opened (Admin\Drawer says which screens, who, and what it costs a screen).
+        $drawer = new Admin\Drawer($this->get(Access::class), $prefs, $assets);
+        $this->set(Admin\Drawer::class, $drawer);
+        add_action('admin_enqueue_scripts', [$drawer, 'enqueue']);
+        add_action('admin_footer', [$drawer, 'footer']);
         // Site Health's direct test for web_fetch: whether it can run pinned here (Admin\SiteHealth).
         // Hooked unconditionally: core applies the filter only on its own screen and cron run.
         add_filter('site_status_tests', [new Admin\SiteHealth($store), 'register']);

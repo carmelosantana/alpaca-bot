@@ -41,6 +41,26 @@ final class ViewRoutesTest extends TestCase
         $this->assertSame('qwen3:8b', get_user_meta($uid, 'alpaca_bot_default_model', true));
     }
 
+    public function test_drawer_state_is_stored_in_user_meta_one_parameter_at_a_time_over_core_validation(): void
+    {
+        $uid = $this->asAdmin();
+        $res = $this->rest('POST', '/view/drawer', ['open' => 'true', 'conversation_id' => '7']);
+        $this->assertSame(200, $res->get_status(), print_r($res->get_data(), true));
+        $this->assertSame('', $res->get_data());
+        $this->assertSame('1', get_user_meta($uid, 'alpaca_bot_drawer_open', true));
+        $this->assertSame('7', get_user_meta($uid, 'alpaca_bot_drawer_conversation', true));
+
+        // Only the open state named: the conversation is left as it was.
+        $this->rest('POST', '/view/drawer', ['open' => 'false']);
+        $this->assertSame('0', get_user_meta($uid, 'alpaca_bot_drawer_open', true));
+        $this->assertSame('7', get_user_meta($uid, 'alpaca_bot_drawer_conversation', true));
+
+        // Core's schema refuses a negative id before the callback runs.
+        $res = $this->rest('POST', '/view/drawer', ['conversation_id' => '-1']);
+        $this->assertSame(400, $res->get_status());
+        $this->assertSame('7', get_user_meta($uid, 'alpaca_bot_drawer_conversation', true));
+    }
+
     public function test_default_model_is_refused_while_users_may_not_change_the_model(): void
     {
         $uid = $this->asAdmin();
@@ -54,7 +74,7 @@ final class ViewRoutesTest extends TestCase
     public function test_the_routes_are_registered_and_the_controller_serves_the_html_itself(): void
     {
         $routes = rest_get_server()->get_routes();
-        foreach (['/alpaca-bot/v1/view/messages/(?P<id>\d+)', '/alpaca-bot/v1/view/history', '/alpaca-bot/v1/view/models', '/alpaca-bot/v1/view/default-model', '/alpaca-bot/v1/view/bubble', '/alpaca-bot/v1/view/panel'] as $route) {
+        foreach (['/alpaca-bot/v1/view/messages/(?P<id>\d+)', '/alpaca-bot/v1/view/history', '/alpaca-bot/v1/view/models', '/alpaca-bot/v1/view/default-model', '/alpaca-bot/v1/view/bubble', '/alpaca-bot/v1/view/panel', '/alpaca-bot/v1/view/drawer'] as $route) {
             $this->assertArrayHasKey($route, $routes);
         }
         $hooked = [];
@@ -144,7 +164,7 @@ final class ViewRoutesTest extends TestCase
     {
         $subscriber = self::factory()->user->create(['role' => 'subscriber']);
         wp_set_current_user($subscriber);
-        foreach ([['GET', '/view/history'], ['GET', '/view/models'], ['GET', '/view/bubble'], ['POST', '/view/bubble', ['role' => 'user']], ['POST', '/view/default-model', ['model' => 'x']], ['GET', '/view/messages/1'], ['GET', '/view/panel']] as $call) {
+        foreach ([['GET', '/view/history'], ['GET', '/view/models'], ['GET', '/view/bubble'], ['POST', '/view/bubble', ['role' => 'user']], ['POST', '/view/default-model', ['model' => 'x']], ['GET', '/view/messages/1'], ['GET', '/view/panel'], ['POST', '/view/drawer', ['open' => true]]] as $call) {
             $res = $this->rest($call[0], $call[1], $call[2] ?? []);
             $this->assertSame(403, $res->get_status(), $call[1]);
         }

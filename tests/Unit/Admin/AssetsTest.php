@@ -236,3 +236,39 @@ it('enqueues the same bundle for a front-end shortcode render, the media picker 
         expect($localised['rest'])->toBe('/wp-json/alpaca-bot/v1')->and($localised['nonce'])->toBe('n')->and($localised['maxImageBytes'])->toBe(6242304);
     }
 });
+
+// ---------------------------------------------------------------- Task 18: what a lazy loader borrows
+
+it('localises settings() as the bundle\'s settings object, the one object a lazily added bundle is handed too', function (): void {
+    Functions\when('plugins_url')->alias(fn(string $p) => '/plugins/alpaca-bot/' . $p);
+    Functions\when('rest_url')->alias(fn(string $p) => '/wp-json/' . $p);
+    Functions\when('wp_create_nonce')->justReturn('n');
+    Functions\when('wp_convert_hr_to_bytes')->justReturn(8 * 1024 * 1024);
+    Functions\when('wp_enqueue_media')->justReturn();
+    Functions\when('wp_enqueue_script')->justReturn();
+    Functions\when('wp_enqueue_style')->justReturn();
+    $localised = null;
+    Functions\expect('wp_localize_script')->once()->with('alpaca-bot-chat', 'alpacaBot', Mockery::on(static function (array $data) use (&$localised): bool {
+        $localised = $data;
+        return true;
+    }));
+    (new Assets())->enqueue(Assets::HOOK);
+    expect($localised)->toBe((new Assets())->settings())
+        ->and(array_keys($localised))->toBe(['rest', 'nonce', 'maxImageBytes', 'i18n', 'offline']);
+});
+
+it('tells a loader where the panel, the drawer preferences and the three chat files are, each file at the version its enqueue would give it', function (): void {
+    Functions\when('plugins_url')->alias(fn(string $p) => '/plugins/alpaca-bot/' . $p);
+    Functions\when('rest_url')->alias(fn(string $p) => '/wp-json/' . $p);
+    $mount = (new Assets())->mount();
+    // The unit process has no WP_DEBUG, so the two build outputs are at the plugin version (the
+    // versioning test above), and htmx at its pinned one, exactly as enqueueChat() versions them.
+    expect($mount)->toBe([
+        'panel' => '/wp-json/alpaca-bot/v1/view/panel',
+        'prefs' => '/wp-json/alpaca-bot/v1/view/drawer',
+        'htmx' => '/plugins/alpaca-bot/assets/js/htmx.min.js?ver=' . Assets::HTMX_VERSION,
+        'chat' => '/plugins/alpaca-bot/assets/js/chat.js?ver=' . Plugin::VERSION,
+        'css' => '/plugins/alpaca-bot/assets/css/alpaca-bot.css?ver=' . Plugin::VERSION,
+        'failed' => 'The chat could not be loaded. Reload the page and try again.',
+    ]);
+});

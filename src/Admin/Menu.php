@@ -77,7 +77,14 @@ final class Menu
     /** @param callable(): void $chatRenderer */
     public function __construct(private SettingsPage $settings, private $chatRenderer, private Access $access) {}
 
-    public function register(): void
+    /**
+     * The capability that shows the menu and the chat screen, and the chat on every other admin
+     * screen through Admin\Drawer, which asks this rather than a question of its own: it is the
+     * same chat under a different chrome.
+     *
+     * @since 0.6.0
+     */
+    public static function capability(Access $access): string
     {
         /**
          * Filters the capability that shows the Alpaca Bot menu and its chat screen. Filtered apart
@@ -89,7 +96,12 @@ final class Menu
          * @since 0.5.0
          * @param string $capability the Chat row of Settings › Access, `edit_posts` by default
          */
-        $cap = Capability::filtered('alpaca_bot/admin/menu_capability', $this->access->stored('chat'));
+        return Capability::filtered('alpaca_bot/admin/menu_capability', $access->stored('chat'));
+    }
+
+    public function register(): void
+    {
+        $cap = self::capability($this->access);
         add_menu_page(__('Alpaca Bot', 'alpaca-bot'), __('Alpaca Bot', 'alpaca-bot'), $cap, self::SLUG, $this->chatRenderer, self::ICON, 3);
         add_submenu_page(self::SLUG, __('Chat', 'alpaca-bot'), __('Chat', 'alpaca-bot'), $cap, self::SLUG, $this->chatRenderer);
         add_submenu_page(self::SLUG, __('Alpaca Bot Settings', 'alpaca-bot'), __('Settings', 'alpaca-bot'), 'manage_options', SettingsPage::SLUG, [$this->settings, 'render']);

@@ -339,3 +339,22 @@ it('registers one Access over the container\'s Store, so every surface resolves 
     expect($plugin->get(Access::class))->toBeInstanceOf(Access::class)
         ->and($plugin->get(Access::class)->stored('chat'))->toBe('publish_posts');
 });
+
+it('puts the drawer on the other admin screens: its loader on admin_enqueue_scripts and its launcher on admin_footer, over the container\'s Access and preferences', function (): void {
+    Functions\when('add_shortcode')->justReturn();
+    Actions\expectAdded('admin_enqueue_scripts')->once()->with(Mockery::on(
+        static fn (mixed $cb): bool => is_array($cb) && ($cb[0] ?? null) instanceof AlpacaBot\Admin\Assets && ($cb[1] ?? null) === 'enqueue'
+    ));
+    Actions\expectAdded('admin_enqueue_scripts')->once()->with(Mockery::on(
+        static fn (mixed $cb): bool => is_array($cb) && ($cb[0] ?? null) instanceof AlpacaBot\Admin\Drawer && ($cb[1] ?? null) === 'enqueue'
+    ));
+    Actions\expectAdded('admin_footer')->once()->with(Mockery::on(
+        static fn (mixed $cb): bool => is_array($cb) && ($cb[0] ?? null) instanceof AlpacaBot\Admin\Drawer && ($cb[1] ?? null) === 'footer'
+    ));
+    $plugin = Plugin::boot();
+    $plugin->register();
+    $drawer = $plugin->get(AlpacaBot\Admin\Drawer::class);
+    expect($drawer)->toBeInstanceOf(AlpacaBot\Admin\Drawer::class)
+        ->and((new ReflectionProperty(AlpacaBot\Admin\Drawer::class, 'access'))->getValue($drawer))->toBe($plugin->get(AlpacaBot\Access::class))
+        ->and((new ReflectionProperty(AlpacaBot\Admin\Drawer::class, 'prefs'))->getValue($drawer))->toBe($plugin->get(UserPrefs::class));
+});

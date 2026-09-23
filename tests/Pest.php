@@ -771,3 +771,15 @@ function fakedStream(array $chunks): array
     }
     return $out;
 }
+
+/**
+ * DrawerTest: the admin-wide drawer over a Store of `$settings`, with a real Access, UserPrefs and
+ * Assets (all three final), so a test says what the site's settings are and stubs only WordPress.
+ *
+ * @param array<string, mixed> $settings
+ */
+function adminDrawer(array $settings = []): AlpacaBot\Admin\Drawer
+{
+    $store = new Store($settings);
+    return new AlpacaBot\Admin\Drawer(new AlpacaBot\Access($store), new AlpacaBot\Chat\UserPrefs(), new AlpacaBot\Admin\Assets());
+}

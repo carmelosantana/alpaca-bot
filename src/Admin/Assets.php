@@ -14,7 +14,10 @@ use AlpacaBot\Plugin;
  * object: the REST root (rest_url(), so it is right under either permalink form), the REST
  * nonce it signs requests with, the largest image the site takes (maxImageBytes()), and the
  * strings it shows. The settings page gets none of that, only OVERRIDES_CSS inline on a core
- * handle; every other admin screen gets nothing.
+ * handle, and every other admin screen gets nothing from enqueue(). Admin\Drawer enqueues a loader
+ * of its own there, for the screens and the users its docblock names, and borrows settings() and
+ * mount() from here, so the bundle it adds on the drawer's first open reads what it reads on the
+ * chat screen.
  *
  * The files are build outputs (`pnpm build`) and gitignored, enqueued by URL as any asset is:
  * a checkout that has not built them gets a 404 for each, and the screen still renders. Under
@@ -155,7 +158,21 @@ final class Assets
         wp_enqueue_script('alpaca-bot-htmx', plugins_url('assets/js/htmx.min.js', ALPACA_BOT_FILE), [], self::HTMX_VERSION, true);
         wp_enqueue_script('alpaca-bot-chat', plugins_url('assets/js/chat.js', ALPACA_BOT_FILE), ['alpaca-bot-htmx', 'heartbeat'], self::version('assets/js/chat.js'), true);
         wp_enqueue_style('alpaca-bot', plugins_url('assets/css/alpaca-bot.css', ALPACA_BOT_FILE), [], self::version('assets/css/alpaca-bot.css'));
-        wp_localize_script('alpaca-bot-chat', 'alpacaBot', [
+        wp_localize_script('alpaca-bot-chat', 'alpacaBot', $this->settings());
+    }
+
+    /**
+     * The chat bundle's settings object, `alpacaBot`: the REST root (rest_url(), so it is right
+     * under either permalink form), the nonce it signs with, the largest image the site takes, and
+     * the strings it shows. Public because this class is not the only one that hands it over:
+     * Admin\Drawer localises the same object on its loader, so a bundle added to the page later
+     * reads exactly what it reads on the chat screen.
+     *
+     * @return array<string, mixed>
+     */
+    public function settings(): array
+    {
+        return [
             'rest' => rest_url('alpaca-bot/v1'),
             'nonce' => wp_create_nonce('wp_rest'),
             'maxImageBytes' => self::maxImageBytes(),
@@ -179,7 +196,33 @@ final class Assets
                 'callingTool' => __('Calling a tool…', 'alpaca-bot'),
             ],
             'offline' => __('You are offline. Messages will send once the connection is back.', 'alpaca-bot'),
-        ]);
+        ];
+    }
+
+    /**
+     * What a loader needs to put the chat into a page that did not enqueue it (`alpacaBotMount`,
+     * resources/ts/mount.ts): the fragment route, the route the drawer's state goes to, the three
+     * files, each with the version query its enqueue would have given it, so a rebuild busts the
+     * browser cache the same way, and the line shown when the fragment does not arrive.
+     *
+     * @return array<string, string>
+     */
+    public function mount(): array
+    {
+        return [
+            'panel' => rest_url('alpaca-bot/v1/view/panel'),
+            'prefs' => rest_url('alpaca-bot/v1/view/drawer'),
+            'htmx' => self::versioned('assets/js/htmx.min.js', self::HTMX_VERSION),
+            'chat' => self::versioned('assets/js/chat.js', self::version('assets/js/chat.js')),
+            'css' => self::versioned('assets/css/alpaca-bot.css', self::version('assets/css/alpaca-bot.css')),
+            'failed' => __('The chat could not be loaded. Reload the page and try again.', 'alpaca-bot'),
+        ];
+    }
+
+    /** A plugin file's URL with `?ver=`, as core's script loader writes an enqueued file's. */
+    private static function versioned(string $relative, string $version): string
+    {
+        return plugins_url($relative, ALPACA_BOT_FILE) . '?ver=' . rawurlencode($version);
     }
 
     /**
