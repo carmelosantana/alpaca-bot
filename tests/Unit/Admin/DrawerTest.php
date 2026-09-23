@@ -248,3 +248,16 @@ it('enqueues no editor sidebar where enqueue_block_editor_assets fires with no p
         expect(true)->toBeTrue($case);
     }
 });
+
+it('asks the menu\'s filter who gets the editor sidebar, as it asks who gets the drawer', function (): void {
+    Functions\when('get_current_screen')->justReturn(($this->screen)('post', true, 'post'));
+    Filters\expectApplied('alpaca_bot/admin/menu_capability')->once()->with('publish_posts')->andReturn('read');
+    Functions\expect('current_user_can')->once()->with('read')->andReturn(true);
+    Functions\when('plugins_url')->alias(fn(string $p) => '/plugins/alpaca-bot/' . $p);
+    Functions\when('rest_url')->alias(fn(string $p) => '/wp-json/' . $p);
+    Functions\when('wp_create_nonce')->justReturn('n');
+    Functions\when('wp_convert_hr_to_bytes')->justReturn(8 * 1024 * 1024);
+    Functions\when('wp_localize_script')->justReturn(true);
+    Functions\expect('wp_enqueue_script')->once();
+    adminDrawer(['access.chat' => 'publish_posts'])->enqueueEditor();
+});
