@@ -105,6 +105,15 @@ function panelRequests(page: Page): { count: number } {
   return seen;
 }
 
+/** Gives the post this title and saves it, resolving once the editor has finished the save. */
+async function save(page: Page, title: string): Promise<void> {
+  await page.evaluate(async (title) => {
+    const editor = (window as unknown as EditorGlobals).wp.data.dispatch('core/editor');
+    await editor.editPost!({ title });
+    await editor.savePost!();
+  }, title);
+}
+
 async function send(sidebar: Locator, text: string): Promise<void> {
   await sidebar.locator('#ab-message').fill(text);
   await sidebar.locator('#ab-message').press('Enter');
@@ -243,6 +252,20 @@ test('on a new post the sidebar names no post until the post is saved, and then 
   sent = nextContext(page);
   await send(sidebar, 'hello again');
   expect(await sent).toEqual({ post_id: id });
+  await turnDone(sidebar);
+
+  // Taken off, the chip stays off through the next save: the sidebar asks for a chip only until
+  // one has come, so the post is not put back on the turn behind the user's back.
+  await sidebar.locator('#ab-form .ab-chip[data-chip="post"] [data-action="chip-remove"]').click();
+  await expect(sidebar.locator('#ab-form .ab-chip')).toHaveCount(0);
+  await save(page, 'ab-e2e-editor-new again');
+  // Time for a fetch the save should not start to be made, since what is asserted is its absence.
+  await page.waitForTimeout(1000);
+  await expect(sidebar.locator('#ab-form .ab-chip')).toHaveCount(0);
+  expect(panels.count).toBe(2);
+  sent = nextContext(page);
+  await send(sidebar, 'hello once more');
+  expect(await sent).toEqual({});
   await turnDone(sidebar);
 });
 
