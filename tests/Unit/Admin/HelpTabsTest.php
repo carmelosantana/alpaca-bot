@@ -18,7 +18,7 @@ function helpScreen(string $id): Mockery\MockInterface
 
 // Core derives a submenu screen's id from the *parent's translated menu title*, so the settings
 // page's id is not a constant. These stand in for get_plugin_page_hookname() rather than spell
-// the id out: what a hard-coded string cost was all four tabs on every translated locale, and a
+// the id out: what a hard-coded string cost was every tab on every translated locale, and a
 // test that names the string again cannot notice. The derivation itself is exercised against
 // real core, in a translated locale, in tests/Integration/HelpTabsTest.php.
 beforeEach(function (): void {
@@ -34,17 +34,17 @@ it('names the chat screen and the settings page as the two screens that get the 
     expect(HelpTabs::screens())->toBe([Assets::HOOK, 'robot-alpaca_page_' . SettingsPage::SLUG]);
 });
 
-it('adds the Chat, Shortcodes, Tools and Support tabs, in that order, to the chat screen and to the settings page', function (): void {
+it('adds the Chat, Shortcodes, Tools, Access and Support tabs, in that order, to the chat screen and to the settings page', function (): void {
     Functions\when('esc_url')->returnArg();
     foreach (HelpTabs::screens() as $id) {
         $added = [];
         $screen = helpScreen($id);
-        $screen->shouldReceive('add_help_tab')->times(4)->andReturnUsing(static function (array $tab) use (&$added): void {
+        $screen->shouldReceive('add_help_tab')->times(5)->andReturnUsing(static function (array $tab) use (&$added): void {
             $added[] = $tab;
         });
         (new HelpTabs())->add($screen);
-        expect(array_column($added, 'id'))->toBe(['alpaca-bot-chat', 'alpaca-bot-shortcodes', 'alpaca-bot-tools', 'alpaca-bot-support'], $id)
-            ->and(array_column($added, 'title'))->toBe(['Chat', 'Shortcodes', 'Tools', 'Support'], $id);
+        expect(array_column($added, 'id'))->toBe(['alpaca-bot-chat', 'alpaca-bot-shortcodes', 'alpaca-bot-tools', 'alpaca-bot-access', 'alpaca-bot-support'], $id)
+            ->and(array_column($added, 'title'))->toBe(['Chat', 'Shortcodes', 'Tools', 'Access', 'Support'], $id);
         foreach ($added as $tab) {
             expect($tab['content'])->toBeString()->toContain('<p>');
         }
@@ -135,6 +135,27 @@ it('tells a site owner what the tools grant: the fetch is an outbound request pi
         ->not->toContain('vulnerab')->not->toMatch('/(?<![\\d.])1\\.\\d/');
 });
 
+// The Access tab is the capability model in the product's own words: a row is a default a filter
+// may override, not an answer, and "Set in code" under a row is that override showing. It names
+// every row by the label Settings › Access gives it, so an operator can find the one it means.
+it('says what each Settings › Access row decides and what "Set in code" under one means', function (): void {
+    Functions\when('esc_url')->returnArg();
+    $access = helpTabContent('alpaca-bot-access');
+    foreach (AlpacaBot\Settings\Schema::fields() as $key => $field) {
+        if (str_starts_with($key, 'access.') && $key !== 'access.mcp' && !str_starts_with($key, 'access.tool.')) {
+            expect($access)->toContain('<strong>' . $field['label'] . '</strong>');
+        }
+    }
+    expect($access)->toContain('Set in code')
+        ->toContain('Administrators')->toContain('Editors and up')->toContain('Authors and up')->toContain('Contributors and up')->toContain('Any logged-in user')
+        // The tool floor: opening the chat does not hand a role the tools.
+        ->toContain('as well as Chat')
+        // The Chat row's two surfaces, each behind a filter of its own, and which one a note names.
+        ->toContain('alpaca_bot/admin/menu_capability')->toContain('alpaca_bot/capability/chat')
+        ->toContain('once no filter changes it')
+        ->not->toMatch('/(?<![\\d.])1\\.\\d/');
+});
+
 it('escapes every URL it prints through esc_url', function (): void {
     $urls = [];
     Functions\when('esc_url')->alias(static function (string $url) use (&$urls): string {
@@ -145,12 +166,12 @@ it('escapes every URL it prints through esc_url', function (): void {
     expect($urls)->not->toBeEmpty()->and($support)->not->toContain('href="https://');
 });
 
-/** The content of one tab as add() hands it to the chat screen. */
+/** The content of one tab as add() hands it to the chat screen; how many tabs there are is the ordering test's to pin. */
 function helpTabContent(string $tabId): string
 {
     $screen = helpScreen(Assets::HOOK);
     $content = null;
-    $screen->shouldReceive('add_help_tab')->times(4)->andReturnUsing(static function (array $tab) use (&$content, $tabId): void {
+    $screen->shouldReceive('add_help_tab')->atLeast()->once()->andReturnUsing(static function (array $tab) use (&$content, $tabId): void {
         if ($tab['id'] === $tabId) {
             $content = $tab['content'];
         }

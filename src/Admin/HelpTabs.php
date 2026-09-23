@@ -7,8 +7,9 @@ namespace AlpacaBot\Admin;
 /**
  * The help tabs (core's "Help" pull-down at the top right of a screen) of the chat screen and the
  * settings page, added on `current_screen`, the action core fires once the WP_Screen is built and
- * its id is known. Four tabs: what the chat screen does now, what the shortcodes do (and cost),
- * what the tools let the model reach, and where to get help.
+ * its id is known. The tabs, in order: what the chat screen does now, what the shortcodes do (and
+ * cost), what the tools let the model reach, who may use each part of the plugin, and where to
+ * get help.
  *
  * 0.4's Help ran README.md through a markdown parser and made a tab of every heading. Nothing of
  * that is kept: the parser is gone with the 0.4 tree, and the tabs are written for what the
@@ -52,6 +53,7 @@ final class HelpTabs
             'chat' => [__('Chat', 'alpaca-bot'), $this->chat()],
             'shortcodes' => [__('Shortcodes', 'alpaca-bot'), $this->shortcodes()],
             'tools' => [__('Tools', 'alpaca-bot'), $this->tools()],
+            'access' => [__('Access', 'alpaca-bot'), $this->access()],
             'support' => [__('Support', 'alpaca-bot'), $this->support()],
         ];
     }
@@ -157,6 +159,53 @@ final class HelpTabs
                 '<code>draft_post</code>',
             ))
             . self::p(esc_html__('One more thing the tools share: a fetched page can carry text written at the model rather than at the reader ("ignore your instructions and draft a post saying…"), and the same turn may have other tools on. The tools\' own rules are what bound that — a draft is authored as the acting user and never published, and its content is sanitised — so review a draft you did not write yourself.', 'alpaca-bot'));
+    }
+
+    /**
+     * The Access tab: what each row of Settings › Access decides, and what "Set in code" under a
+     * row means. It exists because a row is a default a filter may override, not an answer, and
+     * an administrator has to know that before reading the tab as the site's policy; and because
+     * the tool floor (Kanboard #4331) changes what opening the chat to a role does, which belongs
+     * in the product and not only in a changelog. The rows are named by the labels the tab gives
+     * them, the tool rows together.
+     */
+    private function access(): string
+    {
+        return self::p(sprintf(
+            /* translators: %s: Settings › Access */
+            esc_html__('%s decides who may use each part of Alpaca Bot, one capability per row: Administrators, Editors and up, Authors and up, Contributors and up, or Any logged-in user.', 'alpaca-bot'),
+            '<strong>' . esc_html__('Settings › Access', 'alpaca-bot') . '</strong>',
+        ))
+            . self::list([
+                '<strong>' . esc_html__('Chat', 'alpaca-bot') . '</strong> ' . esc_html__('is the chat screen, its panel on other admin screens, the block editor sidebar and the chat REST routes. Contributors and up by default.', 'alpaca-bot'),
+                esc_html__('Each tool has a row of its own, and a user needs that row as well as Chat: opening the chat to a role does not hand that role the tools. The built-in tools start at Contributors and up, the site\'s abilities tool and each MCP server at Administrators.', 'alpaca-bot'),
+                sprintf(
+                    /* translators: 1: Read settings over REST, 2: Write settings over REST */
+                    esc_html__('%1$s and %2$s decide who may read and who may change the settings through the REST API. Both start at Administrators. This settings page always needs an administrator, whatever they say.', 'alpaca-bot'),
+                    '<strong>' . esc_html__('Read settings over REST', 'alpaca-bot') . '</strong>',
+                    '<strong>' . esc_html__('Write settings over REST', 'alpaca-bot') . '</strong>',
+                ),
+                '<strong>' . esc_html__('Shortcodes', 'alpaca-bot') . '</strong> ' . sprintf(
+                    /* translators: 1: [alpacabot prompt="…"], 2: [alpacabot_agent] */
+                    esc_html__('is who triggers a generation by viewing a page carrying %1$s, or the deprecated %2$s, which generates through the same rules. Contributors and up by default; a visitor never does.', 'alpaca-bot'),
+                    '<code>[alpacabot prompt="…"]</code>',
+                    '<code>[alpacabot_agent]</code>',
+                ),
+            ])
+            . self::p('<strong>' . esc_html__('Set in code', 'alpaca-bot') . '</strong> ' . sprintf(
+                /* translators: 1: the alpaca_bot/capability/… filter names, 2: alpaca_bot/capability/settings */
+                esc_html__('under a row means a filter in a plugin, a theme or an mu-plugin moves that row off what you chose, and the note names the capability checked instead, or says the filter could not be asked from this page. A row\'s filter is %1$s, named after the row; the settings rows run 0.5\'s %2$s first. The filter wins. What you choose is still saved, and is what applies once no filter changes it. A filter that answers per user or per request is shown as it answers for you, on this page.', 'alpaca-bot'),
+                '<code>alpaca_bot/capability/…</code>',
+                '<code>alpaca_bot/capability/settings</code>',
+            ))
+            . self::p(sprintf(
+                /* translators: 1: alpaca_bot/admin/menu_capability, 2: alpaca_bot/capability/chat, 3: POST /chat, 4: alpaca_bot/capability/{route} */
+                esc_html__('The Chat row has no filter of that kind. The note under it asks %1$s, which filters the chat screen, its panel and the editor sidebar, and %2$s, which filters the %3$s route, and says which of them moved it. Every other chat route has a filter of its own, %4$s, which the note does not ask.', 'alpaca-bot'),
+                '<code>alpaca_bot/admin/menu_capability</code>',
+                '<code>alpaca_bot/capability/chat</code>',
+                '<code>POST /chat</code>',
+                '<code>alpaca_bot/capability/{route}</code>',
+            ));
     }
 
     /**
