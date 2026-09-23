@@ -34,6 +34,9 @@ type EditorGlobals = {
   alpacaBot: { nonce: string; rest: string };
 };
 
+/** Every post this spec makes is titled with this prefix, and the afterAll hook below deletes them by it. */
+const TITLE = 'ab-e2e-editor-';
+
 async function login(page: Page): Promise<void> {
   await page.goto('/wp-login.php');
   await page.fill('#user_login', ADMIN_USER);
@@ -119,9 +122,39 @@ async function send(sidebar: Locator, text: string): Promise<void> {
   await sidebar.locator('#ab-message').press('Enter');
 }
 
+/**
+ * Deletes, for good, every post whose title starts with TITLE, through the REST API as the admin,
+ * so runs do not pile drafts up on the development site. A post saved under another title is not
+ * this spec's and is left alone.
+ */
+test.afterAll(async ({ browser }, testInfo) => {
+  const page = await browser.newPage({ baseURL: testInfo.project.use.baseURL });
+  try {
+    await login(page);
+    await page.goto('/wp-admin/index.php');
+    const left = await page.evaluate(async (prefix) => {
+      const wp = window as unknown as EditorGlobals;
+      const posts = wp.alpacaBot.rest.replace('alpaca-bot/v1', 'wp/v2/posts');
+      const sep = posts.includes('?') ? '&' : '?';
+      const headers = { 'X-WP-Nonce': wp.alpacaBot.nonce };
+      const mine = async (): Promise<number[]> => {
+        const res = await fetch(`${posts}${sep}search=${encodeURIComponent(prefix)}&status=draft,publish,pending,private,future&context=edit&per_page=100`, { credentials: 'same-origin', headers });
+        return (await res.json() as { id: number; title: { raw: string } }[]).filter((p) => p.title.raw.startsWith(prefix)).map((p) => p.id);
+      };
+      for (const id of await mine()) {
+        await fetch(`${posts.replace(/\/posts(?=$|[?&])/, `/posts/${id}`)}${sep}force=true`, { method: 'DELETE', credentials: 'same-origin', headers });
+      }
+      return (await mine()).length;
+    }, TITLE);
+    expect(left).toBe(0);
+  } finally {
+    await page.close();
+  }
+});
+
 test('the block editor has the chat as its own sidebar, on the post being edited, with the image button and no footer drawer, and keeps it through a close', async ({ page }) => {
   await login(page);
-  const id = await draft(page, 'ab-e2e-editor-draft');
+  const id = await draft(page, `${TITLE}draft`);
   const panels = panelRequests(page);
   const toggle = await openEditor(page, `/wp-admin/post.php?post=${id}&action=edit`);
 
@@ -138,7 +171,7 @@ test('the block editor has the chat as its own sidebar, on the post being edited
   await expect(sidebar.locator('#ab-form')).toBeVisible();
   await booted(sidebar);
   await expect(page.locator('script[src*="assets/js/chat.js"]')).toHaveCount(1);
-  await expect(sidebar.locator('#ab-form .ab-chip[data-chip="post"] .ab-chip__label')).toHaveText('Editing: ab-e2e-editor-draft');
+  await expect(sidebar.locator('#ab-form .ab-chip[data-chip="post"] .ab-chip__label')).toHaveText(`Editing: ${TITLE}draft`);
   await expect(sidebar.locator('#ab-form input[name="context[post_id]"]')).toHaveValue(String(id));
   // The editor names no screen: the post is its context.
   await expect(sidebar.locator('#ab-form .ab-chip')).toHaveCount(1);
@@ -235,14 +268,10 @@ test('on a new post the sidebar names no post until the post is saved, and then 
   await sidebar.locator('#ab-form').evaluate((form) => { (form as HTMLFormElement & { abMark?: number }).abMark = 1; });
 
   // Saved: the chip comes, without a reload and without a remount.
-  await page.evaluate(async () => {
-    const editor = (window as unknown as EditorGlobals).wp.data.dispatch('core/editor');
-    await editor.editPost!({ title: 'ab-e2e-editor-new' });
-    await editor.savePost!();
-  });
+  await save(page, `${TITLE}new`);
   expect(await postStatus(page)).toBe('draft');
   const id = await postId(page);
-  await expect(sidebar.locator('#ab-form .ab-chip[data-chip="post"] .ab-chip__label')).toHaveText('Editing: ab-e2e-editor-new');
+  await expect(sidebar.locator('#ab-form .ab-chip[data-chip="post"] .ab-chip__label')).toHaveText(`Editing: ${TITLE}new`);
   await expect(sidebar.locator('#ab-form input[name="context[post_id]"]')).toHaveValue(String(id));
   expect(await sidebar.locator('#ab-form').evaluate((form) => (form as HTMLFormElement & { abMark?: number }).abMark)).toBe(1);
   await expect(sidebar.locator('article.ab-msg--assistant')).toHaveCount(1);
@@ -258,7 +287,7 @@ test('on a new post the sidebar names no post until the post is saved, and then 
   // one has come, so the post is not put back on the turn behind the user's back.
   await sidebar.locator('#ab-form .ab-chip[data-chip="post"] [data-action="chip-remove"]').click();
   await expect(sidebar.locator('#ab-form .ab-chip')).toHaveCount(0);
-  await save(page, 'ab-e2e-editor-new again');
+  await save(page, `${TITLE}new again`);
   // Time for a fetch the save should not start to be made, since what is asserted is its absence.
   await page.waitForTimeout(1000);
   await expect(sidebar.locator('#ab-form .ab-chip')).toHaveCount(0);
@@ -277,14 +306,14 @@ test('on a new post an autosave is enough for the sidebar to name it', async ({ 
   await booted(sidebar);
   await expect(sidebar.locator('#ab-form .ab-chip')).toHaveCount(0);
 
-  await page.evaluate(async () => {
+  await page.evaluate(async (title) => {
     const editor = (window as unknown as EditorGlobals).wp.data.dispatch('core/editor');
-    await editor.editPost!({ title: 'ab-e2e-editor-autosaved' });
+    await editor.editPost!({ title });
     await editor.autosave!();
-  });
+  }, `${TITLE}autosaved`);
   expect(await postStatus(page)).toBe('draft');
   const id = await postId(page);
-  await expect(sidebar.locator('#ab-form .ab-chip[data-chip="post"] .ab-chip__label')).toHaveText('Editing: ab-e2e-editor-autosaved');
+  await expect(sidebar.locator('#ab-form .ab-chip[data-chip="post"] .ab-chip__label')).toHaveText(`Editing: ${TITLE}autosaved`);
   await expect(sidebar.locator('#ab-form input[name="context[post_id]"]')).toHaveValue(String(id));
 });
 
@@ -302,14 +331,14 @@ test('two saves that finish while the post chip is still being fetched ask for i
   let release: () => void = () => {};
   const saved = new Promise<void>((resolve) => { release = resolve; });
   await page.route(isPanel, async (r) => { await saved; await r.continue(); });
-  await save(page, 'ab-e2e-editor-twice');
-  await save(page, 'ab-e2e-editor-twice again');
+  await save(page, `${TITLE}twice`);
+  await save(page, `${TITLE}twice again`);
   // Time for a second fetch the second save should not start, since what is asserted is its absence.
   await page.waitForTimeout(1000);
   expect(panels.count).toBe(2);
   release();
 
-  await expect(sidebar.locator('#ab-form .ab-chip[data-chip="post"] .ab-chip__label')).toHaveText('Editing: ab-e2e-editor-twice again');
+  await expect(sidebar.locator('#ab-form .ab-chip[data-chip="post"] .ab-chip__label')).toHaveText(`Editing: ${TITLE}twice again`);
   await page.unroute(isPanel);
   await expect(sidebar.locator('#ab-form .ab-chip')).toHaveCount(1);
 });
