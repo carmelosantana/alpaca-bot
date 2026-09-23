@@ -203,7 +203,8 @@ final class Assets
      * What a loader needs to put the chat into a page that did not enqueue it (`alpacaBotMount`,
      * resources/ts/mount.ts): the fragment route, the route the drawer's state goes to, the three
      * files, each with the version query its enqueue would have given it, so a rebuild busts the
-     * browser cache the same way, and the line shown when the fragment does not arrive.
+     * browser cache the same way, the chat's name, for a host that titles the panel it puts the
+     * chat in, and the line shown when the fragment does not arrive.
      *
      * @return array<string, string>
      */
@@ -215,6 +216,7 @@ final class Assets
             'htmx' => self::versioned('assets/js/htmx.min.js', self::HTMX_VERSION),
             'chat' => self::versioned('assets/js/chat.js', self::version('assets/js/chat.js')),
             'css' => self::versioned('assets/css/alpaca-bot.css', self::version('assets/css/alpaca-bot.css')),
+            'title' => __('Alpaca Bot', 'alpaca-bot'),
             'failed' => __('The chat could not be loaded. Reload the page and try again.', 'alpaca-bot'),
         ];
     }

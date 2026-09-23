@@ -10,7 +10,8 @@
  * drawer.ts calls mountPanel() again only after a mount that failed; a mounted chat it shows and
  * hides, so a turn in flight is never re-rendered.
  */
-export interface MountSettings { panel: string; prefs: string; htmx: string; chat: string; css: string; failed: string }
+/** What Admin\Assets::mount() localises; `title` is the chat's name, for a host that titles the panel it mounts the chat in. */
+export interface MountSettings { panel: string; prefs: string; htmx: string; chat: string; css: string; title: string; failed: string }
 
 declare global {
   interface Window { alpacaBotMount?: MountSettings }

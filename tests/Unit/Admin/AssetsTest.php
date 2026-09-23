@@ -257,7 +257,7 @@ it('localises settings() as the bundle\'s settings object, the one object a lazi
         ->and(array_keys($localised))->toBe(['rest', 'nonce', 'maxImageBytes', 'i18n', 'offline']);
 });
 
-it('tells a loader where the panel, the drawer preferences and the three chat files are, each file at the version its enqueue would give it', function (): void {
+it('tells a loader where the panel, the drawer preferences and the three chat files are, each file at the version its enqueue would give it, and the chat\'s name for a host to title its panel with', function (): void {
     Functions\when('plugins_url')->alias(fn(string $p) => '/plugins/alpaca-bot/' . $p);
     Functions\when('rest_url')->alias(fn(string $p) => '/wp-json/' . $p);
     $mount = (new Assets())->mount();
@@ -269,6 +269,7 @@ it('tells a loader where the panel, the drawer preferences and the three chat fi
         'htmx' => '/plugins/alpaca-bot/assets/js/htmx.min.js?ver=' . Assets::HTMX_VERSION,
         'chat' => '/plugins/alpaca-bot/assets/js/chat.js?ver=' . Plugin::VERSION,
         'css' => '/plugins/alpaca-bot/assets/css/alpaca-bot.css?ver=' . Plugin::VERSION,
+        'title' => 'Alpaca Bot',
         'failed' => 'The chat could not be loaded. Reload the page and try again.',
     ]);
 });
