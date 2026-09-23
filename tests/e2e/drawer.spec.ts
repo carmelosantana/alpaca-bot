@@ -200,6 +200,36 @@ test('"New chat" in the drawer starts a fresh transcript in place, from the head
   await expect(page.locator('script[src*="assets/js/chat.js"]')).toHaveCount(0);
 });
 
+test('a "New chat" whose request fails keeps the drawer on the conversation it remembers, and stores nothing', async ({ page }) => {
+  // No turn is needed: the drawer remembers whatever id POST /view/drawer stored, and one that is
+  // no conversation of the user's opens as a new chat without the drawer forgetting the id.
+  await login(page);
+  await drawerState(page, { open: true, conversation_id: 999999 });
+  const drawer = page.locator('#ab-drawer');
+  await booted(drawer);
+  await expect(drawer).toHaveAttribute('data-conversation', '999999');
+  const url = page.url();
+  const errors: string[] = [];
+  page.on('pageerror', (e) => errors.push(e.message));
+  const stored: string[] = [];
+  page.on('request', (req) => { if (req.method() === 'POST' && /view(\/|%2F)drawer/.test(req.url())) stored.push(req.postData() ?? ''); });
+
+  const isPanel = (u: URL): boolean => /view(\/|%2F)panel/.test(u.toString());
+  await page.route(isPanel, (r) => r.abort('connectionfailed'));
+  const failed = page.waitForEvent('requestfailed', (req) => /view(\/|%2F)panel/.test(req.url()));
+  await drawer.locator('.page-title-action').click();
+  await failed;
+  // Time for a POST /view/drawer the failure should not send, since what is asserted is its absence.
+  await page.waitForTimeout(1000);
+  expect(stored).toEqual([]);
+  await expect(drawer).toHaveAttribute('data-conversation', '999999');
+  expect(page.url()).toBe(url);
+  expect(errors).toEqual([]);
+  await page.unroute(isPanel);
+
+  await drawerState(page, { open: false, conversation_id: 0 });
+});
+
 test('an iframe screen gets no drawer: core defines IFRAME_REQUEST for it and it is someone else\'s modal', async ({ page }) => {
   // media-upload.php is core's legacy upload modal, loaded into a thickbox iframe, and it defines
   // IFRAME_REQUEST, as plugin-install.php's details modal and update.php's update and activate actions do. Its
