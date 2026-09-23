@@ -5,12 +5,12 @@ declare(strict_types=1);
 namespace AlpacaBot\Toolkit;
 
 /**
- * A tool name the plugin did not choose, made to fit the rule it holds every tool name to.
+ * A tool name the plugin did not choose, made to fit: at most MAX characters of `[A-Za-z0-9_-]`,
+ * the first a letter or an underscore.
  *
  * AbilitiesToolkit names its tools after an ability's `namespace/name`, which another plugin
  * chose: core checks it against `/^[a-z0-9-]+\/[a-z0-9-]+$/` and sets no length (WP 7.1
- * class-wp-abilities-registry.php:86). The rule fit() holds a tool name to is at most MAX
- * characters of `[A-Za-z0-9_-]`, the first a letter or an underscore.
+ * class-wp-abilities-registry.php:86).
  *
  * A name that already fits comes back unchanged, so the common case reads as it was written.
  * Anything else is changed *and marked*: characters outside the set become `_`, a first

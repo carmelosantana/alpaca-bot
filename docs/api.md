@@ -497,11 +497,12 @@ Rules worth knowing before you write:
 
 - **`toolkits.enabled` is a list of ids, replaced wholesale.** The built-in toolkits the
   assistant may use, by the ids the schema route lists under the field's `options`
-  (`web_fetch`, `summarize`, `draft_post`, `abilities`; the default is the first three). What
-  is stored is the subset of those ids you sent, in the schema's order: an id it does not know
-  is dropped, a duplicate is one entry, and `[]` switches every tool off. A value that is not a
-  list at all stores `[]` rather than the default, since the default switches tools on. The
-  field's `type` is `checkbox-list`, which a form renders as one checkbox per option.
+  (`web_fetch`, `summarize`, `draft_post`, `abilities`; the default is `web_fetch`,
+  `summarize` and `draft_post`). What is stored is the subset of those ids you sent, in the
+  schema's order: an id it does not know is dropped, a duplicate is one entry, and `[]`
+  switches every tool off. A value that is not a list at all stores `[]` rather than the
+  default, since the default switches tools on. The field's `type` is `checkbox-list`, which a
+  form renders as one checkbox per option.
 
   ```
   $ curl -s -u "admin:$PW" -H 'Content-Type: application/json' -X PUT -d '{"toolkits.enabled": ["draft_post", "bogus", "web_fetch"]}' "$B/settings" | jq -c '{"toolkits.enabled"}'
