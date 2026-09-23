@@ -7,6 +7,14 @@
  * time (the nonce header, the history select's conversation id) is changed on the
  * htmx:configRequest event instead. Every fragment it inserts came from a /view/* route.
  *
+ * Its listeners sit on the document, but it acts only inside the shell, the `.ab-wrap` around the
+ * form: the admin-wide drawer (Admin\Drawer) puts the shell on wp-admin screens whose own buttons
+ * carry `data-action` too (the comments list's Quick Edit is `data-action="edit"`) and whose own
+ * pages may hold code blocks. And it tells whatever hosts the shell two things, as events on the
+ * form: `ab:conversation` (`detail.id`) whenever the conversation the transcript shows is set,
+ * and `ab:new-chat`, cancelable, before the history select's "New chat" leaves the page.
+ * resources/ts/drawer.ts listens for both.
+ *
  * boot() is exported rather than run on import, so node:test can drive it against a document of
  * its own (tests/ts/chat.test.ts, Kanboard #4334); chat.ts is the entry that finds the shell and
  * calls it. The pieces with a decision of their own to test are composer.ts, redeem.ts and
@@ -30,10 +38,17 @@ interface MediaFrame { on(event: string, cb: () => void): void; open(): void; st
 interface HtmxDetail { path: string; headers: Record<string, string>; xhr?: XMLHttpRequest }
 type Json = Record<string, unknown>;
 
+/** The part of htmx's API this bundle and the drawer's loader call (resources/ts/mount.ts, drawer.ts). */
+interface Htmx {
+  trigger(target: Element, name: string): void;
+  ajax(verb: string, path: string, context: { target: Element; swap: string; headers?: Record<string, string> }): Promise<void>;
+  process(target: Element): void;
+}
+
 declare global {
   interface Window {
     alpacaBot?: Settings;
-    htmx?: { trigger(target: Element, name: string): void };
+    htmx?: Htmx;
     wp?: { media?: (options: object) => MediaFrame };
   }
 }
@@ -43,6 +58,9 @@ export function boot(cfg: Settings, form: HTMLFormElement): void {
   const textarea = $<HTMLTextAreaElement>('#ab-message', form) as HTMLTextAreaElement;
   const sendButton = $<HTMLButtonElement>('[data-action="send"]', form) as HTMLButtonElement;
   const field = (name: string): HTMLInputElement => form.elements.namedItem(name) as HTMLInputElement;
+  // What this boot acts on: the shell (the file docblock says why), or the document for a form
+  // that is not in one.
+  const shell: ParentNode = form.closest('.ab-wrap') ?? document;
   let busy = false;
   let expired = false;
   let offlineShown = false;
@@ -92,6 +110,7 @@ export function boot(cfg: Settings, form: HTMLFormElement): void {
     if (id === null) return;
     field('conversation_id').value = String(id);
     for (const node of $$('#ab-chat, #ab-messages')) node.dataset.conversation = String(id);
+    form.dispatchEvent(new CustomEvent('ab:conversation', { bubbles: true, detail: { id } }));
   }
   /** Runs a change to the transcript and keeps the bottom in view unless the user scrolled up. */
   function withScroll(mutate: () => void): void {
@@ -326,7 +345,7 @@ export function boot(cfg: Settings, form: HTMLFormElement): void {
   });
   document.addEventListener('click', (e) => {
     const button = (e.target as Element).closest<HTMLElement>('[data-action]');
-    if (!button) return;
+    if (!button || !shell.contains(button)) return;
     const turn = button.closest('.ab-msg');
     switch (button.dataset.action) {
       case 'copy': void copy(button, turn ? ($('.ab-msg__content', turn)?.innerText ?? '') : ''); break;
@@ -349,7 +368,11 @@ export function boot(cfg: Settings, form: HTMLFormElement): void {
     const id = (target as HTMLSelectElement).selectedOptions[0]?.dataset.id ?? '0';
     if (id === '0') {
       ev.preventDefault();
-      location.assign($<HTMLAnchorElement>('.page-title-action')?.href ?? location.href);
+      // "New chat" is a page to go to on the chat screen and something a host may do in place
+      // (the drawer swaps a fresh transcript in), so the host is asked first.
+      if (form.dispatchEvent(new CustomEvent('ab:new-chat', { bubbles: true, cancelable: true }))) {
+        location.assign($<HTMLAnchorElement>('.page-title-action', shell)?.href ?? location.href);
+      }
       return;
     }
     ev.detail.path = ev.detail.path.replace(/(messages(?:\/|%2F))0(?=$|[?&#])/i, '$1' + id);
@@ -357,7 +380,7 @@ export function boot(cfg: Settings, form: HTMLFormElement): void {
   document.body.addEventListener('htmx:afterSwap', () => {
     const list = $('#ab-messages');
     if (list) setConversation(list.dataset.conversation);
-    decorate(document, t('copyCode'));
+    decorate(shell, t('copyCode'));
   });
   document.body.addEventListener('htmx:responseError', (e) => {
     const xhr = (e as CustomEvent<HtmxDetail>).detail.xhr;
@@ -367,7 +390,7 @@ export function boot(cfg: Settings, form: HTMLFormElement): void {
   window.addEventListener('offline', connectivity);
   watchNonce((nonce) => { cfg.nonce = nonce; });
 
-  decorate(document, t('copyCode'));
+  decorate(shell, t('copyCode'));
   connectivity();
   grow(textarea);
   textarea.focus();
