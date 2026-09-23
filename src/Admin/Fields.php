@@ -137,13 +137,17 @@ final class Fields
 
     /**
      * The hidden inputs that post a field the page is not showing, so a save from one tab
-     * carries every other tab's values unchanged: the sanitize callback rebuilds the whole
-     * option from what is posted, and a field it does not hear about goes back to its default
-     * (the old first-save bug). Booleans post as 0/1, the way the visible checkbox does; a map
-     * (`models.overrides`) posts one input per leaf, `[key][model][field]`, and anything that is
-     * not a scalar at that depth is dropped rather than printed as "Array"; a list
-     * (`toolkits.enabled`) posts one input per item under `[key][]`, the way the checked boxes
-     * would, and an empty list posts nothing, which keeps the stored [] just the same.
+     * carries every other tab's values unchanged. A field a post leaves out is not lost either:
+     * Schema::sanitize() takes the stored value for any key the post does not name, and only a
+     * key with nothing stored falls back to its default. So a map that must not be replaced by
+     * what can be printed of it here (`access.mcp`) is left out rather than carried
+     * (SettingsPage::render()).
+     *
+     * Booleans post as 0/1, the way the visible checkbox does; a map (`models.overrides`) posts
+     * one input per leaf, `[key][model][field]`, and anything that is not a scalar at that depth
+     * is dropped rather than printed as "Array"; a list (`toolkits.enabled`) posts one input per
+     * item under `[key][]`, the way the checked boxes would, and an empty list posts nothing,
+     * which keeps the stored [] just the same.
      */
     public static function hidden(string $key, mixed $value): string
     {
