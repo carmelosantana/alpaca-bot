@@ -30,15 +30,28 @@ use AlpacaBot\Settings\Store;
  *
  * It also asserts the hooks did their work, so a drawer that printed nothing cannot pass on zero.
  *
+ * The footer also names the screen, its page title and, on the classic editor, the post, for the
+ * context chips. Those are globals core has set by then, and this suite's request sets them as
+ * the screen's own file would: `$title` as admin-header.php reads it, and on the editor the post
+ * as post.php loads it, once through get_post() (which fills the object cache) and once more as
+ * the edit form's global.
+ *
  * @group performance
  */
 final class DrawerQueriesTest extends TestCase
 {
+    public function tear_down(): void
+    {
+        unset($GLOBALS['title'], $GLOBALS['post']);
+        parent::tear_down();
+    }
+
     public function test_the_drawer_adds_no_query_to_an_admin_screen_before_it_is_opened(): void
     {
         $uid = $this->asAdmin();
         update_user_meta($uid, 'alpaca_bot_drawer_conversation', '5');
         set_current_screen('dashboard');
+        $GLOBALS['title'] = 'Dashboard';
         $drawer = Plugin::instance()->get(Drawer::class);
         get_user_meta($uid);
         Plugin::instance()->get(Store::class)->get('access.chat');
@@ -53,7 +66,7 @@ final class DrawerQueriesTest extends TestCase
         $queries = get_num_queries() - $before;
 
         $this->assertStringContainsString('id="ab-drawer-launcher"', $html);
-        $this->assertStringContainsString('data-conversation="5"', $html);
+        $this->assertStringContainsString('data-conversation="5" data-screen-id="dashboard" data-screen-title="Dashboard" data-post="0"', $html);
         $this->assertTrue(wp_script_is(Drawer::HANDLE, 'enqueued'));
         $this->assertTrue(wp_style_is(Drawer::HANDLE, 'enqueued'));
         $this->assertFalse(wp_script_is('alpaca-bot-chat', 'enqueued'));
@@ -61,5 +74,34 @@ final class DrawerQueriesTest extends TestCase
         $this->assertFalse(wp_style_is('alpaca-bot', 'enqueued'));
         $this->assertFalse(wp_script_is('media-views', 'enqueued'));
         $this->assertSame(0, $queries, 'the drawer ran a query before it was opened');
+    }
+
+    public function test_the_drawer_adds_no_query_to_the_classic_editor_before_it_is_opened(): void
+    {
+        $uid = $this->asAdmin();
+        $postId = self::factory()->post->create(['post_author' => $uid, 'post_title' => 'Classic']);
+        // post.php: the post loaded, then loaded again for the form as the global.
+        clean_post_cache($postId);
+        get_post($postId);
+        $GLOBALS['post'] = get_post($postId, OBJECT, 'edit');
+        set_current_screen('post');
+        get_current_screen()->is_block_editor(false);
+        $GLOBALS['title'] = 'Edit Post';
+        $drawer = Plugin::instance()->get(Drawer::class);
+        get_user_meta($uid);
+        Plugin::instance()->get(Store::class)->get('access.chat');
+        wp_scripts();
+        wp_styles();
+
+        $before = get_num_queries();
+        $drawer->enqueue();
+        ob_start();
+        $drawer->footer();
+        $html = (string) ob_get_clean();
+        $queries = get_num_queries() - $before;
+
+        $this->assertStringContainsString('data-screen-id="post" data-screen-title="Edit Post" data-post="' . $postId . '"', $html);
+        $this->assertTrue(wp_script_is(Drawer::HANDLE, 'enqueued'));
+        $this->assertSame(0, $queries, 'the drawer ran a query on the classic editor before it was opened');
     }
 }

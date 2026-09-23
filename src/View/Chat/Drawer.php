@@ -31,8 +31,9 @@ final class Drawer extends Component
      * @param int $postId the post being edited when the drawer was opened, else 0
      * @param string|null $model the user's effective model (Chat\UserPrefs::modelFor()); null means the catalog's default
      * @param string|null $sprite path to the icon sprite, as Shell takes it; null means the plugin's own
+     * @param array{id: string, title: string}|null $screen the screen the drawer is on, as Shell takes it
      */
-    public function __construct(private Store $store, private ModelCatalog $catalog, private ?Conversation $conversation, private array $history, private int $postId = 0, private ?string $model = null, private ?string $sprite = null) {}
+    public function __construct(private Store $store, private ModelCatalog $catalog, private ?Conversation $conversation, private array $history, private int $postId = 0, private ?string $model = null, private ?string $sprite = null, private ?array $screen = null) {}
 
     public function render(): string
     {
@@ -42,7 +43,7 @@ final class Drawer extends Component
             'data-action' => 'drawer-close',
             'aria-label' => __('Close the chat', 'alpaca-bot'),
         ], $this->e('×'));
-        $shell = new Shell($this->store, $this->catalog, $this->conversation, $this->history, $this->postId, $this->sprite, $this->model, null, true);
+        $shell = new Shell($this->store, $this->catalog, $this->conversation, $this->history, $this->postId, $this->sprite, $this->model, null, true, $this->screen);
         return $this->tag('div', ['class' => 'ab-drawer__panel'], $close . $shell->render());
     }
 }

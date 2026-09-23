@@ -38,7 +38,10 @@ use AlpacaBot\Chat\UserPrefs;
  * load primed whole: WP_User::get_caps_data() reads the capabilities with get_user_meta(), and a
  * miss there reads every row of the user's meta in one query (get_metadata_raw(),
  * update_meta_cache()). The Chat row is the settings option and the URLs are built from core's,
- * all autoloaded. tests/Integration/DrawerQueriesTest.php counts it.
+ * all autoloaded. What footer() adds for the context chips is read off globals core has set by
+ * then: the screen, its page title, and on the classic editor the post, which post.php loaded
+ * and get_post() reads back from the object cache that load filled.
+ * tests/Integration/DrawerQueriesTest.php counts it, on the dashboard and on the classic editor.
  *
  * Open or closed, and the conversation shown, are the user's (Chat\UserPrefs), stored through
  * `POST /view/drawer`, so the drawer comes back the way it was left on the next screen. A drawer
@@ -87,20 +90,36 @@ final class Drawer
         wp_localize_script(self::HANDLE, 'alpacaBotMount', $this->assets->mount());
     }
 
-    /** `admin_footer`: the launcher, and the empty element the loader fills on the first open. */
+    /**
+     * `admin_footer`: the launcher, and the empty element the loader fills on the first open. The
+     * element also names what the chat's context chips show (View\Chat\Composer), which only this
+     * request knows: the screen's id and page title, and on the classic editor the post. The
+     * title is core's get_admin_page_title(), which is HTML (edit-comments.php puts `&#8220;` in
+     * its own), so its markup is stripped and its entities decoded here to make it text; the panel
+     * cleans it for the chip by Context\CurrentScreenSource::screenFrom(), and the turn again.
+     * The post is the one core loaded for the screen (post.php's global), read back through
+     * get_post() and so from the object cache that load filled; whether the user may edit it is
+     * the panel's question to ask (View\Chat\Shell), when it is opened.
+     */
     public function footer(): void
     {
         if (!$this->wanted()) {
             return;
         }
         $userId = (int) get_current_user_id();
+        $screen = get_current_screen();
+        $title = html_entity_decode(wp_strip_all_tags((string) get_admin_page_title()), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        $post = $screen instanceof \WP_Screen && $screen->base === 'post' ? get_post() : null;
         printf(
             '<button type="button" id="ab-drawer-launcher" class="ab-drawer-launcher" aria-controls="ab-drawer" aria-expanded="false"><span class="dashicons dashicons-format-chat" aria-hidden="true"></span><span class="screen-reader-text">%1$s</span></button>'
-            . '<aside id="ab-drawer" class="ab-drawer" aria-label="%2$s" data-open="%3$s" data-conversation="%4$d" hidden></aside>',
+            . '<aside id="ab-drawer" class="ab-drawer" aria-label="%2$s" data-open="%3$s" data-conversation="%4$d" data-screen-id="%5$s" data-screen-title="%6$s" data-post="%7$d" hidden></aside>',
             esc_html__('Open the Alpaca Bot chat', 'alpaca-bot'),
             esc_attr__('Alpaca Bot chat', 'alpaca-bot'),
             $this->prefs->drawerOpen($userId) ? '1' : '0',
             (int) $this->prefs->drawerConversation($userId),
+            esc_attr($screen instanceof \WP_Screen ? $screen->id : ''),
+            esc_attr($title),
+            (int) ($post instanceof \WP_Post ? $post->ID : 0),
         );
     }
 }

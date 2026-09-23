@@ -7,6 +7,7 @@ namespace AlpacaBot\Rest;
 use AlpacaBot\Chat\ConversationStore;
 use AlpacaBot\Chat\Message;
 use AlpacaBot\Chat\UserPrefs;
+use AlpacaBot\Context\CurrentScreenSource;
 use AlpacaBot\Errors;
 use AlpacaBot\Provider\ModelCatalog;
 use AlpacaBot\Settings\Store;
@@ -40,9 +41,10 @@ use AlpacaBot\View\Markdown;
  *   the streamed text, its receipt counting the `tool_calls` the done frame carried; a user
  *   turn with its `images` (data URLs) is the optimistic bubble chat.ts shows while the turn
  *   runs.
- * - `GET /view/panel?conversation_id=&post_id=`: the whole chat as one fragment (View\Chat\Drawer)
- *   for the admin-wide drawer, on one of the user's conversations or a new chat, as the chat
- *   screen answers `?conversation=`.
+ * - `GET /view/panel?conversation_id=&post_id=&screen_id=&screen_title=`: the whole chat as one
+ *   fragment (View\Chat\Drawer) for the admin-wide drawer, on one of the user's conversations or
+ *   a new chat, as the chat screen answers `?conversation=`, with the post and the screen as the
+ *   composer's context chips.
  * - `POST /view/drawer {open, conversation_id}`: stores what the admin-wide drawer shows
  *   (Admin\Drawer) and answers an empty fragment.
  *
@@ -89,6 +91,8 @@ final class ViewController extends Controller
             ['path' => '/view/panel', 'methods' => 'GET', 'callback' => [$this, 'panel'], 'capability' => self::CHAT, 'args' => [
                 'conversation_id' => ['type' => 'integer', 'default' => 0, 'minimum' => 0],
                 'post_id' => ['type' => 'integer', 'default' => 0, 'minimum' => 0],
+                'screen_id' => ['type' => 'string', 'default' => ''],
+                'screen_title' => ['type' => 'string', 'default' => ''],
             ]],
             ['path' => '/view/drawer', 'methods' => 'POST', 'callback' => [$this, 'drawer'], 'capability' => self::CHAT, 'args' => [
                 'open' => ['type' => 'boolean'],
@@ -212,8 +216,11 @@ final class ViewController extends Controller
      * `conversation_id` opens one of the user's own, and anyone else's, or a missing one, is a
      * new chat rather than an error, as `?conversation=` is on the screen; the history is the
      * user's, `chat.history_limit` deep; the model is the user's effective one (UserPrefs).
-     * `post_id` is carried into the composer as the turn's context and is not checked here:
-     * Context\CurrentScreenSource decides per turn, for the turn's user, whether the post is sent.
+     * `post_id` becomes the composer's post chip when the user may edit the post (Shell asks);
+     * `screen_id` and `screen_title` become its screen chip, cleaned by
+     * Context\CurrentScreenSource::screenFrom(), the function that cleans them again on the turn,
+     * so the chip holds what the turn will make of it. Either chip is only what the turn sends:
+     * the source decides per turn, for the turn's user, what reaches the model.
      */
     public function panel(\WP_REST_Request $request): \WP_REST_Response
     {
@@ -228,6 +235,8 @@ final class ViewController extends Controller
             $history,
             max(0, (int) $request->get_param('post_id')),
             $this->prefs->modelFor($userId, $this->catalog, $this->store),
+            null,
+            CurrentScreenSource::screenFrom(['id' => (string) $request->get_param('screen_id'), 'title' => (string) $request->get_param('screen_title')]),
         );
         return self::html($drawer->render());
     }

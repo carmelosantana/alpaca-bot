@@ -6,6 +6,7 @@ use AlpacaBot\Chat\ConversationStore;
 use AlpacaBot\Chat\UserPrefs;
 use AlpacaBot\Provider\Factory;
 use AlpacaBot\Provider\ModelCatalog;
+use AlpacaBot\Context\CurrentScreenSource;
 use AlpacaBot\Rest\Controller;
 use AlpacaBot\Rest\ViewController;
 use AlpacaBot\Settings\Store;
@@ -82,7 +83,7 @@ it('declares every view route on the Chat row, its filter key being Controller::
         ->and($byMethod['POST /view/bubble']['args']['role']['enum'])->toBe(['user', 'assistant'])
         ->and($byMethod['POST /view/bubble']['args']['images'])->toBe(['type' => 'array', 'items' => ['type' => 'string'], 'default' => []])
         ->and($byMethod['POST /view/bubble']['args']['tool_calls'])->toBe(['type' => 'array', 'items' => ['type' => 'object'], 'default' => []])
-        ->and($byMethod['GET /view/panel']['args'])->toBe(['conversation_id' => ['type' => 'integer', 'default' => 0, 'minimum' => 0], 'post_id' => ['type' => 'integer', 'default' => 0, 'minimum' => 0]])
+        ->and($byMethod['GET /view/panel']['args'])->toBe(['conversation_id' => ['type' => 'integer', 'default' => 0, 'minimum' => 0], 'post_id' => ['type' => 'integer', 'default' => 0, 'minimum' => 0], 'screen_id' => ['type' => 'string', 'default' => ''], 'screen_title' => ['type' => 'string', 'default' => '']])
         // No default on either: an absent parameter must read as null, which is how drawer() tells
         // "not named" from "named as false or 0".
         ->and($byMethod['POST /view/drawer']['args'])->toBe(['open' => ['type' => 'boolean'], 'conversation_id' => ['type' => 'integer', 'minimum' => 0]])
@@ -248,6 +249,8 @@ it('serve() writes a view response as HTML and leaves every other response to co
 
 it('renders the drawer panel on one of the user\'s conversations, and a new chat for anyone else\'s, with the post as the composer\'s context', function (): void {
     Functions\when('admin_url')->alias(fn(string $p) => '/wp-admin/' . $p);
+    Functions\when('current_user_can')->justReturn(true);
+    Functions\when('wp_strip_all_tags')->alias(static fn(string $s): string => trim(strip_tags($s)));
     Functions\when('get_transient')->justReturn([['id' => 'llama3.2', 'label' => 'llama3.2'], ['id' => 'llava:7b', 'label' => 'llava']]);
     Functions\when('get_user_meta')->justReturn('llava:7b');
     $asked = [];
@@ -260,6 +263,7 @@ it('renders the drawer panel on one of the user\'s conversations, and a new chat
     Functions\when('get_post')->alias(static fn(int $id): ?object => match ($id) {
         5 => conversationChatPost(5, '3'),
         6 => (object) (['post_title' => 'Their private thread'] + (array) conversationChatPost(6, '9')),
+        12 => (object) ['ID' => 12, 'post_title' => 'Hello world'],
         default => null,
     });
     Functions\when('get_post_meta')->alias(static fn(int $id, string $key): mixed => $key === 'ab_messages'
@@ -272,7 +276,7 @@ it('renders the drawer panel on one of the user\'s conversations, and a new chat
         ->and($res->get_data())->toStartWith('<div class="ab-drawer__panel">')->toContain('<div class="ab-wrap ab-wrap--drawer">')
         ->toContain('<div id="ab-chat" data-conversation="5">')->toContain('<option value="8" data-id="8">Listed</option>')
         // The user's effective model (UserPrefs), not the site default, and the post as the turn's context.
-        ->toContain('name="model" value="llava:7b"')->toContain('name="context[post_id]" value="12"');
+        ->toContain('name="model" value="llava:7b"')->toContain('name="context[post_id]" value="12"')->toContain('Editing: Hello world');
 
     // Post 6 is user 9's (this file's stubs): its transcript is not rendered, and it is not an
     // error either but a new chat, as ?conversation= is on the screen.
@@ -281,6 +285,31 @@ it('renders the drawer panel on one of the user\'s conversations, and a new chat
         ->not->toContain('ab-msg--assistant')->toContain('<div id="ab-chat" data-conversation="0">')
         // Both histories were user 3's, chat.history_limit deep.
         ->and($asked)->toBe([[3, 4], [3, 4]]);
+});
+
+it('renders the screen it was sent as the composer\'s chip, cleaned by the rule the turn cleans it by', function (): void {
+    Functions\when('admin_url')->alias(fn(string $p) => '/wp-admin/' . $p);
+    Functions\when('get_transient')->justReturn([['id' => 'llama3.2', 'label' => 'llama3.2']]);
+    Functions\when('get_user_meta')->justReturn('');
+    Functions\when('get_posts')->justReturn([]);
+    Functions\when('wp_strip_all_tags')->alias(static fn(string $s): string => trim(strip_tags($s)));
+    $c = viewController();
+    $raw = ['screen_id' => 'Edit-Post', 'screen_title' => "  <b>Posts</b>\n\t›  Drafts " . str_repeat('é', 200)];
+
+    $html = $c->panel(restRequest('GET', '/x', $raw))->get_data();
+    $clean = CurrentScreenSource::screenFrom(['id' => $raw['screen_id'], 'title' => $raw['screen_title']]);
+    expect($clean)->not->toBeNull()
+        ->and($html)->toContain('<input type="hidden" name="context[screen][id]" value="' . $clean['id'] . '">')
+        ->toContain('<input type="hidden" name="context[screen][title]" value="' . $clean['title'] . '">')
+        ->toContain('<span class="ab-chip__label">On: ' . $clean['title'] . '</span>')
+        ->toContain('value="edit-post"')->toContain('value="Posts › Drafts éé')
+        // No post was named, so no post chip, and no field for one.
+        ->not->toContain('data-chip="post"')->not->toContain('context[post_id]');
+
+    // Nothing the source would refuse is rendered: no chip, so nothing for the turn to send.
+    foreach ([[], ['screen_id' => 'edit-post'], ['screen_title' => 'Posts'], ['screen_id' => '<>!', 'screen_title' => 'Posts'], ['screen_id' => 'x', 'screen_title' => " \n "]] as $params) {
+        expect($c->panel(restRequest('GET', '/x', $params))->get_data())->not->toContain('ab-chip')->not->toContain('context[');
+    }
 });
 
 // ---------------------------------------------------------------- Task 18: POST /view/drawer

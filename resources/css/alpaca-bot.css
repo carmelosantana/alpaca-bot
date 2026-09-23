@@ -206,6 +206,15 @@ pre > .ab-code__copy:focus-visible { outline-color: var(--ab-code-text); }
 
 /* ---- composer -------------------------------------------------------------------------- */
 
+/* The context chips above the box: what the next turn will send (View\Chat\Composer::chip()). */
+.ab-composer__chips { display: flex; flex-wrap: wrap; gap: 6px; max-width: var(--ab-max); margin: 0 auto 6px; }
+.ab-chip { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; padding: 2px 4px 2px 10px; border: 1px solid var(--ab-border); border-radius: 999px; background: var(--ab-surface); font-size: 12px; }
+.ab-chip__label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ab-chip__remove { display: inline-flex; flex: none; padding: 2px; border: 0; border-radius: 50%; background: none; color: var(--ab-muted); cursor: pointer; }
+.ab-chip__remove:hover { color: var(--ab-text); }
+.ab-chip__remove:focus-visible { outline: var(--ab-focus-width) solid var(--ab-accent); }
+.ab-chip__remove .ab-icon { width: 14px; height: 14px; }
+
 /* Sticky is for iOS, where 100vh overshoots the visible viewport: the row stays in view as the page scrolls. */
 .ab-composer { position: sticky; bottom: 0; padding-top: 8px; }
 .ab-composer__row {

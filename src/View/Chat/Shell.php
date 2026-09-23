@@ -47,8 +47,9 @@ final class Shell extends Component
      * @param string|null $model the model the select and the composer start on (the user's effective model, UserPrefs::modelFor()); null means the catalog's default
      * @param string|null $home the "New chat" link's href: null is the chat screen, a URL is a front-end page, and marks this shell as that page's (the class docblock)
      * @param bool $drawer whether this is the admin-wide drawer's shell (View\Chat\Drawer); it chooses the wrapper's class ahead of `$home` (the class docblock)
+     * @param array{id: string, title: string}|null $screen the screen the drawer is on, as Context\CurrentScreenSource::screenFrom() cleaned it, for the composer's screen chip; null for none
      */
-    public function __construct(private Store $store, private ModelCatalog $catalog, private ?Conversation $conversation, private array $history, private int $postId = 0, private ?string $sprite = null, private ?string $model = null, private ?string $home = null, private bool $drawer = false) {}
+    public function __construct(private Store $store, private ModelCatalog $catalog, private ?Conversation $conversation, private array $history, private int $postId = 0, private ?string $sprite = null, private ?string $model = null, private ?string $home = null, private bool $drawer = false, private ?array $screen = null) {}
 
     public function render(): string
     {
@@ -67,7 +68,13 @@ final class Shell extends Component
         $list = new MessageList($messages, new Markdown(), $this->store, $who->userName, $who->userAvatar, $who->assistantAvatar, $id);
         $chat = $this->tag('div', ['id' => 'ab-chat', 'data-conversation' => (string) $id],
             $this->tag('div', ['id' => 'ab-status', 'class' => 'ab-status', 'role' => 'status', 'aria-live' => 'polite'], '') . $list->render());
-        $composer = new Composer($this->store, $id, $model, $this->postId);
+        // The post chip names a post only for a user who may edit it; anyone else gets no chip,
+        // and so no id on the turn. It names it by the stored title, which is what
+        // Context\CurrentScreenSource tells the model, not by get_the_title(), whose filters
+        // texturize it and which, outside wp-admin (GET /view/panel is a REST request), prefixes
+        // a private post's with "Private: ".
+        $post = $this->postId > 0 && current_user_can('edit_post', $this->postId) ? get_post($this->postId) : null;
+        $composer = new Composer($this->store, $id, $model, $post === null ? 0 : $this->postId, $post === null ? '' : wp_strip_all_tags($post->post_title), $this->screen);
 
         $class = match (true) {
             $this->drawer => 'ab-wrap ab-wrap--drawer',

@@ -15,7 +15,8 @@ use AlpacaBot\View\Chat\Shell;
  * bare screen is a new chat, as it was in 0.4 and as the header's "New chat" link, which points
  * at the bare screen, needs it to be. `?conversation={id}` opens one of the user's own instead
  * (anyone else's, or a missing one, is a new chat again, not an error), and `?post={id}` is the
- * post the screen was opened from, carried as the turn's context.
+ * post the screen was opened from, shown as a chip above the composer to a user who may edit it
+ * (View\Chat\Shell), and sent as the turn's context while the chip is there.
  *
  * The model the select and the composer start on is the user's effective model (UserPrefs), so
  * the screen opens on what the user last chose and the first turn runs on it.

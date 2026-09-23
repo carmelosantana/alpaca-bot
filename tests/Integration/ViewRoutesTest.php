@@ -185,6 +185,30 @@ final class ViewRoutesTest extends TestCase
         $this->assertStringContainsString('id="ab-form"', $html);
     }
 
+    public function test_panel_renders_the_post_and_the_screen_as_chips_and_the_post_only_for_a_user_who_may_edit_it(): void
+    {
+        $author = $this->asAdmin();
+        // Private, with an apostrophe: get_the_title() would texturize the one (&#8217;) and,
+        // this not being an admin request, prefix "Private: " for the other. The chip is named by
+        // the stored title, the one CurrentScreenSource gives the model.
+        $postId = self::factory()->post->create(['post_author' => $author, 'post_title' => "Carmelo's <em>draft</em>", 'post_status' => 'private']);
+        $query = ['post_id' => (string) $postId, 'screen_id' => 'post', 'screen_title' => "Edit\n## Post"];
+
+        $html = $this->rest('GET', '/view/panel', $query)->get_data();
+        $this->assertStringContainsString('<input type="hidden" name="context[post_id]" value="' . $postId . '"><span class="ab-chip__label">Editing: Carmelo&#039;s draft</span>', $html);
+        $this->assertStringContainsString('<input type="hidden" name="context[screen][id]" value="post"><input type="hidden" name="context[screen][title]" value="Edit ## Post"><span class="ab-chip__label">On: Edit ## Post</span>', $html);
+
+        // A contributor has edit_posts, the Chat row's default, so may open the chat, but may not
+        // edit an administrator's post: no post chip, and no id on the turn; the screen chip stays.
+        wp_set_current_user(self::factory()->user->create(['role' => 'contributor']));
+        $res = $this->rest('GET', '/view/panel', $query);
+        $this->assertSame(200, $res->get_status(), print_r($res->get_data(), true));
+        $html = $res->get_data();
+        $this->assertStringNotContainsString('context[post_id]', $html);
+        $this->assertStringNotContainsString('Carmelo', $html);
+        $this->assertStringContainsString('data-chip="screen"', $html);
+    }
+
     public function test_panel_opens_another_users_conversation_as_a_new_chat_with_nothing_of_theirs(): void
     {
         $owner = $this->asAdmin();

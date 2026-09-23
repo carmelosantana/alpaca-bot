@@ -634,7 +634,8 @@ function cliUsers(array $existing = [3], int $current = 0): void
 
 /**
  * View\Chat\ComponentsTest: a Shell over a one-model catalog (served from the transient), the
- * given conversation and history, user 3 "Carmelo", and the given sprite path.
+ * given conversation and history, user 3 "Carmelo", the given sprite path, and `$postId` as the
+ * post being edited, which the user may edit and whose stored title is "Post {id}".
  *
  * @param list<array{id: int, title: string, created: int}> $history
  */
@@ -645,6 +646,10 @@ function chatShell(?AlpacaBot\Chat\Conversation $conversation, array $history, ?
     Functions\when('get_avatar_url')->justReturn('/u.png');
     Functions\when('plugins_url')->alias(fn(string $p) => '/plugins/alpaca-bot/' . $p);
     Functions\when('admin_url')->alias(fn(string $p) => '/wp-admin/' . $p);
+    // The post chip: the user may edit every post, and post N is titled "Post N".
+    Functions\when('current_user_can')->justReturn(true);
+    Functions\when('get_post')->alias(static fn(int $id): object => (object) ['ID' => $id, 'post_title' => "Post {$id}"]);
+    Functions\when('wp_strip_all_tags')->alias(static fn(string $s): string => trim(strip_tags($s)));
     $store = new Store(['models.default' => 'llama3.2', 'chat.history_limit' => 15]);
     return new AlpacaBot\View\Chat\Shell($store, new ModelCatalog(new Factory($store)), $conversation, $history, $postId, $sprite);
 }

@@ -513,8 +513,9 @@ it('renders the chat shell for an editor with no prompt, on their model, and enq
     Functions\expect('wp_enqueue_media')->once();
     $html = $chat->render('', null, 'alpacabot');
     expect($html)->toContain('id="ab-chat"')->toContain('data-conversation="0"')->toContain('name="model" value="llama3.2"')
-        // The page the shortcode is on is not "the post being edited": no post context rides on the turn.
-        ->toContain('name="context[post_id]" value="0"')
+        // The page the shortcode is on is not "the post being edited": no post chip, and no
+        // context field of any kind rides on the turn.
+        ->not->toContain('context[')->not->toContain('ab-composer__chips')
         // The chat screen's stylesheet; the shell's markup does not use the shortcode's two classes.
         ->and(array_column($h->styles, 0))->toBe(['alpaca-bot'])
         ->and($h->writes)->toBe([]);

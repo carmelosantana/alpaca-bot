@@ -40,7 +40,7 @@ final class Collector
          * @since 0.5.0
          * @param ContextSourceInterface[] $sources the registered sources, in registration order
          * @param int                      $userId  the user whose turn it is
-         * @param array<string, mixed>     $request the caller's `context` option: the REST `context` object as sent (the admin screen passes the post being edited), empty from the shortcodes and the abilities
+         * @param array<string, mixed>     $request the caller's `context` option: the REST `context` object as sent (the chat screen and the drawer send a key for each context chip left on the composer: `post_id` for the post being edited, `screen` for the screen the drawer is on), empty from the shortcodes and the abilities
          * @var mixed $sources what the filter returned, checked before it is trusted
          */
         $sources = apply_filters('alpaca_bot/context/sources', $this->sources, $userId, $request);

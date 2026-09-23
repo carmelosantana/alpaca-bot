@@ -10,15 +10,19 @@ use Brain\Monkey\Filters;
 use Brain\Monkey\Functions;
 
 // adminDrawer() lives in tests/Pest.php. WP_Screen is a class Mockery declares (as HelpTabsTest
-// does): `id` is the property core sets, is_block_editor() the method core answers the editor
-// question with, and get_current_screen() is how a hook gets at it.
+// does): `id` and `base` are the properties core sets, is_block_editor() the method core answers
+// the editor question with, and get_current_screen() is how a hook gets at it. The page title is
+// get_admin_page_title()'s, as core's admin-header.php set it.
 beforeEach(function (): void {
-    $this->screen = static function (string $id, bool $blockEditor = false): Mockery\MockInterface {
+    $this->screen = static function (string $id, bool $blockEditor = false, ?string $base = null): Mockery\MockInterface {
         $screen = Mockery::mock('WP_Screen');
         $screen->id = $id;
+        $screen->base = $base ?? $id;
         $screen->shouldReceive('is_block_editor')->andReturn($blockEditor);
         return $screen;
     };
+    Functions\when('get_admin_page_title')->justReturn('Dashboard');
+    Functions\when('wp_strip_all_tags')->alias(static fn(string $s): string => trim(strip_tags($s)));
     Functions\when('get_current_user_id')->justReturn(3);
     Functions\when('get_user_meta')->alias(static fn(int $id, string $key): string => match ($key) {
         UserPrefs::META_DRAWER_OPEN => '1',
@@ -115,4 +119,60 @@ it('enqueues the loader and its stylesheet only: no chat bundle, no htmx, no med
         ->and(array_keys($localized))->toBe(['alpacaBot', 'alpacaBotMount'])
         ->and($localized['alpacaBot'])->toBe([Drawer::HANDLE, (new Assets())->settings()])
         ->and($localized['alpacaBotMount'])->toBe([Drawer::HANDLE, (new Assets())->mount()]);
+});
+
+// ---------------------------------------------------------------- Task 19: the screen, for the chip
+
+it('names the screen and its page title on the drawer, for the panel to render as a chip, and no post off the editor', function (): void {
+    Functions\when('get_current_screen')->justReturn(($this->screen)('edit-post', false, 'edit'));
+    Functions\when('current_user_can')->justReturn(true);
+    Functions\when('get_admin_page_title')->justReturn('Posts');
+    Functions\expect('get_post')->never();
+    ob_start();
+    adminDrawer()->footer();
+    expect((string) ob_get_clean())->toContain('<aside id="ab-drawer" class="ab-drawer" aria-label="Alpaca Bot chat" data-open="1" data-conversation="42" data-screen-id="edit-post" data-screen-title="Posts" data-post="0" hidden></aside>');
+});
+
+it('names the classic editor\'s post, the one core loaded for the screen', function (): void {
+    Functions\when('get_current_screen')->justReturn(($this->screen)('post', false, 'post'));
+    Functions\when('current_user_can')->justReturn(true);
+    Functions\when('get_admin_page_title')->justReturn('Edit Post');
+    $post = Mockery::mock('WP_Post');
+    $post->ID = 12;
+    Functions\expect('get_post')->once()->withNoArgs()->andReturn($post);
+    ob_start();
+    adminDrawer()->footer();
+    expect((string) ob_get_clean())->toContain('data-screen-id="post" data-screen-title="Edit Post" data-post="12"');
+
+    // A page's classic editor is the same screen base under the post type's own id.
+    Functions\when('get_current_screen')->justReturn(($this->screen)('page', false, 'post'));
+    $page = Mockery::mock('WP_Post');
+    $page->ID = 8;
+    Functions\expect('get_post')->once()->withNoArgs()->andReturn($page);
+    ob_start();
+    adminDrawer()->footer();
+    expect((string) ob_get_clean())->toContain('data-screen-id="page" data-screen-title="Edit Post" data-post="8"');
+
+    // No post in the global: none named.
+    Functions\expect('get_post')->once()->withNoArgs()->andReturn(null);
+    ob_start();
+    adminDrawer()->footer();
+    expect((string) ob_get_clean())->toContain('data-post="0"');
+});
+
+it('writes the page title as text, its entities decoded and its markup gone, and escapes it into the attribute', function (): void {
+    Functions\when('get_current_screen')->justReturn(($this->screen)('edit-comments'));
+    Functions\when('current_user_can')->justReturn(true);
+    // edit-comments.php?p= titles itself this way, with the entities in the translated string.
+    Functions\when('get_admin_page_title')->justReturn('Comments on &#8220;<em>Hello</em>&#8221; &amp; more');
+    ob_start();
+    adminDrawer()->footer();
+    expect((string) ob_get_clean())->toContain('data-screen-title="Comments on “Hello” &amp; more"');
+
+    Functions\when('get_admin_page_title')->justReturn('&quot;&gt;&lt;script&gt;alert(1)&lt;/script&gt;');
+    ob_start();
+    adminDrawer()->footer();
+    $html = (string) ob_get_clean();
+    expect($html)->not->toContain('<script>')
+        ->toContain('data-screen-title="&quot;&gt;&lt;script&gt;alert(1)&lt;/script&gt;"');
 });
