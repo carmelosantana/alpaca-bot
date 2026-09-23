@@ -21,7 +21,7 @@
  *
  * This is an entry esbuild builds, and runs when the page loads it.
  */
-import { mountPanel, withQuery, type MountSettings } from './mount.ts';
+import { mountPanel, panelQuery, withQuery, type MountSettings } from './mount.ts';
 import { fromHtml } from './dom.ts';
 
 function start(cfg: MountSettings, launcher: HTMLElement, host: HTMLElement): void {
@@ -68,7 +68,7 @@ function start(cfg: MountSettings, launcher: HTMLElement, host: HTMLElement): vo
     }
     if (!mounted) {
       const before = document.activeElement;
-      mounted = mountPanel(host, cfg, nonce(), { conversation_id: host.dataset.conversation ?? '0' }).then(
+      mounted = mountPanel(host, cfg, nonce(), panelQuery(host, host.dataset.conversation ?? '0')).then(
         () => { if (!byUser) giveFocusBack(before); },
         (e: unknown) => { console.error(e); mounted = null; },
       );
@@ -82,7 +82,9 @@ function start(cfg: MountSettings, launcher: HTMLElement, host: HTMLElement): vo
    * replaced form would have none; its conversation goes back to 0.
    */
   async function newChat(): Promise<void> {
-    const res = await fetch(withQuery(cfg.panel, { conversation_id: '0' }), { credentials: 'same-origin', headers: { 'X-WP-Nonce': nonce() } });
+    // The mount's query, so this is the fragment the drawer would mount; only its transcript and
+    // history are taken below, and the composer, its context chips included, stays as it is.
+    const res = await fetch(withQuery(cfg.panel, panelQuery(host, '0')), { credentials: 'same-origin', headers: { 'X-WP-Nonce': nonce() } });
     const fresh = res.ok ? fromHtml(await res.text()) : null;
     if (!fresh) return;
     for (const id of ['ab-messages', 'ab-history']) {

@@ -38,7 +38,6 @@ const PAGE = `<div id="wpbody">
   <form id="ab-form" class="ab-composer">
     <input type="hidden" name="conversation_id" value="0">
     <input type="hidden" name="model" value="llama3.2">
-    <input type="hidden" name="context[post_id]" value="0">
     <input type="hidden" name="images" value="data:image/png;base64,iVBORw0KGgo=">
     <textarea id="ab-message" name="message" rows="1"></textarea>
     <div class="ab-composer__buttons">

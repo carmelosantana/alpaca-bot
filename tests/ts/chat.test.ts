@@ -25,7 +25,6 @@ const SHELL = `<div class="ab-wrap">
   <form id="ab-form" class="ab-composer">
     <input type="hidden" name="conversation_id" value="0">
     <input type="hidden" name="model" value="llama3.2">
-    <input type="hidden" name="context[post_id]" value="0">
     <input type="hidden" name="images" value="">
     <textarea id="ab-message" name="message" rows="1"></textarea>
     <div class="ab-composer__buttons">
@@ -156,4 +155,61 @@ test('a redemption refused for concurrency is shown as a warning, not an error, 
   // The draft still comes back and the transcript is still clean: the colour is the only difference.
   assert.equal((form.querySelector('#ab-message') as HTMLTextAreaElement).value, 'the message that waits its turn');
   assert.equal(document.querySelectorAll('#ab-messages article').length, 0);
+});
+
+/**
+ * SHELL with the two context chips View\Chat\Composer renders above the box when it has a post
+ * and a screen: the drawer's composer on the classic editor.
+ */
+const SHELL_WITH_CHIPS = SHELL.replace('<textarea', `<div class="ab-composer__chips">
+      <span class="ab-chip" data-chip="post"><input type="hidden" name="context[post_id]" value="12"><span class="ab-chip__label">Editing: Hello</span><button type="button" class="ab-chip__remove" data-action="chip-remove">x</button></span>
+      <span class="ab-chip" data-chip="screen"><input type="hidden" name="context[screen][id]" value="post"><input type="hidden" name="context[screen][title]" value="Edit Post"><span class="ab-chip__label">On: Edit Post</span><button type="button" class="ab-chip__remove" data-action="chip-remove">x</button></span>
+    </div>
+    <textarea`);
+
+/** Boots against `shell`, answers the ticket request from here and records its body, and sends `message`. */
+async function sentContext(t: TestContext, shell: string, before: (form: HTMLFormElement, win: ReturnType<typeof installDom>) => void): Promise<{ form: HTMLFormElement; body: Record<string, unknown> }> {
+  const win = installDom(shell);
+  const real = globalThis.fetch;
+  t.after(() => { globalThis.fetch = real; });
+  let body: Record<string, unknown> = {};
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = new URL(String(input));
+    if (url.pathname.endsWith('/view/bubble')) return new Response('<article class="ab-msg"><div class="ab-msg__content"></div></article>', { headers: { 'content-type': 'text/html' } });
+    if (url.pathname.endsWith('/alpaca-bot/v1/chat')) {
+      body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      return Response.json({ stream_url: `${REST}/chat/1/stream?token=t` });
+    }
+    return Response.json({ code: 'alpaca_bot_rate_limited', message: 'Too many requests.' }, { status: 429 });
+  }) as typeof fetch;
+
+  const { boot } = await import('../../resources/ts/boot.ts');
+  const form = document.querySelector('#ab-form') as HTMLFormElement;
+  boot(CFG, form);
+  before(form, win);
+  (form.querySelector('#ab-message') as HTMLTextAreaElement).value = 'tighten this';
+  form.dispatchEvent(new win.Event('submit', { cancelable: true }) as unknown as Event);
+  await until(() => Object.keys(body).length > 0);
+  return { form, body };
+}
+
+test('a turn sends the context its chips name', async (t) => {
+  const { body } = await sentContext(t, SHELL_WITH_CHIPS, () => {});
+  assert.deepEqual(body.context, { post_id: 12, screen: { id: 'post', title: 'Edit Post' } });
+});
+
+test('a chip removed before sending is not on the next turn, and the box has the focus back', async (t) => {
+  const { form, body } = await sentContext(t, SHELL_WITH_CHIPS, (f, win) => {
+    (f.querySelector('#ab-message') as HTMLTextAreaElement).blur();
+    (f.querySelector('[data-chip="screen"] [data-action="chip-remove"]') as HTMLElement).dispatchEvent(new win.MouseEvent('click', { bubbles: true }) as unknown as MouseEvent);
+    assert.equal(document.activeElement?.id, 'ab-message');
+  });
+  assert.deepEqual(body.context, { post_id: 12 });
+  assert.equal(form.querySelectorAll('.ab-chip').length, 1);
+  assert.equal(form.querySelectorAll('[data-chip="post"]').length, 1);
+});
+
+test('a composer with no chips sends an empty context, not a post of 0', async (t) => {
+  const { body } = await sentContext(t, SHELL, () => {});
+  assert.deepEqual(body.context, {});
 });

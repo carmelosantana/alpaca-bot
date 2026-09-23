@@ -36,6 +36,7 @@ import { grow, restoreDraft, setImage } from './composer.ts';
 import { redeem, restError } from './redeem.ts';
 import { refusal } from './refusal.ts';
 import { appendText, releaseHeld } from './held.ts';
+import { contextFrom } from './context.ts';
 import type { RestError } from './redeem.ts';
 
 // wp_localize_script() ships every scalar as a string, so the byte figure arrives as one; imageLimit() reads it.
@@ -177,7 +178,7 @@ export function boot(cfg: Settings, form: HTMLFormElement): void {
       user = fromHtml(await userRes.text());
       if (user) append(user);
       const ticketRes = await request('POST', api('/chat'), {
-        message: text, conversation_id: asId(field('conversation_id').value) ?? 0, model: field('model').value, images, context: { post_id: asId(field('context[post_id]').value) ?? 0 }, stream: true,
+        message: text, conversation_id: asId(field('conversation_id').value) ?? 0, model: field('model').value, images, context: contextFrom(form), stream: true,
       });
       if (!ticketRes.ok) return refused(ticketRes.status, await restError(ticketRes));
       const ticket = await ticketRes.json() as { stream_url: string };
@@ -369,6 +370,9 @@ export function boot(cfg: Settings, form: HTMLFormElement): void {
       case 'edit': textarea.value = turn ? ($('.ab-msg__content', turn)?.innerText ?? '') : ''; grow(textarea); textarea.focus(); break;
       case 'image': pickImage(); break;
       case 'image-remove': setImage(form, ''); break;
+      // The chip's hidden fields go with it, so the next turn's context (contextFrom()) has no
+      // key for it. The button was focused and is gone, so the focus goes back to the box.
+      case 'chip-remove': button.closest('.ab-chip')?.remove(); textarea.focus(); break;
     }
   });
   document.addEventListener('change', (e) => {

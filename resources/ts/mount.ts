@@ -60,6 +60,21 @@ export function withQuery(base: string, query: Record<string, string>): string {
 }
 
 /**
+ * The query every fetch of GET /view/panel into `host` carries: the conversation to open, and
+ * what the composer's context chips name, off the data attributes Admin\Drawer::footer() prints
+ * on the drawer element (the post on the classic editor, the screen's id and page title). An
+ * element without them asks for no chips.
+ */
+export function panelQuery(host: HTMLElement, conversation: string): Record<string, string> {
+  return {
+    conversation_id: conversation,
+    post_id: host.dataset.post ?? '0',
+    screen_id: host.dataset.screenId ?? '',
+    screen_title: host.dataset.screenTitle ?? '',
+  };
+}
+
+/**
  * The chat, in `host`: the file docblock says in what order. Any failure on the way (a file that
  * would not load, a refused or failed request for the fragment) leaves `cfg.failed` in `host` and
  * rejects, so the caller can let the next open try again from the start.
