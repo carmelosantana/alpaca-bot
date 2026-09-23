@@ -16,7 +16,8 @@ import { expect, test, type Page } from '@playwright/test';
  *   turn is sent and when an image is removed), while a screen that has loaded the library, and
  *   the chat screen itself, keep it.
  * - "New chat" inside the drawer swaps a fresh transcript in rather than leaving the page, and
- *   closing is remembered.
+ *   closing is remembered. A "New chat" whose request fails leaves the drawer on the conversation
+ *   it remembers and stores nothing.
  * - The composer's context chips: the screen's on the posts list, and the post's as well on a
  *   classic editor screen (an attachment's, which core never opens in the block editor), each in
  *   the turn's POST /chat body until it is taken off.
