@@ -67,7 +67,7 @@ it('persists the default model and returns a notice', function (): void {
 
 // ---------------------------------------------------------------- beyond the brief's two
 
-it('declares every view route on the Chat row, its filter key being its path without the {id} segment, and only the model list rate limited, like /models', function (): void {
+it('declares every view route on the Chat row, its filter key being Controller::routeKey() of its path, and only the model list rate limited, like /models', function (): void {
     $routes = viewController()->routes();
     $byMethod = [];
     foreach ($routes as $route) {
@@ -83,7 +83,8 @@ it('declares every view route on the Chat row, its filter key being its path wit
         ->and($byMethod['POST /view/bubble']['args']['images'])->toBe(['type' => 'array', 'items' => ['type' => 'string'], 'default' => []])
         ->and($byMethod['POST /view/bubble']['args']['tool_calls'])->toBe(['type' => 'array', 'items' => ['type' => 'object'], 'default' => []])
         ->and($byMethod['GET /view/panel']['args'])->toBe(['conversation_id' => ['type' => 'integer', 'default' => 0, 'minimum' => 0], 'post_id' => ['type' => 'integer', 'default' => 0, 'minimum' => 0]])
-        // One capability filter key per fragment, the {id} segment removed as for /conversations.
+        // The filter key is Controller::routeKey() of the path, which drops the {id} segment as it
+        // does for /conversations; the bubble routes share one path, so they share `view/bubble`.
         ->and(array_map(ViewController::routeKey(...), array_column($routes, 'path')))->toBe(['view/messages', 'view/history', 'view/models', 'view/default-model', 'view/bubble', 'view/bubble', 'view/panel']);
     foreach ($byMethod as $key => $route) {
         expect($route['rate_limit'] ?? false)->toBe($key === 'GET /view/models', $key);
