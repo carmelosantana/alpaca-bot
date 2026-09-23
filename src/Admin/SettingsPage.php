@@ -336,7 +336,8 @@ final class SettingsPage
      * The ids of the MCP servers `toolkits.mcp_servers` lists, in list order: the ones the Access
      * tab gives a row (core keeps one field per id, so a repeated id is one row). A server with no
      * id, or one postable() does not admit, gets none, and so reads as whatever Access::stored()
-     * has for it: administrators only unless something other than this page stored an entry.
+     * has for it: administrators only unless an entry for that exact id was stored by some other
+     * writer (a REST PUT, or an edit of the option).
      *
      * @return list<string>
      */
@@ -355,22 +356,26 @@ final class SettingsPage
 
     /**
      * Whether the page gives a server id a select posting as
-     * `alpaca_bot_settings[access.mcp][<id>]`: only when every character is one the round trip
-     * through esc_attr(), a browser and PHP's form parser hands back unchanged, so the select
-     * cannot write some other server's key. That is an allowlist, printable ASCII other than `]`
-     * and `&`, and not the whole set that survives: CRLF, a tab or `é` come back intact in
-     * Chromium and are refused all the same.
+     * `alpaca_bot_settings[access.mcp][<id>]`. The aim is that the select cannot write some other
+     * server's key. It admits an id made only of printable ASCII other than `]` and `&`, that is
+     * not a single space, and that is not an integer as PHP writes one. That is an allowlist, not
+     * the whole set that survives the round trip through esc_attr(), a browser and PHP's form
+     * parser: CRLF, a tab or `é` came back intact in Chromium and are refused all the same. One id
+     * holding every admitted character, the space included, came back as itself in Chromium.
      *
-     * What is left out, and why. PHP ends a bracketed segment at its first `]`, so `a]b` posts as
-     * `a`, and cuts the name at a NUL byte. A browser posts a lone LF or CR as CRLF, so `a\nb`
-     * would post as `a\r\nb`. esc_attr() leaves an entity such as `&amp;` as it is, and the browser
-     * decodes it, so `a&amp;b` posts as `a&b`. Anything else outside printable ASCII is refused
-     * rather than argued one by one. And an id that is an integer as PHP writes one (`12`, not
-     * `012` or ` 12`) becomes an int key, which Schema::sanitizeAccessMcp() drops.
+     * What is left out, and why; each case was seen to come back changed. PHP ends a bracketed
+     * segment at its first `]`, so `a]b` posts as `a`, and cuts the name at a NUL byte. A browser
+     * posts a lone LF or CR as CRLF, so `a\nb` posts as `a\r\nb`, and a trailing one too: `x\n`
+     * posts as `x\r\n`. The pattern's `D` modifier is what refuses that last one, since without
+     * it `$` also matches before a final LF. esc_attr() leaves an entity such as `&amp;` as it is,
+     * and the browser decodes it, so `a&amp;b` posts as `a&b`. PHP reads `[ ]` as `[]`, an
+     * append, so a single space posts as the int key 0 (two spaces come back as themselves). An
+     * integer as PHP writes one (`12`, not `012` or ` 12`) becomes an int key. An int key is
+     * dropped by Schema::sanitizeAccessMcp().
      */
     private static function postable(string $id): bool
     {
-        return preg_match('/^[\x20-\x25\x27-\x5C\x5E-\x7E]+$/', $id) === 1 && (string) (int) $id !== $id;
+        return preg_match('/^[\x20-\x25\x27-\x5C\x5E-\x7E]+$/D', $id) === 1 && $id !== ' ' && (string) (int) $id !== $id;
     }
 
     /**

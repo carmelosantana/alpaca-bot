@@ -375,13 +375,13 @@ final class SettingsPageTest extends TestCase
 
     /**
      * A server id reaches the page through core's do_settings_fields(), which prints a field's
-     * title as it is given: the row's title, its id and its field name are escaped, and a server
-     * whose id a form cannot post back as itself gets no row at all: `x]"<y` would post as `x`,
-     * `lf\nx` as `lf\r\nx`, and `12` as an int key.
+     * title as it is given: the row's title, its id and its field name are escaped, and each
+     * server below whose id postable() refuses gets no row at all: `x]"<y` would post as `x`,
+     * `lf\nx` as `lf\r\nx`, `x\n` as `x\r\n`, and `12` as an int key.
      */
     public function test_a_hostile_mcp_server_id_reaches_the_access_tab_escaped(): void
     {
-        add_filter('option_' . Plugin::OPTION, static fn(mixed $v): mixed => is_array($v) ? $v + ['toolkits.mcp_servers' => [['id' => 'a"<b>c'], ['id' => 'x]"<y'], ['id' => "lf\nx"], ['id' => '12']]] : $v);
+        add_filter('option_' . Plugin::OPTION, static fn(mixed $v): mixed => is_array($v) ? $v + ['toolkits.mcp_servers' => [['id' => 'a"<b>c'], ['id' => 'x]"<y'], ['id' => "lf\nx"], ['id' => '12'], ['id' => "x\n"]]] : $v);
         $html = $this->renderAccessPage('access');
 
         $this->assertStringNotContainsString('<b>', $html);
@@ -391,6 +391,7 @@ final class SettingsPageTest extends TestCase
         $this->assertStringNotContainsString('[access.mcp][x]', $html);
         $this->assertStringNotContainsString('[access.mcp][lf', $html);
         $this->assertStringNotContainsString('[access.mcp][12]', $html);
+        $this->assertStringNotContainsString("[access.mcp][x\n]", $html);
         $this->assertSame(1, substr_count($html, 'MCP server: '));
     }
 

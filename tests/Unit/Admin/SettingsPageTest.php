@@ -405,12 +405,13 @@ it('adds an Access row for each MCP server the settings hold, and none for the a
 });
 
 // A server id comes from the settings, so it may be anything. It reaches the page escaped in the
-// row's title (core prints a field title as it is given), its id and its field name; and an id a
-// form cannot post back as itself gets no select at all, or its select would write another key.
-// The page admits only printable ASCII other than `]` and `&`, and not an integer. Most refused ids
+// row's title (core prints a field title as it is given), its id and its field name; and each id
+// refused below gets no select at all. postable() admits
+// printable ASCII other than `]` and `&`, but not a single space or an integer. Most refused ids
 // below change on the way back: PHP ends a bracketed name segment at the first `]` (`x]"<y` posts
-// as `x`) and cuts it at NUL; a browser posts LF and CR as CRLF (`lf\nx` would overwrite
-// `lf\r\nx`'s row); esc_attr() leaves `&amp;` as it is, which a browser then decodes to `&`; and
+// as `x`) and cuts it at NUL; a browser posts LF and CR as CRLF, a trailing one included
+// (`lf\nx` would overwrite `lf\r\nx`'s row, `trail\n` would write `trail\r\n`); esc_attr()
+// leaves `&amp;` as it is, which a browser then decodes to `&`; PHP reads `[ ]` as an append; and
 // `12` becomes an int key, which Schema::sanitizeAccessMcp() drops. CRLF, a tab and `é` come back
 // intact in Chromium, and are refused anyway: they are outside the characters the page admits.
 it('escapes a hostile MCP server id everywhere it reaches the page, and gives no select to one a form cannot post back', function (): void {
@@ -419,7 +420,7 @@ it('escapes a hostile MCP server id everywhere it reaches the page, and gives no
     Functions\when('esc_attr')->alias(fn($s) => htmlspecialchars((string) $s, ENT_QUOTES));
     Functions\when('esc_html')->alias(fn($s) => htmlspecialchars((string) $s, ENT_QUOTES));
     $evil = 'a"<b>c';
-    $refused = ['x]"<y', "nul\0byte", "lf\nx", "cr\rx", "crlf\r\nx", "tab\tx", 'ent&amp;x', "e\u{e9}x", '12'];
+    $refused = ['x]"<y', "nul\0byte", "lf\nx", "cr\rx", "crlf\r\nx", "tab\tx", 'ent&amp;x', "e\u{e9}x", '12', "trail\n", "12\n", ' '];
     $fields = settingsFields(['toolkits.mcp_servers' => array_map(static fn(string $id): array => ['id' => $id], [$evil, ...$refused])]);
 
     expect(array_values(array_filter(array_keys($fields), static fn(string $id): bool => str_starts_with($id, 'alpaca_bot_access.mcp'))))->toBe(['alpaca_bot_access.mcp.' . $evil]);
