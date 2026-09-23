@@ -53,7 +53,7 @@ final class RouteCapability
          *
          * @since 0.5.0
          * @param string           $capability the route's default: its declared capability, or for a chat route the Chat row of Settings › Access (`edit_posts` unless the site changed it)
-         * @param \WP_REST_Request $request    the request being authorised
+         * @param \WP_REST_Request $request    the request being authorised, or the `POST /chat` one Settings › Access built to ask
          */
         return Capability::filtered("alpaca_bot/capability/{$route}", $default, $request);
     }

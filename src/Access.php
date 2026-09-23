@@ -226,9 +226,13 @@ final class Access
              * over both verbs is why the rows exist: tighten the write with `…/settings/write`
              * rather than here, or off the WP_REST_Request's `get_method()`.
              *
+             * Settings › Access fires it too, to show whether code has moved either row, with a
+             * `GET` or a `PUT /settings` request it builds for the question. That request
+             * authorises nothing and no client sent it.
+             *
              * @since 0.5.0
              * @param string $capability the `settings.read` or `settings.write` row, `manage_options` by default
-             * @param mixed  ...$args    the WP_REST_Request being authorised
+             * @param mixed  ...$args    the WP_REST_Request being authorised, or one Settings › Access built to ask
              */
             $stored = Capability::filtered('alpaca_bot/capability/settings', $stored, ...$args);
         }

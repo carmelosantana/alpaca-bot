@@ -133,6 +133,13 @@ the settings routes, over the stored row; then `alpaca_bot/capability/settings/r
 is how it takes the write (or the read) back. `alpaca_bot/capability/settings/schema` is retired:
 it is no longer applied, and the schema route asks `settings/read` with the rest of the read.
 
+These filters are not only called to authorise a request. The **Settings › Access** tab (section 7)
+asks some of them to show under a row whether code has moved it: `alpaca_bot/capability/settings`
+and `alpaca_bot/capability/settings/read` or `…/write` with a `GET` or `PUT /settings` request,
+and `alpaca_bot/capability/chat` with a `POST /chat` request. The tab builds those requests
+itself; no client sent them and they authorise nothing, so a filter that logs or counts what it
+is handed sees them too.
+
 ```php
 // Let Authors chat and read their own history, but keep settings to administrators.
 foreach (['chat', 'chat/stream', 'conversations', 'models', 'usage'] as $route) {

@@ -324,6 +324,10 @@ it('asks a settings row with the REST request its route authorises, and a shortc
     Filters\expectApplied('alpaca_bot/capability/settings/read')->atLeast()->once()
         ->with('manage_options', Mockery::on(static fn(mixed $r): bool => $r instanceof WP_REST_Request && $r->get_method() === 'GET' && $r->get_route() === '/alpaca-bot/v1/settings'))
         ->andReturn('manage_options');
+    // 0.5's key runs first for both settings rows, with the same built request (docs/api.md says so).
+    Filters\expectApplied('alpaca_bot/capability/settings')->atLeast()->twice()
+        ->with('manage_options', Mockery::on(static fn(mixed $r): bool => $r instanceof WP_REST_Request && in_array($r->get_method(), ['GET', 'PUT'], true) && $r->get_route() === '/alpaca-bot/v1/settings'))
+        ->andReturn('manage_options');
     // A capability that is not one of the five is named as itself.
     Filters\expectApplied('alpaca_bot/capability/shortcode')->atLeast()->once()->with('edit_posts', 0, 'alpacabot')->andReturn('exist');
     $fields = settingsFields();
