@@ -275,11 +275,12 @@ it('resolves a subclass\'s row to its shipped default, and fires no row filter, 
     expect($perm(new WP_REST_Request('GET', '/alpaca-bot/v1/rows')))->toBeTrue();
 });
 
-// Controller is the class docs/api.md invites a site to extend, so every method on it is one a
-// subclass can collide with: a same-named method that differs in static-ness, visibility or
-// signature is a fatal when the subclass is declared, inside rest_api_init. The route filter the
-// Access tab also asks lives on a final class of its own for that reason, and the extensible
-// surface is the one 0.5 shipped with, listed here as reflection reads it.
+// Controller is the class docs/api.md invites a site to extend, and a method added to it can clash
+// with one a subclass already declares. Probed on PHP 8.4 against fe88268, which had a public
+// static filteredCapability(): a subclass declaring it non-static, or protected, did not load (a
+// fatal when the subclass is declared). The route filter the Access tab also asks lives on a
+// final class of its own for that reason, and this pins Controller's methods to the ones it had
+// before this task (6ac6fd3), as reflection reads them.
 it('keeps the surface a subclass inherits to the methods it had, and applies the route filter from a final class', function (): void {
     $surface = [];
     foreach ((new ReflectionClass(Controller::class))->getMethods() as $method) {

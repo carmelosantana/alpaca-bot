@@ -12,9 +12,10 @@ use AlpacaBot\Capability;
  * code changed the Chat row for the `/chat` route.
  *
  * A final class of its own rather than a method on Controller, because Controller is the class a
- * site extends (docs/api.md): a method there is one a subclass can collide with, and a
- * same-named method that differs in static-ness, visibility or signature is a fatal when the
- * subclass is declared. Nothing here is for a site to call or extend.
+ * site extends (docs/api.md), and a method added there can clash with one a subclass already
+ * declares: when this was a public static method on Controller, a subclass declaring it
+ * non-static, or protected, did not load (probed on PHP 8.4). Nothing here is for a site to call
+ * or extend.
  *
  * @internal
  * @since 0.6.0
