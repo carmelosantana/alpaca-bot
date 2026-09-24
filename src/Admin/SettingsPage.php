@@ -452,8 +452,8 @@ final class SettingsPage
                     $rows[] = $alone[0];
                 } else {
                     $rows[] = $was[$id];
-                    /* translators: 1: an MCP server's URL, 2: its id */
-                    $notices['mcp_dropped'][] = sprintf(__('The change to MCP server %1$s (%2$s) was not saved: its URL has to be https with a host, and its prefix a lowercase letter then up to 15 lowercase letters, digits or underscores, and not "ability".', 'alpaca-bot'), $url($was[$id]), $id);
+                    /* translators: 1: an MCP server's URL, 2: its id, 3: what a prefix has to be (Schema::mcpPrefixRule()) */
+                    $notices['mcp_dropped'][] = sprintf(__('The change to MCP server %1$s (%2$s) was not saved: its URL has to be https with a host, and its prefix %3$s.', 'alpaca-bot'), $url($was[$id]), $id, Schema::mcpPrefixRule());
                 }
             } elseif (trim($url($row)) !== '') {
                 if ($alone !== []) {
@@ -461,8 +461,8 @@ final class SettingsPage
                     // and every row the post removes.
                     $rows[] = array_merge($alone[0], ['id' => '']);
                 } else {
-                    /* translators: %s: the URL of an MCP server that was not added */
-                    $notices['mcp_dropped'][] = sprintf(__('The MCP server %s was not added: its URL has to be https with a host, and its prefix a lowercase letter then up to 15 lowercase letters, digits or underscores, and not "ability".', 'alpaca-bot'), $url($row));
+                    /* translators: 1: the URL of an MCP server that was not added, 2: what a prefix has to be (Schema::mcpPrefixRule()) */
+                    $notices['mcp_dropped'][] = sprintf(__('The MCP server %1$s was not added: its URL has to be https with a host, and its prefix %2$s.', 'alpaca-bot'), $url($row), Schema::mcpPrefixRule());
                 }
             }
         }
@@ -670,7 +670,11 @@ final class SettingsPage
         }
         return '<div class="ab-mcp-servers" id="ab-mcp-servers"' . Hx::attrs(['headers' => Hx::formHeaders()]) . '><table class="widefat striped"><thead><tr>' . $head . '</tr></thead><tbody>' . $body . '</tbody></table></div>'
             . '<p class="description">' . esc_html((string) ($f['description'] ?? '')) . '</p>'
-            . '<p class="description">' . esc_html__('The prefix names this server\'s tools for the model, as prefix__tool: a lowercase letter, then up to 15 lowercase letters, digits or underscores, and not "ability". The last row adds a server; leave its URL empty to add none.', 'alpaca-bot') . '</p>'
+            . '<p class="description">' . esc_html(sprintf(
+                /* translators: %s: what a prefix has to be (Schema::mcpPrefixRule()) */
+                __('The prefix names this server\'s tools for the model, as prefix__tool: %s. The last row adds a server; leave its URL empty to add none.', 'alpaca-bot'),
+                Schema::mcpPrefixRule(),
+            )) . '</p>'
             . '<p class="description">' . esc_html__('Discover tools lists the tools a saved server offers. Tick the ones to approve and save; a box left clear drops that tool\'s approval. Each approval is of the tool as it was shown, so a tool the server changes afterwards is marked for review the next time it is listed.', 'alpaca-bot') . '</p>';
     }
 
@@ -692,7 +696,7 @@ final class SettingsPage
         $labels = self::serverColumns();
         $cells = [
             ($id === null ? '' : self::serverInput($i, 'id', 'hidden', '', $id, ''))
-                . self::serverInput($i, 'prefix', 'text', 'small-text', $row['prefix'] ?? '', $labels[0], ' pattern="[a-z][a-z0-9_]{0,15}" maxlength="16"'),
+                . self::serverInput($i, 'prefix', 'text', 'small-text', $row['prefix'] ?? '', $labels[0], ' pattern="[a-z](_?[a-z0-9])*" maxlength="16"'),
             self::serverInput($i, 'url', 'url', 'regular-text', $row['url'] ?? '', $labels[1], ' pattern="https://.*"'),
             self::serverInput($i, 'header_name', 'text', 'regular-text', $row['header_name'] ?? '', $labels[2]),
             self::serverInput($i, 'header_value', 'password', 'regular-text', $row['header_value'] ?? '', $labels[3], ' autocomplete="new-password"'),

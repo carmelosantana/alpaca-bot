@@ -612,6 +612,24 @@ final class McpSettingsTest extends TestCase
         $this->assertSame(['aa' => self::SECRET, 'bb' => self::OTHER], Secrets::all());
     }
 
+    /**
+     * R90: a prefix that ends in `_`, holds `__`, or is the abilities' own is refused over REST, the
+     * rule is said, nothing is written, and the Tools tab's input carries the same rule as a pattern.
+     */
+    public function test_a_prefix_that_could_share_a_tool_name_is_refused_and_the_tab_says_the_rule(): void
+    {
+        foreach (['trk_', 'a__b', 'ability'] as $prefix) {
+            $res = $this->rest('PUT', '/settings', ['toolkits.mcp_servers' => [['url' => self::URL, 'prefix' => $prefix, 'header_value' => self::SECRET]]]);
+            $this->assertSame(400, $res->get_status(), $prefix);
+            $this->assertStringContainsString(Schema::mcpPrefixRule(), $res->get_data()['data']['rows'][0]['reason'], $prefix);
+            $this->assertSame([], get_option(Plugin::OPTION, [])['toolkits.mcp_servers'] ?? [], $prefix);
+        }
+        $this->assertSame(200, $this->rest('PUT', '/settings', ['toolkits.mcp_servers' => [['url' => self::URL, 'prefix' => 'a_b', 'header_value' => self::SECRET]]])->get_status());
+        $tools = $this->page('toolkits');
+        $this->assertStringContainsString('pattern="[a-z](_?[a-z0-9])*" maxlength="16"', $tools);
+        $this->assertStringContainsString(esc_html(Schema::mcpPrefixRule()), $tools);
+    }
+
     /** m-4: a client that PUTs the same body without ids keeps the same id, and its Access entry, every time. */
     public function test_the_same_put_without_ids_keeps_the_same_server(): void
     {

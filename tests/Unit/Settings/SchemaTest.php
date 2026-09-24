@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 use AlpacaBot\Access;
 use AlpacaBot\Settings\Schema;
+use AlpacaBot\Toolkit\AbilitiesToolkit;
+use AlpacaBot\Toolkit\ToolName;
 use Brain\Monkey\Functions;
 
 it('has defaults for every field and a section for each', function (): void {
@@ -310,6 +312,9 @@ it('reads an mcp server row into shape and drops one it cannot read as a server'
         ['url' => 'https://other.example.com/mcp', 'prefix' => '9lives'],             // a tool name may not start with a digit
         ['url' => 'https://other.example.com/mcp', 'prefix' => "tail\n"],             // `$` would match before this LF; `\z` does not
         ['url' => 'https://other.example.com/mcp', 'prefix' => str_repeat('p', 17)],  // longer than 16
+        ['url' => 'https://other.example.com/mcp', 'prefix' => 'trk_'],               // ends in `_`: trk_ + x and trk + _x would both be trk___x
+        ['url' => 'https://other.example.com/mcp', 'prefix' => 'ability__core'],      // holds `__`: its tools could be named as an ability's
+        ['url' => 'https://other.example.com/mcp', 'prefix' => 'a__b'],               // holds `__`
         ['url' => 'https://other.example.com/mcp'],                                   // no prefix
         ['url' => '', 'prefix' => 'blank'],                                           // the form's empty "add a server" row
         ['url' => 'https://gone.example.com/mcp', 'prefix' => 'gone', 'remove' => '1'],
@@ -326,7 +331,49 @@ it('reads an mcp server row into shape and drops one it cannot read as a server'
         'approved' => [],
     ]])
         ->and(Schema::sanitizeMcpServers('nope'))->toBe([])
-        ->and(Schema::sanitizeMcpServers([['url' => 'https://a.example.com/mcp', 'prefix' => str_repeat('p', 16)]])[0]['prefix'])->toBe(str_repeat('p', 16));
+        ->and(Schema::sanitizeMcpServers([['url' => 'https://a.example.com/mcp', 'prefix' => str_repeat('p', 16)]])[0]['prefix'])->toBe(str_repeat('p', 16))
+        ->and(Schema::sanitizeMcpServers([['url' => 'https://a.example.com/mcp', 'prefix' => 'a_b_9']])[0]['prefix'])->toBe('a_b_9');
+});
+
+// The model knows an MCP tool as ToolName::fit('<prefix>__<name>'). A prefix with no `__` in it and
+// no `_` at its end makes the first `__` of that name the end of the prefix, so two servers,
+// whose prefixes differ, can never give two tools one name; and `ability` is refused, since
+// AbilitiesToolkit names every ability `ability__<namespace>__<name>`. The brute force is the
+// reviewer's: every prefix over {a, b, _} up to five characters, every tool name over {a, _, .}
+// up to four, two names long enough that fit() cuts and marks them, and prefixes near `ability`.
+it('admits no two prefixes, and no prefix beside the abilities, that put two tools under one name', function (): void {
+    $words = static function (array $alphabet, int $max): array {
+        $out = [];
+        $level = [''];
+        for ($n = 1; $n <= $max; $n++) {
+            $next = [];
+            foreach ($level as $w) {
+                foreach ($alphabet as $c) {
+                    $next[] = $w . $c;
+                }
+            }
+            $out = array_merge($out, $next);
+            $level = $next;
+        }
+        return $out;
+    };
+    $prefixes = array_values(array_filter(
+        array_merge($words(['a', 'b', '_'], 5), ['ability', 'ability_', 'ability__core', 'ability_x', 'abilit', 'abilityx', 'trk', 'trk_']),
+        [Schema::class, 'isMcpPrefix'],
+    ));
+    $names = array_merge($words(['a', '_', '.'], 4), [str_repeat('a', 70), str_repeat('a', 69) . '_'], ['core__get-site-info', 'get-site-info', '_x', 'x']);
+    $owners = [];
+    foreach ($prefixes as $prefix) {
+        foreach ($names as $name) {
+            $owners[ToolName::fit($prefix . '__' . $name)][$prefix] = true;
+        }
+    }
+    $clashes = array_filter($owners, static fn(array $by): bool => count($by) > 1);
+    $abilities = array_map([AbilitiesToolkit::class, 'toolName'], ['core/get-site-info', 'a/b', 'ability/x', 'x__y/z']);
+    expect($prefixes)->toContain('trk')->toContain('a_b')->toContain('ability_x')->toContain('abilit')
+        ->not->toContain('trk_')->not->toContain('a__b')->not->toContain('ability')->not->toContain('ability__core')
+        ->and(array_keys($clashes))->toBe([])
+        ->and(array_values(array_intersect($abilities, array_keys($owners))))->toBe([]);
 });
 
 it('clamps a server\'s timeout and byte cap, and gives an unreadable one the default', function (): void {

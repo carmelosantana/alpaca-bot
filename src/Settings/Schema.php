@@ -49,12 +49,26 @@ final class Schema
     private const MCP_ID = '/^[a-z][a-z0-9_]{0,23}\z/';
 
     /**
-     * An MCP server's tool-name prefix: a lowercase letter, then up to 15 of `[a-z0-9_]`. The
-     * model sees a tool as `<prefix>__<name>`, and a tool name has to start with a letter or `_`
+     * An MCP server's tool-name prefix: 1 to 16 characters, lowercase letters and digits with
+     * single underscores between them, starting with a letter. The model sees a tool as
+     * ToolName::fit('<prefix>__<name>'), and a tool name has to start with a letter or `_`
      * (Toolkit\ToolName), so a prefix starting with a digit would have every tool of that server
-     * renamed.
+     * renamed. No `__` inside and no `_` at the end, so the first `__` of such a name is where the
+     * prefix ends: fit() leaves `[a-z0-9_]` as it is and cuts only past its 55th character, and
+     * `<prefix>__` is at most 18. Two servers, whose prefixes differ (sanitizeMcpServers()), can
+     * then never give two tools one name, where `trk` with `_x` and `trk_` with `x` would both be
+     * `trk___x`. SchemaTest checks that by brute force.
      */
-    private const MCP_TOOL_PREFIX = '/^[a-z][a-z0-9_]{0,15}\z/';
+    private const MCP_TOOL_PREFIX = '/^(?=.{1,16}\z)[a-z](?:_?[a-z0-9])*\z/';
+
+    /**
+     * The prefix no server may take: AbilitiesToolkit names every ability `ability__<namespace>__<name>`
+     * (AbilitiesToolkit::toolName()), so a server under it could name a tool as an ability is
+     * named. The abilities are the only built-in tools whose names hold `__`: `web_fetch`,
+     * `summarize`, `draft_post` and the agent's `done` hold none, so no fitted MCP name can be one
+     * of them.
+     */
+    public const RESERVED_PREFIX = 'ability';
 
     /**
      * Force tools on for one model: the stored value of `models.overrides[<m>][tools]` that
@@ -398,6 +412,19 @@ final class Schema
         return $ids;
     }
 
+    /** isMcpPrefix()'s rule in words, for every screen and reply that refuses a prefix. */
+    public static function mcpPrefixRule(): string
+    {
+        /* translators: the rule an MCP server's tool-name prefix has to meet; ability is a literal prefix and stays in English */
+        return __('1 to 16 lowercase letters and digits, starting with a letter, with single underscores allowed between them, and not "ability"', 'alpaca-bot');
+    }
+
+    /** Whether `$prefix` is one a server may name its tools under: MCP_TOOL_PREFIX, and not RESERVED_PREFIX. */
+    public static function isMcpPrefix(mixed $prefix): bool
+    {
+        return is_string($prefix) && preg_match(self::MCP_TOOL_PREFIX, $prefix) === 1 && $prefix !== self::RESERVED_PREFIX;
+    }
+
     /** Whether `$id` is a server id as MCP_ID defines one: the one rule for a server's row, its Access entry and its Access select. */
     public static function isMcpId(mixed $id): bool
     {
@@ -557,7 +584,7 @@ final class Schema
         $prefix = $row['prefix'] ?? null;
         return match (true) {
             self::mcpUrl($row['url'] ?? null) === '' => 'url',
-            !is_string($prefix) || preg_match(self::MCP_TOOL_PREFIX, $prefix) !== 1 || $prefix === 'ability' => 'prefix',
+            !self::isMcpPrefix($prefix) => 'prefix',
             in_array($prefix, $prefixes, true) => 'taken',
             default => null,
         };

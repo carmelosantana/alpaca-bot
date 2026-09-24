@@ -270,7 +270,8 @@ final class SettingsController extends Controller
             $prefix = is_string($row['prefix'] ?? null) ? $row['prefix'] : '';
             $out[] = ['index' => $key, 'id' => $id, 'url' => $url, 'reason' => match ($fault) {
                 'url' => __('the URL has to be https with a host.', 'alpaca-bot'),
-                'prefix' => __('the prefix has to be a lowercase letter then up to 15 lowercase letters, digits or underscores, and not "ability".', 'alpaca-bot'),
+                /* translators: %s: what a prefix has to be (Schema::mcpPrefixRule()) */
+                'prefix' => sprintf(__('the prefix has to be %s.', 'alpaca-bot'), Schema::mcpPrefixRule()),
                 /* translators: %s: a tool-name prefix */
                 'taken' => sprintf(__('the prefix %s is already used by an earlier row of this request.', 'alpaca-bot'), $prefix),
             }];

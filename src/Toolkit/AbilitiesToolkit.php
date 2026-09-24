@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace AlpacaBot\Toolkit;
 
+use AlpacaBot\Settings\Schema;
 use AlpacaBot\Settings\Store;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Contract\ToolkitInterface;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Enum\ToolResultStatus;
@@ -92,8 +93,8 @@ final class AbilitiesToolkit implements ToolkitInterface
     /** The property a non-object input schema is wrapped under. */
     public const WRAP = 'input';
 
-    /** What every tool name this toolkit offers starts with, ahead of the ability's name. */
-    private const PREFIX = 'ability__';
+    /** What every tool name this toolkit offers starts with, ahead of the ability's name: the prefix no MCP server may take (Schema::RESERVED_PREFIX), then `__`. */
+    private const PREFIX = Schema::RESERVED_PREFIX . '__';
 
     /** @var \Closure(string): bool */
     private \Closure $exists;
