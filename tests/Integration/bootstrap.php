@@ -72,13 +72,13 @@ tests_add_filter('pre_http_request', static function (mixed $pre, array $args, s
 // At PHP_INT_MIN this guard runs before TestCase::fakeProvider()'s filter, and swaps the provider
 // first. What keeps fakeProvider() in charge is that its callback ignores the value it is handed
 // and returns its fake: made to pass a provider it is handed through, it hands on OfflineProvider,
-// and ChatRoutesTest fails. The `instanceof` test decides nothing there (made to swap whatever it
-// is given, it leaves ChatRoutesTest and HermeticTest green); it would decide only if this guard
-// ran after the test's filter, as at PHP_INT_MAX, where the fake is no longer an OllamaProvider and
-// is passed through. PHP_INT_MIN -- genuinely first, and the mirror of the sibling guard's
-// PHP_INT_MAX -- buys something narrower: the guard sees the provider exactly as Factory::make()
-// built it, before any filter can wrap it in something this `instanceof` would no longer
-// recognise.
+// and ChatRoutesTest fails. The `instanceof` test decides nothing about the fake there (made to
+// swap whatever it is given, it leaves ChatRoutesTest and HermeticTest green); it would decide
+// only if this guard ran after the test's filter, as at PHP_INT_MAX, where the fake is no longer
+// an OllamaProvider and is passed through. PHP_INT_MIN -- genuinely first, and the mirror of the
+// sibling guard's PHP_INT_MAX -- buys something narrower: the guard sees the provider exactly as
+// Factory::make() built it, before any filter can wrap it in something this `instanceof` would no
+// longer recognise.
 //
 // Only an OllamaProvider is swapped: a WpAiClientProvider is left exactly as built, which is not a
 // claim that its transport is covered. It is left because WpAiClientTest asserts Factory::make()

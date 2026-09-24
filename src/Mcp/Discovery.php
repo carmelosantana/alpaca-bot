@@ -13,10 +13,12 @@ use AlpacaBot\Settings\Store;
  * pinned fingerprint matches), `changed` (it is pinned to another one) or `new` (it is not
  * pinned), with whether its box starts ticked.
  *
- * The fingerprint an administrator ticks is the fingerprint of the definition they were shown
- * (View\Settings\McpTools posts it as the box's value), so approving is approving that
- * definition and nothing else. A changed tool starts unticked with its new fingerprint in the
- * box, so approving it again is a deliberate act, and it re-pins the tool. A new tool starts
+ * The fingerprint an administrator ticks is the fingerprint of the definition the list was built
+ * from (View\Settings\McpTools posts it as the box's value), so approving is approving that
+ * definition and nothing else. The list shows the tool's name, title and description, not its
+ * input schema, which the fingerprint covers too: the schema is pinned unseen. A changed tool
+ * starts unticked with its new fingerprint in the box, so approving it again is a deliberate
+ * act, and it re-pins the tool. A new tool starts
  * ticked unless its `destructiveHint` annotation is exactly `true` (ToolDefinition::destructive()):
  * the annotation is the server's own claim, which the MCP specification says to treat as
  * untrusted, and here it only decides which way a box starts. A new tool without the annotation,

@@ -41,9 +41,10 @@ find dist/alpaca-bot -exec touch -h -d "@$SOURCE_DATE_EPOCH" {} +
 # eyeballing them: every runtime path present, nothing from the dev toolchain.
 # The list is fed to grep by herestring, never `printf | grep -q`: -q exits on the first match
 # and closes the pipe, and the writer is killed if it is still writing. Not hypothetically, on
-# this artifact. When this was measured it listed 911 entries, 68,398 bytes against a 65,536-byte
-# pipe -- just over it -- and `printf '%s\n' "$list" | grep -qxF alpaca-bot/alpaca-bot.php` still wins the
-# race 40 times out of 40, because grep finds its match and exits before the writer notices.
+# this artifact. When this was measured it listed 911 entries, 68,398 bytes against a
+# 65,536-byte pipe -- just over it -- and
+# `printf '%s\n' "$list" | grep -qxF alpaca-bot/alpaca-bot.php` still wins the race 40 times
+# out of 40, because grep finds its match and exits before the writer notices.
 # Six copies of the same listing, 410,388 bytes, loses it 20 times out of 20: `pipefail` hands
 # back 141 and a path that IS in the zip is reported MISSING. What decides it is bytes still in
 # flight, not how many entries matched. So there is no match count to reason from, and the
@@ -85,7 +86,8 @@ do
     echo "UNEXPECTED entries matching $pattern:"
     # Herestring again, and for the same reason. `grep ... | head` is the same race, and the ten
     # lines head reads are not what decides it: head exits after them, and grep dies only if it
-    # is still writing by then. On the 68,398 bytes the listing measured then it survives; on six copies of it
+    # is still writing by then. On the 68,398 bytes the listing measured then it survives; on
+    # six copies of it
     # `grep -E '^alpaca-bot/vendor-prefixed/' | head` dies at 141 in 18 runs of 20. The flip
     # moves with line width, not match count (measured elsewhere in this phase at 510 matches of
     # 22 bytes, 339 of 40, 275 of 126) — a small pipeline is not safe by being small, it is safe
