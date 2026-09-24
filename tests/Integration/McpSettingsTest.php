@@ -423,6 +423,25 @@ final class McpSettingsTest extends TestCase
         $this->assertSame($order, array_keys($wp_filter['http_request_host_is_external']->callbacks[10]));
         $this->assertSame(10, has_filter('http_request_host_is_external', 'allowed_http_request_hosts'));
 
+        // Multisite's opt-in, core's ms_allowed_http_request_hosts() at priority 20. It calls
+        // get_network(), which a single-site install does not load, so here it can be shown only
+        // never to be called by the MCP check: called, it would end the check with an Error.
+        if (!is_multisite()) {
+            add_filter('http_request_host_is_external', 'ms_allowed_http_request_hosts', 20, 2);
+        }
+        $res = $this->rest('PUT', '/settings', ['toolkits.mcp_servers' => [['url' => 'https://10.0.0.5/mcp', 'prefix' => 'trk']]]);
+        $this->assertSame('alpaca_bot_mcp_address', $res->get_data()['code'] ?? null);
+        try {
+            (new \AlpacaBot\Mcp\Egress())->client(\AlpacaBot\Mcp\ServerConfig::fromSettings(['id' => 'trk', 'url' => 'https://10.0.0.5/mcp', 'prefix' => 'trk']));
+            $this->fail('Egress built a client for 10.0.0.5');
+        } catch (\AlpacaBot\Toolkit\AddressRefused) {
+            // Refused, without asking the network's callback.
+        }
+        $this->assertSame(20, has_filter('http_request_host_is_external', 'ms_allowed_http_request_hosts'));
+        if (!is_multisite()) {
+            remove_filter('http_request_host_is_external', 'ms_allowed_http_request_hosts', 20);
+        }
+
         $res = $this->rest('PUT', '/settings', ['toolkits.mcp_servers' => [['url' => 'https://10.0.0.7/mcp', 'prefix' => 'trk']]]);
         $this->assertSame(200, $res->get_status(), print_r($res->get_data(), true));
         $this->assertInstanceOf(\AlpacaBot\Vendor\Symfony\Contracts\HttpClient\HttpClientInterface::class, (new \AlpacaBot\Mcp\Egress())->client(\AlpacaBot\Mcp\ServerConfig::fromSettings(['id' => 'trk', 'url' => 'https://10.0.0.7/mcp', 'prefix' => 'trk'])));
