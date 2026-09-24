@@ -255,6 +255,16 @@ jobs:
       - name: WordPress integration suite
         run: WPH_MODE=wp-env bash bin/test-integration.sh
 
+      # The uninstall routine walks every site of a network, and the run above is a single site,
+      # where that test skips. So the uninstall group runs again on a network, once: on the latest
+      # leg only, since the walk does not depend on the core version, and the group alone, which
+      # is a few seconds on top of reinstalling the test database. --fail-on-skipped makes a run
+      # that did not come up as a network fail rather than pass. example.org because a network
+      # install refuses the default admin@localhost (bin/test-integration.sh).
+      - name: Uninstall routine on a network
+        if: matrix.wp == 'latest'
+        run: WPH_MODE=wp-env WP_MULTISITE=1 WP_TESTS_DOMAIN=example.org bash bin/test-integration.sh --group uninstall --fail-on-skipped
+
       - run: pnpm exec playwright install --with-deps chromium
 
       - name: Chat end-to-end smoke test
