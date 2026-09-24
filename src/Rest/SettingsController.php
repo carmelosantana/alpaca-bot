@@ -38,10 +38,15 @@ use AlpacaBot\Settings\Store;
  * below), and a site may lower that row or filter it for a custom role, so without this check it
  * would be handing that role the provider credential and every MCP server's header value in
  * cleartext. A caller the gate admitted without `manage_options` is not refused the route, only
- * the secrets: the reply is the masked read, the same one they get without the flag. Nothing the
- * route answers without the flag has a floor, because none of it is a credential — and the write,
- * the other half of that argument in 0.5, now has a row and a key of its own, so admitting a role
- * to the read no longer admits it to the PUT.
+ * the secrets: the reply is the masked read, the same one they get without the flag. That read
+ * has no floor of its own, and it masks only the provider key and each header value: every other
+ * field is answered as stored. Two of those can hold a credential a site wrote into them. An MCP
+ * server's URL keeps its query string (`?api_key=…`); a user name or password in it is refused
+ * at save (Schema::sanitizeMcpServers()), so the header is where a server's credential goes.
+ * `provider.base_url` keeps all of itself, a user name, password and query string included
+ * (masking it is Kanboard #4539). A site that lowers the `settings.read` row answers those to
+ * the role it admits. The write, which 0.5 gated with the read, now has a row and a key of its
+ * own, so admitting a role to the read no longer admits it to the PUT.
  *
  * The reveal response sets `Cache-Control: no-store` itself even though core normally supplies
  * it. WP_REST_Server::serve_request() sends a response's own headers first and then, when
