@@ -423,6 +423,40 @@ it('refuses a PUT that would drop a row, names the row and why, and writes nothi
     'a new row with no prefix' => [[['id' => 'aa', 'url' => 'https://aa.example.com/mcp', 'prefix' => 'aa'], ['id' => 'bb', 'url' => 'https://bb.example.com/mcp', 'prefix' => 'bb'], ['url' => 'https://new.example.com/mcp', 'prefix' => '', 'header_value' => 'Bearer typed']], 2, null, 'https://new.example.com/mcp', 'prefix'],
 ]);
 
+// M4 (R101): a URL with a user name or password is refused as any row the schema cannot keep is,
+// with a reason of its own that says where a credential goes. The refusal names the row by its
+// URL with the userinfo taken out, so the credential is not answered back.
+it('refuses a PUT whose MCP URL carries a credential, says to use the header, and does not echo it', function (array $row, int $index, ?string $id, string $named): void {
+    $this->stored['toolkits.mcp_servers'] = [
+        ['id' => 'aa', 'url' => 'https://aa.example.com/mcp', 'header_name' => 'Authorization', 'header_value' => Schema::MASK, 'prefix' => 'aa', 'approved' => []],
+    ];
+    $controller = new SettingsController(new Store(), new Mcp\ServerSettings(static fn(string $host, string $url): array => throw new RuntimeException('no lookup was expected')));
+    $rows = $index === 0 ? [$row] : [['id' => 'aa', 'url' => 'https://aa.example.com/mcp', 'prefix' => 'aa'], $row];
+    $response = $controller->update(restRequest('PUT', '/settings', ['models.num_ctx' => 2048, 'toolkits.mcp_servers' => $rows]));
+    expect($response)->toBeInstanceOf(WP_Error::class)
+        ->and($response->get_error_code())->toBe('alpaca_bot_mcp_row')
+        ->and($response->get_error_data()['status'])->toBe(400)
+        ->and($response->get_error_data()['rows'])->toHaveCount(1)
+        ->and($response->get_error_data()['rows'][0])->toMatchArray(['index' => $index, 'id' => $id, 'url' => $named])
+        ->and($response->get_error_data()['rows'][0]['reason'])->toContain('user name or password')->toContain('header')
+        ->and($response->get_error_message())->toContain($named)
+        ->and(json_encode([$response->get_error_message(), $response->get_error_data()]))->not->toContain('s3cret')->not->toContain('tok3n')
+        ->and($this->written)->toBeNull();
+})->with([
+    'a stored server given a user and password' => [['id' => 'aa', 'url' => 'https://user:s3cret@aa.example.com/mcp', 'prefix' => 'aa'], 0, 'aa', 'https://aa.example.com/mcp'],
+    'a new row with a token for a user name' => [['url' => 'https://tok3n@new.example.com/mcp?x=1', 'prefix' => 'nn'], 1, null, 'https://new.example.com/mcp?x=1'],
+]);
+
+// A row refused for another reason is named without its userinfo too: the reason is the URL's.
+it('names a refused http URL without the password it carried', function (): void {
+    $controller = new SettingsController(new Store(), new Mcp\ServerSettings(static fn(string $host, string $url): array => throw new RuntimeException('no lookup was expected')));
+    $response = $controller->update(restRequest('PUT', '/settings', ['toolkits.mcp_servers' => [['url' => 'http://user:s3cret@plain.example.com/mcp', 'prefix' => 'pp']]]));
+    expect($response->get_error_code())->toBe('alpaca_bot_mcp_row')
+        ->and($response->get_error_data()['rows'][0]['url'])->toBe('http://plain.example.com/mcp')
+        ->and($response->get_error_data()['rows'][0]['reason'])->toContain('https with a host')
+        ->and(json_encode([$response->get_error_message(), $response->get_error_data()]))->not->toContain('s3cret');
+});
+
 it('lets a blank row, a removed row and a left-out server go without a refusal', function (): void {
     $this->stored['toolkits.mcp_servers'] = [
         ['id' => 'aa', 'url' => 'https://aa.example.com/mcp', 'header_name' => '', 'header_value' => '', 'prefix' => 'aa', 'approved' => []],

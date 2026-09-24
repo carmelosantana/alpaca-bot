@@ -585,12 +585,14 @@ Rules worth knowing before you write:
   - `approved` is tool name => the 64-hex-character fingerprint of the definition that was
     approved; anything else is dropped.
 
-  A row the list cannot keep (a URL that is not `https` with a host, a prefix the rule refuses,
-  or a prefix an earlier row of the PUT already has) is refused rather than dropped when it names
-  a stored server's `id` or is a new row with a URL: the PUT answers
-  `400 alpaca_bot_mcp_row` and writes nothing, the other keys included. The error's
-  `data.rows` names each such row as `{index, id, url, reason}`: its index in the posted list,
-  the `id` it sent (or `null`), the URL it sent, and why. A row with neither a stored server's
+  A row the list cannot keep (a URL that is not `https` with a host, a URL with a user name or
+  password in it, a prefix the rule refuses, or a prefix an earlier row of the PUT already has)
+  is refused rather than dropped when it names a stored server's `id` or is a new row with a
+  URL: the PUT answers `400 alpaca_bot_mcp_row` and writes nothing, the other keys included. A
+  credential goes in the header, which reads back masked, never in the URL, which reads back as
+  stored. The error's `data.rows` names each such row as `{index, id, url, reason}`: its index
+  in the posted list, the `id` it sent (or `null`), the URL it sent without any user name and
+  password, and why. A row with neither a stored server's
   `id` nor a URL, and a row sent with `"remove": true`, are left out without a word.
 
   A server left out of the list, or sent with `"remove": true`, is removed, and its header value

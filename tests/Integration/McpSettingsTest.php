@@ -613,6 +613,35 @@ final class McpSettingsTest extends TestCase
     }
 
     /**
+     * M4 (R101) over real core: esc_url_raw() keeps a user name and password in a URL, so it is the
+     * schema that refuses one. Over REST the PUT answers 400 and writes nothing; on the page the
+     * new row is left out and the screen says to use the header. Neither answers the password back.
+     */
+    public function test_a_url_that_carries_a_credential_is_refused_over_rest_and_on_the_page(): void
+    {
+        $withUser = 'https://user:int-pass-5d1e@93.184.216.34/mcp';
+        $this->assertSame($withUser, esc_url_raw($withUser));
+        $before = get_option(Plugin::OPTION, []);
+        $res = $this->rest('PUT', '/settings', ['toolkits.mcp_servers' => [['url' => $withUser, 'prefix' => 'trk']]]);
+        $this->assertSame(400, $res->get_status());
+        $this->assertSame('alpaca_bot_mcp_row', $res->get_data()['code']);
+        $this->assertSame(self::URL, $res->get_data()['data']['rows'][0]['url']);
+        $this->assertStringContainsString('user name or password', $res->get_data()['data']['rows'][0]['reason']);
+        $this->assertStringNotContainsString('int-pass-5d1e', (string) wp_json_encode($res->get_data()));
+        $this->assertSame($before, get_option(Plugin::OPTION, []));
+
+        $posted = self::formPost($this->page('toolkits'));
+        $posted['toolkits.mcp_servers'][0] = ['url' => $withUser, 'prefix' => 'trk'];
+        $this->save($posted);
+        $this->assertSame([], get_option(Plugin::OPTION)['toolkits.mcp_servers']);
+        $errors = get_settings_errors(Plugin::OPTION);
+        $this->assertSame(['mcp_dropped'], array_column($errors, 'code'));
+        $this->assertStringContainsString(self::URL . ' was not added', $errors[0]['message']);
+        $this->assertStringContainsString('header', $errors[0]['message']);
+        $this->assertStringNotContainsString('int-pass-5d1e', (string) wp_json_encode($errors));
+    }
+
+    /**
      * R90: a prefix that ends in `_`, holds `__`, or is the abilities' own is refused over REST, the
      * rule is said, nothing is written, and the Tools tab's input carries the same rule as a pattern.
      */

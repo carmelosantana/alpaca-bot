@@ -251,7 +251,9 @@ final class SettingsController extends Controller
      * not lose quietly: one that names a stored server's id, and a new one with a URL. A row whose
      * `remove` is ticked, and a blank row, are not among them (Schema::droppedMcpRows()). Each is
      * `{index, id, url, reason}`: its key in the posted list, the id it posted when that is a
-     * string, the URL it posted, and why. The header value is not read.
+     * string, the URL it posted with any user name and password taken out
+     * (Schema::withoutUserinfo()), so a refused credential is not answered back, and why. The
+     * header value is not read.
      *
      * @return list<array{index: array-key, id: string|null, url: string, reason: string}>
      */
@@ -263,13 +265,14 @@ final class SettingsController extends Controller
             /** @var array<array-key, mixed> $row droppedMcpRows() lists arrays only */
             $row = is_array($raw) ? $raw[$key] : [];
             $id = is_string($row['id'] ?? null) ? $row['id'] : null;
-            $url = is_string($row['url'] ?? null) ? $row['url'] : '';
+            $url = is_string($row['url'] ?? null) ? Schema::withoutUserinfo($row['url']) : '';
             if (!in_array($id, $storedIds, true) && trim($url) === '') {
                 continue;
             }
             $prefix = is_string($row['prefix'] ?? null) ? $row['prefix'] : '';
             $out[] = ['index' => $key, 'id' => $id, 'url' => $url, 'reason' => match ($fault) {
                 'url' => __('the URL has to be https with a host.', 'alpaca-bot'),
+                'userinfo' => __('the URL may not carry a user name or password; send a credential as the header value, which reads back masked.', 'alpaca-bot'),
                 /* translators: %s: what a prefix has to be (Schema::mcpPrefixRule()) */
                 'prefix' => sprintf(__('the prefix has to be %s.', 'alpaca-bot'), Schema::mcpPrefixRule()),
                 /* translators: %s: a tool-name prefix */

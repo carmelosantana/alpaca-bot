@@ -415,7 +415,8 @@ final class SettingsPage
      * (not in step 3's exception, where the schema would drop the second of the two), with the
      * post's `remove` rows handed along so that a row given its id there cannot take the id of a
      * server this save removes.
-     * Notices name the server each is about (its URL, and its id for a stored one) and are escaped
+     * Notices name the server each is about (its URL, and its id for a stored one; a URL the post
+     * brought and the schema left out is named without its user name and password) and are escaped
      * here, because settings_errors() prints a message as it is given; they are added address,
      * prefix, dropped and cleared, in that order.
      *
@@ -439,7 +440,7 @@ final class SettingsPage
 
         $posted = $input['toolkits.mcp_servers'] ?? null;
         // Valid on its own means the only fault was a prefix an earlier row had taken.
-        foreach (array_keys(Schema::droppedMcpRows($posted)) as $key) {
+        foreach (Schema::droppedMcpRows($posted) as $key => $fault) {
             /** @var array<array-key, mixed> $row droppedMcpRows() lists arrays only */
             $row = is_array($posted) ? $posted[$key] : [];
             $id = is_string($row['id'] ?? null) ? $row['id'] : null;
@@ -452,8 +453,11 @@ final class SettingsPage
                     $rows[] = $alone[0];
                 } else {
                     $rows[] = $was[$id];
-                    /* translators: 1: an MCP server's URL, 2: its id, 3: what a prefix has to be (Schema::mcpPrefixRule()) */
-                    $notices['mcp_dropped'][] = sprintf(__('The change to MCP server %1$s (%2$s) was not saved: its URL has to be https with a host, and its prefix %3$s.', 'alpaca-bot'), $url($was[$id]), $id, Schema::mcpPrefixRule());
+                    $notices['mcp_dropped'][] = $fault === 'userinfo'
+                        /* translators: 1: an MCP server's URL, 2: its id */
+                        ? sprintf(__('The change to MCP server %1$s (%2$s) was not saved: its URL carries a user name or password. Put a credential in the header instead.', 'alpaca-bot'), $url($was[$id]), $id)
+                        /* translators: 1: an MCP server's URL, 2: its id, 3: what a prefix has to be (Schema::mcpPrefixRule()) */
+                        : sprintf(__('The change to MCP server %1$s (%2$s) was not saved: its URL has to be https with a host, and its prefix %3$s.', 'alpaca-bot'), $url($was[$id]), $id, Schema::mcpPrefixRule());
                 }
             } elseif (trim($url($row)) !== '') {
                 if ($alone !== []) {
@@ -461,8 +465,11 @@ final class SettingsPage
                     // and every row the post removes.
                     $rows[] = array_merge($alone[0], ['id' => '']);
                 } else {
-                    /* translators: 1: the URL of an MCP server that was not added, 2: what a prefix has to be (Schema::mcpPrefixRule()) */
-                    $notices['mcp_dropped'][] = sprintf(__('The MCP server %1$s was not added: its URL has to be https with a host, and its prefix %2$s.', 'alpaca-bot'), $url($row), Schema::mcpPrefixRule());
+                    $notices['mcp_dropped'][] = $fault === 'userinfo'
+                        /* translators: %s: the URL of an MCP server that was not added, without its user name and password */
+                        ? sprintf(__('The MCP server %s was not added: its URL carries a user name or password. Put a credential in the header instead.', 'alpaca-bot'), Schema::withoutUserinfo($url($row)))
+                        /* translators: 1: the URL of an MCP server that was not added, 2: what a prefix has to be (Schema::mcpPrefixRule()) */
+                        : sprintf(__('The MCP server %1$s was not added: its URL has to be https with a host, and its prefix %2$s.', 'alpaca-bot'), Schema::withoutUserinfo($url($row)), Schema::mcpPrefixRule());
                 }
             }
         }

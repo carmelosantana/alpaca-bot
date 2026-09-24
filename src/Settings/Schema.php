@@ -146,7 +146,7 @@ final class Schema
             'toolkits.enabled' => ['type' => 'checkbox-list', 'default' => ['web_fetch', 'summarize', 'draft_post'], 'section' => 'toolkits', 'label' => __('Enabled tools', 'alpaca-bot'), 'description' => __('What the assistant may do besides answer. A tool that is off is not offered to the model at all.', 'alpaca-bot'), 'options' => ['web_fetch' => __('Fetch a web page the user names', 'alpaca-bot'), 'summarize' => __('Summarize text', 'alpaca-bot'), 'draft_post' => __('Draft a post or page (never publishes)', 'alpaca-bot'), 'abilities' => __('Call the site\'s WordPress abilities you tick', 'alpaca-bot')]],
             'toolkits.user_agent' => ['type' => 'string', 'default' => 'AlpacaBot/' . Plugin::VERSION . ' (+https://github.com/carmelosantana/alpaca-bot)', 'section' => 'toolkits', 'label' => __('User agent for fetch tools', 'alpaca-bot'), 'description' => __('Sent with every request web_fetch makes. The default names the installed version, but every save of the settings stores this field with the rest, so after the first save it keeps what it held then and a later version\'s default does not replace it. Empty it to send the installed version\'s default.', 'alpaca-bot')],
             'toolkits.abilities' => ['type' => 'array', 'default' => [], 'section' => 'toolkits', 'label' => __('Abilities the model may call', 'alpaca-bot'), 'description' => __('The WordPress abilities that WordPress and other plugins register on this site. Each one you tick becomes a tool of the abilities tool, which is offered only while it is on under Enabled tools, and only to users its Access row admits. Two ticked abilities that would reach the model under the same tool name are marked, and neither is offered. A call runs as the user whose turn it is, through the ability\'s own permission check. Alpaca Bot\'s own abilities are never offered.', 'alpaca-bot'), 'sanitize' => [self::class, 'sanitizeAbilities']],
-            'toolkits.mcp_servers' => ['type' => 'array', 'default' => [], 'section' => 'toolkits', 'label' => __('MCP servers', 'alpaca-bot'), 'description' => __('Remote MCP servers, and the tools of each you approve for the model. The address must be https; it is checked when it is saved from this screen or over the REST API, and a private or other special-purpose address is refused, even when it is the site\'s own host. Moving a server to another host or port clears its header value, so it is never sent to an address it was not set for; type it again. A connection to an MCP server never goes through a proxy, neither one set for WordPress nor one set in the server\'s environment, so a site whose outbound traffic has to use a proxy cannot reach one. The header value is kept in an option of its own that WordPress does not load on every page, and this screen only shows whether one is set.', 'alpaca-bot')],
+            'toolkits.mcp_servers' => ['type' => 'array', 'default' => [], 'section' => 'toolkits', 'label' => __('MCP servers', 'alpaca-bot'), 'description' => __('Remote MCP servers, and the tools of each you approve for the model. The address must be https, with no user name or password in it: a credential goes in the header, never in the address. It is checked when it is saved from this screen or over the REST API, and a private or other special-purpose address is refused, even when it is the site\'s own host. Moving a server to another host or port clears its header value, so it is never sent to an address it was not set for; type it again. A connection to an MCP server never goes through a proxy, neither one set for WordPress nor one set in the server\'s environment, so a site whose outbound traffic has to use a proxy cannot reach one. The header value is kept in an option of its own that WordPress does not load on every page, and this screen only shows whether one is set.', 'alpaca-bot')],
             'access.chat' => self::access('chat', __('Chat', 'alpaca-bot'), __('Who may open the chat screen and use the chat REST routes. A tool needs its own row as well as this one.', 'alpaca-bot')),
             'access.tool.web_fetch' => self::access('tool.web_fetch', __('Tool: fetch a web page', 'alpaca-bot'), __('Who may run a turn that can fetch a page, and who may use [alpacabot_agent], which runs the same tool on the shortcode\'s behalf. It governs the next fetch, not the last one: a shortcode answer already cached on a post stands until its cache expires. The tool makes this server send an outbound request and hands the reply back; the Tools help tab says what that grants.', 'alpaca-bot')),
             'access.tool.summarize' => self::access('tool.summarize', __('Tool: summarize', 'alpaca-bot'), __('Who may run a turn that can summarize text through the model.', 'alpaca-bot')),
@@ -439,6 +439,9 @@ final class Schema
      *
      * - `url` is https with a host, after esc_url_raw(). A row without one is dropped, which is
      *   what the form's blank "add a server" row is; so is a row whose `remove` box was ticked.
+     *   So is a URL with a user name or a password in it, an empty one included: the URL is
+     *   stored, and answered by `GET /settings`, as it is written, while the header value is kept
+     *   apart and read back masked, so a credential goes there.
      *   Whether the *address* is public is not asked here: that is a DNS lookup, and this is a
      *   pure function. Mcp\ServerSettings asks it when the settings page or the REST route saves
      *   a URL that is new or changed. Mcp\Egress::client() asks it again, for whatever builds a
@@ -545,12 +548,13 @@ final class Schema
 
     /**
      * Each row of `$raw` that sanitizeMcpServers() leaves out, by its key in `$raw`, with why:
-     * `url` (not https with a host), `prefix` (not MCP_TOOL_PREFIX, or `ability`) or `taken` (an
-     * earlier row that is kept has it). A row that is not an array, or whose `remove` is ticked,
+     * `url` (not https with a host), `userinfo` (https with a host, and a user name or password
+     * too), `prefix` (not MCP_TOOL_PREFIX, or `ability`) or `taken` (an earlier row that is kept
+     * has it). A row that is not an array, or whose `remove` is ticked,
      * is not listed, since leaving it out is what it asks for. Both functions ask mcpRowFault(),
      * so the two cannot disagree about a row.
      *
-     * @return array<array-key, 'url'|'prefix'|'taken'>
+     * @return array<array-key, 'url'|'userinfo'|'prefix'|'taken'>
      */
     public static function droppedMcpRows(#[\SensitiveParameter] mixed $raw): array
     {
@@ -578,27 +582,59 @@ final class Schema
      *
      * @param array<array-key, mixed> $row
      * @param list<string>            $prefixes
-     * @return 'url'|'prefix'|'taken'|null
+     * @return 'url'|'userinfo'|'prefix'|'taken'|null
      */
     private static function mcpRowFault(#[\SensitiveParameter] array $row, array $prefixes): ?string
     {
         $prefix = $row['prefix'] ?? null;
+        $url = self::mcpUrlFault(self::escapedUrl($row['url'] ?? null));
         return match (true) {
-            self::mcpUrl($row['url'] ?? null) === '' => 'url',
+            $url !== null => $url,
             !self::isMcpPrefix($prefix) => 'prefix',
             in_array($prefix, $prefixes, true) => 'taken',
             default => null,
         };
     }
 
-    /** An MCP server's URL as sanitizeMcpServers() keeps it, or '' when it is not https with a host. */
+    /** An MCP server's URL as sanitizeMcpServers() keeps it, or '' when mcpUrlFault() finds one. */
     private static function mcpUrl(mixed $raw): string
     {
-        $url = is_string($raw) ? esc_url_raw(trim($raw)) : '';
+        $url = self::escapedUrl($raw);
+        return self::mcpUrlFault($url) === null ? $url : '';
+    }
+
+    private static function escapedUrl(mixed $raw): string
+    {
+        return is_string($raw) ? esc_url_raw(trim($raw)) : '';
+    }
+
+    /**
+     * What is wrong with `$url`, an escaped URL, as an MCP server's: `url` when it is not https
+     * with a host, `userinfo` when it is but carries a user name or a password (an empty one, as
+     * in `https://@host/`, included), null when nothing is.
+     *
+     * @return 'url'|'userinfo'|null
+     */
+    private static function mcpUrlFault(string $url): ?string
+    {
         $scheme = strtolower((string) wp_parse_url($url, PHP_URL_SCHEME));
         // The host trimmed of dots, as Mcp\Egress reads it: `https://./mcp` has none.
         $host = trim((string) wp_parse_url($url, PHP_URL_HOST), '.');
-        return $scheme === 'https' && $host !== '' ? $url : '';
+        if ($scheme !== 'https' || $host === '') {
+            return 'url';
+        }
+        return wp_parse_url($url, PHP_URL_USER) === null && wp_parse_url($url, PHP_URL_PASS) === null ? null : 'userinfo';
+    }
+
+    /**
+     * `$url` with any user name and password taken out, for a refusal that names the URL it
+     * refused: `https://user:pass@host/mcp` is `https://host/mcp`. What is taken is everything
+     * between `//` and the last `@` before the first `/`, `?` or `#` after it, which is where
+     * wp_parse_url() finds the host. A URL without `//` is returned as it is.
+     */
+    public static function withoutUserinfo(string $url): string
+    {
+        return (string) preg_replace('#^([^/?\#]*//)[^/?\#]*@#', '$1', $url);
     }
 
     /**

@@ -335,6 +335,23 @@ it('reads an mcp server row into shape and drops one it cannot read as a server'
         ->and(Schema::sanitizeMcpServers([['url' => 'https://a.example.com/mcp', 'prefix' => 'a_b_9']])[0]['prefix'])->toBe('a_b_9');
 });
 
+// A credential in the address would be stored, and answered by GET /settings, as the address is:
+// in the clear. The header is where one goes, and it reads back masked. So a URL with a user name
+// or a password, even an empty one, is not kept, and the fault says so apart from `url`. An `@`
+// in the path or the query is not userinfo, and stays.
+it('drops an mcp server whose URL carries a user name or password, and names the fault', function (): void {
+    $raw = [
+        ['url' => 'https://user:s3cret@mcp.example.com/mcp', 'prefix' => 'both'],
+        ['url' => 'https://tok3n@mcp.example.com/mcp', 'prefix' => 'user'],
+        ['url' => 'https://:s3cret@mcp.example.com/mcp', 'prefix' => 'pass'],
+        ['url' => 'https://@mcp.example.com/mcp', 'prefix' => 'empty'],
+        ['url' => 'http://user:s3cret@mcp.example.com/mcp', 'prefix' => 'plain'],
+        ['url' => 'https://mcp.example.com/a@b/mcp?to=a@b', 'prefix' => 'kept'],
+    ];
+    expect(array_column(Schema::sanitizeMcpServers($raw), 'url'))->toBe(['https://mcp.example.com/a@b/mcp?to=a@b'])
+        ->and(Schema::droppedMcpRows($raw))->toBe([0 => 'userinfo', 1 => 'userinfo', 2 => 'userinfo', 3 => 'userinfo', 4 => 'url']);
+});
+
 // The model knows an MCP tool as ToolName::fit('<prefix>__<name>'). A prefix with no `__` in it and
 // no `_` at its end makes the first `__` of that name the end of the prefix, so two servers,
 // whose prefixes differ, can never give two tools one name; and `ability` is refused, since
