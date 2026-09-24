@@ -9,8 +9,11 @@ namespace AlpacaBot\Mcp;
  * UnavailableClient. With one, for() returns whatever the closure returns for the server it was
  * asked about, which is how a test hands in its own double.
  *
- * It reads nothing from the ServerConfig itself and records nothing: the header value reaches the
- * closure a caller passed, if there is one, and goes nowhere else from here.
+ * It reads nothing from the ServerConfig itself and records nothing. for()'s parameter is a
+ * #[\SensitiveParameter], so a trace taken with zend.exception_ignore_args off holds a
+ * SensitiveParameterValue in that frame rather than the server. The closure's own frame is the
+ * closure's: the one a caller passes gets the ServerConfig as it is, and ServerConfig::__debugInfo()
+ * is what masks its header value if that frame is printed.
  *
  * @since 0.6.0
  */
@@ -25,7 +28,7 @@ final class ClientFactory
         $this->build = $build ?? static fn(ServerConfig $server): ClientInterface => new UnavailableClient();
     }
 
-    public function for(ServerConfig $server): ClientInterface
+    public function for(#[\SensitiveParameter] ServerConfig $server): ClientInterface
     {
         return ($this->build)($server);
     }

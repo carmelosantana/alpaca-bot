@@ -30,3 +30,15 @@ it('keeps a positive number the administrator did type, including a fractional t
     expect($row->timeout)->toBe(0.5)
         ->and($row->maxBytes)->toBe(1);
 });
+
+// A ServerConfig that reaches print_r() or var_dump(), on its own or inside a trace's arguments,
+// shows every field but the header value.
+it('masks the header value when it is dumped, and shows the rest', function (): void {
+    $server = new ServerConfig('docs', 'https://mcp.example.test/mcp', 'Authorization', 'Bearer secret-t', 'docs');
+    $printed = print_r($server, true);
+    ob_start();
+    var_dump($server);
+    $dumped = (string) ob_get_clean();
+    expect($printed)->not->toContain('secret-t')->toContain('[redacted]')->toContain('https://mcp.example.test/mcp')->toContain('Authorization')
+        ->and($dumped)->not->toContain('secret-t')->toContain('[redacted]')->toContain('https://mcp.example.test/mcp');
+});

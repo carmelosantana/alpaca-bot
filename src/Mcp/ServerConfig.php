@@ -42,6 +42,18 @@ final readonly class ServerConfig
         public array $approved = [],
     ) {}
 
+    /**
+     * What print_r() and var_dump() show: every field, with the header value replaced by
+     * `[redacted]`. Those two read __debugInfo(); var_export() and serialize() do not, and still
+     * write the value.
+     *
+     * @return array<string, mixed>
+     */
+    public function __debugInfo(): array
+    {
+        return array_replace(get_object_vars($this), ['headerValue' => '[redacted]']);
+    }
+
     /** @param array<string, mixed> $row one `toolkits.mcp_servers` row */
     public static function fromSettings(array $row): self
     {

@@ -63,3 +63,23 @@ it('the fake lists what it was seeded with, records every call, and answers a ca
     expect(fn() => $failing->listTools())->toThrow(McpUnavailable::class);
     expect($failing->listed)->toBe(1);
 });
+
+// With zend.exception_ignore_args off, a trace carries every frame's arguments, so a closure that
+// hands back something that is not a client would leave the ServerConfig, header value and all, in
+// the TypeError for() throws.
+it('keeps the server out of the trace when the closure hands back something that is not a client', function (): void {
+    $before = (string) ini_get('zend.exception_ignore_args');
+    ini_set('zend.exception_ignore_args', '0');
+    $thrown = null;
+    try {
+        (new ClientFactory(static fn(ServerConfig $server): object => new stdClass()))->for(mcpServer());
+    } catch (TypeError $e) {
+        $thrown = $e;
+    } finally {
+        ini_set('zend.exception_ignore_args', $before);
+    }
+    $frames = array_values(array_filter($thrown?->getTrace() ?? [], static fn(array $frame): bool => ($frame['class'] ?? '') === ClientFactory::class && $frame['function'] === 'for'));
+    expect($thrown)->toBeInstanceOf(TypeError::class)
+        ->and($frames)->toHaveCount(1)
+        ->and($frames[0]['args'][0] ?? null)->toBeInstanceOf(SensitiveParameterValue::class);
+});
