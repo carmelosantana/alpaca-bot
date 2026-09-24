@@ -222,6 +222,7 @@ it('keeps a masked value only when the scheme, host and port are the stored ones
     'the host changed' => ['https://steal.example.net/mcp', false],
     'the port changed' => ['https://mcp.example.com:8443/mcp', false],
     'the scheme changed' => ['http://mcp.example.com/mcp', false],
+    'the scheme changed, the port as it was' => ['http://mcp.example.com:443/mcp', false],
     'a subdomain' => ['https://evil.mcp.example.com/mcp', false],
     'only the path changed' => ['https://mcp.example.com/v2/mcp?x=1', true],
     'the default port written out' => ['https://mcp.example.com:443/mcp', true],
