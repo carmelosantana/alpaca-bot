@@ -18,10 +18,14 @@ A privately hosted WordPress AI chatbot. Chat with your own models, give them to
 = Features =
 
 - A chat screen in wp-admin: replies stream in as they are written, with a copy button on every message and code block, "Edit and resend" on your own, and an image attached from the media library for a model that can see.
+- The same chat as a drawer on most other admin screens and as a sidebar in the block editor. The drawer carries the screen it is on, and both carry the post being edited, as chips above the composer; a chip you take off is not sent.
 - Your conversations, stored **privately** on your site (or not at all: the Privacy tab decides) and listed in the screen's history.
 - Switch models per conversation; where the site allows it, your pick is remembered as your default.
 - A system prompt, per-model overrides (temperature, context window, keep-alive) and a receipt under every reply: model, tokens, time.
 - Monthly usage caps, per site and per user, with the meter behind them.
+- Tools the model can call, each switchable: fetch a web page, summarize, write a draft, and the abilities tool, which offers the WordPress abilities an administrator ticks and runs each as the chatting user.
+- Remote MCP servers under Settings › Tools. This release stores and checks them but contacts none; **Tools, and what they let the model reach** says what that means.
+- **Settings › Access**: who may use the chat, each tool, each MCP server, the settings over REST and the shortcodes, one capability per row, with a note under a row that code sets instead.
 - A REST API under `alpaca-bot/v1` ([docs/api.md](https://github.com/carmelosantana/alpaca-bot/blob/main/docs/api.md)) and a WP-CLI command.
 
 = Requirements =
@@ -46,11 +50,12 @@ Click **Alpaca Bot** in the admin menu, below Dashboard and above Posts. The scr
 - Type in the box at the foot of the screen. **Enter** sends, **Shift+Enter** adds a line, **Escape** clears the box.
 - The image button attaches a picture from the media library to your next message, for a model that can see. The largest image the screen takes is set by the site's PHP `post_max_size`, not its upload limit: the image travels inside the message, not as an upload.
 - Replies stream in as they are written. Every message has a **Copy** button, your own have **Edit and resend**, and a code block has its own copy button. Under a reply is its receipt: the model, the tokens it used and how long it took.
+- Most other admin screens have a round button at the bottom right that opens the same chat as a drawer, on the conversation you last had open in it; in the block editor it is a sidebar instead, opened by the Alpaca Bot button in the editor's top bar, which starts on a new chat. The drawer shows the screen it is on as a chip above the composer, and both show the post being edited as one, to a user who may edit it; a chip goes with every message until you take it off.
 - The **Help** tab at the top right of the screen repeats this, and documents the shortcodes.
 
 **Settings**
 
-`Alpaca Bot > Settings` (administrators) is one page in tabs: **Provider** (the endpoint, its key, the timeout), **Models** (the default, temperature, context window, keep-alive, and per-model overrides), **Chat** (system prompt, welcome text, what users may change), **Privacy** (whether conversations and the usage log are stored, and for how long), **Limits** (monthly token caps for the site and per user), **Tools** (what the model may do besides answer, including which of the site's WordPress abilities it may call — read the next section before you leave those as they come) and **Access** (who may use each part of the plugin). Every field is also readable and writable over the REST API (`GET`/`PUT /settings`).
+`Alpaca Bot > Settings` (administrators) is one page in tabs: **Provider** (the endpoint, its key, the timeout), **Models** (the default, temperature, context window, keep-alive, and per-model overrides), **Chat** (system prompt, welcome text, what users may change), **Privacy** (whether conversations and the usage log are stored, and for how long), **Limits** (monthly token caps for the site and per user), **Tools** (what the model may do besides answer, including which of the site's WordPress abilities it may call and the MCP servers it may use — read the next section before you leave those as they come) and **Access** (who may use each part of the plugin). Every field is also readable and writable over the REST API (`GET`/`PUT /settings`).
 
 **Tools, and what they let the model reach**
 
@@ -178,6 +183,40 @@ There is a price as well as a symptom. `web_fetch`, `summarize` and `draft_post`
 
 Releases before 0.5.0 are on the [releases page](https://github.com/carmelosantana/alpaca-bot/releases).
 
+= 0.6.0 =
+
+The chat on most admin screens and in the block editor, a capability for each part of the plugin, and tools from the site's WordPress abilities and from remote MCP servers. **Breaking** is what an upgrading site, or a client of the REST API, may have to act on.
+
+**Breaking**
+
+- **A tool now needs a Settings › Access row of its own, as well as the chat.** `Toolkit\Registry::enabled()` drops every toolkit whose row the user fails before the `alpaca_bot/toolkits` filter runs. A default site sees no change: `web_fetch`, `summarize` and `draft_post` start at `edit_posts`, the capability the chat already asked for. A site that opened the chat to a wider role in code keeps the chat for that role and loses the tools until an administrator lowers a tool's row, or code opens it with `alpaca_bot/capability/tool/{id}`. `[alpacabot_agent]` fetches through `web_fetch`, so it asks that row too (Kanboard #4331).
+- **The settings capability filter is now two.** `GET /settings` and `GET /settings/schema` ask `alpaca_bot/capability/settings/read`, `PUT /settings` asks `alpaca_bot/capability/settings/write`, and both start from what the old `alpaca_bot/capability/settings` returns, so an existing filter keeps working and can now be split. `alpaca_bot/capability/settings/schema` is no longer applied: the schema route asks `…/settings/read` with the rest of the read. `?reveal=1` still needs `manage_options` whatever the filters say. Settings › Access calls these filters, and `alpaca_bot/capability/chat`, with a request it builds itself, to show whether code has moved a row; that request authorises nothing (Kanboard #4332).
+- **A stream refused because you already have the most running that the site allows answers its own code**, `429 alpaca_bot_stream_concurrency` with `data.limit`, where it answered `alpaca_bot_rate_limited`; the per-minute limit keeps the old code. A client that matched the old code for both now tells them apart, and the chat screen shows the refusal as a warning and gives the message back (Kanboard #4333).
+- **`web_fetch` pins the addresses it checked into the connection, and refuses to fetch where it cannot.** It looks a name up once, checks every address, and hands them to cURL (the first alone on a libcurl older than 7.59), for the request and for each redirect, which it now follows itself, up to three. On a server whose PHP would send the request without cURL the tool refuses every fetch rather than connect unpinned, and Tools › Site Health says so (Kanboard #4330, #4483).
+- **`Rest\Errors` and `Rest\RateLimit` are now `AlpacaBot\Errors` and `AlpacaBot\RateLimit`.** Site code that named them by their old names has to move; the REST routes, the hooks and the wire are unchanged.
+- **`Shortcodes\Chat::CAPABILITY` is gone.** Who generates a shortcode answer is the Shortcodes row of Settings › Access, `edit_posts` by default as before, filtered by `alpaca_bot/capability/shortcode`.
+- **New keys on the wire.** Every usage receipt a turn reports carries `tool_result_bytes` (on `POST /chat`, the stream's `done` frame and `alpaca_bot/usage/recorded`), each entry of `meta.tool_calls` carries `result_bytes`, and every stream `delta` frame carries `held`. A client that validated those shapes strictly will see them.
+- **The `alpaca-bot/chat` ability is annotated `destructive`.** Storing a turn does more than add to the conversation: it rewrites the conversation's excerpt, and its title while that is empty or the default, and a transcript past its storage budget drops its oldest images and then its oldest messages. A client of the Abilities API that treats a destructive ability with more care now does so for this one.
+- **Deleting the plugin now deletes what it stored.** Uninstalling it from the Plugins screen, or with `wp plugin uninstall`, removes its settings, conversations, usage receipts, user preferences, transients and cron event, and what 0.4 left behind, on every site of a network. Drafts `draft_post` wrote are ordinary posts and stay. Deactivating keeps all of it (Kanboard #4431).
+
+**Added**
+
+- The chat as a drawer on most other admin screens, opened from a button at the bottom right and kept open, on its conversation, from screen to screen, and as a sidebar in the block editor. Both are shown to the users `alpaca_bot/admin/menu_capability` admits, and are served by two new routes, `GET /view/panel` and `POST /view/drawer`.
+- Context chips above the composer: the screen the drawer is on, and the post being edited for a user who may edit it. A chip taken off is not sent.
+- **Settings › Access**, a seventh settings tab with one capability per row: the chat, each tool, each MCP server, reading and writing settings over REST, and the shortcodes. A row that code moves is marked "set in code"; every row but Chat has a filter named after it, `alpaca_bot/capability/tool/web_fetch` for the fetch tool's, and the Chat row is filtered by `alpaca_bot/admin/menu_capability` and each chat route's own filter. An Access help tab says what each row decides.
+- The abilities tool, off by default: the WordPress abilities an administrator ticks under Settings › Tools, offered to the model and run as the chatting user through each ability's own permission check. Its row starts at administrators, Alpaca Bot's own abilities are never offered, and a result longer than 8000 characters is cut.
+- Remote MCP servers under Settings › Tools: an https address, one header, and a prefix for the server's tool names, `prefix__tool`, which may not end in `_`, hold `__` or be `ability`, and is one server's alone. Each tool is approved one at a time and pinned to a SHA-256 fingerprint of the definition approved, and one the server has since changed is withheld until it is approved again. The header value reads back masked and is kept out of the autoloaded settings. An address is checked when it is saved from the settings page or over REST, and a PUT with a refused address, or with a row it cannot keep, answers `400 alpaca_bot_mcp_address` or `400 alpaca_bot_mcp_row` and writes nothing. The connection is held to an address that passed, through no proxy. Each server has its own Access row, starting at administrators; the `alpaca_bot/toolkits` filter sees it as `mcp.<id>`, after the built-in tools; and every call fires `alpaca_bot/mcp/called`.
+- A Site Health test that says whether `web_fetch` can run pinned on this server.
+
+**Fixed**
+
+- A failed turn says "Provider error:" only where the provider failed; a tool turn that failed on its own is described in words of its own (Kanboard #4327).
+- The 0.4 conversation migration no longer retries a row another plugin keeps from saving on every request for ever: the row is tried a few times and then left as it is (Kanboard #4335).
+- A model that writes a tool call out as text, `<tool_call>…</tool_call>`, no longer flashes the markup through the reply while it streams; the chat shows "Calling a tool…" in its place (Kanboard #4329).
+- The per-model overrides table on Settings › Models stays inside the page with the admin menu expanded, and its Tools select keeps its label's width on a narrow screen (Kanboard #4348, #4363).
+- `web_fetch`'s default user agent names the installed version, where it named 0.5 whatever was installed. A site that has saved its settings keeps the value it saved, and can empty the field to send the default.
+- The integration suite reaches no network, so it passes the same with no provider and no DNS (Kanboard #4322).
+
 = 0.5.0 =
 
 A ground-up rewrite. The 0.4 code is gone rather than refactored, so the list below is what an upgrading site notices, not a summary of every commit.
@@ -209,6 +248,10 @@ A ground-up rewrite. The 0.4 code is gone rather than refactored, so the list be
 - The plugin's own dependencies are namespace-prefixed, so php-agents or CommonMark installed by another plugin cannot collide with the copies shipped here.
 
 == Upgrade Notice ==
+
+= 0.6.0 =
+
+Each tool now needs its own Settings › Access row as well as chat: a role you opened chat to in code keeps chat and gets no tool until the tool's row admits it. The settings capability filter splits into read and write keys. Deleting the plugin now deletes its data.
 
 = 0.5.0 =
 
