@@ -21,7 +21,7 @@ if (!defined('ABSPATH')) {
 
 if (PHP_VERSION_ID < 80400) {
     add_action('admin_notices', static function (): void {
-        echo '<div class="notice notice-error"><p>' . esc_html__('Alpaca Bot 0.5 requires PHP 8.4 or newer. The plugin is inactive.', 'alpaca-bot') . '</p></div>';
+        echo '<div class="notice notice-error"><p>' . esc_html__('Alpaca Bot requires PHP 8.4 or newer. The plugin is inactive.', 'alpaca-bot') . '</p></div>';
     });
     return;
 }
