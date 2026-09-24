@@ -8,6 +8,7 @@ use AlpacaBot\Plugin;
 use AlpacaBot\Settings\Schema;
 use AlpacaBot\Toolkit\AddressPin;
 use AlpacaBot\Toolkit\AddressRefused;
+use Brain\Monkey\Actions;
 use Brain\Monkey\Filters;
 use Brain\Monkey\Functions;
 
@@ -259,10 +260,10 @@ it('names the stored servers whose value a posted mask would drop because the or
 });
 
 // m-5: core's add_option() runs the settings page's sanitize callback a second time on a site's
-// first save, with nothing stored yet, so every row reads as new. A URL that passed once in the
-// request is not looked up again, so the second pass cannot refuse what the first let through
-// after its value was already kept.
-it('looks up a URL that passed once in a request no more', function (): void {
+// first save, with nothing stored yet, so every row reads as new. A URL that passed is not looked
+// up again until a write of the option completes (R79: forgetPassed()), so the second pass cannot
+// refuse what the first let through after its value was already kept.
+it('looks up a URL that passed no more until the option is written', function (): void {
     $asked = 0;
     $settings = new ServerSettings(static function (string $host, string $url) use (&$asked): array {
         ++$asked;
@@ -272,6 +273,15 @@ it('looks up a URL that passed once in a request no more', function (): void {
     expect($settings->refusals($rows, []))->toBe([])
         ->and($settings->refusals($rows, []))->toBe([])
         ->and($asked)->toBe(1);
+    $settings->forgetPassed();
+    expect($settings->refusals($rows, []))->toBe([])->and($asked)->toBe(2);
+});
+
+it('forgets what passed once the option is written, whether updated or added', function (): void {
+    $settings = new ServerSettings();
+    Actions\expectAdded('update_option_' . Plugin::OPTION)->once()->with([$settings, 'forgetPassed'], 10, 0);
+    Actions\expectAdded('add_option_' . Plugin::OPTION)->once()->with([$settings, 'forgetPassed'], 10, 0);
+    $settings->register();
 });
 
 it('asks again for a URL that was refused', function (): void {

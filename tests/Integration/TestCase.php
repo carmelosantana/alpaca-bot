@@ -50,6 +50,9 @@ abstract class TestCase extends \WP_UnitTestCase
         parent::set_up();
         $GLOBALS['wp_rest_server'] = null;
         Plugin::instance()->get(Store::class)->replace(Schema::defaults());
+        // One ServerSettings serves the whole process, so a URL one test passed is not taken as
+        // passed by the next.
+        Plugin::instance()->get(\AlpacaBot\Mcp\ServerSettings::class)->forgetPassed();
     }
 
     public function tear_down(): void

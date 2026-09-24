@@ -297,9 +297,14 @@ it('prints the wp-ai fallback notice to administrators on admin_notices, and bus
         return $cb instanceof Closure;
     }));
     $onUpdate = null;
+    // Mcp\ServerSettings adds a listener of its own on this action (forgetPassed()); the one
+    // under test is Plugin's closure.
     Actions\expectAdded('update_option_' . Plugin::OPTION)->once()->with(Mockery::on(static function (mixed $cb) use (&$onUpdate): bool {
+        if (!$cb instanceof Closure) {
+            return false;
+        }
         $onUpdate = $cb;
-        return $cb instanceof Closure;
+        return true;
     }), 10, 2);
     $plugin = Plugin::boot();
     $plugin->register();

@@ -227,6 +227,8 @@ final class SettingsController extends Controller
             $rows = Schema::sanitizeMcpServers($input['toolkits.mcp_servers'], $stored);
             $refused = $this->servers->refusals($rows, $stored);
             if ($refused !== []) {
+                // Nothing is written, so no write's action clears what passed on the way.
+                $this->servers->forgetPassed();
                 $reasons = [];
                 foreach ($refused as $i => $reason) {
                     /* translators: 1: an MCP server's URL, 2: why its address was refused */

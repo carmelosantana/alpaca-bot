@@ -547,6 +547,32 @@ final class McpSettingsTest extends TestCase
         $this->assertStringNotContainsString('Bearer lost', (string) wp_json_encode($errors));
     }
 
+    /**
+     * R79: a URL that passed is not passed for good. After the write it passed for, and after a
+     * PUT that was refused and wrote nothing, it is looked up again: here it has lost the site's
+     * opt-in in between, and is refused.
+     */
+    public function test_a_url_that_passed_is_checked_again_on_the_next_save(): void
+    {
+        $optIn = static fn(bool $external, string $host): bool => $host === '10.0.0.7' ? true : $external;
+        $private = 'https://10.0.0.7/mcp';
+
+        // Passed, and written.
+        add_filter('http_request_host_is_external', $optIn, 10, 2);
+        $this->assertSame(200, $this->rest('PUT', '/settings', ['toolkits.mcp_servers' => [['url' => $private, 'prefix' => 'aa']]])->get_status());
+        remove_filter('http_request_host_is_external', $optIn, 10);
+        $res = $this->rest('PUT', '/settings', ['toolkits.mcp_servers' => [['id' => 'aa', 'url' => $private, 'prefix' => 'aa'], ['url' => $private, 'prefix' => 'bb']]]);
+        $this->assertSame('alpaca_bot_mcp_address', $res->get_data()['code'] ?? null, 'after a write');
+
+        // Passed, in a PUT another row got refused, so nothing was written.
+        $this->rest('PUT', '/settings', ['toolkits.mcp_servers' => []]);
+        add_filter('http_request_host_is_external', $optIn, 10, 2);
+        $this->assertSame(400, $this->rest('PUT', '/settings', ['toolkits.mcp_servers' => [['url' => $private, 'prefix' => 'aa'], ['url' => 'https://10.0.0.5/mcp', 'prefix' => 'bb']]])->get_status());
+        remove_filter('http_request_host_is_external', $optIn, 10);
+        $res = $this->rest('PUT', '/settings', ['toolkits.mcp_servers' => [['url' => $private, 'prefix' => 'aa']]]);
+        $this->assertSame('alpaca_bot_mcp_address', $res->get_data()['code'] ?? null, 'after a refused PUT');
+    }
+
     /** R78 over real dispatch: a PUT that would drop a stored server's row writes nothing at all. */
     public function test_a_put_that_would_drop_a_stored_row_is_refused_and_writes_nothing(): void
     {

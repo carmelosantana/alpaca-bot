@@ -57,10 +57,18 @@ final class ServerSettings
     private \Closure $resolve;
 
     /**
-     * URLs that passed the check in this request. Core's add_option() runs the settings page's
-     * sanitize callback a second time on a site's first save, with nothing stored yet, so every
-     * row reads as new there; this is what keeps that second pass from looking each host up again,
-     * and from refusing a row whose value beforeSave() has already kept.
+     * URLs that passed the check since the last write of the option. Core's add_option() runs the
+     * settings page's sanitize callback a second time on a site's first save, with nothing stored
+     * yet, so every row reads as new there; this is what keeps that second pass from looking each
+     * host up again, and from refusing a row whose value beforeSave() has already kept.
+     *
+     * forgetPassed() empties it: on `update_option_alpaca_bot_settings` and
+     * `add_option_alpaca_bot_settings`, which core fires once the row is written (after that second
+     * pass), and when the REST route refuses a PUT for an address, which writes nothing. So a URL
+     * is not taken as passed by a later save that the same process makes, which may run after the
+     * site's opt-in or the DNS answer has changed. A save that ends up changing nothing fires
+     * neither action (update_option() returns before them), and what it looked up stays until the
+     * next write.
      *
      * @var array<string, true>
      */
@@ -75,6 +83,14 @@ final class ServerSettings
     public function register(): void
     {
         add_filter('pre_update_option_' . Plugin::OPTION, [$this, 'beforeSave'], 10, 2);
+        add_action('update_option_' . Plugin::OPTION, [$this, 'forgetPassed'], 10, 0);
+        add_action('add_option_' . Plugin::OPTION, [$this, 'forgetPassed'], 10, 0);
+    }
+
+    /** Empties the record of URLs that passed (`$passed` says when, and why). */
+    public function forgetPassed(): void
+    {
+        $this->passed = [];
     }
 
     /**
@@ -172,7 +188,7 @@ final class ServerSettings
      * changed against the row of the same id in `$stored`. A URL the stored list already has
      * under that id is not looked up again, so saving another tab costs no lookup; whether that
      * address still passes is Egress's question when it builds a client. Nor is a URL that
-     * passed earlier in this request (`$passed`).
+     * passed since the last write of the option (`$passed`).
      *
      * `$rows` are rows Schema::sanitizeMcpServers() made, so each URL is https with a host; the
      * host is handed to the check as wp_parse_url() gives it, brackets and all for an IPv6
