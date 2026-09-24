@@ -47,7 +47,14 @@ final class Schema
      * LF. With no `.` and no `/` in it, no two ids share the filter name Access builds from
      * `mcp.<id>`.
      */
-    private const MCP_ID = '/^[a-z][a-z0-9_]{0,23}\z/';
+    private const MCP_ID = '/^' . self::MCP_ID_PATTERN . '\z/';
+
+    /**
+     * MCP_ID without its anchors, for a pattern that has anchors of its own: the id group of
+     * `GET /view/mcp-tools/{id}` (Rest\ViewController). It holds no parenthesis, which
+     * Controller::routeKey() needs of a route's group.
+     */
+    public const MCP_ID_PATTERN = '[a-z][a-z0-9_]{0,23}';
 
     /**
      * An MCP server's tool-name prefix: 1 to 16 characters, lowercase letters and digits with

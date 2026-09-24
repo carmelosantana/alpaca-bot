@@ -116,7 +116,7 @@ final class ViewController extends Controller
                 'conversation_id' => ['type' => 'integer', 'minimum' => 0],
             ]],
             ...($this->discovery === null ? [] : [
-                ['path' => '/view/mcp-tools/(?P<id>[a-z0-9_]{1,24})', 'methods' => 'GET', 'callback' => [$this, 'mcpTools'], 'capability' => 'manage_options', 'rate_limit' => true, 'args' => ['index' => ['type' => 'integer', 'default' => 0, 'minimum' => 0]]],
+                ['path' => '/view/mcp-tools/(?P<id>' . Schema::MCP_ID_PATTERN . ')', 'methods' => 'GET', 'callback' => [$this, 'mcpTools'], 'capability' => 'manage_options', 'rate_limit' => true, 'args' => ['index' => ['type' => 'integer', 'default' => 0, 'minimum' => 0]]],
             ]),
         ];
     }

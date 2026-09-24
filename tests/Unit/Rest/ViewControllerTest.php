@@ -354,7 +354,7 @@ it('declares the MCP tools route only when it has a Discovery: manage_options, r
     $routes = viewControllerWithMcp(new AlpacaBot\Tests\Integration\FakeClient())->routes();
     $mcp = array_values(array_filter($routes, static fn(array $r): bool => str_starts_with($r['path'], '/view/mcp-tools')));
     expect($mcp)->toHaveCount(1)
-        ->and($mcp[0]['path'])->toBe('/view/mcp-tools/(?P<id>[a-z0-9_]{1,24})')
+        ->and(str_starts_with($mcp[0]['path'], '/view/mcp-tools/(?P<id>'))->toBeTrue()
         ->and($mcp[0]['methods'])->toBe('GET')
         ->and($mcp[0]['capability'])->toBe('manage_options')
         ->and($mcp[0]['rate_limit'])->toBeTrue()
@@ -362,6 +362,18 @@ it('declares the MCP tools route only when it has a Discovery: manage_options, r
         ->and(ViewController::routeKey($mcp[0]['path']))->toBe('view/mcp-tools')
         ->and(count($routes))->toBe(9)
         ->and(array_filter(viewController()->routes(), static fn(array $r): bool => str_starts_with($r['path'], '/view/mcp-tools')))->toBe([]);
+});
+
+// M7 (R101): the route's id is the schema's server id, no wider. Core matches a route as
+// `@^{route}$@i` (WP_REST_Server::match_request_to_handler()); the case-insensitive flag is the one
+// difference, so the route is asked case-sensitively here and Discovery::server() refuses the rest.
+it('takes as the MCP tools route\'s id exactly what Schema::isMcpId() admits', function (): void {
+    $routes = viewControllerWithMcp(new AlpacaBot\Tests\Integration\FakeClient())->routes();
+    $path = array_values(array_filter($routes, static fn(array $r): bool => str_starts_with($r['path'], '/view/mcp-tools')))[0]['path'];
+    $ids = ['trk', 'a', 'a_b_9', 'z9', str_repeat('a', 24), '1trk', '9', '_trk', str_repeat('a', 25), '', 'a-b', 'a.b', 'Trk', 'trk/x', "trk\n"];
+    $matched = array_filter($ids, static fn(string $id): bool => preg_match('@^' . $path . '$@D', '/view/mcp-tools/' . $id) === 1);
+    expect(array_values($matched))->toBe(array_values(array_filter($ids, [AlpacaBot\Settings\Schema::class, 'isMcpId'])))
+        ->and($matched)->toContain('trk')->not->toContain('1trk');
 });
 
 // The route's own gate is `alpaca_bot/capability/view/mcp-tools`, and a filter decides it. The

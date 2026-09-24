@@ -56,6 +56,24 @@ it('reads the stored server and merges in the header value the option does not c
         ->and(mcpDiscovery([])->server('')?->id)->toBeNull();
 });
 
+// M7 (R101): a row written round the schema (a hand edit, `wp option update`) is not a server here
+// unless its id is one Schema::isMcpId() admits, and one ServerConfig::fromSettings() cannot read
+// (an object where a string belongs) is no server either, rather than an Error out of the route.
+it('finds no server for an id the schema would not admit, or for a row it cannot read', function (): void {
+    Functions\when('get_option')->justReturn([]);
+    $store = new Store(['toolkits.mcp_servers' => [
+        ['id' => '1trk', 'url' => 'https://mcp.example.com/mcp', 'header_value' => '', 'prefix' => 'one'],
+        ['id' => 'Trk', 'url' => 'https://mcp.example.com/mcp', 'header_value' => '', 'prefix' => 'up'],
+        ['id' => 'obj', 'url' => new stdClass(), 'header_value' => '', 'prefix' => 'obj'],
+        ['id' => 'ok', 'url' => 'https://mcp.example.com/mcp', 'header_value' => '', 'prefix' => 'ok'],
+    ]]);
+    $discovery = new Discovery($store, new ClientFactory());
+    expect($discovery->server('1trk'))->toBeNull()
+        ->and($discovery->server('Trk'))->toBeNull()
+        ->and($discovery->server('obj'))->toBeNull()
+        ->and($discovery->server('ok')?->id)->toBe('ok');
+});
+
 it('marks each tool approved, changed or new, and leaves a destructive new tool unticked', function (): void {
     $search = new ToolDefinition('search', 'Search.', ['type' => 'object']);
     $write = new ToolDefinition('write', 'Write.', ['type' => 'object'], ['destructiveHint' => true]);

@@ -802,6 +802,26 @@ final class McpSettingsTest extends TestCase
     }
 
     /**
+     * M7 (R101) over real dispatch: an id that does not start with a letter matches no route, and
+     * one with an uppercase letter, which core's case-insensitive match lets through to the
+     * callback, is no server there. Neither lists anything.
+     */
+    public function test_the_route_takes_only_an_id_the_schema_admits(): void
+    {
+        $client = new FakeClient([new ToolDefinition('search', 'Search.', ['type' => 'object'])]);
+        $this->useClient(static fn(): FakeClient => $client);
+        $this->rest('PUT', '/settings', ['toolkits.mcp_servers' => [['url' => self::URL, 'prefix' => 'trk', 'header_value' => self::SECRET]]]);
+        $this->assertSame('trk', get_option(Plugin::OPTION)['toolkits.mcp_servers'][0]['id']);
+        $this->assertSame('rest_no_route', $this->rest('GET', '/view/mcp-tools/1trk')->get_data()['code']);
+        $upper = $this->rest('GET', '/view/mcp-tools/TRK');
+        $this->assertSame(404, $upper->get_status());
+        $this->assertSame('alpaca_bot_not_found', $upper->get_data()['code']);
+        $this->assertSame(0, $client->listed);
+        $this->assertSame(200, $this->rest('GET', '/view/mcp-tools/trk')->get_status());
+        $this->assertSame(1, $client->listed);
+    }
+
+    /**
      * The route's filter decides its gate, and the callback asks manage_options again: listing a
      * server hands its stored header value to the client. An editor the filter admits is refused
      * all the same, and the server is never listed for them; an unknown id is a 404.

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace AlpacaBot\Mcp;
 
+use AlpacaBot\Settings\Schema;
 use AlpacaBot\Settings\Store;
 
 /**
@@ -41,14 +42,27 @@ final class Discovery
     /**
      * The stored server whose id is `$id`, with its header value put back from Secrets (the row
      * carries the mask), or null when the settings list no server of that id.
+     *
+     * Also null for a row only a write round the schema can store (a hand edit, `wp option
+     * update`), as Mcp\Toolkits skips one: an id Schema::isMcpId() does not admit, which the
+     * route's own pattern turns away too except for an uppercase letter, since core matches a
+     * route case-insensitively; and a row ServerConfig::fromSettings() cannot read (an object
+     * where a string belongs), which would otherwise be an Error out of the route.
      */
     public function server(string $id): ?ServerConfig
     {
+        if (!Schema::isMcpId($id)) {
+            return null;
+        }
         $rows = $this->store->get('toolkits.mcp_servers', []);
         foreach (is_array($rows) ? $rows : [] as $row) {
             if (is_array($row) && ($row['id'] ?? null) === $id) {
                 $row['header_value'] = Secrets::resolve($row);
-                return ServerConfig::fromSettings($row);
+                try {
+                    return ServerConfig::fromSettings($row);
+                } catch (\Throwable) {
+                    return null;
+                }
             }
         }
         return null;
