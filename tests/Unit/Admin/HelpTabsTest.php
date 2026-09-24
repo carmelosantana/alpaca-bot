@@ -201,6 +201,9 @@ it('tells the person adding an MCP server what is offered, whose text it is, who
         ->toContain('withheld until you approve it again')->toContain('lists twice')
         ->toContain("the server's text")->toContain('shortened and flattened exactly as the model gets it')
         ->toContain('starts at Administrators')
+        // M5 (R101): the schema is the server's text too, reaches the model as sent, and is pinned unseen.
+        ->toContain("input schema carries the server's text too")->toContain('Alpaca Bot neither cleans nor caps')
+        ->toContain('which the list does not show')->toContain('pins its input schema')
         ->toContain("even when it is the site's own host")
         ->toContain('<code>alpaca_bot/mcp/called</code>')
         ->and($tools)->not->toContain('same address rules');
