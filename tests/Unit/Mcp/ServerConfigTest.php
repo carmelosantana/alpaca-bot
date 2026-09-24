@@ -60,5 +60,9 @@ it('keeps the row out of the trace when reading it fails', function (): void {
     expect($thrown)->toBeInstanceOf(Error::class)
         ->and($frames)->toHaveCount(1)
         ->and($frames[0]['args'][0] ?? null)->toBeInstanceOf(SensitiveParameterValue::class)
-        ->and(print_r($thrown, true))->not->toContain('secret-t');
+        // The frame and the message, not print_r($thrown): the whole Error's trace keeps every
+        // frame's arguments, Pest's own objects among them, and printing it took more than 512 MB
+        // in a whole-suite run. The row is an argument of this frame and of no other.
+        ->and(print_r($frames[0], true))->not->toContain('secret-t')
+        ->and($thrown?->getMessage())->not->toContain('secret-t');
 });
