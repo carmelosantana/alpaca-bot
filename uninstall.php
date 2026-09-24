@@ -14,13 +14,15 @@
  * What it removes, on each site:
  * - options: the settings row, the MCP header values (`alpaca_bot_mcp_secrets`), the four
  *   Settings\Migrate04 flags, the stream slot rows Rest\StreamBudget writes with $wpdb, and the
- *   options 0.4.17 wrote (one per settings field, its version stamp, and its shortcode cache);
+ *   options 0.4 wrote (one per settings field 0.4.17 had and five older ones, its version
+ *   stamp, and its shortcode cache);
  * - transients: the model catalog, and every dynamic one (rate limit windows, usage month
  *   totals, shortcode answers, stream tickets, MCP drift markers, 0.4.17's model list and
  *   shortcode cache);
  * - posts: every `chat_history` (conversations) and `chat_log` (usage receipts) post in any
  *   status, and all of their post meta, which is where the transcript, the receipt's numbers and
- *   Migrate04's attempts count live;
+ *   Migrate04's attempts count live; unless another loaded plugin has registered the type (the
+ *   last paragraph);
  * - post meta: 0.4.17's shortcode cache, left on the post that showed it (the post stays);
  * - the `alpaca_bot/usage/cleanup` cron event.
  * And once, because a network's sites share one user meta table: the three Chat\UserPrefs user
@@ -39,8 +41,8 @@
  * anchored at the start, and each row it returns is deleted only if the whole name matches the
  * exact shape the plugin writes; so a neighbour that shares a prefix is left alone. Deletes go
  * through delete_option() and delete_metadata(), so WordPress's caches drop the rows with the
- * table. Posts are the exception: they are deleted with two SQL statements per batch of 500
- * rather than wp_delete_post(), which runs several queries and a hook chain for each row, and a
+ * table. Posts are the exception: they are deleted in SQL, in batches of 500, rather than
+ * with wp_delete_post(), which runs several queries and a hook chain for each row, and a
  * site can hold years of receipts. So no `delete_post` hooks fire for them, and each one's post,
  * meta, comment and term caches are dropped by hand. The plugin writes no terms or comments on
  * them, but other code can, and what it hangs off them by post id goes with them: their term
