@@ -184,6 +184,26 @@ it('reports on an abandoned turn\'s receipt the size of what had come back befor
         ->and($row[0][2]['meta_input']['tool_result_bytes'])->toBe(11);
 });
 
+// The agent indexes tools by name and the last toolkit to name one wins it. The registry hands
+// the built-ins over first, so without a guard a later toolkit (an MCP server, a site's own
+// through the filter) could take a built-in tool's name and its calls. The earlier one keeps it.
+it('keeps a tool name for the toolkit that offered it first, so a later toolkit cannot take its calls', function (): void {
+    $first = echoToolkit('echo_tool', 'Use the first.', static fn(array $a): ToolResult => ToolResult::success('first:' . $a['text']));
+    $second = echoToolkit('echo_tool', 'Use the second.', static fn(array $a): ToolResult => ToolResult::success('second:' . $a['text']));
+    $provider = agentProvider([
+        [new Response('', ProviderFinishReason::ToolUse, [new ToolCall('c1', 'echo_tool', ['text' => 'ping'])])],
+        [new Response('Done.', ProviderFinishReason::Stop, usage: new Usage(2, 2, 4))],
+    ], $calls);
+    $h = pipelineWith($provider, [], [], TOOL_MODEL, null, registryWith(['a' => $first, 'b' => $second]));
+
+    $r = $h->pipeline->complete(3, 'ping');
+
+    expect($r->reply->meta['tool_calls'][0]['result_excerpt'])->toBe('first:ping')
+        ->and(array_map(static fn(object $t): string => $t->name(), $calls[0]['tools']))->toBe(['echo_tool', 'done'])
+        // A toolkit left with no tool says nothing to the model about tools it does not have.
+        ->and($calls[0]['messages'][0]->content())->toContain('Use the first.')->not->toContain('Use the second.');
+});
+
 it('yields the answer a model gives through the done tool, which it never streamed, after the run', function (): void {
     $provider = agentProvider([
         [new Response('', ProviderFinishReason::ToolUse, [new ToolCall('c1', 'done', ['response' => 'Final answer'])], usage: new Usage(2, 1, 3))],

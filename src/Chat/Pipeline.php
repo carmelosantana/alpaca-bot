@@ -12,6 +12,7 @@ use AlpacaBot\Provider\Factory;
 use AlpacaBot\Provider\Model;
 use AlpacaBot\Provider\ModelCatalog;
 use AlpacaBot\Settings\Store;
+use AlpacaBot\Toolkit\FirstWins;
 use AlpacaBot\Toolkit\Registry;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Agent\Output;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Contract\MessageInterface;
@@ -755,7 +756,8 @@ final class Pipeline
             $history->add($message);
         }
         $agent = new Assistant($provider, $system);
-        foreach ($toolkits as $toolkit) {
+        // A tool name stays with the first toolkit that offered it (Toolkit\FirstWins).
+        foreach (FirstWins::over($toolkits) as $toolkit) {
             $agent->addToolkit($toolkit);
         }
         $agent->attach($observer);
