@@ -4,12 +4,13 @@
  * the Plugins screen, or on `wp plugin uninstall`. The plugin is inactive then, and was not loaded
  * for the request unless `wp plugin uninstall --deactivate` loaded it before deactivating it, so
  * nothing here uses its autoloader or a class of its own: every name is written out below, and
- * the list is the inventory. tests/Unit/UninstallInventoryTest.php reads every write call in
- * src/ (options, transients, meta, cron, post types, roles and the rest its docblock lists) and
- * fails when one stores under a name this file does not name, or under a name built at run
- * time that its map does not tie to an entry here; it also counts `$wpdb` writes and fails on
- * any table or file. tests/Integration/UninstallTest.php runs this file over one of each row
- * and a neighbour of each that is not ours.
+ * the list is the inventory. tests/Unit/UninstallInventoryTest.php reads every call in src/ to
+ * a writer on its lists: the WordPress functions that store options, transients, meta, cron
+ * events, post types, terms and the rest its docblock names; `$wpdb` writes; and the table,
+ * upload and `$wp_filesystem` calls. It fails when one stores under a name this file does not
+ * name, under a name built at run time that its map does not tie to an entry here, or in a table
+ * or file. A writer that is not on its lists is not seen. tests/Integration/UninstallTest.php
+ * runs this file over one of each row and a neighbour of each that is not ours.
  *
  * What it removes, on each site:
  * - options: the settings row, the MCP header values (`alpaca_bot_mcp_secrets`), the four
