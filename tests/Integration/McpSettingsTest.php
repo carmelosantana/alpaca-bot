@@ -205,6 +205,34 @@ final class McpSettingsTest extends TestCase
         $this->assertFalse($this->raw(Secrets::OPTION));
     }
 
+    /**
+     * N-9: the same, when the new row is one the page puts back after a clash. `aa` is removed,
+     * `bb` takes `aa`'s prefix at a refused address (so it is restored and frees the prefix), and
+     * a new row repeats `aa`'s URL and prefix with the mask. It is a new server all the same:
+     * `aa_2`, with no Access entry and no value.
+     */
+    public function test_a_row_put_back_after_a_clash_does_not_take_a_removed_servers_id(): void
+    {
+        $this->rest('PUT', '/settings', [
+            'toolkits.mcp_servers' => [
+                ['url' => self::URL, 'prefix' => 'aa', 'header_value' => self::SECRET],
+                ['url' => 'https://93.184.216.35/mcp', 'prefix' => 'bb', 'header_value' => self::OTHER],
+            ],
+            'access.mcp' => ['aa' => 'edit_posts', 'bb' => 'read'],
+        ]);
+        $posted = self::formPost($this->page('toolkits'));
+        $posted['toolkits.mcp_servers'][0]['remove'] = '1';
+        $posted['toolkits.mcp_servers'][1]['prefix'] = 'aa';
+        $posted['toolkits.mcp_servers'][1]['url'] = 'https://10.9.9.9/mcp';
+        $posted['toolkits.mcp_servers'][2] = ['url' => self::URL, 'prefix' => 'aa', 'header_value' => Schema::MASK];
+        $this->save($posted);
+
+        $after = get_option(Plugin::OPTION);
+        $this->assertSame([['bb', 'bb', Schema::MASK], ['aa_2', 'aa', '']], array_map(static fn(array $r): array => [$r['id'], $r['prefix'], $r['header_value']], $after['toolkits.mcp_servers']));
+        $this->assertSame(['bb' => 'read'], $after['access.mcp']);
+        $this->assertSame(['bb' => self::OTHER], Secrets::all());
+    }
+
     public function test_a_put_whose_address_is_refused_writes_nothing(): void
     {
         $this->rest('PUT', '/settings', ['toolkits.mcp_servers' => [['url' => self::URL, 'prefix' => 'trk', 'header_value' => self::SECRET]]]);

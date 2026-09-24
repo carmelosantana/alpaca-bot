@@ -409,7 +409,9 @@ final class SettingsPage
      *    drop, because its URL moved to another origin (ServerSettings::clearedByMove()), is said.
      *
      * Then the list goes through the schema again, against `$stored`, to be the shape it stores
-     * (not in step 3's exception, where the schema would drop the second of the two).
+     * (not in step 3's exception, where the schema would drop the second of the two), with the
+     * post's `remove` rows handed along so that a row given its id there cannot take the id of a
+     * server this save removes.
      * Notices name the server each is about (its URL, and its id for a stored one) and are escaped
      * here, because settings_errors() prints a message as it is given; they are added address,
      * prefix, dropped and cleared, in that order.
@@ -452,7 +454,8 @@ final class SettingsPage
                 }
             } elseif (trim($url($row)) !== '') {
                 if ($alone !== []) {
-                    // No id: the last pass through the schema gives it one, against every row kept.
+                    // No id: the last pass through the schema gives it one, against every row kept
+                    // and every row the post removes.
                     $rows[] = array_merge($alone[0], ['id' => '']);
                 } else {
                     /* translators: %s: the URL of an MCP server that was not added */
@@ -535,7 +538,10 @@ final class SettingsPage
                 add_settings_error(Plugin::OPTION, $code, esc_html($message));
             }
         }
-        $clean['toolkits.mcp_servers'] = Schema::sanitizeMcpServers(array_values($rows), $storedRows);
+        // The post's `remove` rows go along: the schema keeps none of them, but it counts their ids
+        // as named, so a row that brings no id cannot be taken for a server this save removes.
+        $removed = array_filter(is_array($posted) ? $posted : [], static fn(mixed $row): bool => is_array($row) && !empty($row['remove']));
+        $clean['toolkits.mcp_servers'] = Schema::sanitizeMcpServers([...array_values($rows), ...array_values($removed)], $storedRows);
         return $clean;
     }
 
