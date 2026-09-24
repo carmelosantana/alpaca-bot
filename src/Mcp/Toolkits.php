@@ -14,19 +14,22 @@ use AlpacaBot\Settings\Store;
  * under, so what the filter receives names the server the way the Access tab and its filter
  * (`alpaca_bot/capability/mcp/<id>`) do.
  *
- * A row is skipped, before any client is built or any credential read, when:
+ * A row is skipped, before any credential is read, when:
  * - its id is not one Schema::isMcpId() admits. Store hands back what is stored, not what the
  *   schema would make of it, and Access::hook() keeps two rows' filters apart only for ids that
  *   rule admits;
+ * - ServerConfig::fromSettings() cannot read it (an object where a string belongs, which only a
+ *   write round the schema can store). It is skipped for every user, rather than failing the
+ *   turn of everyone the registry is asked about;
  * - it approves nothing: there would be nothing to offer, and no reason to hold its header value;
  * - the user fails its `mcp.<id>` row (Access::allows(), asked of `$userId` with user_can()).
  *   That row defaults to `manage_options`. It is not in Access::defaults(), because there is one
  *   per server; a row that list does not name reads as `manage_options`.
  * For every other row the header value is put back from Secrets (the row carries the mask), and
- * the client comes from ClientFactory::for(); this class opens no connection and asks nothing of
- * the network itself. The factory the plugin constructs is given no closure in this release, so
- * the client it hands out is UnavailableClient, and a toolkit the plugin's instance of this class
- * builds lists no tools.
+ * the toolkit is handed the ClientFactory, from which McpToolkit builds its client when its tools
+ * are first asked for. This class builds no client and asks nothing of the network. The factory
+ * the plugin constructs is given no closure in this release, so the client it hands out is
+ * UnavailableClient, and a toolkit the plugin's instance of this class builds lists no tools.
  *
  * The toolkit is handed `$userId`, the id its row was asked for, as the user its calls are
  * announced as, so the check and the record cannot disagree about who is asking. Its drift goes
@@ -52,12 +55,16 @@ final class Toolkits
             }
             /** @var string $id isMcpId() passed it */
             $id = $row['id'];
-            if (ServerConfig::fromSettings($row)->approved === [] || !$this->access->allows($userId, Access::MCP_PREFIX . $id, $userId)) {
+            try {
+                $read = ServerConfig::fromSettings($row);
+            } catch (\Throwable) {
                 continue;
             }
-            $row['header_value'] = Secrets::resolve($row);
-            $server = ServerConfig::fromSettings($row);
-            $out[Access::MCP_PREFIX . $id] = new McpToolkit($this->clients->for($server), $server, $userId, Drift::set(...));
+            if ($read->approved === [] || !$this->access->allows($userId, Access::MCP_PREFIX . $id, $userId)) {
+                continue;
+            }
+            $server = new ServerConfig($read->id, $read->url, $read->headerName, Secrets::resolve($row), $read->prefix, $read->timeout, $read->maxBytes, $read->approved);
+            $out[Access::MCP_PREFIX . $id] = new McpToolkit($this->clients, $server, $userId, Drift::set(...));
         }
         return $out;
     }

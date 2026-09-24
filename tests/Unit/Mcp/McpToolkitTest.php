@@ -2,11 +2,13 @@
 
 declare(strict_types=1);
 
+use AlpacaBot\Mcp\ClientFactory;
 use AlpacaBot\Mcp\McpToolkit;
 use AlpacaBot\Mcp\McpUnavailable;
 use AlpacaBot\Mcp\ServerConfig;
 use AlpacaBot\Mcp\ToolDefinition;
 use AlpacaBot\Tests\Integration\FakeClient;
+use AlpacaBot\Toolkit\AddressRefused;
 use AlpacaBot\Toolkit\SchemaTool;
 use AlpacaBot\Toolkit\ToolName;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Enum\ToolResultStatus;
@@ -24,11 +26,21 @@ beforeEach(function (): void {
     Functions\when('wp_strip_all_tags')->alias(static fn(string $s): string => strip_tags((string) preg_replace('@<(script|style)[^>]*?>.*?</\1>@si', '', $s)));
 });
 
-/** @param array<string, string> $approved tool name => pinned fingerprint */
-function mcpToolkit(FakeClient $client, array $approved, ?array &$drift = null): McpToolkit
+/**
+ * A toolkit over a factory that answers `$client`, or throws `$client` when it is a Throwable;
+ * `$built` counts the builds.
+ *
+ * @param array<string, string> $approved tool name => pinned fingerprint
+ */
+function mcpToolkit(FakeClient|\Throwable $client, array $approved, ?array &$drift = null, ?int &$built = null): McpToolkit
 {
+    $built = 0;
     $server = new ServerConfig('trk', 'https://mcp.example.com/mcp', 'Authorization', 'Bearer t', 'trk', approved: $approved);
-    return new McpToolkit($client, $server, 3, static function (string $id, array $names) use (&$drift): void {
+    $factory = new ClientFactory(static function (ServerConfig $s) use ($client, &$built): FakeClient {
+        ++$built;
+        return $client instanceof \Throwable ? throw $client : $client;
+    });
+    return new McpToolkit($factory, $server, 3, static function (string $id, array $names) use (&$drift): void {
         $drift = [$id, $names];
     });
 }
@@ -49,6 +61,32 @@ it('reports no drift, which clears the marker, when every approved tool still ma
     $search = new ToolDefinition('search', 'Search.', ['type' => 'object']);
     mcpToolkit(new FakeClient([$search]), ['search' => $search->fingerprint()], $drift)->tools();
     expect($drift)->toBe(['trk', []]);
+});
+
+// Building a client can fail on its own (a real builder checks the address, and its refusal names
+// the host), so it is built when the tools are first asked for, inside the same catch as the
+// listing: a server whose client cannot be built is a turn with no remote tools, and a caller
+// that never asks for tools builds nothing.
+it('builds the client only when its tools are asked for, once, and calls through the client that listed them', function (): void {
+    $search = new ToolDefinition('search', 'Search.', ['type' => 'object']);
+    $client = new FakeClient([$search], ['search' => ToolResult::success('hit')]);
+    $kit = mcpToolkit($client, ['search' => $search->fingerprint()], $drift, $built);
+    expect($built)->toBe(0);
+    $kit->tools()[0]->execute(['q' => 'x']);
+    $kit->guidelines();
+    expect($built)->toBe(1)
+        ->and($client->listed)->toBe(1)
+        ->and($client->calls)->toBe([['name' => 'search', 'arguments' => ['q' => 'x']]]);
+});
+
+it('offers nothing, and says nothing of the host, when the client cannot be built', function (): void {
+    $refused = new AddressRefused('mcp.example.com does not resolve, or its lookup failed.');
+    $drift = ['untouched'];
+    $kit = mcpToolkit($refused, ['search' => str_repeat('a', 64)], $drift, $built);
+    expect($kit->tools())->toBe([])
+        ->and($kit->guidelines())->toBe('')
+        ->and($built)->toBe(1)
+        ->and($drift)->toBe(['untouched']);
 });
 
 it('lists the server once however often the agent asks for its tools', function (): void {
@@ -124,8 +162,8 @@ it('offers neither copy of a name the listing repeats, even under a pin a save k
     $other = new ToolDefinition('fetch', 'Fetch.', ['type' => 'object']);
     $kit = mcpToolkit(new FakeClient([$one, $two, $other]), ['search' => $one->fingerprint(), 'fetch' => $other->fingerprint()], $drift);
     expect(array_map(static fn($t): string => $t->name(), $kit->tools()))->toBe(['trk__fetch'])
-        // Discovery records the name once when any copy is changed; so does this, so the two
-        // writers of the marker agree about the same listing.
+        // Discovery records the name once when any copy is changed; so does this, so Discovery
+        // and this toolkit agree about the same listing.
         ->and($drift)->toBe(['trk', ['search']]);
     $same = mcpToolkit(new FakeClient([$one, $one]), ['search' => $one->fingerprint()], $drift);
     expect($same->tools())->toBe([])->and($drift)->toBe(['trk', []]);

@@ -22,6 +22,8 @@ use Brain\Monkey\Functions;
 
 beforeEach(function (): void {
     Functions\when('wp_strip_all_tags')->alias(static fn(string $s): string => strip_tags($s));
+    // A listing that finds no drift clears the server's marker (Drift::set()).
+    Functions\when('delete_transient')->justReturn(true);
 });
 
 /**
@@ -34,7 +36,7 @@ beforeEach(function (): void {
  * @param list<array{0: int, 1: string}> $asked every user_can() as [user, capability]
  * @param list<string>          $secrets  every option name get_option() was asked for
  */
-function mcpToolkits(array $row = [], array $settings = [], ?array &$built = null, ?array &$asked = null, ?array &$secrets = null, bool $can = true, array $tools = []): Toolkits
+function mcpToolkits(array $row = [], array $settings = [], ?array &$built = null, ?array &$asked = null, ?array &$secrets = null, bool $can = true, array $tools = [], ?\Throwable $buildError = null): Toolkits
 {
     $built = [];
     $asked = [];
@@ -52,9 +54,9 @@ function mcpToolkits(array $row = [], array $settings = [], ?array &$built = nul
         'header_value' => Schema::MASK, 'prefix' => 'trk', 'timeout' => 30.0, 'max_bytes' => 1048576,
         'approved' => ['search' => str_repeat('a', 64)],
     ], $row)]]);
-    return new Toolkits($store, new Access($store), new ClientFactory(static function (ServerConfig $server) use (&$built, $tools): FakeClient {
+    return new Toolkits($store, new Access($store), new ClientFactory(static function (ServerConfig $server) use (&$built, $tools, $buildError): FakeClient {
         $built[] = $server;
-        return new FakeClient($tools, ['search' => ToolResult::success('hit')]);
+        return $buildError !== null ? throw $buildError : new FakeClient($tools, ['search' => ToolResult::success('hit')]);
     }));
 }
 
@@ -63,7 +65,10 @@ it('builds one toolkit keyed mcp.<id> for a user who passes the server\'s row, a
     expect(array_keys($kits->for(5)))->toBe(['mcp.trk'])
         ->and($kits->for(5)['mcp.trk'])->toBeInstanceOf(McpToolkit::class)
         ->and($asked[0])->toBe([5, 'manage_options'])
-        ->and($built[0]->id)->toBe('trk');
+        // The client is the toolkit's to build, when its tools are first asked for.
+        ->and($built)->toBe([]);
+    $kits->for(5)['mcp.trk']->tools();
+    expect($built[0]->id)->toBe('trk');
 });
 
 it('asks the row as the settings narrow it', function (): void {
@@ -95,7 +100,7 @@ it('skips a row whose id is not a server id, since its Access row could be anoth
 
 it('hands the factory the server with the header value Secrets keeps in place of the mask', function (): void {
     $kits = mcpToolkits([], [], $built);
-    $kits->for(5);
+    $kits->for(5)['mcp.trk']->tools();
     expect($built[0]->headerValue)->toBe('Bearer t')
         ->and($built[0]->headerName)->toBe('Authorization')
         ->and($built[0]->approved)->toBe(['search' => str_repeat('a', 64)]);
@@ -108,3 +113,22 @@ it('announces a call as the user the row was asked for, and records drift in the
     Actions\expectDone('alpaca_bot/mcp/called')->once()->with('trk', 'search', [], 5, Mockery::type(ToolResult::class));
     expect($kits->for(5)['mcp.trk']->tools()[0]->execute([])->content)->toBe('hit');
 });
+
+// I-2: a builder that fails (a real one refuses an address that does not resolve, and says which
+// host) must not take the registry down with it for every user the row admits.
+it('hands back the toolkit when its client cannot be built, and the toolkit offers nothing', function (): void {
+    $kits = mcpToolkits([], [], $built, $asked, $secrets, true, [], new AlpacaBot\Toolkit\AddressRefused('mcp.example.com does not resolve, or its lookup failed.'));
+    $kit = $kits->for(5)['mcp.trk'] ?? null;
+    expect($kit)->toBeInstanceOf(McpToolkit::class)
+        ->and($built)->toBe([])
+        ->and($kit?->tools())->toBe([])
+        ->and($kit?->guidelines())->toBe('')
+        ->and($built)->toHaveCount(1);
+});
+
+// M-4: Store hands back what is stored, and a row written round the schema can hold anything. One
+// that cannot be read as a server is skipped, for every user, rather than failing the turn.
+it('skips a stored row it cannot read as a server', function (string $field): void {
+    $kits = mcpToolkits([$field => new stdClass()], [], $built, $asked);
+    expect($kits->for(5))->toBe([])->and($built)->toBe([]);
+})->with([['url'], ['header_name'], ['prefix']]);

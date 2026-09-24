@@ -211,6 +211,16 @@ it('hands the filter the built-ins before the MCP servers', function (): void {
     expect(array_keys($r->enabled(3)))->toBe(['web_fetch', 'mcp.trk']);
 });
 
+it('still answers when an MCP server\'s client cannot be built, and that server offers nothing', function (): void {
+    Functions\when('get_option')->justReturn([]);
+    $store = new Store(['toolkits.mcp_servers' => [['id' => 'trk', 'url' => 'https://mcp.invalid/mcp', 'header_value' => '', 'prefix' => 'trk', 'approved' => ['search' => str_repeat('a', 64)]]]]);
+    $access = new Access($store);
+    Filters\expectApplied('alpaca_bot/toolkits')->once()->andReturnFirstArg();
+    $r = new Registry($store, $access, new Toolkits($store, $access, new ClientFactory(static fn(): never => throw new AlpacaBot\Toolkit\AddressRefused('mcp.invalid does not resolve, or its lookup failed.'))));
+    $enabled = $r->enabled(3);
+    expect(array_keys($enabled))->toBe(['mcp.trk'])->and($enabled['mcp.trk']->tools())->toBe([]);
+});
+
 it('lets the alpaca_bot/toolkits filter take an MCP server away', function (): void {
     Functions\when('get_option')->justReturn([]);
     $store = new Store(['toolkits.mcp_servers' => [['id' => 'trk', 'url' => 'https://mcp.example.com/mcp', 'header_value' => '', 'prefix' => 'trk', 'approved' => ['search' => str_repeat('a', 64)]]]]);
