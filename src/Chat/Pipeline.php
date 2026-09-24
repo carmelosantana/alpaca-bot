@@ -631,11 +631,12 @@ final class Pipeline
      * except for two failures the provider had no part in, which arrive in words of their own.
      *
      * A RunFailure is failure()'s, for a tool run whose Error finish nobody announced, and its
-     * message is raised as it is. A TerminationException that reaches here escaped the agent's
-     * own catch: AbstractAgent::run() collects every toolkit's tools() before its first try, so
-     * a toolkit that stops the run from there is not caught by the library the way a tool that
-     * stops it from execute() is (that one is a finished turn: failure()). It says what the tool
-     * said, or that a tool stopped the run when it said nothing.
+     * message is raised as it is. A TerminationException that reaches here never met the
+     * agent's catch: agentTurn() asks every toolkit for its tools (Toolkit\FirstWins::over())
+     * before it starts the fiber the agent runs in, so a toolkit that stops the run from there is
+     * not caught by the library the way a tool that stops it from execute() is (that one is a
+     * finished turn: failure()). It says what the tool said, or that a tool stopped the run when
+     * it said nothing.
      *
      * Everything else keeps the prefix, as every failure did before 0.6: a provider that threw
      * on the plain path, one the agent announced, and whatever else lands in send()'s catch.

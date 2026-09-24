@@ -89,7 +89,7 @@ it('offers nothing, and says nothing of the host, when the client cannot be buil
         ->and($drift)->toBe(['untouched']);
 });
 
-it('lists the server once however often the agent asks for its tools', function (): void {
+it('lists the server once however often its tools are asked for', function (): void {
     $search = new ToolDefinition('search', 'Search.', ['type' => 'object']);
     $client = new FakeClient([$search]);
     $kit = mcpToolkit($client, ['search' => $search->fingerprint()]);

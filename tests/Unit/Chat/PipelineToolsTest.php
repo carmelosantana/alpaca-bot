@@ -1334,10 +1334,40 @@ it('hands an unannounced failure back in the plugin\'s words, and an announced o
         ->and(pipelineRaised($silent))->toBe('Provider error: ' . NO_REASON);
 });
 
+// Who asks a toolkit for its tools on a tool turn, and how often: Toolkit\FirstWins::over() once,
+// before the agent runs; the agent then asks FirstWins's wrapper, which answers from that list, and
+// the system prompt asks the toolkit's guidelines() once (McpToolkit's and Toolkit\FirstWins's
+// docblocks rest on this).
+it('asks each toolkit for its tools once on a tool turn, and for its guidelines once', function (): void {
+    $toolkit = new class implements ToolkitInterface {
+        public int $tools = 0;
+        public int $guidelines = 0;
+
+        public function tools(): array
+        {
+            ++$this->tools;
+            return echoToolkit('echo_tool')->tools();
+        }
+
+        public function guidelines(): string
+        {
+            ++$this->guidelines;
+            return 'Use it.';
+        }
+    };
+    $provider = agentProvider([
+        [new Response('', ProviderFinishReason::ToolUse, [new ToolCall('c1', 'echo_tool', ['text' => 'ping'])])],
+        [new Response('Done.', ProviderFinishReason::Stop, usage: new Usage(2, 2, 4))],
+    ]);
+    $h = pipelineWith($provider, [], [], TOOL_MODEL, null, registryWith(['echo' => $toolkit]));
+    $h->pipeline->complete(3, 'ping');
+    expect([$toolkit->tools, $toolkit->guidelines])->toBe([1, 1]);
+});
+
 it('raises a toolkit that stops the run before it starts in words of its own, not as a provider error', function (): void {
-    // AbstractAgent::run() collects every toolkit's tools() before its first try (:142-143
-    // against :242 in the pinned library), so a TerminationException thrown there is not the
-    // library's to catch: it escapes the fiber into send()'s catch, where it used to become
+    // Pipeline::agentTurn() asks every toolkit for its tools (Toolkit\FirstWins::over()) before
+    // it starts the fiber the agent runs in, so a TerminationException thrown there is not the
+    // library's to catch: it leaves agentTurn() into send()'s catch, where it used to become
     // "Provider error: ".
     $toolkit = new class implements ToolkitInterface {
         public function tools(): array
@@ -1367,6 +1397,9 @@ it('raises a toolkit that stops the run before it starts in words of its own, no
     expect($caught)->not->toBeNull()
         ->and($caught->getMessage())->toBe(TOOL_STOPPED)
         ->and($caught->getPrevious())->toBeInstanceOf(TerminationException::class)
+        // Thrown from FirstWins::over(), called by agentTurn(), and from no frame of the library.
+        ->and(array_map(static fn(array $f): string => ($f['class'] ?? '') . '::' . $f['function'], array_slice($caught->getPrevious()->getTrace(), 0, 3)))
+        ->toBe([$toolkit::class . '::tools', AlpacaBot\Toolkit\FirstWins::class . '::over', Pipeline::class . '::agentTurn'])
         // chat/failed still hears what was thrown, as it always has.
         ->and($failed)->toBeInstanceOf(TerminationException::class)
         // Nothing ran, so nothing is kept: the post made for this turn is taken back.
