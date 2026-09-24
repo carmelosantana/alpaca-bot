@@ -55,6 +55,22 @@ final class UninstallTest extends TestCase
         'alpaca_bot_default_top_p', 'alpaca_bot_version',
     ];
 
+    /** Options that extend one of ours, that one of ours extends, or that an unanchored or unescaped match would take. */
+    private const NEIGHBOUR_OPTIONS = [
+        'alpaca_bot_settings_backup', 'alpaca_bot_mcp_secrets_old', 'xalpaca_bot_settings', 'alpaca_bot',
+        'alpaca_bot_stream_slot_backup', 'alpaca_bot_stream_slot_7_0_old', 'alpaca-bot-stream-slot-7-0',
+        'alpaca_bot_cache_notahash', 'alpaca_bot_migrated_05', 'alpaca_bot_api_url_v2', 'other_plugin_settings',
+    ];
+
+    /**
+     * Transients next to ours. A server id starts with a letter; not `_Srv` for the drift one,
+     * because option_name's collation is case-insensitive and that is our `srv` row.
+     */
+    private const NEIGHBOUR_TRANSIENTS = [
+        'alpaca_bot_models_backup', 'alpaca_bot_rl_backup', 'alpaca_bot_stream_notatoken', 'alpaca_bot_usage_site_2026',
+        'alpaca_bot_mcp_drift_9srv', 'other_plugin_models',
+    ];
+
     private function uninstall(): void
     {
         if (!defined('WP_UNINSTALL_PLUGIN')) {
@@ -94,11 +110,6 @@ final class UninstallTest extends TestCase
         $this->assertSame('gone', get_option($name, 'gone'), "get_option($name) still answers from the cache");
     }
 
-    private function assertOptionKept(string $name): void
-    {
-        $this->assertTrue($this->optionRow($name), "option row $name, not the plugin's, was deleted");
-    }
-
     private function assertTransientGone(string $name): void
     {
         $this->assertFalse($this->optionRow('_transient_' . $name), "transient $name is still there");
@@ -106,9 +117,10 @@ final class UninstallTest extends TestCase
         $this->assertFalse(get_transient($name), "get_transient($name) still answers from the cache");
     }
 
-    private function assertTransientKept(string $name): void
+    /** A 0.4 cache name with one character too many. */
+    private function hashPlusOne(): string
     {
-        $this->assertTrue($this->optionRow('_transient_' . $name), "transient $name, not the plugin's, was deleted");
+        return 'alpaca_bot_cache_' . md5('x') . '0';
     }
 
     /** @return array<string, int> what was written, by name, for the assertions */
@@ -189,24 +201,13 @@ final class UninstallTest extends TestCase
     /** @return array<string, int> */
     private function plantNeighbours(int $user, int $other): array
     {
-        // Options that extend one of ours, that one of ours extends, or that an unanchored or
-        // unescaped match would take.
-        foreach ([
-            'alpaca_bot_settings_backup', 'alpaca_bot_mcp_secrets_old', 'xalpaca_bot_settings', 'alpaca_bot',
-            'alpaca_bot_stream_slot_backup', 'alpaca_bot_stream_slot_7_0_old', 'alpaca-bot-stream-slot-7-0',
-            'alpaca_bot_cache_notahash', 'alpaca_bot_cache_' . md5('x') . '0', 'alpaca_bot_migrated_05',
-            'alpaca_bot_api_url_v2', 'other_plugin_settings',
-        ] as $name) {
+        foreach ([...self::NEIGHBOUR_OPTIONS, $this->hashPlusOne()] as $name) {
             update_option($name, 'not ours');
         }
-        // Transients, and one of our names as a *site* transient, which the plugin never writes.
-        set_transient('alpaca_bot_models_backup', 'not ours', 3600);
-        set_transient('alpaca_bot_rl_backup', 'not ours', 3600);
-        set_transient('alpaca_bot_stream_notatoken', 'not ours', 3600);
-        set_transient('alpaca_bot_usage_site_2026', 'not ours', 3600);
-        // A server id starts with a letter. Not `_Srv`: option_name's collation is case-insensitive, so that is our `srv` row.
-        set_transient('alpaca_bot_mcp_drift_9srv', 'not ours', 3600);
-        set_transient('other_plugin_models', 'not ours', 3600);
+        foreach (self::NEIGHBOUR_TRANSIENTS as $name) {
+            set_transient($name, 'not ours', 3600);
+        }
+        // One of our names as a *site* transient, which the plugin never writes.
         set_site_transient(ModelCatalog::TRANSIENT, 'not ours', 3600);
 
         // A post of a neighbouring type, and a plain post carrying one of our post meta keys.
@@ -267,7 +268,7 @@ final class UninstallTest extends TestCase
         // Ours: every transient the plugin wrote, found by listing the rows rather than by name.
         foreach ($transients as $row) {
             $name = (string) preg_replace('/^_transient_(timeout_)?/', '', $row);
-            if (in_array($name, ['alpaca_bot_models_backup', 'alpaca_bot_rl_backup', 'alpaca_bot_stream_notatoken', 'alpaca_bot_usage_site_2026', 'alpaca_bot_mcp_drift_9srv'], true)) {
+            if (in_array($name, self::NEIGHBOUR_TRANSIENTS, true)) {
                 continue;
             }
             $this->assertTransientGone($name);
@@ -290,17 +291,11 @@ final class UninstallTest extends TestCase
         $this->assertFalse(wp_next_scheduled(UsageMeter::CLEANUP_HOOK));
 
         // Theirs: every neighbour.
-        foreach ([
-            'alpaca_bot_settings_backup', 'alpaca_bot_mcp_secrets_old', 'xalpaca_bot_settings', 'alpaca_bot',
-            'alpaca_bot_stream_slot_backup', 'alpaca_bot_stream_slot_7_0_old', 'alpaca-bot-stream-slot-7-0',
-            'alpaca_bot_cache_notahash', 'alpaca_bot_cache_' . md5('x') . '0', 'alpaca_bot_migrated_05',
-            'alpaca_bot_api_url_v2', 'other_plugin_settings',
-        ] as $name) {
-            $this->assertOptionKept($name);
-        }
-        foreach (['alpaca_bot_models_backup', 'alpaca_bot_rl_backup', 'alpaca_bot_stream_notatoken', 'alpaca_bot_usage_site_2026', 'alpaca_bot_mcp_drift_9srv', 'other_plugin_models'] as $name) {
-            $this->assertTransientKept($name);
-        }
+        // Collected, not asserted one at a time, so a failure names every neighbour that went.
+        $lost = array_values(array_filter([...self::NEIGHBOUR_OPTIONS, $this->hashPlusOne()], fn(string $n): bool => !$this->optionRow($n)));
+        $this->assertSame([], $lost, 'options that are not the plugin\'s were deleted');
+        $lost = array_values(array_filter(self::NEIGHBOUR_TRANSIENTS, fn(string $n): bool => !$this->optionRow('_transient_' . $n)));
+        $this->assertSame([], $lost, 'transients that are not the plugin\'s were deleted');
         // Read through the API: a site transient is an options row on a single site and a sitemeta row on a network.
         $this->assertSame('not ours', get_site_transient(ModelCatalog::TRANSIENT), 'the site transient of the same name is not ours');
         $this->assertTrue($this->postRow($theirs['archive']), 'a post of a neighbouring type was deleted');
