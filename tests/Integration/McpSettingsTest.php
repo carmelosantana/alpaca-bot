@@ -381,6 +381,64 @@ final class McpSettingsTest extends TestCase
         $this->assertStringNotContainsString('Bearer lost', (string) wp_json_encode($errors));
     }
 
+    /**
+     * A stored server's edit the schema cannot read (an http URL here) keeps the server as
+     * stored, and the screen names it. Left to the schema, the row would be dropped and the
+     * server, its header value and its Access entry with it.
+     */
+    public function test_an_edit_the_schema_drops_keeps_the_stored_server(): void
+    {
+        $this->rest('PUT', '/settings', [
+            'toolkits.mcp_servers' => [['url' => self::URL, 'prefix' => 'aa', 'header_value' => self::SECRET]],
+            'access.mcp' => ['aa' => 'read'],
+        ]);
+        $before = get_option(Plugin::OPTION);
+        $posted = self::formPost($this->page('toolkits'));
+        $posted['toolkits.mcp_servers'][0]['url'] = 'http://93.184.216.34/mcp';
+        $this->save($posted);
+
+        $after = get_option(Plugin::OPTION);
+        $this->assertSame($before['toolkits.mcp_servers'], $after['toolkits.mcp_servers']);
+        $this->assertSame($before['access.mcp'], $after['access.mcp']);
+        $this->assertSame(['aa' => self::SECRET], Secrets::all());
+        $errors = get_settings_errors(Plugin::OPTION);
+        $this->assertSame(['mcp_dropped'], array_column($errors, 'code'));
+        $this->assertStringContainsString(self::URL . ' (aa)', $errors[0]['message']);
+    }
+
+    /**
+     * An option that already holds two servers under one prefix (written round the schema): a
+     * save of the form as it is shown keeps both, since putting the loser back as stored cannot
+     * part them, and says which two. The rest of the post is saved.
+     */
+    public function test_two_stored_servers_under_one_prefix_are_both_kept_and_named(): void
+    {
+        global $wpdb;
+        $this->rest('PUT', '/settings', [
+            'toolkits.mcp_servers' => [
+                ['url' => self::URL, 'prefix' => 'aa', 'header_value' => self::SECRET],
+                ['url' => 'https://93.184.216.35/mcp', 'prefix' => 'bb', 'header_value' => self::OTHER],
+            ],
+        ]);
+        $option = get_option(Plugin::OPTION);
+        $option['toolkits.mcp_servers'][1]['prefix'] = 'aa';
+        $wpdb->update($wpdb->options, ['option_value' => maybe_serialize($option)], ['option_name' => Plugin::OPTION]);
+        wp_cache_delete(Plugin::OPTION, 'options');
+        wp_cache_delete('alloptions', 'options');
+        $posted = self::formPost($this->page('toolkits'));
+        $posted['toolkits.user_agent'] = 'Changed/2.0';
+        $this->save($posted);
+
+        $after = get_option(Plugin::OPTION);
+        $this->assertSame('Changed/2.0', $after['toolkits.user_agent']);
+        $this->assertSame($option['toolkits.mcp_servers'], $after['toolkits.mcp_servers']);
+        $this->assertSame(['aa' => self::SECRET, 'bb' => self::OTHER], Secrets::all());
+        $errors = get_settings_errors(Plugin::OPTION);
+        $this->assertSame(['mcp_prefix'], array_column($errors, 'code'));
+        $this->assertStringContainsString(self::URL . ' (aa)', $errors[0]['message']);
+        $this->assertStringContainsString('https://93.184.216.35/mcp (bb)', $errors[0]['message']);
+    }
+
     /** m-4: a client that PUTs the same body without ids keeps the same id, and its Access entry, every time. */
     public function test_the_same_put_without_ids_keeps_the_same_server(): void
     {

@@ -394,16 +394,20 @@ final class SettingsPage
      *    own (it lost its prefix to an earlier row, which step 3 settles) and as stored when it is
      *    not (a URL or prefix the schema does not accept). A new row with a URL that was dropped is
      *    said.
-     * 3. Prefixes: while two rows share one, the row that keeps it is, in this order, a row put back
-     *    as stored, a stored server whose prefix is its own stored one, any other stored server,
-     *    a new row, and the first of equals. Every other row under that prefix loses: a stored
-     *    server is put back as stored, a new row is left out. Rows put back as stored never share a
-     *    prefix, since the stored list's are unique, so each round puts one server back or leaves
-     *    one row out, and it ends.
+     * 3. Prefixes: while two rows share one, the row that keeps it is, in this order, a stored
+     *    server whose prefix is its own stored one (as a row put back as stored is), any other
+     *    stored server, a new row, and the first of equals. The other loses: a stored server is
+     *    put back as stored, a new row is left out, so each round changes a row for good and it
+     *    ends. The exception is a loser whose own stored prefix is the one in dispute: the keeper
+     *    then holds it as its stored prefix too, so the option already has two servers under one
+     *    prefix, which only a write round the schema leaves, and putting the loser back changes
+     *    nothing. The server list is then kept exactly as stored, neither server removed, and the
+     *    screen names both.
      * 4. Header values: a stored server whose posted mask ServerSettings::beforeSave() is about to
      *    drop, because its URL moved to another origin (ServerSettings::clearedByMove()), is said.
      *
-     * Then the list goes through the schema again, against `$stored`, to be the shape it stores.
+     * Then the list goes through the schema again, against `$stored`, to be the shape it stores
+     * (not in step 3's exception, where the schema would drop the second of the two).
      * Notices name the server each is about (its URL, and its id for a stored one) and are escaped
      * here, because settings_errors() prints a message as it is given; they are added address,
      * prefix, dropped and cleared, in that order.
@@ -423,7 +427,6 @@ final class SettingsPage
             }
         }
         $rows = is_array($clean['toolkits.mcp_servers'] ?? null) ? $clean['toolkits.mcp_servers'] : [];
-        $held = [];
         $notices = ['mcp_address' => [], 'mcp_prefix' => [], 'mcp_dropped' => [], 'mcp_cleared' => []];
         $url = static fn(mixed $row): string => is_array($row) && is_string($row['url'] ?? null) ? $row['url'] : '';
 
@@ -436,7 +439,6 @@ final class SettingsPage
                 : sprintf(__('The MCP server %1$s was not added: %2$s', 'alpaca-bot'), $rows[$i]['url'], $reason);
             if ($before !== null) {
                 $rows[$i] = $before;
-                $held[$rows[$i]['id']] = true;
             } else {
                 unset($rows[$i]);
             }
@@ -455,7 +457,6 @@ final class SettingsPage
                 }
                 if ($alone === []) {
                     $rows[] = $was[$id];
-                    $held[$id] = true;
                     /* translators: 1: an MCP server's URL, 2: its id */
                     $notices['mcp_dropped'][] = sprintf(__('The change to MCP server %1$s (%2$s) was not saved: its URL has to be https with a host, and its prefix a lowercase letter then up to 15 lowercase letters, digits or underscores, and not "ability".', 'alpaca-bot'), $url($was[$id]), $id);
                 } else {
@@ -467,16 +468,12 @@ final class SettingsPage
             }
         }
 
-        // By reference: step 3 adds to $held as it goes, and an arrow function would see the
-        // array as it was when it was made.
-        $rank = static function (array $row) use (&$held, $was): int {
-            return match (true) {
-                isset($held[$row['id']]) => 0,
-                isset($was[$row['id']]) && ($was[$row['id']]['prefix'] ?? null) === $row['prefix'] => 1,
-                isset($was[$row['id']]) => 2,
-                default => 3,
-            };
+        $rank = static fn(array $row): int => match (true) {
+            isset($was[$row['id']]) && ($was[$row['id']]['prefix'] ?? null) === $row['prefix'] => 1,
+            isset($was[$row['id']]) => 2,
+            default => 3,
         };
+        $twice = null;
         do {
             $clash = false;
             $owner = [];
@@ -490,11 +487,14 @@ final class SettingsPage
                 [$keep, $lose] = $rank($row) < $rank($rows[$first]) ? [$i, $first] : [$first, $i];
                 $owner[$prefix] = $keep;
                 $loser = $rows[$lose];
+                if (isset($was[$loser['id']]) && ($was[$loser['id']]['prefix'] ?? null) === $prefix) {
+                    $twice = [$rows[$keep], $loser, $prefix];
+                    break 2;
+                }
                 if (isset($was[$loser['id']])) {
                     /* translators: 1: an MCP server's URL, 2: its id, 3: a tool-name prefix */
                     $notices['mcp_prefix'][] = sprintf(__('The change to MCP server %1$s (%2$s) was not saved: the prefix %3$s belongs to another server.', 'alpaca-bot'), $url($was[$loser['id']]), $loser['id'], $prefix);
                     $rows[$lose] = $was[$loser['id']];
-                    $held[$loser['id']] = true;
                 } else {
                     /* translators: 1: an MCP server's URL, 2: a tool-name prefix */
                     $notices['mcp_prefix'][] = sprintf(__('The MCP server %1$s was not added: the prefix %2$s belongs to another server.', 'alpaca-bot'), $url($loser), $prefix);
@@ -504,6 +504,15 @@ final class SettingsPage
                 break;
             }
         } while ($clash);
+
+        if ($twice !== null) {
+            [$one, $two, $prefix] = $twice;
+            /* translators: 1: an MCP server's URL, 2: its id, 3: another MCP server's URL, 4: its id, 5: a tool-name prefix */
+            $message = sprintf(__('The MCP servers were not saved: %1$s (%2$s) and %3$s (%4$s) are both stored under the prefix %5$s. Give one of them another prefix, or remove one, and save again.', 'alpaca-bot'), $url($one), $one['id'], $url($two), $two['id'], $prefix);
+            add_settings_error(Plugin::OPTION, 'mcp_prefix', esc_html($message));
+            $clean['toolkits.mcp_servers'] = $storedRows;
+            return $clean;
+        }
 
         foreach ($servers->clearedByMove($rows, $storedRows) as $id) {
             foreach ($rows as $row) {
