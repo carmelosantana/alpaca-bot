@@ -289,4 +289,33 @@ final class ViewRoutesTest extends TestCase
         $this->assertStringContainsString('"rest":"' . rest_url('alpaca-bot/v1') . '"', (string) wp_scripts()->get_data('alpaca-bot-chat', 'data'));
         $this->assertStringContainsString('?rest_route=/alpaca-bot/v1', rest_url('alpaca-bot/v1'));
     }
+
+    /**
+     * The drawer's loader knows a page's own htmx by the id core prints on the handle's tag, which
+     * Assets::mount() hands it; this is core printing that tag, so the two cannot drift apart.
+     * The settings screen enqueues htmx, and a `script_loader_src` filter that strips `?ver=`
+     * changes the URL and leaves the id.
+     */
+    public function test_the_htmx_id_the_loader_is_handed_is_the_one_core_prints_on_the_settings_screen(): void
+    {
+        $this->asAdmin();
+        // A queue of its own: another test's enqueue of the chat screen would still be in the global one.
+        $GLOBALS['wp_scripts'] = new \WP_Scripts();
+        $strip = static fn(string $src): string => (string) remove_query_arg('ver', $src);
+        add_filter('script_loader_src', $strip);
+        // admin_enqueue_scripts fires with the screen set: core's own listeners read it.
+        set_current_screen(\AlpacaBot\Admin\SettingsPage::screen());
+        do_action('admin_enqueue_scripts', \AlpacaBot\Admin\SettingsPage::screen());
+        $this->assertTrue(wp_script_is('alpaca-bot-htmx', 'enqueued'));
+        $this->assertFalse(wp_script_is('alpaca-bot-chat', 'enqueued'));
+        ob_start();
+        wp_scripts()->do_items(['alpaca-bot-htmx']);
+        $tag = (string) ob_get_clean();
+        remove_filter('script_loader_src', $strip);
+        $mount = (new Assets())->mount();
+        $this->assertStringContainsString('id="' . $mount['htmxId'] . '"', $tag);
+        $this->assertStringNotContainsString('ver=', $tag);
+        $this->assertStringNotContainsString(esc_url($mount['htmx']), $tag);
+        $GLOBALS['wp_scripts'] = null;
+    }
 }
