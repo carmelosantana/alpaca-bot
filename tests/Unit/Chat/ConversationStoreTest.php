@@ -5,6 +5,7 @@ declare(strict_types=1);
 use AlpacaBot\Chat\Conversation;
 use AlpacaBot\Chat\ConversationStore;
 use AlpacaBot\Chat\Message;
+use AlpacaBot\Plugin;
 use AlpacaBot\Settings\Store;
 use Brain\Monkey\Functions;
 
@@ -582,6 +583,7 @@ it('deletes the owner\'s conversation only while nothing is stored on it, checki
 // ------------------------------------------------------- registerPostType()
 
 it('registers a private, non-searchable chat_history type that dies with its user and cannot be created from the UI', function (): void {
+    Functions\when('post_type_exists')->justReturn(false);
     Functions\expect('register_post_type')->once()->withArgs(function (string $type, array $args): bool {
         return $type === ConversationStore::POST_TYPE
             && $args['public'] === false
@@ -591,7 +593,16 @@ it('registers a private, non-searchable chat_history type that dies with its use
             && $args['delete_with_user'] === true
             && $args['supports'] === ['title', 'excerpt', 'author']
             && $args['capabilities'] === ['create_posts' => 'do_not_allow']
-            && $args['map_meta_cap'] === true;
+            && $args['map_meta_cap'] === true
+            && $args[Plugin::POST_TYPE_MARK] === true;
     });
+    (new ConversationStore(new Store()))->registerPostType();
+});
+
+// uninstall.php leaves a type another loaded plugin uses; the mark is how it tells. When the name
+// was already registered, the plugin still registers over it, as before, but unmarked.
+it('marks the ConversationStore registration as the plugin\'s only when the name was free', function (): void {
+    Functions\when('post_type_exists')->justReturn(true);
+    Functions\expect('register_post_type')->once()->withArgs(static fn(string $type, array $args): bool => $type === ConversationStore::POST_TYPE && $args[Plugin::POST_TYPE_MARK] === false);
     (new ConversationStore(new Store()))->registerPostType();
 });

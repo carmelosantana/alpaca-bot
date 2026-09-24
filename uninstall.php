@@ -68,9 +68,11 @@
  * `chat_history` and `chat_log` are not prefixed (0.4 named them, and existing sites hold rows
  * under them), and nothing on a post says which plugin wrote it, so the decision is per type:
  * - registered for this request with the plugin's mark (`alpaca_bot_owned`, Plugin::POST_TYPE_MARK;
- *   `wp plugin uninstall --deactivate` loaded the plugin first): the plugin's, removed;
- * - registered without the mark: another plugin loaded for this request uses the name, and
- *   every post of that type is left, the plugin's own included;
+ *   `wp plugin uninstall --deactivate` loaded the plugin first): the plugin registered the name
+ *   and nothing else had, so the posts are its own, removed;
+ * - registered without the mark: another plugin loaded for this request uses the name, whether
+ *   it registered before the plugin (which then registered over it unmarked) or after, and every
+ *   post of that type is left, the plugin's own included;
  * - registered by nothing (the Plugins screen and a plain `wp plugin uninstall`, where the
  *   plugin is not loaded): removed. So an *inactive* plugin's posts under the same name are
  *   deleted too; nothing can tell them apart.

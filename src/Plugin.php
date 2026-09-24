@@ -15,10 +15,13 @@ final class Plugin
 
     /**
      * An extra argument the plugin's two post types are registered with, which core keeps as a
-     * property of the WP_Post_Type. `chat_history` and `chat_log` are not prefixed, so
-     * uninstall.php reads it to tell this plugin's registration (`wp plugin uninstall
-     * --deactivate` loads the plugin first) from another loaded plugin's use of the same name,
-     * whose posts it then leaves. uninstall.php loads no class, so it names the value itself.
+     * property of the WP_Post_Type: true only when no other code had registered the name before
+     * the plugin did. `chat_history` and `chat_log` are not prefixed, so uninstall.php reads it
+     * (`wp plugin uninstall --deactivate` loads the plugin first) to tell a name only this plugin
+     * registered from one another loaded plugin also uses, in either order, and leaves the posts
+     * of the second. When the other plugin registered first, the plugin's registration still
+     * replaces its arguments for the request, as register_post_type() always does; only the mark
+     * differs. uninstall.php loads no class, so it names the value itself.
      */
     public const POST_TYPE_MARK = 'alpaca_bot_owned';
 

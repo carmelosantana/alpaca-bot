@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use AlpacaBot\Chat\UsageMeter;
+use AlpacaBot\Plugin;
 use AlpacaBot\Settings\Store;
 use Brain\Monkey\Actions;
 use Brain\Monkey\Functions;
@@ -284,6 +285,7 @@ it('reports zero for nobody without querying or caching', function (): void {
 // ------------------------------------------------------- registerPostType()
 
 it('registers a private, non-searchable chat_log type with no UI that dies with its user and cannot be created from an editor', function (): void {
+    Functions\when('post_type_exists')->justReturn(false);
     Functions\expect('register_post_type')->once()->withArgs(function (string $type, array $args): bool {
         return $type === UsageMeter::POST_TYPE
             && $type === 'chat_log'
@@ -294,8 +296,17 @@ it('registers a private, non-searchable chat_log type with no UI that dies with 
             && $args['delete_with_user'] === true
             && $args['supports'] === ['title', 'author', 'custom-fields']
             && $args['capabilities'] === ['create_posts' => 'do_not_allow']
-            && $args['map_meta_cap'] === true;
+            && $args['map_meta_cap'] === true
+            && $args[Plugin::POST_TYPE_MARK] === true;
     });
+    (new UsageMeter(new Store()))->registerPostType();
+});
+
+// uninstall.php leaves a type another loaded plugin uses; the mark is how it tells. When the name
+// was already registered, the plugin still registers over it, as before, but unmarked.
+it('marks the UsageMeter registration as the plugin\'s only when the name was free', function (): void {
+    Functions\when('post_type_exists')->justReturn(true);
+    Functions\expect('register_post_type')->once()->withArgs(static fn(string $type, array $args): bool => $type === UsageMeter::POST_TYPE && $args[Plugin::POST_TYPE_MARK] === false);
     (new UsageMeter(new Store()))->registerPostType();
 });
 
