@@ -3,6 +3,7 @@
     <description>WordPress Coding Standards for Alpaca Bot 0.5 (PSR-4, strict types).</description>
 
     <file>alpaca-bot.php</file>
+    <file>uninstall.php</file>
     <file>src</file>
     <exclude-pattern>vendor/*</exclude-pattern>
     <exclude-pattern>vendor-prefixed/*</exclude-pattern>
