@@ -197,6 +197,20 @@ it('adds each MCP server the user passes as its own toolkit, before the filter a
         ->and($asked)->toBe([[3, 'manage_options']]);
 });
 
+// The order decides who keeps a tool name both offer (Toolkit\FirstWins): the built-ins first.
+it('hands the filter the built-ins before the MCP servers', function (): void {
+    Functions\when('get_option')->justReturn([]);
+    $store = new Store([
+        'toolkits.enabled' => ['web_fetch'],
+        'toolkits.mcp_servers' => [['id' => 'trk', 'url' => 'https://mcp.example.com/mcp', 'header_value' => '', 'prefix' => 'trk', 'approved' => ['search' => str_repeat('a', 64)]]],
+    ]);
+    $access = new Access($store);
+    Filters\expectApplied('alpaca_bot/toolkits')->once()->andReturnFirstArg();
+    $r = new Registry($store, $access, new Toolkits($store, $access, new ClientFactory()));
+    $r->register('web_fetch', Mockery::mock(ToolkitInterface::class));
+    expect(array_keys($r->enabled(3)))->toBe(['web_fetch', 'mcp.trk']);
+});
+
 it('lets the alpaca_bot/toolkits filter take an MCP server away', function (): void {
     Functions\when('get_option')->justReturn([]);
     $store = new Store(['toolkits.mcp_servers' => [['id' => 'trk', 'url' => 'https://mcp.example.com/mcp', 'header_value' => '', 'prefix' => 'trk', 'approved' => ['search' => str_repeat('a', 64)]]]]);
