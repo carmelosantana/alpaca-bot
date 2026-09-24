@@ -52,7 +52,7 @@ use AlpacaBot\Toolkit\SchemaTool;
  * `alpaca_bot_settings[toolkits.mcp_servers][<index>][<field>]` (renderMcpServers()). A save
  * that carries a server whose URL is new or changed has that address checked in the sanitize
  * callback (heldServers()), where a refusal can be put on the screen, and a stored server the
- * post lists is removed only by its `remove` box.
+ * post lists, as the schema wrote it, is removed only by its `remove` box.
  *
  * The Access tab is not one Schema field per control either. Every row is the capability select
  * the schema describes, on Access::stored(), and under a row whose filter moves it off that value,
@@ -382,9 +382,9 @@ final class SettingsPage
     }
 
     /**
-     * `$clean` with its MCP servers held to what the page promises: a stored server the post lists
-     * is removed only by its `remove` box, and a refusal is said on the screen. Four steps, in
-     * order.
+     * `$clean` with its MCP servers held to what the page promises: a stored server the post lists,
+     * as the schema wrote it, is removed only by its `remove` box, and a refusal is said on the
+     * screen. Four steps, in order.
      *
      * 1. Addresses (ServerSettings::refusals()): a stored server whose new or changed URL is refused
      *    is put back as `$stored` has it, whole (header value, approvals and Access entry stand,
