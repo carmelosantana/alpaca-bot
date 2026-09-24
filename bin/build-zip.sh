@@ -54,6 +54,7 @@ list=$(unzip -Z1 dist/alpaca-bot.zip)
 fail=0
 for path in \
   alpaca-bot/alpaca-bot.php \
+  alpaca-bot/uninstall.php \
   alpaca-bot/readme.txt \
   alpaca-bot/LICENSE.md \
   alpaca-bot/src/Plugin.php \

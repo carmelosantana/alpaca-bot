@@ -2,8 +2,8 @@
 # --exclude-from list, so these are rsync patterns: a leading `/` anchors to the plugin root,
 # an unanchored name matches at any depth.
 #
-# The runtime needs exactly: alpaca-bot.php, readme.txt, LICENSE.md, src/, assets/ and
-# vendor-prefixed/. vendor/ is a BUILD-TIME INPUT, not an artifact: alpaca-bot.php registers its
+# The runtime needs exactly: alpaca-bot.php, uninstall.php, readme.txt, LICENSE.md, src/, assets/
+# and vendor-prefixed/. vendor/ is a BUILD-TIME INPUT, not an artifact: alpaca-bot.php registers its
 # own PSR-4 loader over src/ and requires only vendor-prefixed/autoload.php, and
 # bin/check-bootstrap.php is the guard that Composer's loader is never registered at runtime.
 
