@@ -55,7 +55,8 @@ final class Composer extends Component
      * that takes the chip off. The fields are inside the chip, so removing the chip removes them,
      * and the turn's `context` is read from the fields the form still holds
      * (resources/ts/context.ts): a removed chip is gone from the page, not remembered anywhere,
-     * and the next render of the composer has it again.
+     * and the next render of the composer has it again, the one a "New chat" in the drawer or the
+     * block editor's sidebar takes its chips from included (resources/ts/mount.ts newChat()).
      *
      * @param array<string, string> $fields input name => value
      */
