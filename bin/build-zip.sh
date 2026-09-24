@@ -61,6 +61,7 @@ for path in \
   alpaca-bot/vendor-prefixed/autoload.php \
   alpaca-bot/assets/js/chat.js \
   alpaca-bot/assets/js/drawer.js \
+  alpaca-bot/assets/js/editor.js \
   alpaca-bot/assets/js/htmx.min.js \
   alpaca-bot/assets/css/alpaca-bot.css \
   alpaca-bot/assets/css/alpaca-bot-drawer.css \
