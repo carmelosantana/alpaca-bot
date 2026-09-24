@@ -22,22 +22,29 @@ namespace AlpacaBot\Mcp;
  *
  * The top-level title is outside the hash, because it is a display label. `annotations` is hashed
  * as sent, `annotations.title` included. JSON_INVALID_UTF8_SUBSTITUTE writes U+FFFD for each
- * invalid UTF-8 sequence, so two definitions that differ only in which bad bytes they carry
- * share a digest.
+ * invalid UTF-8 sequence, so two definitions json_encode() can encode that differ only in which bad
+ * bytes they carry share a digest. The serialize() path below keeps the bytes, so there they do
+ * not.
  *
  * When json_encode() fails, the digest is of serialize() of the same canonical array instead. It
  * fails for a float that decoded to INF or -INF (`1e999`, which no JSON flag can encode) and for
- * nesting past json_encode()'s depth limit of 512. serialize() writes each value with its type and
- * length, INF included, and unserialize() gives the array back, so definitions that differ keep
- * different digests. JSON_PARTIAL_OUTPUT_ON_ERROR would not do that: it writes INF, -INF and NAN
+ * nesting past json_encode()'s depth limit of 512. serialize() tags each value with its type and
+ * delimits it, a string by its byte length, an array by its element count, and a number, boolean
+ * or null by a `;` (`d:INF;` for INF), and unserialize() gives the array back, so definitions
+ * that differ keep different digests. JSON_PARTIAL_OUTPUT_ON_ERROR would not do that: it writes INF, -INF and NAN
  * all as 0. A JSON encoding of the canonical array starts with `{` and its serialize() form with
  * `a:`, so the two paths never hash the same bytes.
  *
  * The four fields are the values json_decode(..., true) produced, so what decoding merges the
- * digest cannot tell apart: `{}` and `[]`, an empty `annotations` object and none, an object keyed
- * "0", "1", ... in order and the array it matches, and two numbers that decode to one float
- * (9007199254740993.0 and 9007199254740992.0, or 99999999999999999999 and 100000000000000000000,
- * both past PHP_INT_MAX).
+ * digest cannot tell apart. The merges probed are:
+ * - `{}` and `[]`, and an empty `annotations` object and none;
+ * - an object keyed "0", "1", ... in order, and the array it matches;
+ * - a key given twice, and the same key given once with the later value;
+ * - a string escape and the character it stands for (`\u0041` and `A`, `\/` and `/`);
+ * - `-0` and `0`, which both decode to the integer 0 (`-0.0` and `0.0` stay apart);
+ * - two numbers that decode to one float: `1.0` and `1.00`, `1e2` and `100.0`,
+ *   9007199254740993.0 and 9007199254740992.0, and 99999999999999999999 and
+ *   100000000000000000000, both past PHP_INT_MAX.
  *
  * php-agents 0.16's McpToolDefinition::fingerprint() is specified to be byte-identical to this
  * one (the contract frozen on Kanboard #4364). On the JSON path the two run the same canonical()
@@ -45,8 +52,8 @@ namespace AlpacaBot\Mcp;
  * McpToolDefinitionTest pins for the same definitions. Parity stops in two places:
  * - for a definition json_encode() cannot encode, php-agents hashes the empty string, which every
  *   such definition shares, and this class hashes the serialize() form;
- * - at a `serialize_precision` other than -1, php-agents' digest of a definition holding a
- *   non-integral float can move (0.1 does at 17) and this one does not.
+ * - at a `serialize_precision` other than -1, php-agents' digest of a definition holding a float
+ *   can move (0.1 and 1e23 do at 17, 123456.0 at 5) and this one does not.
  * A stored pin is only portable between the two classes where they agree.
  *
  * destructive() is true only when the `destructiveHint` annotation is exactly `true`. The MCP

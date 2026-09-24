@@ -34,11 +34,31 @@ it('keeps a positive number the administrator did type, including a fractional t
 // A ServerConfig that reaches print_r() or var_dump(), on its own or inside a trace's arguments,
 // shows every field but the header value.
 it('masks the header value when it is dumped, and shows the rest', function (): void {
-    $server = new ServerConfig('docs', 'https://mcp.example.test/mcp', 'Authorization', 'Bearer secret-t', 'docs');
+    $server = new ServerConfig('tracker-id', 'https://mcp.example.test/mcp', 'Authorization', 'Bearer secret-t', 'docs');
     $printed = print_r($server, true);
     ob_start();
     var_dump($server);
     $dumped = (string) ob_get_clean();
-    expect($printed)->not->toContain('secret-t')->toContain('[redacted]')->toContain('https://mcp.example.test/mcp')->toContain('Authorization')
-        ->and($dumped)->not->toContain('secret-t')->toContain('[redacted]')->toContain('https://mcp.example.test/mcp');
+    expect($printed)->not->toContain('secret-t')->toContain('[redacted]')->toContain('tracker-id')->toContain('https://mcp.example.test/mcp')->toContain('Authorization')
+        ->and($dumped)->not->toContain('secret-t')->toContain('[redacted]')->toContain('tracker-id')->toContain('https://mcp.example.test/mcp')->toContain('Authorization');
+});
+
+// The row carries header_value, so a trace taken while fromSettings() reads it, with
+// zend.exception_ignore_args off, would otherwise hold the value in that frame's arguments.
+it('keeps the row out of the trace when reading it fails', function (): void {
+    $before = (string) ini_get('zend.exception_ignore_args');
+    ini_set('zend.exception_ignore_args', '0');
+    $thrown = null;
+    try {
+        ServerConfig::fromSettings(['id' => new stdClass(), 'header_value' => 'Bearer secret-t']);
+    } catch (Error $e) {
+        $thrown = $e;
+    } finally {
+        ini_set('zend.exception_ignore_args', $before);
+    }
+    $frames = array_values(array_filter($thrown?->getTrace() ?? [], static fn(array $frame): bool => ($frame['class'] ?? '') === ServerConfig::class && $frame['function'] === 'fromSettings'));
+    expect($thrown)->toBeInstanceOf(Error::class)
+        ->and($frames)->toHaveCount(1)
+        ->and($frames[0]['args'][0] ?? null)->toBeInstanceOf(SensitiveParameterValue::class)
+        ->and(print_r($thrown, true))->not->toContain('secret-t');
 });

@@ -43,9 +43,9 @@ final readonly class ServerConfig
     ) {}
 
     /**
-     * What print_r() and var_dump() show: every field, with the header value replaced by
-     * `[redacted]`. Those two read __debugInfo(); var_export() and serialize() do not, and still
-     * write the value.
+     * print_r() and var_dump() read this, and show every field with the header value replaced by
+     * `[redacted]`. var_export(), serialize(), json_encode() and an (array) cast do not read it,
+     * and write the value.
      *
      * @return array<string, mixed>
      */
@@ -54,8 +54,13 @@ final readonly class ServerConfig
         return array_replace(get_object_vars($this), ['headerValue' => '[redacted]']);
     }
 
-    /** @param array<string, mixed> $row one `toolkits.mcp_servers` row */
-    public static function fromSettings(array $row): self
+    /**
+     * The row carries `header_value`, so it is a #[\SensitiveParameter]: a trace taken while it is
+     * read, with zend.exception_ignore_args off, holds a SensitiveParameterValue in this frame.
+     *
+     * @param array<string, mixed> $row one `toolkits.mcp_servers` row
+     */
+    public static function fromSettings(#[\SensitiveParameter] array $row): self
     {
         $approved = [];
         foreach ((array) ($row['approved'] ?? []) as $name => $fingerprint) {
