@@ -55,7 +55,7 @@ Click **Alpaca Bot** in the admin menu, below Dashboard and above Posts. The scr
 
 **Settings**
 
-`Alpaca Bot > Settings` (administrators) is one page in tabs: **Provider** (the endpoint, its key, the timeout), **Models** (the default, temperature, context window, keep-alive, and per-model overrides), **Chat** (system prompt, welcome text, what users may change), **Privacy** (whether conversations and the usage log are stored, and for how long), **Limits** (monthly token caps for the site and per user), **Tools** (what the model may do besides answer, including which of the site's WordPress abilities it may call and the MCP servers it may use — read the next section before you leave those as they come) and **Access** (who may use each part of the plugin). Every field is also readable and writable over the REST API (`GET`/`PUT /settings`).
+`Alpaca Bot > Settings` (administrators) is one page in tabs: **Provider** (the endpoint, its key, the timeout), **Models** (the default, temperature, context window, keep-alive, and per-model overrides), **Chat** (system prompt, welcome text, what users may change), **Privacy** (whether conversations and the usage log are stored, and for how long), **Limits** (monthly token caps for the site and per user), **Tools** (what the model may do besides answer, including which of the site's WordPress abilities it may call, and the remote MCP servers — read the next section before you leave those as they come) and **Access** (who may use each part of the plugin). Every field is also readable and writable over the REST API (`GET`/`PUT /settings`).
 
 **Tools, and what they let the model reach**
 
