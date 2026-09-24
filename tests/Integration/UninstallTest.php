@@ -420,6 +420,27 @@ final class UninstallTest extends TestCase
     }
 
     /**
+     * The other order, under `wp plugin uninstall --deactivate`: another plugin registered
+     * `chat_log` first and the plugin's registration then overwrote it. The name was not free
+     * when the plugin took it, so its registration carries no mark, and the type is left.
+     */
+    public function test_it_leaves_a_type_another_plugin_registered_before_the_plugin_did(): void
+    {
+        unregister_post_type(UsageMeter::POST_TYPE);
+        register_post_type(UsageMeter::POST_TYPE, ['public' => false]);
+        Plugin::instance()->get(UsageMeter::class)->registerPostType();
+        try {
+            $theirs = self::factory()->post->create(['post_type' => UsageMeter::POST_TYPE, 'post_status' => 'publish']);
+
+            $this->uninstall();
+
+            $this->assertNotNull(get_post($theirs), 'another plugin\'s chat_log post was deleted');
+        } finally {
+            $this->reregisterOurTypes();
+        }
+    }
+
+    /**
      * The Plugins screen and a plain `wp plugin uninstall`: the plugin was not loaded, so nothing
      * registers either type, and every post of both goes.
      */
