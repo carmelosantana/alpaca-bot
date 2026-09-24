@@ -423,7 +423,7 @@ capability. Two things are secrets, and both read back as `••••` when on
 none is: `provider.api_key`, and the `header_value` of each row of `toolkits.mcp_servers`:
 
 ```
-$ curl -s -u "admin:$PW" "$B/settings" | jq -c .
+# GET /settings as an administrator, run in-process on wp-env (rest_do_request()), piped through jq -c .
 {"provider.kind":"ollama","provider.base_url":"http://ollama.example:11434/v1","provider.api_key":"","provider.timeout":60,"models.default":"qwen3-vl:2b","models.temperature":0.7,"models.num_ctx":8192,"models.keep_alive":"5m","models.overrides":[],"chat.system_prompt":"","chat.welcome":"How can I help?","chat.placeholder":"Message Alpaca Bot","chat.user_can_change_model":true,"chat.context_messages":20,"chat.history_limit":20,"chat.spellcheck":true,"chat.assistant_avatar":"","privacy.save_history":true,"privacy.usage_log":true,"privacy.usage_retention_days":90,"governance.site_monthly_tokens":0,"governance.user_monthly_tokens":0,"toolkits.enabled":["web_fetch","summarize","draft_post"],"toolkits.user_agent":"AlpacaBot/… (+https://github.com/carmelosantana/alpaca-bot)","toolkits.abilities":[],"toolkits.mcp_servers":[{"id":"docs","url":"https://mcp.example.com/mcp","header_name":"Authorization","header_value":"••••","prefix":"docs","timeout":30,"max_bytes":1048576,"approved":[]}],"access.chat":"edit_posts","access.tool.web_fetch":"edit_posts","access.tool.summarize":"edit_posts","access.tool.draft_post":"edit_posts","access.tool.abilities":"manage_options","access.settings.read":"manage_options","access.settings.write":"manage_options","access.shortcode":"edit_posts","access.mcp":[]}
 ```
 
