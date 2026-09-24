@@ -7,7 +7,15 @@ namespace AlpacaBot\Tests\Integration;
 use AlpacaBot\Chat\ConversationStore;
 use AlpacaBot\Chat\UsageMeter;
 use AlpacaBot\Plugin;
+use AlpacaBot\Settings\Schema;
 use AlpacaBot\Settings\Store;
+use AlpacaBot\Toolkit\AbilitiesToolkit;
+use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Config\ModelDefinition;
+use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Contract\ProviderInterface;
+use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Enum\ProviderFinishReason;
+use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Provider\Response;
+use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Provider\Usage;
+use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Tool\ToolCall;
 
 /**
  * The three abilities over core's own Abilities API: registration on core's hooks, core's input
@@ -248,5 +256,121 @@ final class AbilitiesTest extends TestCase
         $this->assertSame('alpaca_bot_rate_limited', $out->get_error_code());
         $this->assertCount(1, $this->posts(UsageMeter::POST_TYPE, $admin));
         $this->assertSame([], $this->posts(ConversationStore::POST_TYPE, $admin));
+    }
+
+    /**
+     * Kanboard #4538 over core's registry: a turn on `POST /chat` is offered a test-only
+     * "execute any ability" ability, shaped like the MCP Adapter's `mcp-adapter/execute-ability`
+     * (it runs wp_get_ability($name)->execute($input) and hands back what that answers), and
+     * the model calls it once for alpaca-bot/chat and once for alpaca-bot/summarize. Core
+     * reaches both callbacks (the caller may run them), both refuse, the refusal is what the
+     * model reads back, and the outer turn completes: one conversation, one receipt, one turn's
+     * worth of provider calls. Afterwards, with no turn running, the ability runs as it always did.
+     */
+    public function test_a_turn_cannot_start_another_through_an_execute_any_ability_tool_and_completes_itself(): void
+    {
+        $admin = $this->asAdmin();
+        $GLOBALS['wp_current_filter'][] = 'wp_abilities_api_init';
+        try {
+            wp_register_ability('alpaca-bot-test/execute-ability', [
+                'label' => 'Execute ability',
+                'description' => 'Runs any ability by name.',
+                'category' => 'alpaca-bot',
+                'input_schema' => ['type' => 'object', 'properties' => ['ability' => ['type' => 'string'], 'input' => ['type' => 'object']], 'required' => ['ability']],
+                'execute_callback' => static function (array $in): mixed {
+                    $ability = wp_get_ability((string) $in['ability']);
+                    return $ability === null ? new \WP_Error('not_found', 'No such ability.') : $ability->execute($in['input'] ?? null);
+                },
+                'permission_callback' => static fn(): bool => current_user_can('manage_options'),
+            ]);
+        } finally {
+            array_pop($GLOBALS['wp_current_filter']);
+        }
+        try {
+            $store = Plugin::instance()->get(Store::class);
+            $store->replace([
+                'toolkits.enabled' => ['summarize', 'abilities'],
+                'toolkits.abilities' => ['alpaca-bot-test/execute-ability'],
+                'models.overrides' => ['fake-model' => ['tools' => Schema::TOOLS_ON]],
+            ]);
+            $tool = AbilitiesToolkit::toolName('alpaca-bot-test/execute-ability');
+            $calls = [];
+            add_filter('alpaca_bot/provider', static function () use ($tool, &$calls): ProviderInterface {
+                return new class ($tool, $calls) implements ProviderInterface {
+                    /** @param list<array{messages: array<mixed>, tools: array<mixed>}> $calls */
+                    public function __construct(private string $tool, private array &$calls) {}
+
+                    public function chat(array $messages, array $tools = [], array $options = []): Response
+                    {
+                        throw new \LogicException('not used');
+                    }
+
+                    public function stream(array $messages, array $tools = [], array $options = []): iterable
+                    {
+                        $this->calls[] = ['messages' => $messages, 'tools' => $tools];
+                        if (count($this->calls) === 1) {
+                            yield new Response('', ProviderFinishReason::ToolUse, [
+                                new ToolCall('c1', $this->tool, ['ability' => 'alpaca-bot/chat', 'input' => ['message' => 'Ask yourself again.']]),
+                                new ToolCall('c2', $this->tool, ['ability' => 'alpaca-bot/summarize', 'input' => ['text' => 'Some long text.']]),
+                            ], usage: new Usage(3, 1, 4));
+                            return;
+                        }
+                        yield new Response('Done.', ProviderFinishReason::Stop);
+                        yield new Response('', ProviderFinishReason::Stop, usage: new Usage(4, 2, 6));
+                    }
+
+                    public function structured(array $messages, string $schema, array $options = []): mixed
+                    {
+                        return [];
+                    }
+
+                    public function models(): array
+                    {
+                        return [new ModelDefinition('fake-model', 'Fake model', 'fake')];
+                    }
+
+                    public function isAvailable(): bool
+                    {
+                        return true;
+                    }
+
+                    public function getModel(): string
+                    {
+                        return 'fake-model';
+                    }
+
+                    public function withModel(string $model): static
+                    {
+                        return $this;
+                    }
+                };
+            });
+
+            $response = $this->rest('POST', '/chat', ['message' => 'Use the tool.']);
+            $this->assertSame(200, $response->get_status(), (string) wp_json_encode($response->get_data()));
+            $refusal = 'A chat turn is already running, and Alpaca Bot does not start another one inside it. Answer in the turn that is running instead.';
+            // A tool turn: the model was offered the test ability, and asked the provider twice, not a third time for a nested turn.
+            $this->assertCount(2, $calls);
+            $this->assertContains($tool, array_map(static fn(object $t): string => $t->name(), $calls[0]['tools']));
+            $results = array_values(array_filter(array_map(static fn(object $m): string => (string) $m->content(), $calls[1]['messages']), static fn(string $c): bool => $c === $refusal));
+            $this->assertCount(2, $results, 'both nested calls read the refusal back');
+            $data = $response->get_data();
+            $this->assertSame('Done.', $data['message']['content']);
+            // The reply's meta is an object on the wire; read it as a client would.
+            $meta = json_decode((string) wp_json_encode($data['message']['meta']), true);
+            $this->assertSame([false, false], array_column($meta['tool_calls'], 'ok'));
+            $this->assertSame([$refusal, $refusal], array_column($meta['tool_calls'], 'result_excerpt'));
+            $this->assertCount(1, $this->posts(ConversationStore::POST_TYPE, $admin));
+            $this->assertCount(1, $this->posts(UsageMeter::POST_TYPE, $admin));
+
+            // No turn is running now: the same ability, called directly, runs its turn.
+            $calls = [];
+            $out = wp_get_ability('alpaca-bot/summarize')->execute(['text' => 'Some long text.']);
+            $this->assertIsArray($out, is_wp_error($out) ? $out->get_error_message() : '');
+            $this->assertCount(1, $calls);
+            $this->assertCount(2, $this->posts(UsageMeter::POST_TYPE, $admin));
+        } finally {
+            wp_unregister_ability('alpaca-bot-test/execute-ability');
+        }
     }
 }

@@ -142,9 +142,20 @@ use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Enum\ToolResultStatus;
  * list these abilities. Being
  * public to the adapter is also what lets its own `mcp-adapter/execute-ability` run these three
  * (v0.6.1 McpAbilityHelperTrait::check_ability_mcp_exposure()), so where an administrator has
- * allowlisted that ability under Settings › Tools, a turn offered it can reach
- * `alpaca-bot/chat` through it and start a nested turn: AbilitiesToolkit::excluded() keeps
- * `alpaca-bot/*` out of the model's direct offer only (Kanboard #4538).
+ * allowlisted that ability under Settings › Tools, a turn offered it can reach them through it:
+ * AbilitiesToolkit::excluded() keeps `alpaca-bot/*` out of the model's direct offer only.
+ *
+ * Re-entry (Kanboard #4538). What such a turn cannot do is start another turn. chat and
+ * summarize ask Chat\Pipeline::running() first and, while any turn is running in the request,
+ * answer Errors::turnRunning() (409) instead, after the permission checks and before the
+ * limiter, so the refused call is not counted and nothing is stored or metered for it. Those two
+ * because they are the two that start a pipeline turn, chat a stored one and summarize the
+ * summarize toolkit's ephemeral one; draft-post starts none (DraftPostToolkit inserts a post and
+ * never calls the pipeline) and runs inside a turn as it does outside one. The count is the
+ * pipeline's, not the ability's, so it holds for a turn started from any surface, and it asks
+ * nothing about how the ability was reached. The model's own `summarize` tool is not an ability,
+ * calls the pipeline directly, and is not refused. A top-level call, with no turn running, runs
+ * as it always did.
  *
  * The annotations are hints, which is what core calls them (7.1 class-wp-ability.php:163),
  * and on one road they also choose an HTTP method: core's run route asks GET of a
@@ -402,6 +413,16 @@ final class Register
     }
 
     /**
+     * True while no turn is running in this request; else the refusal. Asked by the two
+     * abilities that start a turn, before the limiter is hit, so a refused call costs nothing
+     * (the class docblock says why the two).
+     */
+    private function idle(): true|\WP_Error
+    {
+        return $this->pipeline->running() ? Errors::turnRunning() : true;
+    }
+
+    /**
      * One hit on the limiter the REST routes share, for the acting user, in their `chat`
      * bucket; the 429 when the minute is spent.
      */
@@ -422,6 +443,10 @@ final class Register
     {
         if (!$this->can('edit_posts')) {
             return Errors::forbidden();
+        }
+        $idle = $this->idle();
+        if ($idle instanceof \WP_Error) {
+            return $idle;
         }
         $limit = $this->limit();
         if ($limit instanceof \WP_Error) {
@@ -456,6 +481,10 @@ final class Register
         $toolkit = $this->toolkit('summarize');
         if ($toolkit instanceof \WP_Error) {
             return $toolkit;
+        }
+        $idle = $this->idle();
+        if ($idle instanceof \WP_Error) {
+            return $idle;
         }
         $limit = $this->limit();
         if ($limit instanceof \WP_Error) {

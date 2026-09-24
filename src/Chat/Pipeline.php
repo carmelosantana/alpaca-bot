@@ -107,6 +107,9 @@ use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Message\UserMessage;
  */
 final class Pipeline
 {
+    /** How many turns are running in this request, one inside another counted twice (running()). */
+    private int $depth = 0;
+
     public function __construct(
         private Store $store,
         private Factory $factory,
@@ -118,6 +121,20 @@ final class Pipeline
         private ?UserPrefs $prefs = null,
         private ?Registry $toolkits = null,
     ) {}
+
+    /**
+     * Whether a turn is running in this request: true from the first iteration of a send()
+     * (complete() and every consumer go through it) until that turn has ended, whether it was
+     * drained, refused, thrown or abandoned, and counted, so a turn started inside another (the
+     * summarize tool's) ending does not end the outer one. Abilities\Register asks it before it
+     * starts a turn of its own, which is what keeps a turn from starting another through an
+     * "execute any ability" tool (Kanboard #4538). It is the instance's count, and one instance
+     * serves the request: Plugin::register() hands every consumer the container's.
+     */
+    public function running(): bool
+    {
+        return $this->depth > 0;
+    }
 
     /**
      * send() drained: the Result once the whole reply is in.
@@ -174,6 +191,25 @@ final class Pipeline
      * @throws \RuntimeException when no model can be resolved, or wrapping a provider failure as 'Provider error: ...' (a tool turn's failure the provider had no part in is raised in words of its own instead: raised())
      */
     public function send(int $userId, string $text, array $options = []): \Generator
+    {
+        // Around the whole turn, so running() holds for every turn and not only one an ability
+        // starts. A finally, so a throw lets go, and so does a consumer that abandons the
+        // stream: PHP runs a suspended generator's finally when it is destroyed.
+        ++$this->depth;
+        try {
+            return yield from $this->turn($userId, $text, $options);
+        } finally {
+            --$this->depth;
+        }
+    }
+
+    /**
+     * send()'s turn, run inside its count.
+     *
+     * @param array{conversation_id?: int, model?: string, images?: string[], context?: array<string, mixed>, system?: string, temperature?: float, ephemeral?: bool} $options see send()
+     * @return \Generator<int, Delta, mixed, Result>
+     */
+    private function turn(int $userId, string $text, array $options): \Generator
     {
         $text = trim($text);
         $images = self::images((array) ($options['images'] ?? []));

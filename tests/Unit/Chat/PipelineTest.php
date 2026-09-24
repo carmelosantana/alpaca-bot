@@ -9,6 +9,7 @@ use AlpacaBot\Chat\Message;
 use AlpacaBot\Chat\Result;
 use AlpacaBot\Chat\UserPrefs;
 use AlpacaBot\Context\Context;
+use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Contract\ProviderInterface;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Enum\ProviderFinishReason;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Message\AssistantMessage;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Message\SystemMessage;
@@ -833,4 +834,42 @@ it('sends a caller\'s temperature option to the provider over the model\'s setti
     $h = pipelineWith(pipelineProvider([new Response('ok', ProviderFinishReason::Stop, usage: new Usage(1, 1, 2))], $call), ['models.overrides' => ['llama3.2' => ['temperature' => 0.1]]]);
     $h->pipeline->complete(3, 'Hi', ['ephemeral' => true]);
     expect($call['options'])->toBe(['temperature' => 0.1, 'num_ctx' => 8192, 'keep_alive' => '5m']);
+});
+
+// running() is what Abilities\Register asks before it starts a turn of its own (Kanboard #4538),
+// so it has to hold for the whole of every turn, whoever started it, and let go however the turn
+// ended: drained, refused, thrown, or walked away from.
+it('running() is false until a turn is first advanced, true until it ends, and counts a turn started inside another', function (): void {
+    $provider = Mockery::mock(ProviderInterface::class);
+    $provider->shouldReceive('stream')->twice()->andReturnUsing(static function (): \Generator {
+        yield new Response('ok', ProviderFinishReason::Stop, usage: new Usage(1, 1, 2));
+    });
+    $h = pipelineWith($provider, turns: 2);
+    expect(fn() => $h->pipeline->complete(3, '   '))->toThrow(\InvalidArgumentException::class, 'The message is empty.')
+        ->and($h->pipeline->running())->toBeFalse();
+    $gen = $h->pipeline->send(3, 'outer');
+    expect($h->pipeline->running())->toBeFalse();
+    $gen->current();
+    expect($h->pipeline->running())->toBeTrue();
+    // An ephemeral turn inside it, as the summarize tool runs one: when the inner turn ends, the
+    // outer one is still running.
+    $h->pipeline->complete(3, 'inner', ['ephemeral' => true]);
+    expect($h->pipeline->running())->toBeTrue();
+    foreach ($gen as $_) {
+    }
+    expect($gen->getReturn()->reply->content)->toBe('ok')
+        ->and($h->pipeline->running())->toBeFalse();
+});
+
+it('running() lets go of a turn the provider failed and of one the consumer abandoned', function (): void {
+    $h = pipelineWith(pipelineProvider([new \RuntimeException('connection refused')]));
+    expect(fn() => $h->pipeline->complete(3, 'Hi'))->toThrow(\RuntimeException::class, 'Provider error')
+        ->and($h->pipeline->running())->toBeFalse();
+
+    $h = pipelineWith(pipelineProvider([new Response('par', ProviderFinishReason::Stop), new Response('tial', ProviderFinishReason::Stop)]));
+    $gen = $h->pipeline->send(3, 'Hi');
+    $gen->current();
+    expect($h->pipeline->running())->toBeTrue();
+    unset($gen);
+    expect($h->pipeline->running())->toBeFalse();
 });

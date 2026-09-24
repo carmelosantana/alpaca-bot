@@ -75,6 +75,25 @@ final class Errors
     }
 
     /**
+     * 409 for an ability asked to start a turn while one is already running in the request
+     * (Chat\Pipeline::running()): the ability was reached from inside a turn, through an
+     * "execute any ability" tool the turn was offered, and a turn does not start another
+     * (Kanboard #4538). Conflict rather than 400: the input is fine and the same call made
+     * outside a turn runs. Reached through a tool, the message is the tool's result the model
+     * reads, so it tells the model what to do instead.
+     *
+     * @since 0.6.0
+     */
+    public static function turnRunning(): \WP_Error
+    {
+        return new \WP_Error(
+            'alpaca_bot_turn_running',
+            __('A chat turn is already running, and Alpaca Bot does not start another one inside it. Answer in the turn that is running instead.', 'alpaca-bot'),
+            ['status' => 409],
+        );
+    }
+
+    /**
      * 402 Payment Required is the nearest status for "your monthly allowance is spent": not a
      * permission problem (403) and not the client's fault (4xx otherwise), and distinct enough
      * that a client can show the cap rather than a generic error. The message is CapExceeded's
