@@ -40,9 +40,14 @@
  * through delete_option() and delete_metadata(), so WordPress's caches drop the rows with the
  * table. Posts are the exception: they are deleted with two SQL statements per batch of 500
  * rather than wp_delete_post(), which runs several queries and a hook chain for each row, and a
- * site can hold years of receipts. So no `delete_post` hooks fire for them, and each one's post
- * and meta cache entries are dropped by hand. Neither type supports comments, revisions or a
- * taxonomy, so there are no other rows to find.
+ * site can hold years of receipts. So no `delete_post` hooks fire for them, and each one's post,
+ * meta, comment and term caches are dropped by hand. The plugin writes no terms or comments on
+ * them, but other code can, and what it hangs off them by post id goes with them: their term
+ * relationships in a taxonomy registered for post types alone (those terms are recounted), and
+ * their comments with the comments' meta. Left: a relationship in a taxonomy registered for
+ * anything else (`link_category`, a user taxonomy) or registered by nothing loaded, because
+ * term_relationships does not say what kind of object its id names; and a post whose
+ * post_parent names one of them.
  *
  * A persistent object cache: a transient then lives in the cache, not in the options table, and
  * a cache cannot be listed by prefix. The two with a fixed name are deleted through
@@ -199,6 +204,8 @@ if (!defined('WP_UNINSTALL_PLUGIN')) {
                 }
             }
         }
+        // Taxonomy => term_taxonomy_id => true, for the terms that lost a post, recounted once below.
+        $recount = [];
         foreach ($post_types as $type) {
             do {
                 // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- The file docblock says why posts are deleted in SQL. The type is prepared; the interpolation is $wpdb's table name.
@@ -207,6 +214,35 @@ if (!defined('WP_UNINSTALL_PLUGIN')) {
                     break;
                 }
                 $in = implode(',', $ids);
+                // Term relationships. object_id is only a number, and a taxonomy decides what kind
+                // of object it names, so a row goes only when its taxonomy is registered for post
+                // types alone: `link_category` names links, a user taxonomy names users, and a
+                // taxonomy nothing loaded registers cannot say.
+                // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- $in is a list of integers cast above; the rest is $wpdb's table names.
+                $rows = $wpdb->get_results("SELECT tr.object_id, tr.term_taxonomy_id, tt.taxonomy FROM `{$wpdb->term_relationships}` tr INNER JOIN `{$wpdb->term_taxonomy}` tt ON tt.term_taxonomy_id = tr.term_taxonomy_id WHERE tr.object_id IN ({$in})");
+                foreach (is_array($rows) ? $rows : [] as $row) {
+                    $taxonomy = get_taxonomy((string) $row->taxonomy);
+                    $types = $taxonomy === false ? [] : (array) $taxonomy->object_type;
+                    $forPosts = $types !== [] && array_filter($types, static fn(string $t): bool => !in_array($t, $post_types, true) && !post_type_exists($t)) === [];
+                    if (!$forPosts) {
+                        continue;
+                    }
+                    // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- As above; the term count and cache are put right below.
+                    $wpdb->delete($wpdb->term_relationships, ['object_id' => (int) $row->object_id, 'term_taxonomy_id' => (int) $row->term_taxonomy_id], ['%d', '%d']);
+                    wp_cache_delete((int) $row->object_id, $taxonomy->name . '_relationships');
+                    $recount[$taxonomy->name][(int) $row->term_taxonomy_id] = true;
+                }
+                // Comments on them, and those comments' meta.
+                // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- As above.
+                $comments = array_map('intval', $wpdb->get_col("SELECT comment_ID FROM `{$wpdb->comments}` WHERE comment_post_ID IN ({$in})"));
+                if ($comments !== []) {
+                    $cin = implode(',', $comments);
+                    // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- $cin is a list of integers cast above; the rest is $wpdb's table name.
+                    $wpdb->query("DELETE FROM `{$wpdb->commentmeta}` WHERE comment_id IN ({$cin})");
+                    // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- As above.
+                    $wpdb->query("DELETE FROM `{$wpdb->comments}` WHERE comment_ID IN ({$cin})");
+                    clean_comment_cache($comments);
+                }
                 // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- $in is a list of integers cast above; the rest is $wpdb's table name. The caches are dropped below.
                 $wpdb->query("DELETE FROM `{$wpdb->postmeta}` WHERE post_id IN ({$in})");
                 // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- As above.
@@ -218,6 +254,9 @@ if (!defined('WP_UNINSTALL_PLUGIN')) {
                 // A batch that deleted nothing would come back as the same batch: stop instead.
                 $more = is_int($deleted) && $deleted > 0 && count($ids) === 500;
             } while ($more);
+        }
+        foreach ($recount as $taxonomy => $tt) {
+            wp_update_term_count_now(array_keys($tt), $taxonomy);
         }
         wp_cache_set_posts_last_changed();
         foreach ($cron_hooks as $hook) {
