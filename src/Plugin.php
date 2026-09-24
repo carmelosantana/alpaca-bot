@@ -219,7 +219,8 @@ final class Plugin
         $menu = new Admin\Menu($settingsPage, [$chatScreen, 'render'], $this->get(Access::class));
         add_action('admin_menu', [$menu, 'register']);
         // Assets::enqueue() gates on the hook suffix itself, so this listens on every admin
-        // screen and acts on two (the chat screen's assets; the settings page's inline rules).
+        // screen and acts on two: the chat screen's assets; the settings page's inline rules and
+        // htmx, for the Tools tab's Discover button.
         // The heartbeat answer runs on admin-ajax, where no enqueue hook fires, so it is hooked here.
         $assets = new Admin\Assets();
         add_action('admin_enqueue_scripts', [$assets, 'enqueue']);
