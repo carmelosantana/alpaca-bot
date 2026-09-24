@@ -13,6 +13,15 @@ final class Plugin
     public const OPTION = 'alpaca_bot_settings';
     public const TEXT_DOMAIN = 'alpaca-bot';
 
+    /**
+     * An extra argument the plugin's two post types are registered with, which core keeps as a
+     * property of the WP_Post_Type. `chat_history` and `chat_log` are not prefixed, so
+     * uninstall.php reads it to tell this plugin's registration (`wp plugin uninstall
+     * --deactivate` loads the plugin first) from another loaded plugin's use of the same name,
+     * whose posts it then leaves. uninstall.php loads no class, so it names the value itself.
+     */
+    public const POST_TYPE_MARK = 'alpaca_bot_owned';
+
     private static ?self $instance = null;
 
     /** @var array<string, object> */

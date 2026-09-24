@@ -63,8 +63,14 @@
  * uninstall` runs it under PHP's command line, which has no time limit by default.
  *
  * `chat_history` and `chat_log` are not prefixed (0.4 named them, and existing sites hold rows
- * under them). Every post of those types is removed, so a site where another plugin also used
- * one of those names would lose that plugin's posts of it too.
+ * under them), and nothing on a post says which plugin wrote it, so the decision is per type:
+ * - registered for this request with the plugin's mark (`alpaca_bot_owned`, Plugin::POST_TYPE_MARK;
+ *   `wp plugin uninstall --deactivate` loaded the plugin first): the plugin's, removed;
+ * - registered without the mark: another plugin loaded for this request uses the name, and
+ *   every post of that type is left, the plugin's own included;
+ * - registered by nothing (the Plugins screen and a plain `wp plugin uninstall`, where the
+ *   plugin is not loaded): removed. So an *inactive* plugin's posts under the same name are
+ *   deleted too; nothing can tell them apart.
  *
  * @package AlpacaBot
  */
@@ -207,6 +213,12 @@ if (!defined('WP_UNINSTALL_PLUGIN')) {
         // Taxonomy => term_taxonomy_id => true, for the terms that lost a post, recounted once below.
         $recount = [];
         foreach ($post_types as $type) {
+            // Registered now, by anything but this plugin (whose registrations carry the mark),
+            // means another loaded plugin uses the name and the posts may be its own.
+            $object = get_post_type_object($type);
+            if ($object !== null && !(property_exists($object, 'alpaca_bot_owned') && $object->alpaca_bot_owned === true)) {
+                continue;
+            }
             do {
                 // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- The file docblock says why posts are deleted in SQL. The type is prepared; the interpolation is $wpdb's table name.
                 $ids = array_map('intval', $wpdb->get_col($wpdb->prepare("SELECT ID FROM `{$wpdb->posts}` WHERE post_type = %s ORDER BY ID LIMIT 500", $type)));

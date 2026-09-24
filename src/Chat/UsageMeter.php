@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace AlpacaBot\Chat;
 
+use AlpacaBot\Plugin;
 use AlpacaBot\Settings\Store;
 
 /**
@@ -62,6 +63,8 @@ final class UsageMeter
             // Receipts are only ever written here, never from an editor screen or REST.
             'capabilities' => ['create_posts' => 'do_not_allow'],
             'map_meta_cap' => true,
+            // Tells uninstall.php this registration is the plugin's (Plugin::POST_TYPE_MARK).
+            Plugin::POST_TYPE_MARK => true,
         ]);
     }
 
