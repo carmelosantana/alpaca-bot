@@ -252,7 +252,7 @@ A ground-up rewrite. The 0.4 code is gone rather than refactored, so the list be
 
 = 0.6.0 =
 
-Each tool now needs its own Settings › Access row as well as chat: a role you opened chat to in code keeps chat and gets no tool until the tool's row admits it. The settings capability filter splits into read and write keys. Deleting the plugin now deletes its data.
+Each tool now needs its own Settings › Access row as well as chat: a role you opened chat to in code keeps chat and gets no tool until the tool's row admits it. The settings capability filter splits into read and write keys; the old key still sets both. Deleting the plugin now deletes its data.
 
 = 0.5.0 =
 
