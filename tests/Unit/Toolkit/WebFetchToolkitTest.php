@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use AlpacaBot\Plugin;
 use AlpacaBot\Settings\Store;
 use AlpacaBot\Toolkit\AddressPin;
 use AlpacaBot\Toolkit\CurlPin;
@@ -82,7 +83,7 @@ it('refuses a URL the guard rejects before any request is made, and says why', f
 
 it('falls back to the schema user agent when the setting is blank, so the request never goes out without one', function (): void {
     Functions\expect('wp_http_validate_url')->once()->andReturnFirstArg();
-    Functions\expect('wp_safe_remote_get')->once()->withArgs(static fn(string $url, array $args): bool => $args['user-agent'] === 'AlpacaBot/0.5 (+https://github.com/carmelosantana/alpaca-bot)')->andReturn(webFetchResponse('<p>ok</p>'));
+    Functions\expect('wp_safe_remote_get')->once()->withArgs(static fn(string $url, array $args): bool => $args['user-agent'] === 'AlpacaBot/' . Plugin::VERSION . ' (+https://github.com/carmelosantana/alpaca-bot)')->andReturn(webFetchResponse('<p>ok</p>'));
     expect(webFetchTool('  ')->execute(['url' => 'https://example.test/'])->content)->toBe('ok');
 });
 
