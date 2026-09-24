@@ -7,8 +7,8 @@
  * htmx comes next, because the fragment is fetched through it: GET /view/panel is swapped in with
  * htmx.ajax(), which also wires the hx-* attributes the header's selects carry. The chat bundle
  * comes last, once the fragment is in the document, because chat.ts boots against the #ab-form it
- * finds when it runs and would find none if it ran first. A file that loaded, or that the page
- * already carries at the same URL, is not added again.
+ * finds when it runs and would find none if it ran first. A file that loaded is not added again,
+ * and nor is htmx when the page already carries it under its handle (`htmxId`).
  * A host calls mountPanel() again only after a mount that failed; a mounted chat it shows and
  * hides (the sidebar moves it as well, and editor.ts says why), so a turn in flight is never
  * re-rendered.
@@ -16,7 +16,7 @@
 import { fromHtml } from './dom.ts';
 
 /** What Admin\Assets::mount() localises; `title` is the chat's name, for a host that titles the panel it mounts the chat in. */
-export interface MountSettings { panel: string; prefs: string; htmx: string; chat: string; css: string; title: string; failed: string }
+export interface MountSettings { panel: string; prefs: string; htmx: string; htmxId: string; chat: string; css: string; title: string; failed: string }
 
 declare global {
   interface Window { alpacaBotMount?: MountSettings }
@@ -24,18 +24,9 @@ declare global {
 
 const added = new Map<string, Promise<void>>();
 
-/**
- * Adds a script once per page, resolving when it has run. A script the page already carries at
- * the same URL counts as run: the settings screen enqueues htmx at the URL Admin\Assets::mount()
- * hands this loader, as a plain footer script, and the parser runs such a script as it puts it in
- * the document, so one that is there has run.
- */
+/** Adds a script once per page, resolving when it has run. */
 export function script(src: string): Promise<void> {
   let loading = added.get(src);
-  if (!loading && Array.from(document.scripts).some((el) => el.src === new URL(src, document.baseURI).href)) {
-    loading = Promise.resolve();
-    added.set(src, loading);
-  }
   if (!loading) {
     loading = new Promise<void>((resolve, reject) => {
       const el = document.createElement('script');
@@ -97,7 +88,13 @@ export function panelQuery(host: HTMLElement, conversation: string): Record<stri
 export async function mountPanel(host: HTMLElement, cfg: MountSettings, nonce: string, query: Record<string, string>): Promise<void> {
   try {
     style(cfg.css);
-    await script(cfg.htmx);
+    // A page that enqueued htmx itself (the settings screen does) carries it under the id core
+    // prints on the handle's tag. Its URL can differ from cfg.htmx (a site may rewrite or strip
+    // `?ver=`), and the id does not; a plain footer script has run once the parser has put it in
+    // the document, so it is not loaded again.
+    if (!document.getElementById(cfg.htmxId)) {
+      await script(cfg.htmx);
+    }
     const htmx = window.htmx;
     if (!htmx) throw new Error('Alpaca Bot: htmx did not load.');
     // The nonce by hand. The chat bundle's htmx:configRequest listener signs only requests whose

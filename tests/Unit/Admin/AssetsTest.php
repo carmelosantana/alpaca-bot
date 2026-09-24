@@ -275,6 +275,8 @@ it('tells a loader where the panel, the drawer preferences and the three chat fi
         'panel' => '/wp-json/alpaca-bot/v1/view/panel',
         'prefs' => '/wp-json/alpaca-bot/v1/view/drawer',
         'htmx' => '/plugins/alpaca-bot/assets/js/htmx.min.js?ver=' . Assets::HTMX_VERSION,
+        // The id core prints on the handle's tag (`{$handle}-js`), how the loader knows the page's own htmx.
+        'htmxId' => 'alpaca-bot-htmx-js',
         'chat' => '/plugins/alpaca-bot/assets/js/chat.js?ver=' . Plugin::VERSION,
         'css' => '/plugins/alpaca-bot/assets/css/alpaca-bot.css?ver=' . Plugin::VERSION,
         'title' => 'Alpaca Bot',

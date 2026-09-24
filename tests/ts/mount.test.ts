@@ -17,23 +17,6 @@ test('withQuery adds its query under either permalink form, keeping a ?rest_rout
 });
 
 /**
- * The settings screen enqueues htmx itself (Admin\Assets, for the Tools tab's Discover button), at
- * the URL mount() hands the loader, so the drawer opened there must not run a second copy of it.
- * happy-dom loads no file, so a script() that added a tag would never settle: the race says which.
- */
-test('script() takes a file the page already carries at that URL as loaded, and adds no second tag', async () => {
-  const src = 'https://alpaca-bot.test/wp-content/plugins/alpaca-bot/assets/js/htmx.min.js?ver=2.0.10';
-  installDom(`<script src="${src.replace('&', '&amp;')}"></script>`);
-  const { script } = await import('../../resources/ts/mount.ts');
-  const settled = await Promise.race([script(src).then(() => 'loaded'), new Promise<string>((r) => setTimeout(() => r('pending'), 50))]);
-  assert.equal(settled, 'loaded');
-  assert.equal(document.querySelectorAll('script').length, 1);
-  // Another file is added as before: happy-dom loads no file, so the tag it adds fails at once
-  // and is removed, and script() rejects, where a file taken as present resolves.
-  assert.equal(await script('https://alpaca-bot.test/wp-content/plugins/alpaca-bot/assets/js/chat.js?ver=1').then(() => 'loaded', () => 'failed'), 'failed');
-});
-
-/**
  * What the drawer's every fetch of GET /view/panel carries (resources/ts/drawer.ts): the first
  * mount, its retry, and "New chat" all build their query here, off the data attributes
  * Admin\Drawer::footer() prints on the drawer element.
@@ -60,7 +43,7 @@ test('panelQuery names the conversation and what the drawer element says the chi
  * post chip the editor sidebar adds once its new post has been saved (resources/ts/editor.ts).
  * Every assertion compares a primitive, never a node (tests/ts/env.ts says why).
  */
-const CFG = { panel: 'https://alpaca-bot.test/wp-json/alpaca-bot/v1/view/panel', prefs: '', htmx: '', chat: '', css: '', title: 'Alpaca Bot', failed: 'failed' };
+const CFG = { panel: 'https://alpaca-bot.test/wp-json/alpaca-bot/v1/view/panel', prefs: '', htmx: '', htmxId: '', chat: '', css: '', title: 'Alpaca Bot', failed: 'failed' };
 const chip = (kind: string, name: string, value: string, label: string): string =>
   `<span class="ab-chip" data-chip="${kind}"><input type="hidden" name="${name}" value="${value}"><span class="ab-chip__label">${label}</span><button type="button" class="ab-chip__remove" data-action="chip-remove" aria-label="Remove ${label}">x</button></span>`;
 const row = (chips: string): string => `<div class="ab-composer__chips" role="group" aria-label="What this chat can see">${chips}</div>`;
@@ -196,4 +179,34 @@ test('postChip adds nothing when the server renders no post chip, refuses the fr
   assert.equal(await postChip(host, CFG, 'n'), true);
   assert.equal(seen.length, 0);
   assert.equal(host.querySelectorAll('#ab-form .ab-chip').length, 1);
+});
+
+/**
+ * The settings screen enqueues htmx itself (Admin\Assets, for the Tools tab's Discover button), so
+ * the drawer opened there must not run a second copy. The page's copy is known by the id core
+ * prints on the handle's tag, `alpaca-bot-htmx-js`, which a site that rewrites the URL (a
+ * `script_loader_src` filter stripping `?ver=`) leaves as it is. happy-dom loads no file, so a
+ * tag the mount adds fails at once: the htmx.ajax() count says whether the mount got past htmx.
+ */
+test('mountPanel uses the htmx the page carries under its handle id, whatever its URL, and adds no copy', async () => {
+  const base = 'https://alpaca-bot.test/wp-content/plugins/alpaca-bot/assets/js';
+  const cfg = { ...CFG, htmx: `${base}/htmx.min.js?ver=2.0.10`, htmxId: 'alpaca-bot-htmx-js', chat: `${base}/chat.js?ver=1` };
+  const asked: string[] = [];
+  const fake = { ajax: async (_method: string, url: string, opts: { target: HTMLElement }) => { asked.push(url); opts.target.innerHTML = '<form id="ab-form"></form>'; } };
+
+  installDom(`<script id="alpaca-bot-htmx-js" src="${base}/htmx.min.js"></script><aside id="host"></aside>`);
+  (window as unknown as { htmx: unknown }).htmx = fake;
+  const { mountPanel } = await import('../../resources/ts/mount.ts');
+  const outcome = await mountPanel(document.getElementById('host') as HTMLElement, cfg, 'n', {}).then(() => 'mounted', () => 'failed');
+  // It got as far as the chat bundle, whose tag is the one that failed.
+  assert.equal(outcome, 'failed');
+  assert.equal(asked.length, 1);
+  assert.equal(document.querySelectorAll('script[src*="htmx"]').length, 1);
+
+  // Without the tag, the loader adds htmx itself, and here that is where it stops.
+  installDom('<aside id="host"></aside>');
+  (window as unknown as { htmx: unknown }).htmx = fake;
+  const second = await mountPanel(document.getElementById('host') as HTMLElement, cfg, 'n', {}).then(() => 'mounted', () => 'failed');
+  assert.equal(second, 'failed');
+  assert.equal(asked.length, 1);
 });

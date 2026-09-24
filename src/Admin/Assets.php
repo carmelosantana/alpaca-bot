@@ -38,6 +38,9 @@ final class Assets
     /** htmx as package.json pins it, exactly (AssetsTest holds the two equal). */
     public const HTMX_VERSION = '2.0.10';
 
+    /** htmx's script handle. Core prints its tag with the id `alpaca-bot-htmx-js`, which mount() hands the loader. */
+    private const HTMX_HANDLE = 'alpaca-bot-htmx';
+
     /**
      * The rules for the per-model overrides table (SettingsPage::renderOverrides()), a `widefat`
      * nested in a Settings API row. Core's forms.css loads after its common.css and reaches every
@@ -107,8 +110,8 @@ final class Assets
             wp_add_inline_style('forms', self::OVERRIDES_CSS);
             // The Tools tab's Discover button is an hx-get at the MCP approval fragment
             // (SettingsPage::renderMcpServers()); htmx is already shipped and pinned, under the
-            // handle and at the URL the chat screen and mount() use, so the drawer's loader on
-            // this screen finds it rather than adding a second copy (resources/ts/mount.ts).
+            // handle the chat screen uses, whose tag id mount() hands the drawer's loader, so the
+            // loader on this screen finds it rather than adding a second copy (resources/ts/mount.ts).
             self::enqueueHtmx();
             return;
         }
@@ -170,7 +173,7 @@ final class Assets
     private function enqueueChat(): void
     {
         self::enqueueHtmx();
-        wp_enqueue_script('alpaca-bot-chat', plugins_url('assets/js/chat.js', ALPACA_BOT_FILE), ['alpaca-bot-htmx', 'heartbeat'], self::version('assets/js/chat.js'), true);
+        wp_enqueue_script('alpaca-bot-chat', plugins_url('assets/js/chat.js', ALPACA_BOT_FILE), [self::HTMX_HANDLE, 'heartbeat'], self::version('assets/js/chat.js'), true);
         wp_enqueue_style('alpaca-bot', plugins_url('assets/css/alpaca-bot.css', ALPACA_BOT_FILE), [], self::version('assets/css/alpaca-bot.css'));
         wp_localize_script('alpaca-bot-chat', 'alpacaBot', $this->settings());
     }
@@ -178,7 +181,7 @@ final class Assets
     /** htmx, in the footer, at the version package.json pins. */
     private static function enqueueHtmx(): void
     {
-        wp_enqueue_script('alpaca-bot-htmx', plugins_url('assets/js/htmx.min.js', ALPACA_BOT_FILE), [], self::HTMX_VERSION, true);
+        wp_enqueue_script(self::HTMX_HANDLE, plugins_url('assets/js/htmx.min.js', ALPACA_BOT_FILE), [], self::HTMX_VERSION, true);
     }
 
     /**
@@ -223,8 +226,9 @@ final class Assets
      * What a loader needs to put the chat into a page that did not enqueue it (`alpacaBotMount`,
      * resources/ts/mount.ts): the fragment route, the route the drawer's state goes to, the three
      * files, each with the version query its enqueue would have given it, so a rebuild busts the
-     * browser cache the same way, the chat's name, for a host that titles the panel it puts the
-     * chat in, and the line shown when the fragment does not arrive.
+     * browser cache the same way, the id core prints on htmx's tag, by which the loader knows a
+     * page that enqueued htmx itself (the settings screen does), the chat's name, for a host that
+     * titles the panel it puts the chat in, and the line shown when the fragment does not arrive.
      *
      * @return array<string, string>
      */
@@ -234,6 +238,7 @@ final class Assets
             'panel' => rest_url('alpaca-bot/v1/view/panel'),
             'prefs' => rest_url('alpaca-bot/v1/view/drawer'),
             'htmx' => self::versioned('assets/js/htmx.min.js', self::HTMX_VERSION),
+            'htmxId' => self::HTMX_HANDLE . '-js',
             'chat' => self::versioned('assets/js/chat.js', self::version('assets/js/chat.js')),
             'css' => self::versioned('assets/css/alpaca-bot.css', self::version('assets/css/alpaca-bot.css')),
             'title' => __('Alpaca Bot', 'alpaca-bot'),
