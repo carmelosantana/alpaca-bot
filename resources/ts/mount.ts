@@ -90,8 +90,9 @@ export async function mountPanel(host: HTMLElement, cfg: MountSettings, nonce: s
     style(cfg.css);
     // A page that enqueued htmx itself (the settings screen does) carries it under the id core
     // prints on the handle's tag. Its URL can differ from cfg.htmx (a site may rewrite or strip
-    // `?ver=`), and the id does not; a plain footer script has run once the parser has put it in
-    // the document, so it is not loaded again.
+    // `?ver=`), and the id does not. The tag being there is taken as the script having run, which
+    // holds once DOMContentLoaded has fired (a plain footer script runs before it), and the drawer
+    // mounts no earlier than that (drawer.ts waits for it), so htmx is not loaded again.
     if (!document.getElementById(cfg.htmxId)) {
       await script(cfg.htmx);
     }
