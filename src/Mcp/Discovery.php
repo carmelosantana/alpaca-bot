@@ -21,6 +21,12 @@ use AlpacaBot\Settings\Store;
  * untrusted, and here it only decides which way a box starts. A new tool without the annotation,
  * or with any other value in it, starts ticked.
  *
+ * A name the listing carries more than once starts unticked on every copy, whatever its state:
+ * MCP makes a tool's name unique on its server, and McpTools offers no box for such a name,
+ * since boxes under one name post as one and keep whichever tick came last. Each copy keeps the
+ * state its own fingerprint gives it, so one copy may be `approved` beside another `changed`, and
+ * the name is recorded in the drift marker once when any copy is `changed`.
+ *
  * It opens no connection itself. tools() asks the ClientFactory it was handed for a client and
  * asks that client to list the server; what the client does is the factory's. The factory the
  * plugin constructs builds UnavailableClient, which answers McpUnavailable::NOT_YET without
@@ -50,7 +56,7 @@ final class Discovery
 
     /**
      * One row per tool the server lists, in the order it lists them, and the names of the changed
-     * ones recorded through Drift::set(), which clears the marker when there are none.
+     * ones recorded through Drift::set(), each once, which clears the marker when there are none.
      *
      * @return list<array{definition: ToolDefinition, fingerprint: string, state: 'approved'|'changed'|'new', ticked: bool}>
      * @throws McpUnavailable when the server cannot be listed; the drift marker is left as it was
@@ -59,7 +65,9 @@ final class Discovery
     {
         $rows = [];
         $changed = [];
-        foreach ($this->clients->for($server)->listTools() as $definition) {
+        $listed = $this->clients->for($server)->listTools();
+        $counts = array_count_values(array_map(static fn(ToolDefinition $d): string => $d->name, $listed));
+        foreach ($listed as $definition) {
             $fingerprint = $definition->fingerprint();
             $pinned = $server->approved[$definition->name] ?? null;
             $state = match ($pinned) {
@@ -67,14 +75,15 @@ final class Discovery
                 $fingerprint => 'approved',
                 default => 'changed',
             };
-            if ($state === 'changed') {
+            $repeated = $counts[$definition->name] > 1;
+            if ($state === 'changed' && !in_array($definition->name, $changed, true)) {
                 $changed[] = $definition->name;
             }
             $rows[] = [
                 'definition' => $definition,
                 'fingerprint' => $fingerprint,
                 'state' => $state,
-                'ticked' => $state === 'approved' || ($state === 'new' && !$definition->destructive()),
+                'ticked' => !$repeated && ($state === 'approved' || ($state === 'new' && !$definition->destructive())),
             ];
         }
         Drift::set($server->id, $changed);

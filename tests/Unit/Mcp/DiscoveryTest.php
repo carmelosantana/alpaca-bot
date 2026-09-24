@@ -114,3 +114,25 @@ it('lists through the client the factory it was handed builds, so the default fa
     $discovery = new Discovery(new Store(['toolkits.mcp_servers' => [['id' => 'trk', 'url' => 'https://mcp.example.com/mcp', 'prefix' => 'trk']]]), new ClientFactory());
     expect(fn() => $discovery->tools($discovery->server('trk')))->toThrow(McpUnavailable::class, McpUnavailable::NOT_YET);
 });
+
+// M-2: a name the listing repeats cannot be approved (View\Settings\McpTools offers no box), so
+// no copy starts ticked. Each copy keeps the state its own fingerprint gives it, and the name goes
+// into the drift marker once when any copy is changed.
+it('ticks no copy of a name the listing repeats, and records it in the drift marker once', function (): void {
+    $v1 = new ToolDefinition('search', 'Search.', ['type' => 'object']);
+    $v2 = new ToolDefinition('search', 'Search, the other one.', ['type' => 'object']);
+    $v3 = new ToolDefinition('search', 'Search, a third.', ['type' => 'object']);
+    $plain = new ToolDefinition('plain', 'Plain.', ['type' => 'object']);
+    $discovery = mcpDiscovery([$v1, $v2, $plain, $v3], ['search' => $v1->fingerprint()], drift: $drift);
+    $tools = $discovery->tools($discovery->server('trk'));
+    expect(array_column($tools, 'state'))->toBe(['approved', 'changed', 'new', 'changed'])
+        ->and(array_column($tools, 'ticked'))->toBe([false, false, true, false])
+        ->and($drift['alpaca_bot_mcp_drift_trk'])->toBe(['search']);
+
+    // Two copies of the pinned definition: nothing has drifted, and still neither is ticked.
+    $twice = mcpDiscovery([$v1, $v1], ['search' => $v1->fingerprint()], drift: $drift);
+    $tools = $twice->tools($twice->server('trk'));
+    expect(array_column($tools, 'state'))->toBe(['approved', 'approved'])
+        ->and(array_column($tools, 'ticked'))->toBe([false, false])
+        ->and($drift['alpaca_bot_mcp_drift_trk'])->toBeNull();
+});

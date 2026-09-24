@@ -54,9 +54,12 @@ it('says a destructive tool\'s warning is the server\'s own claim, and warns abo
         ->and((new McpTools(0, [mcpToolRow($plain, 'new', true)]))->render())->not->toContain('Destructive');
 });
 
-it('shows the description the model will read, through SchemaTool::describe(), escaped', function (): void {
+// describe() strips tags, so the escape is seen on what survives it: `&`, `"` and a bare `<`.
+it('shows the description through SchemaTool::describe(), and escapes what describe() leaves', function (): void {
     $long = str_repeat('word ', 100);
     $tool = new ToolDefinition('search', "# Heading\n<b>Bold</b>\n\nline two <img src=x onerror=alert(1)>", ['type' => 'object']);
+    $bare = new ToolDefinition('compare', 'Tom & "Jerry" when a < b', ['type' => 'object']);
+    expect((new McpTools(0, [mcpToolRow($bare, 'new', true)]))->render())->toContain('<span class="description">Tom &amp; &quot;Jerry&quot; when a &lt; b</span>');
     $cut = new ToolDefinition('long', $long, ['type' => 'object']);
     $html = (new McpTools(0, [mcpToolRow($tool, 'new', true), mcpToolRow($cut, 'new', true)]))->render();
     expect($html)->toContain('<span class="description">' . SchemaTool::describe($tool->description) . '</span>')
@@ -67,11 +70,41 @@ it('shows the description the model will read, through SchemaTool::describe(), e
         ->not->toContain('<b>');
 });
 
-// The title is the server's words too, and printed with the same rule.
-it('prints a title and a name as text, never as markup', function (): void {
-    $tool = new ToolDefinition('search', 'Search.', ['type' => 'object'], [], '<script>alert(1)</script>Find');
+// The title is the server's words too, and printed with the same rule: tags stripped by
+// describe(), and what survives it escaped.
+it('prints a title stripped of tags and escaped', function (): void {
+    $tool = new ToolDefinition('search', 'Search.', ['type' => 'object'], [], '<script>alert(1)</script>Find & "go" < now');
     $html = (new McpTools(0, [mcpToolRow($tool, 'new', true)]))->render();
-    expect($html)->not->toContain('<script')->toContain('<strong>Find</strong>');
+    expect($html)->not->toContain('<script')->toContain('<strong>Find &amp; &quot;go&quot; &lt; now</strong>');
+});
+
+// I-1: a name is the server's text, and one that cannot be approved is still printed. It is
+// escaped, not stripped, so what the server sent is what the administrator reads.
+it('prints a hostile tool name as inert text', function (): void {
+    $img = new ToolDefinition('<img src=x onerror=alert(1)>', 'Hostile.', ['type' => 'object']);
+    $quote = new ToolDefinition('a" onmouseover="alert(2)', 'Quoted.', ['type' => 'object']);
+    $html = (new McpTools(0, [mcpToolRow($img, 'new', true), mcpToolRow($quote, 'new', true)]))->render();
+    expect($html)->not->toContain('<img')
+        ->not->toContain('" onmouseover="')
+        ->toContain('<code>&lt;img src=x onerror=alert(1)&gt;</code>')
+        ->toContain('<code>a&quot; onmouseover=&quot;alert(2)</code>')
+        ->and(substr_count($html, 'type="checkbox"'))->toBe(0);
+});
+
+// M-2: MCP makes a tool's name unique on its server, so a listing that repeats one is a server
+// misbehaving. One box per copy would post under one name and keep whichever tick came last, so
+// no copy gets a box, each says why, and every other tool is offered as usual.
+it('offers no box for a name the listing repeats, on any copy, and says so on each', function (): void {
+    $first = new ToolDefinition('search', 'Search.', ['type' => 'object']);
+    $second = new ToolDefinition('search', 'Search, the other one.', ['type' => 'object']);
+    $plain = new ToolDefinition('plain', 'Plain.', ['type' => 'object']);
+    $html = (new McpTools(0, [mcpToolRow($first, 'approved', false), mcpToolRow($second, 'changed', false), mcpToolRow($plain, 'new', true)]))->render();
+    expect(substr_count($html, 'type="checkbox"'))->toBe(1)
+        ->and($html)->toContain('name="alpaca_bot_settings[toolkits.mcp_servers][0][approved][plain]"')
+        ->not->toContain('[approved][search]')
+        ->and(substr_count($html, 'The server lists this name more than once, so no copy has a box; saving drops the name&#039;s approval, if it has one.'))->toBe(2)
+        // Each copy keeps its own state: the one that differs from the pin still says so.
+        ->and(substr_count($html, 'changed since approval: review'))->toBe(1);
 });
 
 // Schema::sanitizeMcpServers() keeps an approval only under a name of [A-Za-z0-9_.-]{1,128} that

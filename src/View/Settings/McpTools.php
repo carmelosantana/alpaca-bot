@@ -29,7 +29,10 @@ use AlpacaBot\View\Component;
  *
  * A tool whose name Schema::isToolName() refuses, asked of the key the name becomes, is listed
  * with no box and a line saying its name cannot be approved: Schema::sanitizeMcpServers() would
- * drop that key on save, and a box whose tick silently vanishes is worse than none.
+ * drop that key on save, and a box whose tick silently vanishes is worse than none. A name the
+ * listing carries more than once is listed the same way on every copy, with a line saying so:
+ * boxes under one name post as one, and the tick that came last would be kept. The name is
+ * listed, so gone() does not name it, and a save drops an approval it has.
  *
  * The swap replaces what the cell held, the hidden inputs carrying the row's approvals among it
  * (SettingsPage), so the list decides the row's approvals on the next save. `$approved`, the
@@ -55,11 +58,11 @@ final class McpTools extends Component
         if ($this->error !== '') {
             return (new Notice('error', $this->error))->render() . $this->kept();
         }
-        $listed = [];
+        $listed = array_map(static fn(array $tool): string => $tool['definition']->name, $this->tools);
+        $counts = array_count_values($listed);
         $items = '';
         foreach ($this->tools as $tool) {
-            $listed[] = $tool['definition']->name;
-            $items .= $this->item($tool);
+            $items .= $this->item($tool, $counts[$tool['definition']->name] > 1);
         }
         $out = $items === ''
             ? (new Notice('info', __('This server lists no tools.', 'alpaca-bot')))->render()
@@ -67,8 +70,11 @@ final class McpTools extends Component
         return $out . $this->gone($listed);
     }
 
-    /** @param array{definition: ToolDefinition, fingerprint: string, state: string, ticked: bool} $tool */
-    private function item(array $tool): string
+    /**
+     * @param array{definition: ToolDefinition, fingerprint: string, state: string, ticked: bool} $tool
+     * @param bool                                                                                   $repeated whether the listing carries this tool's name more than once
+     */
+    private function item(array $tool, bool $repeated): string
     {
         $definition = $tool['definition'];
         $name = $definition->name;
@@ -81,7 +87,9 @@ final class McpTools extends Component
         if ($definition->destructive()) {
             $notes .= ' ' . $this->tag('em', [], $this->e(__('Destructive, by the server\'s own account: a claim this site cannot check.', 'alpaca-bot')));
         }
-        if (Schema::isToolName(array_key_first([$name => true]))) {
+        if ($repeated) {
+            $head = $label . ' ' . $this->tag('em', [], $this->e(__('The server lists this name more than once, so no copy has a box; saving drops the name\'s approval, if it has one.', 'alpaca-bot')));
+        } elseif (Schema::isToolName(array_key_first([$name => true]))) {
             $box = $this->tag('input', [
                 'type' => 'checkbox',
                 'name' => $this->field($name),
