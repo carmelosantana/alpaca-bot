@@ -318,7 +318,7 @@ final class ViewController extends Controller
             $tools = [];
             $error = self::reason($e, $server);
         }
-        return self::html((new McpTools(max(0, (int) $request->get_param('index')), $tools, $error, $server->approved))->render());
+        return self::html((new McpTools(max(0, (int) $request->get_param('index')), $tools, $error, $server->approved, $server->prefix))->render());
     }
 
     /**

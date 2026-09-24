@@ -8,6 +8,7 @@ use AlpacaBot\Mcp\ToolDefinition;
 use AlpacaBot\Plugin;
 use AlpacaBot\Settings\Schema;
 use AlpacaBot\Toolkit\SchemaTool;
+use AlpacaBot\Toolkit\ToolName;
 use AlpacaBot\View\Chat\Notice;
 use AlpacaBot\View\Component;
 
@@ -32,7 +33,10 @@ use AlpacaBot\View\Component;
  * drop that key on save, and a box whose tick silently vanishes is worse than none. A name the
  * listing carries more than once is listed the same way on every copy, with a line saying so:
  * boxes under one name post as one, and the tick that came last would be kept. The name is
- * listed, so gone() does not name it, and a save drops an approval it has.
+ * listed, so gone() does not name it, and a save drops an approval it has. Two tools that keep
+ * their boxes but reach the model under one name (ToolName::fit() of `<prefix>__<name>`, under
+ * the server's prefix) are each marked with a line naming the other, as the abilities list marks
+ * two abilities: McpToolkit offers neither of them while both are approved.
  *
  * The swap replaces what the cell held, the hidden inputs carrying the row's approvals among it
  * (SettingsPage), so the list decides the row's approvals on the next save. `$approved`, the
@@ -50,8 +54,9 @@ final class McpTools extends Component
      * @param list<array{definition: ToolDefinition, fingerprint: string, state: string, ticked: bool}> $tools    Discovery::tools()
      * @param string                                                                                   $error    why the server could not be listed, untrusted text; '' when it was
      * @param array<array-key, mixed>                                                                  $approved the row's stored `approved` map, tool name => fingerprint
+     * @param string                                                                                   $prefix   the server's tool-name prefix, which the model's names for its tools start with
      */
-    public function __construct(private int $index, private array $tools, private string $error = '', private array $approved = []) {}
+    public function __construct(private int $index, private array $tools, private string $error = '', private array $approved = [], private string $prefix = '') {}
 
     public function render(): string
     {
@@ -60,9 +65,10 @@ final class McpTools extends Component
         }
         $listed = array_map(static fn(array $tool): string => $tool['definition']->name, $this->tools);
         $counts = array_count_values($listed);
+        $clashes = $this->clashes($counts);
         $items = '';
         foreach ($this->tools as $tool) {
-            $items .= $this->item($tool, $counts[$tool['definition']->name] > 1);
+            $items .= $this->item($tool, $counts[$tool['definition']->name] > 1, $clashes[$tool['definition']->name] ?? []);
         }
         $out = $items === ''
             ? (new Notice('info', __('This server lists no tools.', 'alpaca-bot')))->render()
@@ -73,8 +79,9 @@ final class McpTools extends Component
     /**
      * @param array{definition: ToolDefinition, fingerprint: string, state: string, ticked: bool} $tool
      * @param bool                                                                                   $repeated whether the listing carries this tool's name more than once
+     * @param list<string>                                                                           $clashes  the other tools the model would know by this one's name
      */
-    private function item(array $tool, bool $repeated): string
+    private function item(array $tool, bool $repeated, array $clashes): string
     {
         $definition = $tool['definition'];
         $name = $definition->name;
@@ -83,6 +90,13 @@ final class McpTools extends Component
         $notes = '';
         if ($tool['state'] === 'changed') {
             $notes .= ' ' . $this->tag('strong', [], $this->e(__('changed since approval: review', 'alpaca-bot')));
+        }
+        if ($clashes !== []) {
+            $notes .= '<br>' . $this->tag('span', ['class' => 'description'], sprintf(
+                /* translators: %s: the other tool's name, or names, e.g. search */
+                $this->e(__('Reaches the model under the same tool name as %s, so while both are ticked neither is offered.', 'alpaca-bot')),
+                implode(', ', array_map(fn(string $other): string => $this->tag('code', [], $this->e($other)), $clashes)),
+            ));
         }
         if ($definition->destructive()) {
             $notes .= ' ' . $this->tag('em', [], $this->e(__('Destructive, by the server\'s own account: a claim this site cannot check.', 'alpaca-bot')));
@@ -101,6 +115,33 @@ final class McpTools extends Component
             $head = $label . ' ' . $this->tag('em', [], $this->e(__('This name cannot be approved, so the tool has no box.', 'alpaca-bot')));
         }
         return $this->tag('li', [], $head . $notes . '<br>' . $this->tag('span', ['class' => 'description'], $this->e(SchemaTool::describe($definition->description))));
+    }
+
+    /**
+     * Each tool that could be approved (a name the listing carries once, and one Schema::isToolName()
+     * takes) whose name ToolName::fit() makes the same as another's, with the others' names.
+     * McpToolkit offers neither of two such tools while both are approved, as AbilitiesToolkit does
+     * with two abilities, and this is how the list says so.
+     *
+     * @param array<array-key, int> $counts how often the listing carries each name
+     * @return array<string, list<string>> by name; empty for a tool no other one shares a name with
+     */
+    private function clashes(array $counts): array
+    {
+        $byName = [];
+        foreach ($this->tools as $tool) {
+            $name = $tool['definition']->name;
+            if ($counts[$name] === 1 && Schema::isToolName(array_key_first([$name => true]))) {
+                $byName[ToolName::fit($this->prefix . '__' . $name)][] = $name;
+            }
+        }
+        $out = [];
+        foreach ($byName as $group) {
+            foreach ($group as $name) {
+                $out[$name] = array_values(array_diff($group, [$name]));
+            }
+        }
+        return $out;
     }
 
     /** One hidden input per stored approval, as SettingsPage draws them: the error fragment's carry-over. */

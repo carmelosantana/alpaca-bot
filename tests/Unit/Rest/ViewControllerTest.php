@@ -454,3 +454,12 @@ it('replaces only a header value, or a credential in it, of 8 characters or more
         ->and($fail('Bearer  12345678', 'saw 12345678'))->toContain('saw ••••')
         ->and($fail('', 'nothing to hide'))->toContain('nothing to hide');
 });
+
+// M-7: the list works out which tools share a name the way McpToolkit does, under the server's own prefix.
+it('marks tools that would share a name under the server\'s own prefix', function (): void {
+    Functions\when('current_user_can')->justReturn(true);
+    $long = new AlpacaBot\Mcp\ToolDefinition(str_repeat('x', 100), 'Long.', ['type' => 'object']);
+    $short = new AlpacaBot\Mcp\ToolDefinition(substr(AlpacaBot\Toolkit\ToolName::fit('trk__' . $long->name), strlen('trk__')), 'Short.', ['type' => 'object']);
+    $res = viewControllerWithMcp(new AlpacaBot\Tests\Integration\FakeClient([$long, $short]))->mcpTools(restRequest('GET', '/x', ['id' => 'trk', 'index' => 0]));
+    expect(substr_count((string) $res->get_data(), 'Reaches the model under the same tool name as'))->toBe(2);
+});

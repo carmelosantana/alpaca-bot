@@ -151,3 +151,33 @@ it('renders an error message that carries markup inert', function (): void {
     expect($html)->not->toContain('<script')->not->toContain('<img')
         ->toContain('&lt;script&gt;alert(1)&lt;/script&gt;');
 });
+
+// M-7: two of a server's tools that ToolName::fit() gives one name are both withheld from the model
+// while both are approved (McpToolkit), so the list says so beside each, as the abilities list does.
+it('marks two tools that would reach the model under one name, naming the other, and leaves the rest alone', function (): void {
+    $long = new ToolDefinition(str_repeat('x', 100), 'Long.', ['type' => 'object']);
+    $short = new ToolDefinition(substr(AlpacaBot\Toolkit\ToolName::fit('trk__' . $long->name), strlen('trk__')), 'Short.', ['type' => 'object']);
+    $other = new ToolDefinition('fetch', 'Fetch.', ['type' => 'object']);
+    $html = (new McpTools(0, [mcpToolRow($long, 'new', true), mcpToolRow($short, 'new', true), mcpToolRow($other, 'new', true)], '', [], 'trk'))->render();
+    $items = explode('<li>', $html);
+    $said = 'Reaches the model under the same tool name as %s, so while both are ticked neither is offered.';
+    expect($items[1])->toContain(sprintf($said, '<code>' . $short->name . '</code>'))
+        ->and($items[2])->toContain(sprintf($said, '<code>' . $long->name . '</code>'))
+        ->and($items[3])->not->toContain('same tool name')
+        // Still a box each: the mark says what ticking both does, and nothing is left out silently.
+        ->and(substr_count($html, 'type="checkbox"'))->toBe(3);
+});
+
+// A name the listing repeats is never offered, so a tool that would share its fitted name is not
+// held back by it, and is not marked.
+it('does not mark a tool for sharing a name with one the listing repeats', function (): void {
+    $long = new ToolDefinition(str_repeat('x', 100), 'Long.', ['type' => 'object']);
+    $short = new ToolDefinition(substr(AlpacaBot\Toolkit\ToolName::fit('trk__' . $long->name), strlen('trk__')), 'Short.', ['type' => 'object']);
+    $html = (new McpTools(0, [mcpToolRow($long, 'new', true), mcpToolRow($long, 'new', true), mcpToolRow($short, 'new', true)], '', [], 'trk'))->render();
+    expect($html)->not->toContain('same tool name');
+    // Nor for one whose name cannot be approved at all (a space is outside the approval rule).
+    $bad = new ToolDefinition('q q', 'Spaced.', ['type' => 'object']);
+    $twin = new ToolDefinition(substr(AlpacaBot\Toolkit\ToolName::fit('trk__' . $bad->name), strlen('trk__')), 'Twin.', ['type' => 'object']);
+    expect(AlpacaBot\Toolkit\ToolName::fit('trk__' . $twin->name))->toBe(AlpacaBot\Toolkit\ToolName::fit('trk__' . $bad->name))
+        ->and((new McpTools(0, [mcpToolRow($bad, 'new', true), mcpToolRow($twin, 'new', true)], '', [], 'trk'))->render())->not->toContain('same tool name');
+});
