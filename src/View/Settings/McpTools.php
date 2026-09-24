@@ -36,7 +36,7 @@ use AlpacaBot\View\Component;
  * listed, so gone() does not name it, and a save drops an approval it has. Two tools that keep
  * their boxes but reach the model under one name (ToolName::fit() of `<prefix>__<name>`, under
  * the server's prefix) are each marked with a line naming the other, as the abilities list marks
- * two abilities: McpToolkit offers neither of them while both are approved.
+ * two abilities: McpToolkit offers neither of them while both are approved and unchanged.
  *
  * The swap replaces what the cell held, the hidden inputs carrying the row's approvals among it
  * (SettingsPage), so the list decides the row's approvals on the next save. `$approved`, the
@@ -120,7 +120,7 @@ final class McpTools extends Component
     /**
      * Each tool that could be approved (a name the listing carries once, and one Schema::isToolName()
      * takes) whose name ToolName::fit() makes the same as another's, with the others' names.
-     * McpToolkit offers neither of two such tools while both are approved, as AbilitiesToolkit does
+     * McpToolkit offers neither of two such tools while both are approved and unchanged, as AbilitiesToolkit does
      * with two abilities, and this is how the list says so.
      *
      * @param array<array-key, int> $counts how often the listing carries each name
