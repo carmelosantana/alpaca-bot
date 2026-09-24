@@ -9,8 +9,10 @@
  * events, post types, terms and the rest its docblock names; `$wpdb` writes; and the table,
  * upload and `$wp_filesystem` calls. It fails when one stores under a name this file does not
  * name, under a name built at run time that its map does not tie to an entry here, or in a table
- * or file. A writer that is not on its lists is not seen. tests/Integration/UninstallTest.php
- * runs this file over one of each row and a neighbour of each that is not ours.
+ * or file. A writer that is not on its lists is not seen, and nor are the `meta_input` and
+ * `tax_input` keys of wp_insert_post() and wp_update_post(), which it reads only for `post_type`.
+ * tests/Integration/UninstallTest.php runs this file over one of each row and a neighbour of each
+ * that is not ours.
  *
  * What it removes, on each site:
  * - options: the settings row, the MCP header values (`alpaca_bot_mcp_secrets`), the four

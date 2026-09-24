@@ -32,7 +32,8 @@ declare(strict_types=1);
  * Mcp\Drift's `self::PREFIX . $id` (Drift::set()). The last is only as good as the id the test
  * passes: a new id shape through Drift::set() is caught only if that test writes one, and the
  * ids are bounded by Settings\Schema's MCP_ID. A write through a function or method not on these
- * lists is not seen.
+ * lists is not seen, and nor is meta or a term handed to wp_insert_post() or wp_update_post() in
+ * `meta_input` or `tax_input`: those two are read for `post_type` only.
  */
 
 const UNINSTALL_WRITERS = [
@@ -52,7 +53,8 @@ const UNINSTALL_WRITERS = [
     'wp_set_post_terms' => 2, 'wp_add_object_terms' => 2,
     // No name argument at all (the taxonomy is fixed): any call has to be in the map.
     'wp_set_post_tags' => 99, 'wp_set_post_categories' => 99,
-    // Read for its `post_type` element; an array literal without one changes no type and is skipped.
+    // Read for its `post_type` element only, never `meta_input` or `tax_input`; an array literal
+    // without one changes no type and is skipped.
     'wp_update_post' => 0,
 ];
 
