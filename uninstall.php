@@ -26,8 +26,13 @@
  * meta keys and 0.4.17's `alpaca_bot_user_settings`.
  *
  * What it leaves: drafts the create-draft tool wrote. They are ordinary posts of the site's own
- * types, owned by the user who asked for them, and nothing marks them as the plugin's. The 0.4
- * names are 0.4.17's; a name only an earlier 0.4 release wrote was not looked for.
+ * types, owned by the user who asked for them, and nothing marks them as the plugin's. And the
+ * names releases before 0.4.16 wrote without this plugin's prefix: those releases were published
+ * on GitHub alone, and `chat` and `log` (post types), `ollama_models` (a transient), `ollama_*`
+ * (0.1 to 0.2's options and user meta) and `custom_*` (the v0.4.0 tag's options, a prefix bug
+ * fixed the same day in d856ff7) are names another plugin may own. The prefixed names every
+ * tag from v0.1.0 to v0.4.17 wrote are removed, the older ones cited in the list below; untagged
+ * commits on main were looked at only where a tag showed a gap (d856ff7).
  *
  * Fixed names are deleted by name. Dynamic names are found with a LIKE on the escaped prefix,
  * anchored at the start, and each row it returns is deleted only if the whole name matches the
@@ -110,6 +115,15 @@ if (!defined('WP_UNINSTALL_PLUGIN')) {
         'alpaca_bot_default_top_k',
         'alpaca_bot_default_top_p',
         'alpaca_bot_version',
+        // Written only before 0.4.16, when releases were published on GitHub alone, through the
+        // Settings API (register_setting() over the same prefix): v0.3.0:src/Options.php:191,212,
+        // 222,227, and main again from d856ff7 (setPrefix) until 7b8a000 dropped the token; and
+        // v0.4.9:src/Define.php:118. The first is an API credential.
+        'alpaca_bot_api_token',
+        'alpaca_bot_save_chat_history',
+        'alpaca_bot_default_system_message',
+        'alpaca_bot_default_message_placeholder',
+        'alpaca_bot_log_chat_response',
     ];
     // Provider\ModelCatalog's, and 0.4.17's model list.
     $transients = ['alpaca_bot_models', 'alpaca_bot_ollama_models'];

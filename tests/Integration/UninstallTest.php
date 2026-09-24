@@ -40,7 +40,7 @@ use AlpacaBot\Shortcodes\Chat;
  */
 final class UninstallTest extends TestCase
 {
-    /** The 0.4.17 options (`v0.4.17:src/Define.php` fields, plus the version stamp), named here independently of uninstall.php. */
+    /** The 0.4 options (`v0.4.17:src/Define.php` fields, the version stamp, and five older names), named here independently of uninstall.php. */
     private const LEGACY_OPTIONS = [
         'alpaca_bot_api_url', 'alpaca_bot_api_username', 'alpaca_bot_api_password', 'alpaca_bot_ollama_timeout',
         'alpaca_bot_default_model', 'alpaca_bot_user_can_change_model', 'alpaca_bot_chat_history_limit',
@@ -53,6 +53,10 @@ final class UninstallTest extends TestCase
         'alpaca_bot_default_repeat_penalty', 'alpaca_bot_default_temperature', 'alpaca_bot_default_seed',
         'alpaca_bot_default_stop', 'alpaca_bot_default_tfs_z', 'alpaca_bot_default_num_predict', 'alpaca_bot_default_top_k',
         'alpaca_bot_default_top_p', 'alpaca_bot_version',
+        // Written only before 0.4.16, when releases were on GitHub alone: v0.3.0:src/Options.php:191,212,222,227
+        // (and main from d856ff7 to 7b8a000), and v0.4.9:src/Define.php:118.
+        'alpaca_bot_api_token', 'alpaca_bot_save_chat_history', 'alpaca_bot_default_system_message',
+        'alpaca_bot_default_message_placeholder', 'alpaca_bot_log_chat_response',
     ];
 
     /** Options that extend one of ours, that one of ours extends, or that an unanchored or unescaped match would take. */
