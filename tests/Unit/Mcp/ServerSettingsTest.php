@@ -261,8 +261,8 @@ it('names the stored servers whose value a posted mask would drop because the or
 
 // m-5: core's add_option() runs the settings page's sanitize callback a second time on a site's
 // first save, with nothing stored yet, so every row reads as new. A URL that passed is not looked
-// up again until a write of the option completes (R79: forgetPassed()), so the second pass cannot
-// refuse what the first let through after its value was already kept.
+// up again until the option is written or a PUT is refused (R79: forgetPassed()), so the second
+// pass cannot refuse what the first let through after its value was already kept.
 it('looks up a URL that passed no more until the option is written', function (): void {
     $asked = 0;
     $settings = new ServerSettings(static function (string $host, string $url) use (&$asked): array {

@@ -57,10 +57,11 @@ final class ServerSettings
     private \Closure $resolve;
 
     /**
-     * URLs that passed the check since the last write of the option. Core's add_option() runs the
-     * settings page's sanitize callback a second time on a site's first save, with nothing stored
-     * yet, so every row reads as new there; this is what keeps that second pass from looking each
-     * host up again, and from refusing a row whose value beforeSave() has already kept.
+     * URLs that passed the check since the option was last written or a PUT was refused. Core's
+     * add_option() runs the settings page's sanitize callback a second time on a site's first
+     * save, with nothing stored yet, so every row reads as new there; this is what keeps that
+     * second pass from looking each host up again, and from refusing a row whose value
+     * beforeSave() has already kept.
      *
      * forgetPassed() empties it: on `update_option_alpaca_bot_settings` and
      * `add_option_alpaca_bot_settings`, which core fires once the row is written (after that second
@@ -188,7 +189,7 @@ final class ServerSettings
      * changed against the row of the same id in `$stored`. A URL the stored list already has
      * under that id is not looked up again, so saving another tab costs no lookup; whether that
      * address still passes is Egress's question when it builds a client. Nor is a URL that
-     * passed since the last write of the option (`$passed`).
+     * passed since the option was last written or a PUT was refused (`$passed`).
      *
      * `$rows` are rows Schema::sanitizeMcpServers() made, so each URL is https with a host; the
      * host is handed to the check as wp_parse_url() gives it, brackets and all for an IPv6
