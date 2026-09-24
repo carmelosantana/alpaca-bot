@@ -17,8 +17,8 @@ use AlpacaBot\Toolkit\AddressPin;
  * `allowed_redirect_hosts` host, at any port; on multisite `ms_allowed_http_request_hosts`
  * (priority 20, ms-default-filters.php) says yes for every domain of the network. web_fetch keeps
  * that: a page on the site's own host is a page, and it calls AddressPin directly. An MCP server
- * is not: it is an address an administrator typed, and a site whose own host name resolves
- * privately would otherwise let that address be any port on the private network behind it. So an
+ * is not: it is an address an administrator typed, and core's yes would let it be any port on
+ * any of those hosts, even one that resolves to a private or loopback address. So an
  * MCP server is refused the site's own host unless the site says otherwise, and the way to say so
  * is the one Egress's docblock gives: a listener of the site's own on
  * `http_request_host_is_external`, which this leaves in place.
@@ -28,9 +28,13 @@ use AlpacaBot\Toolkit\AddressPin;
  * arrives) restores it too. Putting the copy back, rather than adding the two callbacks again,
  * keeps their place among the other priority-10 and priority-20 listeners: add_filter() would
  * append them, after a site's own listener at the same priority, and a site listener that says no
- * after core's yes would then be overruled by it for every later web_fetch in the request. What
- * the copy costs: a listener added to the filter *during* the check is dropped with it; the only
- * code that runs during it is AddressPin and the filter's own listeners.
+ * after core's yes would then be overruled by it for every later web_fetch in the request.
+ *
+ * What it costs: while the check runs, core's two callbacks are off the filter for all the code
+ * that runs then, not only AddressPin: the lookup, the filter's other listeners, and whatever the
+ * wording of a refusal sets off through __() (`gettext` listeners, just-in-time loading of a text
+ * domain). A web_fetch check made from that code is refused the site's own host, and a listener
+ * that code adds to the filter is gone once the copy is put back.
  *
  * @since 0.6.0
  */
