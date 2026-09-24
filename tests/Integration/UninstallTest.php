@@ -383,6 +383,63 @@ final class UninstallTest extends TestCase
         }
     }
 
+    /** Puts the plugin's own registrations back after a test that swapped them out. */
+    private function reregisterOurTypes(): void
+    {
+        foreach ([ConversationStore::POST_TYPE, UsageMeter::POST_TYPE] as $type) {
+            unregister_post_type($type);
+        }
+        Plugin::instance()->get(ConversationStore::class)->registerPostType();
+        Plugin::instance()->get(UsageMeter::class)->registerPostType();
+    }
+
+    /**
+     * `chat_log` and `chat_history` are not prefixed. When another plugin that is loaded for the
+     * uninstall has registered one of them, its posts are its own and the whole type is left,
+     * ours of that type included: nothing on a post says whose it is. The other type still goes.
+     */
+    public function test_it_leaves_a_type_another_loaded_plugin_registered(): void
+    {
+        $user = self::factory()->user->create();
+        Plugin::instance()->get(Store::class)->set('privacy.save_history', true);
+        $conversation = Plugin::instance()->get(ConversationStore::class)->create($user, 'Ours')->id;
+        unregister_post_type(UsageMeter::POST_TYPE);
+        register_post_type(UsageMeter::POST_TYPE, ['public' => false]);
+        try {
+            $theirs = self::factory()->post->create(['post_type' => UsageMeter::POST_TYPE, 'post_status' => 'publish']);
+            update_post_meta($theirs, 'their_meta', 'kept');
+
+            $this->uninstall();
+
+            $this->assertNotNull(get_post($theirs), 'another plugin\'s chat_log post was deleted');
+            $this->assertSame('kept', get_post_meta($theirs, 'their_meta', true));
+            $this->assertNull(get_post($conversation), 'chat_history is still ours, and its post is still there');
+        } finally {
+            $this->reregisterOurTypes();
+        }
+    }
+
+    /**
+     * The Plugins screen and a plain `wp plugin uninstall`: the plugin was not loaded, so nothing
+     * registers either type, and every post of both goes.
+     */
+    public function test_it_removes_the_posts_of_a_type_nothing_registers(): void
+    {
+        unregister_post_type(ConversationStore::POST_TYPE);
+        unregister_post_type(UsageMeter::POST_TYPE);
+        try {
+            $conversation = self::factory()->post->create(['post_type' => ConversationStore::POST_TYPE, 'post_status' => 'private']);
+            $receipt = self::factory()->post->create(['post_type' => UsageMeter::POST_TYPE, 'post_status' => 'private']);
+
+            $this->uninstall();
+
+            $this->assertNull(get_post($conversation));
+            $this->assertNull(get_post($receipt));
+        } finally {
+            $this->reregisterOurTypes();
+        }
+    }
+
     /** Run twice, and on a site that never stored anything: nothing to remove is not an error. */
     public function test_it_is_safe_to_run_on_a_site_with_nothing_to_remove(): void
     {
