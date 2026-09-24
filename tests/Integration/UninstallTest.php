@@ -280,7 +280,7 @@ final class UninstallTest extends TestCase
             $this->assertSame(0, $this->postMetaRows($ours[$which]), "$which post meta is still there");
             $this->assertNull(get_post($ours[$which]), "get_post() still answers $which from the cache");
         }
-        $this->assertSame('', get_post_meta($ours['page'], 'alpaca_bot_cache_' . md5('0.4 shortcode'), true));
+        $this->assertSame('', get_post_meta($ours['page'], 'alpaca_bot_cache_' . md5('0.4 shortcode'), true), '0.4.17\'s shortcode cache is still on the page');
         $this->assertTrue($this->postRow($ours['page']), 'the page carrying the 0.4 cache is not ours');
         // Ours: user meta.
         foreach ([UserPrefs::META_DEFAULT_MODEL, UserPrefs::META_DRAWER_OPEN, UserPrefs::META_DRAWER_CONVERSATION, 'alpaca_bot_user_settings'] as $key) {
@@ -288,7 +288,7 @@ final class UninstallTest extends TestCase
             $this->assertSame('', get_user_meta($user, $key, true), "get_user_meta($key) still answers from the cache");
         }
         // Ours: the cron event.
-        $this->assertFalse(wp_next_scheduled(UsageMeter::CLEANUP_HOOK));
+        $this->assertFalse(wp_next_scheduled(UsageMeter::CLEANUP_HOOK), 'the usage cleanup event is still scheduled');
 
         // Theirs: every neighbour.
         // Collected, not asserted one at a time, so a failure names every neighbour that went.
@@ -303,11 +303,11 @@ final class UninstallTest extends TestCase
         foreach ([ConversationStore::META_MESSAGES, Migrate04::META_ATTEMPTS, 'alpaca_bot_cache_notahash', 'total_tokens'] as $key) {
             $this->assertNotSame('', get_post_meta($theirs['post'], $key, true), "post meta $key on a post that is not ours was deleted");
         }
-        $this->assertTrue($this->userMetaRow($user, 'alpaca_bot_drawer_open_backup'));
-        $this->assertTrue($this->userMetaRow($user, 'alpaca_bot_default_model_x'));
-        $this->assertTrue($this->userMetaRow($other, 'other_plugin_pref'));
-        $this->assertNotFalse(wp_next_scheduled(UsageMeter::CLEANUP_HOOK . '_backup'));
-        $this->assertNotFalse(wp_next_scheduled('other_plugin_cleanup'));
+        $this->assertTrue($this->userMetaRow($user, 'alpaca_bot_drawer_open_backup'), 'user meta alpaca_bot_drawer_open_backup was deleted');
+        $this->assertTrue($this->userMetaRow($user, 'alpaca_bot_default_model_x'), 'user meta alpaca_bot_default_model_x was deleted');
+        $this->assertTrue($this->userMetaRow($other, 'other_plugin_pref'), 'user meta other_plugin_pref was deleted');
+        $this->assertNotFalse(wp_next_scheduled(UsageMeter::CLEANUP_HOOK . '_backup'), 'a cron event next to ours was unscheduled');
+        $this->assertNotFalse(wp_next_scheduled('other_plugin_cleanup'), 'another plugin\'s cron event was unscheduled');
     }
 
     /** Run twice, and on a site that never stored anything: nothing to remove is not an error. */
