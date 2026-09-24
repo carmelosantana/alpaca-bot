@@ -11,8 +11,8 @@ use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Tool\ToolResult;
  * versions, mapping content blocks and retries belong to an implementation, not to this interface.
  *
  * Both methods throw McpUnavailable when the server cannot be reached or does not answer as an MCP
- * server. An implementation returns a ToolResult, including one whose status is an error, only
- * when the server answered.
+ * server. A client that talks to a server returns a ToolResult, including one whose status is an
+ * error, only when the server answered.
  *
  * @since 0.6.0
  */

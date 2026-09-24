@@ -18,8 +18,7 @@ namespace AlpacaBot\Mcp;
  *   as `enum`, so it sorts none of them;
  * - the encoding is json_encode() with JSON_UNESCAPED_SLASHES, JSON_UNESCAPED_UNICODE,
  *   JSON_PRESERVE_ZERO_FRACTION and JSON_INVALID_UTF8_SUBSTITUTE, with `serialize_precision` held
- *   at -1 for the call, so a php.ini that sets another value does not move the digest of a
- *   non-integral float.
+ *   at -1 for the call, so a php.ini that sets another value does not move the digest.
  *
  * The top-level title is outside the hash, because it is a display label. `annotations` is hashed
  * as sent, `annotations.title` included. JSON_INVALID_UTF8_SUBSTITUTE writes U+FFFD for each
@@ -46,8 +45,8 @@ namespace AlpacaBot\Mcp;
  * McpToolDefinitionTest pins for the same definitions. Parity stops in two places:
  * - for a definition json_encode() cannot encode, php-agents hashes the empty string, which every
  *   such definition shares, and this class hashes the serialize() form;
- * - at a `serialize_precision` other than -1, php-agents' digest of a non-integral float moves and
- *   this one does not.
+ * - at a `serialize_precision` other than -1, php-agents' digest of a definition holding a
+ *   non-integral float can move (0.1 does at 17) and this one does not.
  * A stored pin is only portable between the two classes where they agree.
  *
  * destructive() is true only when the `destructiveHint` annotation is exactly `true`. The MCP
