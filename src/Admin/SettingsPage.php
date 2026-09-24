@@ -358,9 +358,9 @@ final class SettingsPage
      * tab gives a row (core keeps one field per id, so a repeated id is one row). Only an id
      * Schema::isMcpId() admits gets one, which is every id Schema::sanitizeMcpServers() stores and
      * the only kind of key Schema::sanitizeAccessMcp() keeps, so the tab never shows a select a
-     * save would drop. That id rule's characters, `[a-z0-9_]`, all come back from a browser and
-     * PHP's form parser as themselves in `alpaca_bot_settings[access.mcp][<id>]`, and an id
-     * starting with a letter is never read as an int key. A row that reached the option with any
+     * save would drop. That id rule's characters, `[a-z0-9_]`, are all ones form encoding leaves
+     * as they are, and PHP's form parser reads `alpaca_bot_settings[access.mcp][<id>]` back with
+     * the id unchanged; an id starting with a letter is never read as an int key. A row that reached the option with any
      * other id gets no select, and reads as administrators only (Access::stored()).
      *
      * @return list<string>
