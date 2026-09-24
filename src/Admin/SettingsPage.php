@@ -433,7 +433,8 @@ final class SettingsPage
         $url = static fn(mixed $row): string => is_array($row) && is_string($row['url'] ?? null) ? $row['url'] : '';
 
         $posted = $input['toolkits.mcp_servers'] ?? null;
-        foreach (Schema::droppedMcpRows($posted) as $key => $fault) {
+        // Valid on its own means the only fault was a prefix an earlier row had taken.
+        foreach (array_keys(Schema::droppedMcpRows($posted)) as $key) {
             /** @var array<array-key, mixed> $row droppedMcpRows() lists arrays only */
             $row = is_array($posted) ? $posted[$key] : [];
             $id = is_string($row['id'] ?? null) ? $row['id'] : null;
@@ -442,7 +443,7 @@ final class SettingsPage
                 if (in_array($id, array_column($rows, 'id'), true)) {
                     continue;
                 }
-                if ($fault === 'taken' && $alone !== []) {
+                if ($alone !== []) {
                     $rows[] = $alone[0];
                 } else {
                     $rows[] = $was[$id];
@@ -450,7 +451,7 @@ final class SettingsPage
                     $notices['mcp_dropped'][] = sprintf(__('The change to MCP server %1$s (%2$s) was not saved: its URL has to be https with a host, and its prefix a lowercase letter then up to 15 lowercase letters, digits or underscores, and not "ability".', 'alpaca-bot'), $url($was[$id]), $id);
                 }
             } elseif (trim($url($row)) !== '') {
-                if ($fault === 'taken' && $alone !== []) {
+                if ($alone !== []) {
                     // No id: the last pass through the schema gives it one, against every row kept.
                     $rows[] = array_merge($alone[0], ['id' => '']);
                 } else {
