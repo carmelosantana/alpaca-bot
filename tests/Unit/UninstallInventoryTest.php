@@ -17,16 +17,22 @@ declare(strict_types=1);
  *   elsewhere: `ab_messages` is post meta that goes with its posts, not by name.
  * - `$wpdb` writes (query, insert, replace, update, delete) are counted per file against
  *   UNINSTALL_WPDB_WRITES, with the uninstall.php entry that covers each file's rows.
- * - Tables, uploads and files: a `CREATE TABLE`/`ALTER TABLE` string, dbDelta(), and every
- *   filesystem or upload writer in UNINSTALL_FILE_WRITERS must not occur, apart from the one
- *   entry that writes to the CLI's standard output. The plugin has none of these today; a new
- *   one fails here, because uninstall.php removes no table and no file.
+ * - Tables, uploads and files: a `CREATE TABLE`/`ALTER TABLE` string, dbDelta(), every
+ *   filesystem or upload function in UNINSTALL_FILE_WRITERS, and the UNINSTALL_FILESYSTEM_METHODS
+ *   called on `$wp_filesystem` must not occur, apart from the one entry that writes to the CLI's
+ *   standard output. The plugin has none of these today; a new one fails here, because
+ *   uninstall.php removes no table and no file.
  *
- * What this does not see: a name built into a variable elsewhere and handed to a call site the
- * map already covers (RateLimit's `$key`, UsageMeter's `$key`) is trusted to keep the shape the
- * map says. A new shape under an existing prefix (a drift marker keyed some new way, through
- * Drift::set()) is caught only by tests/Integration/UninstallTest.php, and only if that test
- * writes it. A write through a WordPress function missing from UNINSTALL_WRITERS is not seen.
+ * What this does not see. A name built into a variable and handed to a call site the map covers
+ * is trusted to keep the shape the map says; there are five such sites, and
+ * tests/Integration/UninstallTest.php writes each through the plugin's own code, so a change of
+ * shape leaves a row it finds: RateLimit's `$key` (RateLimit::hit()), UsageMeter's `$key`
+ * (UsageMeter::record() and monthSummary()), Shortcodes\Chat's `$key` (Chat::cacheKey()),
+ * Rest\ChatController's `self::STREAM_TRANSIENT . $token` (a POST /chat with `stream`) and
+ * Mcp\Drift's `self::PREFIX . $id` (Drift::set()). The last is only as good as the id the test
+ * passes: a new id shape through Drift::set() is caught only if that test writes one, and the
+ * ids are bounded by Settings\Schema's MCP_ID. A write through a function or method not on these
+ * lists is not seen.
  */
 
 const UNINSTALL_WRITERS = [
@@ -42,6 +48,12 @@ const UNINSTALL_WRITERS = [
     'register_post_type' => 0, 'register_taxonomy' => 0, 'add_role' => 0, 'add_cap' => 0,
     'wp_insert_post' => 0, 'wp_insert_term' => 1, 'wp_set_object_terms' => 2, 'wp_insert_comment' => 0,
     'wp_insert_user' => 0, 'set_theme_mod' => 0,
+    'update_blog_option' => 1, 'add_blog_option' => 1,
+    'wp_set_post_terms' => 2, 'wp_add_object_terms' => 2,
+    // No name argument at all (the taxonomy is fixed): any call has to be in the map.
+    'wp_set_post_tags' => 99, 'wp_set_post_categories' => 99,
+    // Read for its `post_type` element; an array literal without one changes no type and is skipped.
+    'wp_update_post' => 0,
 ];
 
 const UNINSTALL_FILE_WRITERS = [
@@ -49,6 +61,9 @@ const UNINSTALL_FILE_WRITERS = [
     'wp_mkdir_p', 'move_uploaded_file', 'wp_handle_upload', 'wp_handle_sideload', 'media_handle_upload',
     'media_handle_sideload', 'wp_insert_attachment', 'wp_filesystem',
 ];
+
+/** WP_Filesystem methods that write, found as method calls on `$wp_filesystem`. */
+const UNINSTALL_FILESYSTEM_METHODS = ['put_contents', 'copy', 'move', 'mkdir', 'touch'];
 
 /**
  * `<file>|<function>|<name>` => the uninstall.php entry that removes it (quoted there), or
@@ -64,6 +79,7 @@ const UNINSTALL_WRITE_MAP = [
     'Shortcodes/Chat.php|set_transient|$key' => 'alpaca_bot_shortcode_',
     'Mcp/Drift.php|set_transient|self::PREFIX . $id' => 'alpaca_bot_mcp_drift_',
     'Rest/ChatController.php|set_transient|self::STREAM_TRANSIENT . $token' => 'alpaca_bot_stream_',
+    'Settings/Migrate04.php|wp_update_post|wp_slash($update)' => 'chat_history',
     'Toolkit/DraftPostToolkit.php|wp_insert_post|$type' => 'left: a draft of the site\'s own post type, owned by the user who asked for it',
 ];
 
@@ -197,8 +213,10 @@ function uninstallWriteSites(): array
                 continue;
             }
             $arg = $call['args'][UNINSTALL_WRITERS[$call['fn']]] ?? '';
-            if ($call['fn'] === 'wp_insert_post' && preg_match("/'post_type' => ([^,\\]]+)/", $arg, $m) === 1) {
+            if (in_array($call['fn'], ['wp_insert_post', 'wp_update_post'], true) && preg_match("/'post_type' => ([^,\\]]+)/", $arg, $m) === 1) {
                 $arg = trim($m[1]);
+            } elseif ($call['fn'] === 'wp_update_post' && preg_match('/^(?:wp_slash\\()?\\[/', $arg) === 1) {
+                continue;
             }
             $literal = uninstallResolve($arg, $source);
             $sites[$path . '|' . $call['fn'] . '|' . ($literal ?? $arg)][] = [$path . ':' . $call['line'], $literal];
@@ -248,6 +266,11 @@ it('counts the $wpdb writes of each file, and names the entry that removes their
 it('finds no table, upload or file the plugin writes, beyond the CLI output', function (): void {
     $found = [];
     foreach (uninstallSrcFiles() as $path => $source) {
+        foreach (uninstallCalls($source, UNINSTALL_FILESYSTEM_METHODS) as $call) {
+            if ($call['on'] === '$wp_filesystem') {
+                $found[] = "$path:{$call['line']} \$wp_filesystem->{$call['fn']}()";
+            }
+        }
         foreach (uninstallCalls($source, UNINSTALL_FILE_WRITERS) as $call) {
             $key = $path . '|' . $call['fn'] . '|' . ($call['args'][0] ?? '');
             if (!$call['method'] && !array_key_exists($key, UNINSTALL_FILE_WRITES_ALLOWED)) {
