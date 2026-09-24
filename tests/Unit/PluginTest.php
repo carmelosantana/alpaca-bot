@@ -420,7 +420,7 @@ it('hands the view routes a Discovery over the container\'s client factory, and 
         ->and((new ReflectionProperty(AlpacaBot\Mcp\Discovery::class, 'clients'))->getValue($discovery))->toBe($factory)
         ->and((new ReflectionProperty(AlpacaBot\Mcp\Discovery::class, 'store'))->getValue($discovery))->toBe($plugin->get(Store::class));
     $view->register();
-    expect($registered)->toContain('/view/mcp-tools/(?P<id>[a-z0-9_]{1,24})');
+    expect($registered)->toContain('/view/mcp-tools/(?P<id>' . AlpacaBot\Settings\Schema::MCP_ID_PATTERN . ')');
 
     // The registry's MCP servers come through the same factory, over the container's one Store
     // and one Access, so a turn's toolkits and the approval list ask the same seam.
