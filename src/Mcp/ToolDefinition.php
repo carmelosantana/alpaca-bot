@@ -90,7 +90,7 @@ final readonly class ToolDefinition
             'annotations' => $this->annotations,
         ]);
         $precision = (string) ini_get('serialize_precision');
-        // phpcs:ignore WordPress.PHP.IniSet.Risky -- serialize_precision sets how many digits json_encode() and serialize() write for a float; it is changed for these two calls only and put back in the finally below.
+        // phpcs:ignore WordPress.PHP.IniSet.Risky -- serialize_precision decides how json_encode() and serialize() write a float; it is changed for these two calls only and put back in the finally below.
         ini_set('serialize_precision', '-1');
         try {
             // phpcs:ignore WordPress.WP.AlternativeFunctions.json_encode_json_encode -- The plain function, as php-agents' McpToolDefinition calls it: when json_encode() returns false, wp_json_encode() runs _wp_json_sanity_check() and encodes again, a second path the library does not have.
