@@ -493,6 +493,32 @@ final class McpSettingsTest extends TestCase
         $this->assertStringNotContainsString('Bearer lost', (string) wp_json_encode($errors));
     }
 
+    /**
+     * A new row the page puts back after a prefix clash comes back with no id, so it cannot pass
+     * for a stored server. Here `bb` is renamed to `aa`'s prefix, `aa` to `cc`, and a new row
+     * repeats `aa`'s stored URL and prefix: the renamed stored server keeps the prefix over the
+     * new row, which is named and left out.
+     */
+    public function test_a_new_row_put_back_after_a_clash_is_not_taken_for_a_stored_server(): void
+    {
+        $this->rest('PUT', '/settings', ['toolkits.mcp_servers' => [
+            ['url' => self::URL, 'prefix' => 'aa', 'header_value' => self::SECRET],
+            ['url' => 'https://93.184.216.35/mcp', 'prefix' => 'bb', 'header_value' => self::OTHER],
+        ]]);
+        $posted = self::formPost($this->page('toolkits'));
+        $posted['toolkits.mcp_servers'][1]['prefix'] = 'aa';
+        $posted['toolkits.mcp_servers'][0]['prefix'] = 'cc';
+        $posted['toolkits.mcp_servers'] = [$posted['toolkits.mcp_servers'][1], $posted['toolkits.mcp_servers'][0], ['url' => self::URL, 'prefix' => 'aa', 'header_value' => 'Bearer lost']];
+        $this->save($posted);
+
+        $after = get_option(Plugin::OPTION)['toolkits.mcp_servers'];
+        $this->assertSame(['bb' => 'aa', 'aa' => 'cc'], array_column($after, 'prefix', 'id'));
+        $this->assertSame(['aa' => self::SECRET, 'bb' => self::OTHER], Secrets::all());
+        $errors = get_settings_errors(Plugin::OPTION);
+        $this->assertSame(['mcp_prefix'], array_column($errors, 'code'));
+        $this->assertStringNotContainsString('Bearer lost', (string) wp_json_encode($errors));
+    }
+
     /** R78 over real dispatch: a PUT that would drop a stored server's row writes nothing at all. */
     public function test_a_put_that_would_drop_a_stored_row_is_refused_and_writes_nothing(): void
     {
