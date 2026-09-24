@@ -18,7 +18,8 @@ import { expect, test, type Locator, type Page, type Request } from '@playwright
  * - "New chat" starts over in the sidebar and does not leave the editor.
  * - On a new post the composer names no post until the post is first saved or autosaved, and
  *   then names it without a reload or a remount: the first turn carries no `post_id`, a turn after
- *   the save carries the post's.
+ *   the save carries the post's. A post chip taken off stays off through the next save, and
+ *   "New chat" puts it back, even when its fragment was rendered before the save.
  */
 const REPLY = 'Hello from the Alpaca Bot end-to-end fake provider.';
 const ADMIN_USER = process.env.WP_ADMIN_USER ?? 'admin';
@@ -324,6 +325,53 @@ test('on a new post the sidebar names no post until the post is saved, and then 
   await send(sidebar, 'hello once more');
   expect(await sent).toEqual({});
   await turnDone(sidebar);
+
+  // New chat puts it back, as the server renders it for the saved post.
+  await sidebar.locator('.page-title-action').click();
+  await expect(sidebar.locator('#ab-messages article')).toHaveCount(0);
+  await expect(sidebar.locator('#ab-form .ab-chip[data-chip="post"] .ab-chip__label')).toHaveText(`Editing: ${TITLE}new again`);
+  await expect(sidebar.locator('#ab-form input[name="context[post_id]"]')).toHaveValue(String(id));
+  expect(panels.count).toBe(3);
+});
+
+test('a New chat whose fragment was rendered before the first save, and arrives after it, still leaves the post named', async ({ page }) => {
+  await login(page);
+  const panels = panelRequests(page);
+  const toggle = await openEditor(page, '/wp-admin/post-new.php');
+  await toggle.click();
+  const sidebar = page.locator('.ab-sidebar');
+  await booted(sidebar);
+  expect(panels.count).toBe(1);
+
+  // New chat's fragment is rendered while the post is an auto-draft, so it has no post chip, and
+  // is held from the page until the save has brought the chip; later requests go straight through.
+  const isPanel = (u: URL): boolean => /view(\/|%2F)panel/.test(u.toString());
+  let release: () => void = () => {};
+  const saved = new Promise<void>((resolve) => { release = resolve; });
+  let rendered: () => void = () => {};
+  const fragment = new Promise<void>((resolve) => { rendered = resolve; });
+  let held = false;
+  await page.route(isPanel, async (r) => {
+    if (held) { await r.continue(); return; }
+    held = true;
+    const response = await r.fetch();
+    rendered();
+    await saved;
+    await r.fulfill({ response });
+  });
+  await sidebar.locator('.page-title-action').click();
+  await fragment;
+  await save(page, `${TITLE}raced`);
+  await expect(sidebar.locator('#ab-form .ab-chip[data-chip="post"]')).toHaveCount(1);
+  expect(panels.count).toBe(3);
+  release();
+
+  // The held fragment's chips, none, replace the chip the save brought, and the sidebar asks again.
+  await expect.poll(() => panels.count).toBe(4);
+  await page.unroute(isPanel);
+  await expect(sidebar.locator('#ab-form .ab-chip[data-chip="post"] .ab-chip__label')).toHaveText(`Editing: ${TITLE}raced`);
+  await expect(sidebar.locator('#ab-form input[name="context[post_id]"]')).toHaveValue(String(await postId(page)));
+  await expect(sidebar.locator('#ab-form .ab-chip')).toHaveCount(1);
 });
 
 test('on a new post an autosave is enough for the sidebar to name it', async ({ page }) => {

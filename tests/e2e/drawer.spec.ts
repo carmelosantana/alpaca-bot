@@ -20,7 +20,7 @@ import { expect, test, type Page } from '@playwright/test';
  *   it remembers and stores nothing.
  * - The composer's context chips: the screen's on the posts list, and the post's as well on a
  *   classic editor screen (an attachment's, which core never opens in the block editor), each in
- *   the turn's POST /chat body until it is taken off.
+ *   the turn's POST /chat body until it is taken off, and back after "New chat".
  *
  * Each test puts the drawer's state where it needs it through the route rather than relying on
  * what an earlier test or run left behind.
@@ -250,7 +250,7 @@ test('an iframe screen gets no drawer: core defines IFRAME_REQUEST for it and it
   await drawerState(page, { open: false, conversation_id: 0 });
 });
 
-test('on the posts list the drawer\'s composer shows the screen as a chip, whose removal takes it off the next turn', async ({ page }) => {
+test('on the posts list the drawer\'s composer shows the screen as a chip, whose removal takes it off the next turn until New chat puts it back', async ({ page }) => {
   await login(page);
   await drawerState(page, { open: false, conversation_id: 0 });
   await page.goto('/wp-admin/edit.php');
@@ -281,6 +281,14 @@ test('on the posts list the drawer\'s composer shows the screen as a chip, whose
   await drawer.locator('#ab-message').press('Enter');
   expect(await sent).toEqual({});
   await turnDone(drawer);
+
+  // New chat puts it back, with its fields, as the screen renders it.
+  await drawer.locator('.page-title-action').click();
+  await expect(drawer.locator('#ab-messages article')).toHaveCount(0);
+  await expect(chip.locator('.ab-chip__label')).toHaveText('On: Posts');
+  await expect(drawer.locator('#ab-form input[name="context[screen][id]"]')).toHaveValue('edit-post');
+  await expect(drawer.locator('#ab-form input[name="context[screen][title]"]')).toHaveValue('Posts');
+  await expect(drawer.locator('#ab-form .ab-chip')).toHaveCount(1);
 
   await drawerState(page, { open: false, conversation_id: 0 });
 });
