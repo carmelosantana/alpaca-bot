@@ -365,7 +365,14 @@ final class Access
         return is_array($map) ? $map : [];
     }
 
-    /** A row's hook segment: dots as slashes, so `tool.web_fetch` is `tool/web_fetch` and `shortcode` is itself. */
+    /**
+     * A row's hook segment: dots as slashes, so `tool.web_fetch` is `tool/web_fetch` and `shortcode` is itself.
+     *
+     * Two rows that differ only in a dot against a slash would share one filter. An MCP row whose
+     * id Schema::isMcpId() admits cannot: such an id holds neither, so `mcp.<id>` is `mcp/<id>`
+     * and no other row's. That is the id rule Schema::sanitizeMcpServers() gives every server and
+     * Schema::sanitizeAccessMcp() every `access.mcp` key.
+     */
     private static function hook(string $row): string
     {
         return str_replace('.', '/', $row);

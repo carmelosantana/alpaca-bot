@@ -115,6 +115,42 @@ abstract class TestCase extends \WP_UnitTestCase
         });
     }
 
+    /**
+     * What a browser would post for the `alpaca_bot_settings` controls in `$html`, parsed by the
+     * parser PHP itself uses for a form body (parse_str()), so a name is read as options.php
+     * would read it, to any depth: `[]` appends, a bracketed segment is a key. An unchecked
+     * checkbox posts nothing; a select posts its selected option. Only `alpaca_bot_settings[...]`
+     * names are kept, and what comes back is that array.
+     *
+     * @return array<string, mixed>
+     */
+    protected static function formPost(string $html): array
+    {
+        $pairs = [];
+        preg_match_all('/<(input|textarea|select)\b([^>]*)>(.*?<\/\1>)?/s', $html, $tags, PREG_SET_ORDER);
+        foreach ($tags as $tag) {
+            if (!preg_match('/name="(alpaca_bot_settings\[[^"]*)"/', $tag[2], $name)) {
+                continue;
+            }
+            if ($tag[1] === 'textarea') {
+                $value = substr($tag[3] ?? '', 0, -strlen('</textarea>'));
+            } elseif ($tag[1] === 'select') {
+                preg_match('/<option value="([^"]*)" selected=["\']selected["\']/', $tag[3] ?? '', $sel);
+                $value = $sel[1] ?? '';
+            } else {
+                if (str_contains($tag[2], 'type="checkbox"') && !str_contains($tag[2], 'checked')) {
+                    continue;
+                }
+                preg_match('/value="([^"]*)"/', $tag[2], $val);
+                $value = $val[1] ?? '';
+            }
+            $pairs[] = rawurlencode(html_entity_decode($name[1], ENT_QUOTES)) . '=' . rawurlencode(html_entity_decode((string) $value, ENT_QUOTES));
+        }
+        parse_str(implode('&', $pairs), $parsed);
+        $posted = $parsed['alpaca_bot_settings'] ?? [];
+        return is_array($posted) ? $posted : [];
+    }
+
     protected function asAdmin(): int
     {
         $id = self::factory()->user->create(['role' => 'administrator']);

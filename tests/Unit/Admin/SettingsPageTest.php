@@ -404,37 +404,32 @@ it('adds an Access row for each MCP server the settings hold, and none for the a
         ->toContain('a filter changes this to Editors and up (<code>edit_others_posts</code>).');
 });
 
-// A server id comes from the settings, so it may be anything. It reaches the page escaped in the
-// row's title (core prints a field title as it is given), its id and its field name; and each id
-// refused below gets no select at all. postable() admits
-// printable ASCII other than `]` and `&`, but not a single space or an integer. Most refused ids
-// below change on the way back: PHP ends a bracketed name segment at the first `]` (`x]"<y` posts
-// as `x`) and cuts it at NUL; a browser posts LF and CR as CRLF, a trailing one included
-// (`lf\nx` would overwrite `lf\r\nx`'s row, `trail\n` would write `trail\r\n`); esc_attr()
-// leaves `&amp;` as it is, which a browser then decodes to `&`; PHP reads `[ ]` as an append; and
-// `12` becomes an int key, which Schema::sanitizeAccessMcp() drops. CRLF, a tab and `é` come back
-// intact in Chromium, and are refused anyway: they are outside the characters the page admits.
-it('escapes a hostile MCP server id everywhere it reaches the page, and gives no select to one a form cannot post back', function (): void {
+// A server id comes from the settings, and an option edited by hand may hold anything there. The
+// Access tab gives a select only to an id Schema::isMcpId() admits, the rule every stored server
+// id and every access.mcp key is held to, so a select is never shown that a save would then drop
+// (R73). The rule's characters, `[a-z0-9_]`, all come back from a browser and PHP's form parser
+// as themselves; each refused id below is one that the old, wider allowlist admitted or that
+// changes on the way back: `x]"<y` posts as `x`, `lf\nx` as `lf\r\nx`, `12` as an int key.
+it('gives a select only to a server id the id rule admits, and escapes the row anyway', function (): void {
     stubSelected();
     Functions\when('get_current_user_id')->justReturn(7);
     Functions\when('esc_attr')->alias(fn($s) => htmlspecialchars((string) $s, ENT_QUOTES));
     Functions\when('esc_html')->alias(fn($s) => htmlspecialchars((string) $s, ENT_QUOTES));
-    $evil = 'a"<b>c';
-    $refused = ['x]"<y', "nul\0byte", "lf\nx", "cr\rx", "crlf\r\nx", "tab\tx", 'ent&amp;x', "e\u{e9}x", '12', "trail\n", "12\n", ' '];
-    $fields = settingsFields(['toolkits.mcp_servers' => array_map(static fn(string $id): array => ['id' => $id], [$evil, ...$refused])]);
+    $refused = ['a"<b>c', 'x]"<y', "nul\0byte", "lf\nx", "crlf\r\nx", "tab\tx", 'ent&amp;x', "e\u{e9}x", '12', '1abc', "trail\n", ' ', 'two words', 'Upper', '_lead', 'dot.ted', 'sla/sh', str_repeat('z', 25)];
+    $fields = settingsFields(['toolkits.mcp_servers' => array_map(static fn(string $id): array => ['id' => $id], [...$refused, 'docs_2'])]);
 
-    expect(array_values(array_filter(array_keys($fields), static fn(string $id): bool => str_starts_with($id, 'alpaca_bot_access.mcp'))))->toBe(['alpaca_bot_access.mcp.' . $evil]);
-    $row = $fields['alpaca_bot_access.mcp.' . $evil];
-    $html = ($row['render'])();
-    expect($row['title'])->toBe('MCP server: a&quot;&lt;b&gt;c')
-        ->and($html)->toContain('<select id="ab-access-mcp-a&quot;&lt;b&gt;c" name="alpaca_bot_settings[access.mcp][a&quot;&lt;b&gt;c]">')
-        ->not->toContain('<b>');
+    expect(array_values(array_filter(array_keys($fields), static fn(string $id): bool => str_starts_with($id, 'alpaca_bot_access.mcp'))))->toBe(['alpaca_bot_access.mcp.docs_2']);
+    $row = $fields['alpaca_bot_access.mcp.docs_2'];
+    expect($row['title'])->toBe('MCP server: docs_2')
+        ->and(($row['render'])())->toContain('<select id="ab-access-mcp-docs_2" name="alpaca_bot_settings[access.mcp][docs_2]">');
 });
 
 // Schema::sanitize() keeps the stored value of a key a post leaves out, so a save from another
-// tab keeps the whole access.mcp map by not posting it. The Access tab posts the map (one select
-// per server), so it carries the entries it has no select for, or saving it would drop them.
-it('posts nothing for the access.mcp map from another tab, and carries the entries with no select from the Access tab', function (): void {
+// tab keeps the whole access.mcp map by not posting it. The Access tab posts the map, one select
+// per listed server, and nothing for an entry whose server is not listed: every write of the
+// option drops such an entry (Mcp\ServerSettings::beforeSave()), so carrying it would carry it
+// into its own removal.
+it('posts nothing for the access.mcp map from another tab, and from the Access tab only the listed servers\' selects', function (): void {
     Functions\when('settings_errors')->justReturn(null);
     Functions\when('settings_fields')->justReturn(null);
     Functions\when('do_settings_sections')->alias(function (string $page): void { echo "<!-- sections:{$page} -->"; });
@@ -442,9 +437,7 @@ it('posts nothing for the access.mcp map from another tab, and carries the entri
     Functions\when('admin_url')->justReturn('http://x/wp-admin/admin.php');
     Functions\when('add_query_arg')->justReturn('http://x/');
     Functions\when('sanitize_key')->returnArg();
-    // `bad` is a hand-edited entry holding an array, which Fields::hidden() would print as
-    // `[access.mcp][bad][x]`: a post holding only that would replace the map, and sanitize it to [].
-    $settings = ['toolkits.mcp_servers' => [['id' => 'docs']], 'access.mcp' => ['docs' => 'read', 'gone' => 'publish_posts', 'x]y' => 'read', 'bad' => ['x' => 'read']]];
+    $settings = ['toolkits.mcp_servers' => [['id' => 'docs']], 'access.mcp' => ['docs' => 'read', 'gone' => 'publish_posts', 'bad' => ['x' => 'read']]];
 
     $_GET['tab'] = 'chat';
     ob_start();
@@ -459,12 +452,134 @@ it('posts nothing for the access.mcp map from another tab, and carries the entri
     expect($other)->not->toContain('alpaca_bot_settings[access.mcp]')
         // The Access tab's schema rows are carried from another tab like any other field; only the map is left out.
         ->toContain('name="alpaca_bot_settings[access.chat]"');
-    expect($access)->toContain('<input type="hidden" name="alpaca_bot_settings[access.mcp][gone]" value="publish_posts">')
-        // docs has its select on this tab; a second input under its name would race it.
-        ->not->toContain('name="alpaca_bot_settings[access.mcp][docs]"')
-        // An id postable() does not admit is not carried either: this one would post as `x`.
-        ->not->toContain('alpaca_bot_settings[access.mcp][x]')
-        ->and(strpos($access, '[access.mcp][gone]'))->toBeLessThan(strpos($access, '<!-- sections:'));
+    // do_settings_sections() is a stand-in here, so the selects are not in this markup at all:
+    // whatever access.mcp input the page printed, it printed itself.
+    expect($access)->not->toContain('alpaca_bot_settings[access.mcp]');
+});
+
+// ---------------------------------------------------------------- MCP servers on the Tools tab
+// toolkits.mcp_servers is a table: a row per stored server and one blank row to add one, every
+// control posting under the row's index. The id is a hidden input, so an edit of the prefix or
+// the URL keeps the server's id, and with it its Access entry and its header value.
+
+it('draws a row per stored server and a blank one, posting every control under the row\'s index', function (): void {
+    Functions\when('checked')->alias(fn($a, $b = true, $echo = true) => $a == $b ? ' checked="checked"' : '');
+    $html = (settingsFields(['toolkits.mcp_servers' => [
+        ['id' => 'trk', 'url' => 'https://mcp.example.com/mcp', 'header_name' => 'Authorization', 'header_value' => Schema::MASK, 'prefix' => 'trk', 'timeout' => 12.5, 'max_bytes' => 2048, 'approved' => ['search' => str_repeat('a', 64)]],
+        ['id' => 'gh', 'url' => 'https://gh.example.com/mcp', 'header_name' => '', 'header_value' => '', 'prefix' => 'gh', 'timeout' => 30.0, 'max_bytes' => 1048576, 'approved' => []],
+    ]])['alpaca_bot_toolkits.mcp_servers']['render'])();
+
+    $n = 'alpaca_bot_settings[toolkits.mcp_servers]';
+    expect($html)->toContain('<div class="ab-mcp-servers" id="ab-mcp-servers"><table class="widefat striped">')
+        ->toContain('<input type="hidden" name="' . $n . '[0][id]" value="trk">')
+        ->toContain('name="' . $n . '[0][prefix]" value="trk"')
+        ->toContain('<input type="url" class="regular-text" name="' . $n . '[0][url]" value="https://mcp.example.com/mcp" pattern="https://.*"')
+        ->toContain('name="' . $n . '[0][header_name]" value="Authorization"')
+        ->toContain('<input type="password" class="regular-text" name="' . $n . '[0][header_value]" value="' . Schema::MASK . '" autocomplete="new-password"')
+        ->toContain('name="' . $n . '[0][timeout]" value="12.5"')
+        ->toContain('name="' . $n . '[0][max_bytes]" value="2048"')
+        ->toContain('<input type="checkbox" name="' . $n . '[0][remove]" value="1" aria-label="Remove">')
+        // The approvals Task 26's discovery fills, carried as they are until then.
+        ->toContain('<div id="ab-mcp-tools-trk"><input type="hidden" name="' . $n . '[0][approved][search]" value="' . str_repeat('a', 64) . '">')
+        ->toContain('<input type="hidden" name="' . $n . '[1][id]" value="gh">')
+        ->toContain('name="' . $n . '[1][header_value]" value=""')
+        // The blank row: no id, so a server added there is given one on save.
+        ->toContain('name="' . $n . '[2][url]" value=""')
+        ->not->toContain('[2][id]')
+        ->not->toContain('[3]');
+    expect(substr_count($html, '<tr>'))->toBe(4);
+});
+
+it('never prints a header value into the table, whatever the row holds', function (): void {
+    Functions\when('checked')->alias(fn($a, $b = true, $echo = true) => $a == $b ? ' checked="checked"' : '');
+    $html = (settingsFields(['toolkits.mcp_servers' => [
+        ['id' => 'raw', 'url' => 'https://mcp.example.com/mcp', 'header_value' => 'Bearer raw-secret', 'prefix' => 'raw'],
+    ]])['alpaca_bot_toolkits.mcp_servers']['render'])();
+    expect($html)->not->toContain('raw-secret')
+        ->toContain('name="alpaca_bot_settings[toolkits.mcp_servers][0][header_value]" value="' . Schema::MASK . '"');
+});
+
+it('escapes what a stored row holds at every attribute and text node', function (): void {
+    Functions\when('checked')->alias(fn($a, $b = true, $echo = true) => $a == $b ? ' checked="checked"' : '');
+    Functions\when('esc_attr')->alias(fn($s) => htmlspecialchars((string) $s, ENT_QUOTES));
+    Functions\when('esc_html')->alias(fn($s) => htmlspecialchars((string) $s, ENT_QUOTES));
+    $evil = '"><script>alert(1)</script>';
+    $html = (settingsFields(['toolkits.mcp_servers' => [
+        ['id' => $evil, 'url' => $evil, 'header_name' => $evil, 'prefix' => $evil, 'timeout' => $evil, 'max_bytes' => $evil, 'approved' => [$evil => $evil]],
+    ]])['alpaca_bot_toolkits.mcp_servers']['render'])();
+    expect($html)->not->toContain('<script');
+});
+
+// The address check at save time runs in the page's sanitize callback, which is where a person is
+// there to be told. A refused new server is left out; a refused edit of a stored server keeps the
+// stored row whole, so its saved address, header value and approvals stand; everything else in
+// the post is saved; and the screen says which address and why.
+it('keeps a server\'s stored row for a refused edit, leaves out a refused new one, and says which and why', function (): void {
+    Functions\when('add_settings_section')->justReturn(null);
+    Functions\when('add_settings_field')->justReturn(null);
+    $opts = null;
+    Functions\expect('register_setting')->once()->withArgs(function (string $group, string $option, array $o) use (&$opts): bool {
+        $opts = $o;
+        return true;
+    });
+    $stored = ['toolkits.mcp_servers' => [
+        ['id' => 'trk', 'url' => 'https://mcp.example.com/mcp', 'header_name' => 'Authorization', 'header_value' => Schema::MASK, 'prefix' => 'trk', 'timeout' => 30.0, 'max_bytes' => 1048576, 'approved' => ['search' => str_repeat('a', 64)]],
+    ]];
+    Functions\when('get_option')->justReturn($stored);
+    $errors = [];
+    Functions\when('add_settings_error')->alias(function (string $setting, string $code, string $message) use (&$errors): void {
+        $errors[] = [$setting, $code, $message];
+    });
+    $page = new SettingsPage(new AlpacaBot\Settings\Store([]), new ModelCatalog(new AlpacaBot\Provider\Factory(new AlpacaBot\Settings\Store([]))), new AlpacaBot\Access(new AlpacaBot\Settings\Store([])), null, new AlpacaBot\Mcp\ServerSettings(static function (string $host, string $url): array {
+        return str_starts_with($host, 'internal') ? throw new AlpacaBot\Toolkit\AddressRefused("{$host} resolves to 10.0.0.7, a private, local or other special-purpose address.") : ['93.184.216.34'];
+    }));
+    $page->register();
+    $out = ($opts['sanitize_callback'])(['chat.welcome' => 'Saved', 'toolkits.mcp_servers' => [
+        ['id' => 'trk', 'url' => 'https://internal-a.example.com/mcp', 'prefix' => 'trk', 'header_value' => 'Bearer do-not-print'],
+        ['url' => 'https://internal-b.example.com/mcp', 'prefix' => 'new'],
+        ['url' => 'https://ok.example.com/mcp', 'prefix' => 'ok'],
+    ]], Plugin::OPTION);
+
+    expect($out['chat.welcome'])->toBe('Saved')
+        ->and(array_column($out['toolkits.mcp_servers'], 'id'))->toBe(['trk', 'ok'])
+        ->and($out['toolkits.mcp_servers'][0])->toBe($stored['toolkits.mcp_servers'][0])
+        ->and($errors)->toHaveCount(2)
+        ->and(array_column($errors, 1))->toBe(['mcp_address', 'mcp_address'])
+        ->and($errors[0][2])->toContain('https://internal-a.example.com/mcp')->toContain('internal-a.example.com resolves to 10.0.0.7')->toContain('https://mcp.example.com/mcp')
+        ->and($errors[1][2])->toContain('https://internal-b.example.com/mcp')->toContain('not added')
+        ->and(json_encode($errors))->not->toContain('do-not-print');
+});
+
+// A refused edit puts the stored row back whole, prefix included, and a new row of the same post
+// may have taken that prefix in the meantime. The schema keeps the first of two rows under one
+// prefix, so the new one is left out, and the screen says so rather than lose it quietly.
+it('says so when a server kept after a refused edit takes back a prefix a new row had claimed', function (): void {
+    Functions\when('add_settings_section')->justReturn(null);
+    Functions\when('add_settings_field')->justReturn(null);
+    $opts = null;
+    Functions\expect('register_setting')->once()->withArgs(function (string $group, string $option, array $o) use (&$opts): bool {
+        $opts = $o;
+        return true;
+    });
+    Functions\when('get_option')->justReturn(['toolkits.mcp_servers' => [
+        ['id' => 'a', 'url' => 'https://a.example.com/mcp', 'header_name' => '', 'header_value' => '', 'prefix' => 'p', 'timeout' => 30.0, 'max_bytes' => 1048576, 'approved' => []],
+    ]]);
+    $errors = [];
+    Functions\when('add_settings_error')->alias(function (string $setting, string $code, string $message) use (&$errors): void {
+        $errors[] = $code . ': ' . $message;
+    });
+    $store = new AlpacaBot\Settings\Store([]);
+    (new SettingsPage($store, new ModelCatalog(new AlpacaBot\Provider\Factory($store)), new AlpacaBot\Access($store), null, new AlpacaBot\Mcp\ServerSettings(static function (string $host, string $url): array {
+        return $host === 'internal.example.com' ? throw new AlpacaBot\Toolkit\AddressRefused('refused.') : ['93.184.216.34'];
+    })))->register();
+    $out = ($opts['sanitize_callback'])(['toolkits.mcp_servers' => [
+        ['id' => 'a', 'url' => 'https://internal.example.com/mcp', 'prefix' => 'q'],
+        ['url' => 'https://b.example.com/mcp', 'prefix' => 'p'],
+    ]], Plugin::OPTION);
+    expect(array_column($out['toolkits.mcp_servers'], 'prefix'))->toBe(['p'])
+        ->and(array_column($out['toolkits.mcp_servers'], 'url'))->toBe(['https://a.example.com/mcp'])
+        ->and($errors)->toHaveCount(2)
+        ->and($errors[1])->toStartWith('mcp_prefix: ')->toContain('https://b.example.com/mcp');
 });
 
 // ---------------------------------------------------------------- the abilities allowlist

@@ -6,6 +6,8 @@ namespace AlpacaBot\Rest;
 
 use AlpacaBot\Access;
 use AlpacaBot\Errors;
+use AlpacaBot\Mcp\Secrets;
+use AlpacaBot\Mcp\ServerSettings;
 use AlpacaBot\Settings\Schema;
 use AlpacaBot\Settings\Store;
 
@@ -22,19 +24,24 @@ use AlpacaBot\Settings\Store;
  * form never wipes it. A secret that is not a string at all (`null`, an array) keeps the stored
  * value too, and the reply shows the mask so the client can see it did: the rule and its reasons
  * are Schema::sanitize()'s, shared with every other writer of the option, and this route only
- * hands the body through. `?reveal=1` on the GET answers the raw secret instead of the mask:
- * only the flag is on the URL, and the secret is in the body. A PUT never reveals, whatever its
- * body says.
+ * hands the body through. An MCP server's header value reads back the same way, MASK or '', in
+ * each row of `toolkits.mcp_servers` (masked()), and takes the same three values on the way in;
+ * Mcp\ServerSettings leaves only MASK or '' there on each update_option() of the option once the
+ * plugin has registered its filter, so masked() is for a row that reached the option any other
+ * way. `?reveal=1` on the GET answers the raw secrets
+ * instead of the mask: the provider key from the option, and each header value from
+ * Mcp\Secrets. Only the flag is on the URL, and the secrets are in the body. A PUT never
+ * reveals, whatever its body says.
  *
  * `reveal` asks `manage_options` in show(), a second check the route's own gate has already
  * passed. The gate is the `settings.read` row of Settings › Access and its filters (capability()
  * below), and a site may lower that row or filter it for a custom role, so without this check it
- * would be handing that role the provider credential in cleartext. A caller the gate admitted
- * without `manage_options` is not refused the route, only the secret: the reply is the masked
- * read, the same one they get without the flag. Nothing else on the route has a floor, because
- * nothing else on it is a credential — and the write, the other half of that argument in 0.5,
- * now has a row and a key of its own, so admitting a role to the read no longer admits it to
- * the PUT.
+ * would be handing that role the provider credential and every MCP server's header value in
+ * cleartext. A caller the gate admitted without `manage_options` is not refused the route, only
+ * the secrets: the reply is the masked read, the same one they get without the flag. Nothing the
+ * route answers without the flag has a floor, because none of it is a credential — and the write,
+ * the other half of that argument in 0.5, now has a row and a key of its own, so admitting a role
+ * to the read no longer admits it to the PUT.
  *
  * The reveal response sets `Cache-Control: no-store` itself even though core normally supplies
  * it. WP_REST_Server::serve_request() sends a response's own headers first and then, when
@@ -56,7 +63,15 @@ use AlpacaBot\Settings\Store;
  * of a second, different verb; a client that wants to change one model reads the map, edits it
  * and sends it back. Whatever arrives goes through Schema::sanitize() on its way to the option
  * (unknown keys dropped, ranges clamped, types coerced), and the reply is the array as stored,
- * masked, so the client sees what the schema made of its input rather than what it sent.
+ * masked, so the client sees what the schema made of its input rather than what it sent. "As
+ * stored" is exact: Store's memo after a write is what the option's filters wrote, so a header
+ * value taken out of its row, or an `access.mcp` entry dropped with its server, is gone from the
+ * reply too.
+ *
+ * A PUT carrying `toolkits.mcp_servers` has the address of each server whose URL is new or
+ * changed checked first (Mcp\ServerSettings::refusals()). When one fails, the reply is a 400
+ * with the code `alpaca_bot_mcp_address`, naming each refused URL and why, and nothing is written,
+ * the other keys of the same PUT included. The message never carries a header value.
  *
  * The keys are dotted (`models.temperature`) and read from get_params(), core's merge of every
  * source; in practice only a JSON body can carry them. PHP rewrites a dot in a top-level
@@ -87,7 +102,13 @@ use AlpacaBot\Settings\Store;
  */
 final class SettingsController extends Controller
 {
-    public function __construct(private Store $store) {}
+    private ServerSettings $servers;
+
+    /** @param ServerSettings|null $servers the address check a PUT of `toolkits.mcp_servers` runs; one over AddressPin by default */
+    public function __construct(private Store $store, ?ServerSettings $servers = null)
+    {
+        $this->servers = $servers ?? new ServerSettings();
+    }
 
     public function routes(): array
     {
@@ -150,7 +171,15 @@ final class SettingsController extends Controller
     public function show(\WP_REST_Request $request): \WP_REST_Response
     {
         if ((bool) $request->get_param('reveal') && current_user_can('manage_options')) {
-            $response = new \WP_REST_Response($this->store->all());
+            $settings = $this->store->all();
+            if (is_array($settings['toolkits.mcp_servers'] ?? null)) {
+                foreach ($settings['toolkits.mcp_servers'] as $i => $row) {
+                    if (is_array($row)) {
+                        $settings['toolkits.mcp_servers'][$i]['header_value'] = Secrets::resolve($row);
+                    }
+                }
+            }
+            $response = new \WP_REST_Response($settings);
             $response->header('Cache-Control', 'no-store');
             return $response;
         }
@@ -162,6 +191,18 @@ final class SettingsController extends Controller
         $input = array_intersect_key($request->get_params(), Schema::fields());
         if ($input === []) {
             return Errors::badRequest(__('No settings were sent. Send a JSON body of dotted keys, e.g. {"models.temperature": 0.7}.', 'alpaca-bot'));
+        }
+        if (array_key_exists('toolkits.mcp_servers', $input)) {
+            $rows = Schema::sanitizeMcpServers($input['toolkits.mcp_servers']);
+            $refused = $this->servers->refusals($rows, $this->store->get('toolkits.mcp_servers'));
+            if ($refused !== []) {
+                $reasons = [];
+                foreach ($refused as $i => $reason) {
+                    /* translators: 1: an MCP server's URL, 2: why its address was refused */
+                    $reasons[] = sprintf(__('%1$s: %2$s', 'alpaca-bot'), $rows[$i]['url'], $reason);
+                }
+                return Errors::badRequest(__('Nothing was saved: an MCP server\'s address did not pass the check.', 'alpaca-bot') . ' ' . implode(' ', $reasons), 'alpaca_bot_mcp_address');
+            }
         }
         $this->store->replace($input);
         return new \WP_REST_Response($this->masked($this->store->all()));
@@ -181,6 +222,9 @@ final class SettingsController extends Controller
             if (in_array($key, Schema::SECRETS, true)) {
                 $field['secret'] = true;
             }
+            if ($key === 'toolkits.mcp_servers') {
+                $field['secret_fields'] = ['header_value'];
+            }
             $fields[$key] = $field;
         }
         return new \WP_REST_Response(['sections' => Schema::sections(), 'fields' => $fields, 'mask' => Schema::MASK]);
@@ -196,6 +240,9 @@ final class SettingsController extends Controller
             if (($settings[$key] ?? '') !== '') {
                 $settings[$key] = Schema::MASK;
             }
+        }
+        if (array_key_exists('toolkits.mcp_servers', $settings)) {
+            $settings['toolkits.mcp_servers'] = Schema::maskedServers($settings['toolkits.mcp_servers']);
         }
         return $settings;
     }

@@ -78,6 +78,12 @@ final class Assets
      * where core folds the menu, and under 782px they scroll inside the wrapper. The label
      * column keeps its 200px, which the table used to take from it.
      *
+     * The MCP servers table (SettingsPage::renderMcpServers()) is the same kind of table, a
+     * `widefat` nested in a Settings API row, and its wrapper, `div.ab-mcp-servers`, gets the
+     * first two of these rules: the wrapper sized by the row and scrolling, and the cells made
+     * cells again with widefat's padding. The rest are about the overrides table's own columns
+     * and are scoped to it.
+     *
      * Inline on core's `forms` handle rather than in a stylesheet of the plugin's: the settings
      * page loads no plugin stylesheet, the chat shell's is another screen's stylesheet, and a
      * rule attached to forms.css prints after the rules it answers by construction, and prints
@@ -90,6 +96,8 @@ final class Assets
         .form-table .ab-overrides th.ab-overrides__system { width: 35%; }
         .form-table .ab-overrides .regular-text { width: 100%; min-width: 12em; }
         .form-table .ab-overrides select { width: auto; }
+        .form-table .ab-mcp-servers { overflow-x: auto; contain: inline-size; }
+        .form-table .ab-mcp-servers th, .form-table .ab-mcp-servers td { display: table-cell; width: auto; padding: 8px 10px; vertical-align: middle; }
         CSS;
 
     public function enqueue(string $hook): void

@@ -51,6 +51,29 @@ it('replace sanitizes, persists, and refreshes the memoized cache', function ():
         ->and($s->get('provider.kind'))->toBe('ollama');
 });
 
+// A pre_update_option filter can change what is written (Mcp\ServerSettings takes a header value
+// out of a server row and drops an access.mcp entry whose server is gone), and the memo is what
+// every later reader in the request sees: the REST reply to a PUT, `wp alpaca-bot settings`'s
+// echo. So the memo is the value the option was written with, after every filter, not the value
+// replace() handed update_option(). Core runs the filters inside update_option(); the stand-in
+// here runs the one replace() adds, over a value an earlier filter changed.
+it('memoises what the option was written with after its filters, not what it handed update_option()', function (): void {
+    Functions\when('get_option')->justReturn([]);
+    $last = null;
+    Brain\Monkey\Filters\expectAdded('pre_update_option_' . Plugin::OPTION)->once()->whenHappen(static function (callable $cb) use (&$last): void {
+        $last = $cb;
+    });
+    Functions\when('update_option')->alias(static function (string $name, array $value) use (&$last): bool {
+        ($last)(['models.num_ctx' => 512] + $value, [], $name);
+        return true;
+    });
+    $s = new Store();
+    $s->replace(['models.num_ctx' => 4096, 'models.temperature' => 1.5]);
+    expect($s->get('models.num_ctx'))->toBe(512)
+        ->and($s->get('models.temperature'))->toBe(1.5)
+        ->and(has_filter('pre_update_option_' . Plugin::OPTION, $last))->toBeFalse();
+});
+
 it('resolves a masked secret against what it already holds, on set and on replace', function (): void {
     Functions\when('get_option')->justReturn(['provider.api_key' => 'sk-stored']);
     $written = [];

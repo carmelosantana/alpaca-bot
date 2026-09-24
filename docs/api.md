@@ -406,12 +406,12 @@ the `PUT` asks `settings.write` (section 2). `?reveal=1` needs `manage_options` 
 say. `GET /settings` is the whole `alpaca_bot_settings` option, every schema key
 with defaults filled in. The `access.*` keys are the Settings › Access rows (section 7); each one
 is a capability name from a fixed list, except `access.mcp`, which is one map of MCP server id to
-capability. The one secret, `provider.api_key`, reads back as `••••` when a key is
-stored and `""` when none is:
+capability. Two things are secrets, and both read back as `••••` when one is stored and `""` when
+none is: `provider.api_key`, and the `header_value` of each row of `toolkits.mcp_servers`:
 
 ```
 $ curl -s -u "admin:$PW" "$B/settings"
-{"provider.kind":"ollama","provider.base_url":"http:\/\/ollama.example:11434\/v1","provider.api_key":"","provider.timeout":60,"models.default":"qwen3-vl:2b","models.temperature":0.7,"models.num_ctx":8192,"models.keep_alive":"5m","models.overrides":[],"chat.system_prompt":"","chat.welcome":"How can I help?","chat.placeholder":"Message Alpaca Bot","chat.user_can_change_model":true,"chat.context_messages":20,"chat.history_limit":20,"chat.spellcheck":true,"chat.assistant_avatar":"","privacy.save_history":true,"privacy.usage_log":true,"privacy.usage_retention_days":0,"governance.site_monthly_tokens":0,"governance.user_monthly_tokens":0,"toolkits.enabled":["web_fetch","summarize","draft_post"],"toolkits.user_agent":"AlpacaBot\/0.5 (+https:\/\/github.com\/carmelosantana\/alpaca-bot)","toolkits.abilities":[],"access.chat":"edit_posts","access.tool.web_fetch":"edit_posts","access.tool.summarize":"edit_posts","access.tool.draft_post":"edit_posts","access.tool.abilities":"manage_options","access.settings.read":"manage_options","access.settings.write":"manage_options","access.shortcode":"edit_posts","access.mcp":[]}
+{"provider.kind":"ollama","provider.base_url":"http:\/\/ollama.example:11434\/v1","provider.api_key":"","provider.timeout":60,"models.default":"qwen3-vl:2b","models.temperature":0.7,"models.num_ctx":8192,"models.keep_alive":"5m","models.overrides":[],"chat.system_prompt":"","chat.welcome":"How can I help?","chat.placeholder":"Message Alpaca Bot","chat.user_can_change_model":true,"chat.context_messages":20,"chat.history_limit":20,"chat.spellcheck":true,"chat.assistant_avatar":"","privacy.save_history":true,"privacy.usage_log":true,"privacy.usage_retention_days":0,"governance.site_monthly_tokens":0,"governance.user_monthly_tokens":0,"toolkits.enabled":["web_fetch","summarize","draft_post"],"toolkits.user_agent":"AlpacaBot\/0.5 (+https:\/\/github.com\/carmelosantana\/alpaca-bot)","toolkits.abilities":[],"toolkits.mcp_servers":[],"access.chat":"edit_posts","access.tool.web_fetch":"edit_posts","access.tool.summarize":"edit_posts","access.tool.draft_post":"edit_posts","access.tool.abilities":"manage_options","access.settings.read":"manage_options","access.settings.write":"manage_options","access.shortcode":"edit_posts","access.mcp":[]}
 ```
 
 (`provider.base_url` is the site's own value.) What this route answers is what is *stored*, which
@@ -424,7 +424,10 @@ for two keys is not the same as what the plugin *uses*:
 - `chat.user_can_change_model` and `privacy.save_history` change what `POST /chat` does with a
   body it accepts, silently; section 3's `POST /chat` covers both.
 
-`?reveal=1` answers the raw key instead. The response is not cacheable — WordPress sends its own
+`?reveal=1` answers the raw secrets instead: the key, and each MCP server's header value, which
+is read from the option it is kept in (`alpaca_bot_mcp_secrets`, below). It needs
+`manage_options` whatever the `settings.read` row says; a user the row admits without it gets the
+masked read. The response is not cacheable — WordPress sends its own
 no-cache headers on any REST response to a logged-in user, and this route sets `no-store` on the
 reveal itself so the guarantee still holds on a site that has filtered core's headers off:
 
@@ -440,7 +443,9 @@ the flag. Filter `rest_send_nocache_headers` to false and the plain `GET` answer
 
 `PUT /settings` is a partial update: send the keys you are changing, as a JSON body of dotted
 keys, and the reply is the whole array as stored (masked). Values go through the schema on the
-way in: unknown keys are dropped, numbers clamped to their range, types coerced.
+way in: unknown keys are dropped, numbers clamped to their range, types coerced. "As stored"
+includes what happens after the schema: a header value taken out of its row, and an `access.mcp`
+entry dropped with its server, are gone from the reply as they are from the option.
 
 ```
 $ curl -s -u "admin:$PW" -H 'Content-Type: application/json' -X PUT \
@@ -525,6 +530,39 @@ Rules worth knowing before you write:
   {"toolkits.abilities":["core/get-site-info"]}
   ```
 
+- **`toolkits.mcp_servers` is a list of remote MCP servers, replaced wholesale.** Each row is
+  `{id, url, header_name, header_value, prefix, timeout, max_bytes, approved}`:
+
+  - `url` must be `https` with a host, or the row is dropped. The address is checked on the way
+    in for every server whose URL is new or changed: a private, loopback, link-local or other
+    special-purpose address, or a name that resolves to one, is refused (the address rule
+    `web_fetch` uses, without its exemption for the site's own host), and the PUT answers `400 alpaca_bot_mcp_address` naming the URL and why, and writes
+    nothing, the other keys of the PUT included. It is checked again before any connection is
+    made to the server. A connection to an MCP server never goes through a proxy, neither
+    WordPress's (`WP_PROXY_HOST`) nor one set in the server's environment, so a site that must
+    reach the internet through a proxy cannot reach one.
+  - `prefix` names the server's tools for the model, `<prefix>__<tool>`: a lowercase letter, then
+    up to 15 of `[a-z0-9_]`, unique in the list, and never `ability`. A row without one is
+    dropped.
+  - `id` is what the server is known by: its `access.mcp` entry, its capability filter
+    `alpaca_bot/capability/mcp/<id>`, its header value. A lowercase letter, then up to 23 of
+    `[a-z0-9_]`. Send a stored server's `id` back with its row to keep it; a row without one is
+    a new server, given an id made from its prefix, never one a stored server has.
+  - `header_name` and `header_value` are one static header sent with every request, typically
+    `Authorization` and `Bearer …`. The value has the key's three spellings (`""` clears it,
+    `"••••"` keeps what is stored, any other string replaces it) with CR, LF and NUL removed,
+    except that a new server has nothing stored, so `"••••"` there means none. The value is not
+    kept in `alpaca_bot_settings`, which WordPress loads on every request, but in
+    `alpaca_bot_mcp_secrets`, which it does not; the row holds `"••••"` or `""`.
+  - `timeout` (1-120 seconds, default 30) and `max_bytes` (1024-8388608, default 1048576) bound
+    one call.
+  - `approved` is tool name => the 64-hex-character fingerprint of the definition that was
+    approved; anything else is dropped.
+
+  A server left out of the list is removed, and its header value and its `access.mcp` entry go
+  with it, so a server added later under the same id starts at administrators only. The schema
+  route flags the field `secret_fields: ["header_value"]`.
+
 - **`privacy.usage_retention_days`** (0-3650, 0 = keep forever) drives a daily cron event,
   `alpaca_bot/usage/cleanup`, that deletes usage receipts (`chat_log` rows) older than the
   window. It never touches conversations. A receipt counts toward the monthly caps until its
@@ -532,8 +570,9 @@ Rules worth knowing before you write:
   already in place gets 0 written on upgrade; only a fresh install takes the default of 90.
 
 `GET /settings/schema` is the field list a client renders a form from, `{sections, fields,
-mask}`; a secret field is flagged `secret: true` and server-side sanitize callables are left
-out. Three of the fields:
+mask}`; a secret field is flagged `secret: true`, a field holding secrets inside its rows names
+them in `secret_fields` (`toolkits.mcp_servers`: `["header_value"]`), and server-side sanitize
+callables are left out. Three of the fields:
 
 ```
 $ curl -s -u "admin:$PW" "$B/settings/schema"
@@ -759,6 +798,7 @@ route the same object is the `error` frame's data.
 | Status | Code | When | Extra `data` |
 |---|---|---|---|
 | 400 | `alpaca_bot_bad_request` | An empty turn; a model the catalog does not list; an image that is not a `data:` URL; a `conversation_id` that is not yours; a settings PUT naming no schema key | |
+| 400 | `alpaca_bot_mcp_address` | A settings PUT whose `toolkits.mcp_servers` has a new or changed URL whose address is refused (private, loopback, link-local or special-purpose, or a name resolving to one); nothing is written, and the message names each URL and why | |
 | 400 | `rest_invalid_param`, `rest_missing_callback_param` | Core's schema validation: `limit` out of 0-200, `user` not `me`/`all`, `refresh` not a boolean, a stream GET with no `token` | `params`, `details` |
 | 401 | `rest_forbidden` | Not authenticated (no cookie+nonce, no Application Password) | |
 | 402 | `alpaca_bot_cap_exceeded` | The monthly token cap is spent (`governance.user_monthly_tokens` or `governance.site_monthly_tokens`) | `scope` (`user`/`site`); `limit` and `used` only when `scope` is `user` |

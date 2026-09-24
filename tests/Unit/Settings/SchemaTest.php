@@ -292,3 +292,161 @@ it('keeps an abilities allowlist of ability names only, once each, never an alpa
         // Left out of the write: kept, and cleaned again on the way through.
         ->and(Schema::sanitize([], ['toolkits.abilities' => ['core/get-site-info', 'alpaca-bot/chat']])['toolkits.abilities'])->toBe(['core/get-site-info']);
 });
+
+// ---------------------------------------------------------------- MCP servers
+// toolkits.mcp_servers is a list of rows, one per remote server. What sanitizeMcpServers() can
+// judge without a lookup it judges here; whether the address is public is Mcp\ServerSettings's
+// question on the way in and Mcp\Egress's on every connection.
+
+it('reads an mcp server row into shape and drops one it cannot read as a server', function (): void {
+    $rows = Schema::sanitizeMcpServers([
+        ['url' => ' https://mcp.example.com/mcp ', 'prefix' => 'trk', 'header_name' => 'Authorization', 'header_value' => 'Bearer t', 'timeout' => '900', 'max_bytes' => '10'],
+        ['url' => 'http://mcp.example.com/mcp', 'prefix' => 'plain'],                 // not https
+        ['url' => 'https:///mcp', 'prefix' => 'nohost'],                              // no host
+        ['url' => 'https://./mcp', 'prefix' => 'dot'],                                // a host that trims to nothing
+        ['url' => 'https://other.example.com/mcp', 'prefix' => 'trk'],                // prefix already taken
+        ['url' => 'https://other.example.com/mcp', 'prefix' => 'ability'],            // reserved: the abilities toolkit names its tools ability__
+        ['url' => 'https://other.example.com/mcp', 'prefix' => 'NOPE'],               // uppercase
+        ['url' => 'https://other.example.com/mcp', 'prefix' => '9lives'],             // a tool name may not start with a digit
+        ['url' => 'https://other.example.com/mcp', 'prefix' => "tail\n"],             // `$` would match before this LF; `\z` does not
+        ['url' => 'https://other.example.com/mcp', 'prefix' => str_repeat('p', 17)],  // longer than 16
+        ['url' => 'https://other.example.com/mcp'],                                   // no prefix
+        ['url' => '', 'prefix' => 'blank'],                                           // the form's empty "add a server" row
+        ['url' => 'https://gone.example.com/mcp', 'prefix' => 'gone', 'remove' => '1'],
+        'not a row',
+    ]);
+    expect($rows)->toBe([[
+        'id' => 'trk',
+        'url' => 'https://mcp.example.com/mcp',
+        'header_name' => 'Authorization',
+        'header_value' => 'Bearer t',
+        'prefix' => 'trk',
+        'timeout' => 120.0,
+        'max_bytes' => 1024,
+        'approved' => [],
+    ]])
+        ->and(Schema::sanitizeMcpServers('nope'))->toBe([])
+        ->and(Schema::sanitizeMcpServers([['url' => 'https://a.example.com/mcp', 'prefix' => str_repeat('p', 16)]])[0]['prefix'])->toBe(str_repeat('p', 16));
+});
+
+it('clamps a server\'s timeout and byte cap, and gives an unreadable one the default', function (): void {
+    $rows = Schema::sanitizeMcpServers([
+        ['url' => 'https://a.example.com/mcp', 'prefix' => 'a', 'timeout' => '0', 'max_bytes' => '99999999999'],
+        ['url' => 'https://b.example.com/mcp', 'prefix' => 'b', 'timeout' => 'soon', 'max_bytes' => ['x']],
+        ['url' => 'https://c.example.com/mcp', 'prefix' => 'c', 'timeout' => '12.5', 'max_bytes' => '2048'],
+    ]);
+    expect(array_column($rows, 'timeout'))->toBe([1.0, 30.0, 12.5])
+        ->and(array_column($rows, 'max_bytes'))->toBe([8388608, 1048576, 2048]);
+});
+
+// The id names the server everywhere else -- its Access entry, its filter, its header value -- so
+// it is assigned once and survives an edit of the prefix or the URL. A row that brings a usable id
+// keeps it before any row is given a new one, so a new row can never take an existing server's
+// id, and with it that server's Access entry, by being listed first.
+it('keeps a row\'s id ahead of making any, and makes one from the prefix when there is none or it is taken', function (): void {
+    $rows = Schema::sanitizeMcpServers([
+        ['id' => 'tracker', 'url' => 'https://a.example.com/mcp', 'prefix' => 'trk'],
+        ['url' => 'https://b.example.com/mcp', 'prefix' => 'gh'],
+        ['id' => 'gh', 'url' => 'https://c.example.com/mcp', 'prefix' => 'gh2'],
+        ['id' => 'gh', 'url' => 'https://d.example.com/mcp', 'prefix' => 'gh3'],
+    ]);
+    expect(array_column($rows, 'id'))->toBe(['tracker', 'gh_2', 'gh', 'gh3']);
+});
+
+// A row that brings no id of its own is a new server, and Mcp\ServerSettings tells a new server
+// from a stored one by id alone. So a made id is never one the stored list holds, even when the
+// server that held it is being removed in this same write: a new row would otherwise be read as
+// that server, and keep its header value and its Access entry. sanitize() hands over the stored
+// ids; a row that names one of them itself is that server, and keeps it.
+it('never makes an id the stored list holds, and lets a row that names one keep it', function (): void {
+    $rows = Schema::sanitizeMcpServers([
+        ['url' => 'https://a.example.com/mcp', 'prefix' => 'trk'],
+        ['id' => 'gh', 'url' => 'https://b.example.com/mcp', 'prefix' => 'gh'],
+    ], ['trk', 'gh', 'trk_2']);
+    expect(array_column($rows, 'id'))->toBe(['trk_3', 'gh']);
+    $stored = ['toolkits.mcp_servers' => [['id' => 'trk', 'url' => 'https://gone.example.com/mcp', 'prefix' => 'trk']]];
+    expect(array_column(Schema::sanitize(['toolkits.mcp_servers' => [['url' => 'https://new.example.com/mcp', 'prefix' => 'trk']]], $stored)['toolkits.mcp_servers'], 'id'))->toBe(['trk_2'])
+        ->and(array_column(Schema::sanitize(['toolkits.mcp_servers' => [['id' => 'trk', 'url' => 'https://moved.example.com/mcp', 'prefix' => 'trk']]], $stored)['toolkits.mcp_servers'], 'id'))->toBe(['trk'])
+        // Left out of the write, the stored list is sanitized against itself and keeps its ids.
+        ->and(array_column(Schema::sanitize([], $stored)['toolkits.mcp_servers'], 'id'))->toBe(['trk']);
+});
+
+// R73: an id and a prefix start with a letter and are anchored with \z. An all-digit id would be
+// an int key in the access.mcp map, which gets no Access row; a digit-first prefix would make
+// every tool name start with a digit, which a tool name may not.
+it('makes a new id for one that is all digits, starts with a digit, ends in a newline, or is not lowercase', function (): void {
+    $rows = Schema::sanitizeMcpServers([
+        ['id' => '12', 'url' => 'https://a.example.com/mcp', 'prefix' => 'a'],
+        ['id' => '1abc', 'url' => 'https://b.example.com/mcp', 'prefix' => 'b'],
+        ['id' => "cc\n", 'url' => 'https://c.example.com/mcp', 'prefix' => 'c'],
+        ['id' => 'Dee', 'url' => 'https://d.example.com/mcp', 'prefix' => 'd'],
+        ['id' => str_repeat('e', 25), 'url' => 'https://e.example.com/mcp', 'prefix' => 'e'],
+        ['id' => 12, 'url' => 'https://f.example.com/mcp', 'prefix' => 'f'],
+        ['id' => str_repeat('g', 24), 'url' => 'https://g.example.com/mcp', 'prefix' => 'g'],
+    ]);
+    expect(array_column($rows, 'id'))->toBe(['a', 'b', 'c', 'd', 'e', 'f', str_repeat('g', 24)]);
+});
+
+it('applies the secret rule to a header value, and lets no value end the header early', function (): void {
+    $rows = Schema::sanitizeMcpServers([
+        ['url' => 'https://a.example.com/mcp', 'prefix' => 'a', 'header_value' => Schema::MASK],
+        ['url' => 'https://b.example.com/mcp', 'prefix' => 'b', 'header_value' => ''],
+        ['url' => 'https://c.example.com/mcp', 'prefix' => 'c', 'header_value' => null],
+        ['url' => 'https://d.example.com/mcp', 'prefix' => 'd', 'header_value' => "Bearer t\r\nX-Evil: 1"],
+        ['url' => 'https://e.example.com/mcp', 'prefix' => 'e', 'header_name' => 'Bad Header'],
+        ['url' => 'https://f.example.com/mcp', 'prefix' => 'f', 'header_value' => "Bearer\0t", 'header_name' => "X-Key\n"],
+        ['url' => 'https://g.example.com/mcp', 'prefix' => 'g', 'header_value' => ['x']],
+    ]);
+    expect(array_column($rows, 'header_value'))->toBe([Schema::MASK, '', Schema::MASK, 'Bearer tX-Evil: 1', Schema::MASK, 'Bearert', Schema::MASK])
+        ->and(array_column($rows, 'header_name'))->toBe(['', '', '', '', '', '', '']);
+});
+
+it('keeps an approved map of tool names to fingerprints and nothing else', function (): void {
+    $rows = Schema::sanitizeMcpServers([[
+        'url' => 'https://a.example.com/mcp', 'prefix' => 'a',
+        'approved' => ['search' => str_repeat('a', 64), 'repo.list-all_2' => str_repeat('c', 64), 'write' => 'not-a-fingerprint', 'sp ace' => str_repeat('b', 64), 'upper' => str_repeat('A', 64), 7 => str_repeat('d', 64), "nl\n" => str_repeat('e', 64)],
+    ], [
+        'url' => 'https://b.example.com/mcp', 'prefix' => 'b', 'approved' => 'search',
+    ]]);
+    expect($rows[0]['approved'])->toBe(['search' => str_repeat('a', 64), 'repo.list-all_2' => str_repeat('c', 64)])
+        ->and($rows[1]['approved'])->toBe([]);
+});
+
+it('stores toolkits.mcp_servers as a list on the Tools tab, empty by default, through sanitizeMcpServers()', function (): void {
+    $f = Schema::fields()['toolkits.mcp_servers'];
+    expect($f['type'])->toBe('array')->and($f['section'])->toBe('toolkits')->and($f['default'])->toBe([])
+        ->and(Schema::LISTS)->toContain('toolkits.mcp_servers')
+        ->and(Schema::sanitize(['toolkits.mcp_servers' => [['url' => 'https://a.example.com/mcp', 'prefix' => 'a'], ['url' => '']]], [])['toolkits.mcp_servers'])->toHaveCount(1)
+        // Left out of the write: kept, and cleaned again on the way through.
+        ->and(Schema::sanitize([], ['toolkits.mcp_servers' => [['url' => 'http://a.example.com/mcp', 'prefix' => 'a']]])['toolkits.mcp_servers'])->toBe([]);
+});
+
+it('keeps an access entry per server id, holding each id to the server id rule and each value to the fixed capability list', function (): void {
+    expect(Schema::sanitizeAccessMcp([
+        'trk' => 'edit_posts',
+        'gh' => 'do_anything',
+        'B A D' => 'read',
+        '12' => 'read',
+        '1abc' => 'read',
+        "nl\n" => 'read',
+        'Upper' => 'read',
+        str_repeat('x', 25) => 'read',
+        str_repeat('y', 24) => 'read',
+    ]))->toBe(['trk' => 'edit_posts', str_repeat('y', 24) => 'read']);
+});
+
+it('names a server id by one rule, anchored at the very end', function (): void {
+    expect(Schema::isMcpId('a'))->toBeTrue()
+        ->and(Schema::isMcpId('a_1'))->toBeTrue()
+        ->and(Schema::isMcpId(str_repeat('a', 24)))->toBeTrue()
+        ->and(Schema::isMcpId(str_repeat('a', 25)))->toBeFalse()
+        ->and(Schema::isMcpId("a\n"))->toBeFalse()
+        ->and(Schema::isMcpId('1a'))->toBeFalse()
+        ->and(Schema::isMcpId('12'))->toBeFalse()
+        ->and(Schema::isMcpId('_a'))->toBeFalse()
+        ->and(Schema::isMcpId('a.b'))->toBeFalse()
+        ->and(Schema::isMcpId('a/b'))->toBeFalse()
+        ->and(Schema::isMcpId('A'))->toBeFalse()
+        ->and(Schema::isMcpId(12))->toBeFalse()
+        ->and(Schema::isMcpId(''))->toBeFalse();
+});

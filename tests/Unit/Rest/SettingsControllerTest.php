@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use AlpacaBot\Access;
+use AlpacaBot\Mcp;
 use AlpacaBot\Rest\SettingsController;
 use AlpacaBot\Settings\Schema;
 use AlpacaBot\Settings\Store;
@@ -267,4 +268,84 @@ it('exposes the schema without the sanitize callables, flagging the secret and n
         expect($v)->not->toBeObject();
     });
     expect(json_encode($data))->toBeString();
+});
+
+// ---------------------------------------------------------------- MCP servers
+
+/** get_option() as the options table would answer it: the secrets option by name, the settings for everything else. */
+function settingsWithSecrets(object $test, array $secrets): void
+{
+    Functions\when('get_option')->alias(fn(string $name, mixed $default = false): mixed => $name === Mcp\Secrets::OPTION ? $secrets : $test->stored);
+}
+
+it('masks every server\'s header value, and reveals it from its own option under reveal', function (): void {
+    $this->stored['toolkits.mcp_servers'] = [
+        ['id' => 'trk', 'url' => 'https://mcp.example.com/mcp', 'header_name' => 'Authorization', 'header_value' => Schema::MASK, 'prefix' => 'trk', 'approved' => []],
+        ['id' => 'gh', 'url' => 'https://gh.example.com/mcp', 'header_name' => '', 'header_value' => '', 'prefix' => 'gh', 'approved' => []],
+        // A row that reached the option with the value itself in it is masked all the same.
+        ['id' => 'raw', 'url' => 'https://raw.example.com/mcp', 'header_name' => 'X-Key', 'header_value' => 'Bearer in-the-row', 'prefix' => 'raw', 'approved' => []],
+    ];
+    settingsWithSecrets($this, ['trk' => 'Bearer t']);
+    $masked = $this->controller->show(restRequest('GET', '/settings'))->get_data();
+    $revealed = $this->controller->show(restRequest('GET', '/settings', ['reveal' => true]))->get_data();
+    expect(array_column($masked['toolkits.mcp_servers'], 'header_value'))->toBe([Schema::MASK, '', Schema::MASK])
+        ->and(json_encode($masked))->not->toContain('Bearer')
+        ->and(array_column($revealed['toolkits.mcp_servers'], 'header_value'))->toBe(['Bearer t', '', 'Bearer in-the-row'])
+        ->and(array_keys($revealed['toolkits.mcp_servers'][0]))->toBe(array_keys($this->stored['toolkits.mcp_servers'][0]));
+});
+
+// R-reveal: the settings.read row can be lowered for a role that is not an administrator, and
+// discovery or a turn sends this value to a remote host on the site's behalf. The floor is the
+// provider key's floor, asked of the same check.
+it('reveals no header value to a caller the read row admitted without manage_options', function (): void {
+    $this->stored['toolkits.mcp_servers'] = [['id' => 'trk', 'url' => 'https://mcp.example.com/mcp', 'header_name' => 'Authorization', 'header_value' => Schema::MASK, 'prefix' => 'trk', 'approved' => []]];
+    settingsWithSecrets($this, ['trk' => 'Bearer t']);
+    Functions\when('current_user_can')->alias(static fn(string $cap): bool => $cap !== 'manage_options');
+    $res = $this->controller->show(restRequest('GET', '/alpaca-bot/v1/settings', ['reveal' => true]));
+    expect($res->get_data()['toolkits.mcp_servers'][0]['header_value'])->toBe(Schema::MASK)
+        ->and(json_encode($res->get_data()))->not->toContain('Bearer t');
+});
+
+// Store's memo holds the row as it was posted until the request ends (the filter that takes the
+// value out runs on the option, not on the memo), and the reply is read from the memo.
+it('answers a PUT that set a header value with the mask, never the value', function (): void {
+    $controller = new SettingsController(new Store(), new Mcp\ServerSettings(static fn(string $host, string $url): array => ['93.184.216.34']));
+    $res = $controller->update(restRequest('PUT', '/settings', ['toolkits.mcp_servers' => [['url' => 'https://mcp.example.com/mcp', 'prefix' => 'trk', 'header_value' => 'Bearer new-secret']]]));
+    expect($res->get_data()['toolkits.mcp_servers'][0]['header_value'])->toBe(Schema::MASK)
+        ->and(json_encode($res->get_data()))->not->toContain('new-secret');
+});
+
+it('refuses a PUT whose server address does not pass the check, says why, and writes nothing', function (): void {
+    $asked = [];
+    $controller = new SettingsController(new Store(), new Mcp\ServerSettings(static function (string $host, string $url) use (&$asked): array {
+        $asked[] = $host;
+        throw new AlpacaBot\Toolkit\AddressRefused("{$host} resolves to 10.0.0.7, a private, local or other special-purpose address.");
+    }));
+    $response = $controller->update(restRequest('PUT', '/settings', [
+        'models.num_ctx' => 2048,
+        'toolkits.mcp_servers' => [['url' => 'https://internal.example.com/mcp', 'prefix' => 'x', 'header_value' => 'Bearer do-not-echo']],
+    ]));
+    expect($response)->toBeInstanceOf(WP_Error::class)
+        ->and($response->get_error_code())->toBe('alpaca_bot_mcp_address')
+        ->and($response->get_error_data()['status'])->toBe(400)
+        ->and($response->get_error_message())->toContain('internal.example.com resolves to 10.0.0.7')
+        ->and($response->get_error_message())->toContain('https://internal.example.com/mcp')
+        ->and(json_encode([$response->get_error_message(), $response->get_error_data()]))->not->toContain('do-not-echo')
+        ->and($asked)->toBe(['internal.example.com'])
+        ->and($this->written)->toBeNull();
+});
+
+it('looks up no address for a PUT that leaves the servers out, or sends back a URL already stored', function (): void {
+    $this->stored['toolkits.mcp_servers'] = [['id' => 'trk', 'url' => 'https://mcp.example.com/mcp', 'header_name' => '', 'header_value' => '', 'prefix' => 'trk', 'approved' => []]];
+    $controller = new SettingsController(new Store(), new Mcp\ServerSettings(static fn(string $host, string $url): array => throw new RuntimeException('no lookup was expected')));
+    expect($controller->update(restRequest('PUT', '/settings', ['models.num_ctx' => 2048])))->toBeInstanceOf(WP_REST_Response::class)
+        ->and($controller->update(restRequest('PUT', '/settings', ['toolkits.mcp_servers' => [['id' => 'trk', 'url' => 'https://mcp.example.com/mcp', 'prefix' => 'renamed']]])))->toBeInstanceOf(WP_REST_Response::class)
+        ->and($this->written['toolkits.mcp_servers'][0]['prefix'])->toBe('renamed');
+});
+
+it('flags the header value of an MCP server row as the one secret inside it', function (): void {
+    $data = $this->controller->schema(restRequest('GET', '/alpaca-bot/v1/settings/schema'))->get_data();
+    expect($data['fields']['toolkits.mcp_servers']['secret_fields'])->toBe(['header_value'])
+        ->and($data['fields']['toolkits.mcp_servers'])->not->toHaveKey('secret')
+        ->and($data['fields']['provider.api_key'])->not->toHaveKey('secret_fields');
 });

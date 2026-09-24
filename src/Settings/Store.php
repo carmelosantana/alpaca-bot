@@ -13,6 +13,14 @@ use AlpacaBot\Plugin;
  * Schema::sanitize() over what is held now, so the stored array is always complete and valid,
  * a key a write leaves out keeps its value, and a secret written as Schema::MASK keeps its
  * stored value rather than becoming the mask.
+ *
+ * After a write the memo is the value update_option() wrote, which is what its
+ * `pre_update_option_alpaca_bot_settings` filters made of the sanitized array rather than the
+ * array itself: Mcp\ServerSettings takes each MCP header value out of its row there and drops
+ * `access.mcp` entries whose server is gone, and a reader later in the request (the REST reply to
+ * a PUT, `wp alpaca-bot settings`'s echo) should see what was stored, not what was asked for.
+ * replace() learns that value from a filter of its own at the end of the chain, added for the one
+ * call, not by reading the option back.
  */
 final class Store
 {
@@ -57,8 +65,26 @@ final class Store
     public function replace(array $settings): void
     {
         $clean = Schema::sanitize($settings, $this->all());
-        update_option(Plugin::OPTION, $clean);
-        $this->cache = $clean;
+        $written = null;
+        // Last in the chain, so it sees what every other filter made of the value. Core runs the
+        // filters before it compares against the stored value and before it picks update or add,
+        // so this runs on every call, one that changes nothing included. Not `static`, for the
+        // reason Plugin::register() gives for its hooked closures: Brain Monkey warns on PHP 8.4
+        // when it inspects a static closure handed to add_filter().
+        $last = function (mixed $value) use (&$written): mixed {
+            $written = $value;
+            return $value;
+        };
+        add_filter('pre_update_option_' . Plugin::OPTION, $last, PHP_INT_MAX);
+        try {
+            update_option(Plugin::OPTION, $clean);
+        } finally {
+            remove_filter('pre_update_option_' . Plugin::OPTION, $last, PHP_INT_MAX);
+        }
+        // Null when no filter ran, which a stand-in for update_option() in a test leaves it.
+        /** @var array<string, mixed> $stored */
+        $stored = is_array($written) ? $written : $clean;
+        $this->cache = $stored;
     }
 
     /**

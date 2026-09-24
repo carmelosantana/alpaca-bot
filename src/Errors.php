@@ -98,10 +98,14 @@ final class Errors
      * that is not a base64 image data URL or images past the site's allowance, a model the
      * catalog does not list, a conversation that is not theirs. The pipeline's InvalidArgumentException messages are already written for the
      * person who sent the request, so a route passes them through as the message.
+     *
+     * `$code` is `alpaca_bot_bad_request` unless a route has a refusal a client needs to tell
+     * apart: `PUT /settings` answers `alpaca_bot_mcp_address` for an MCP server address that did
+     * not pass the check.
      */
-    public static function badRequest(string $message): \WP_Error
+    public static function badRequest(string $message, string $code = 'alpaca_bot_bad_request'): \WP_Error
     {
-        return new \WP_Error('alpaca_bot_bad_request', $message, ['status' => 400]);
+        return new \WP_Error($code, $message, ['status' => 400]);
     }
 
     /**

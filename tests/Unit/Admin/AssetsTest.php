@@ -60,7 +60,11 @@ it('adds the overrides table rules inline to core forms stylesheet on the settin
         // Under 782px forms.css gives every form-table select `width: 100%`, which in an
         // auto-width column shrank the Tools select to 40px and clipped "Model default"
         // (Kanboard #4363); sized by its options, it holds its column at its label's width.
-        ->toContain('.form-table .ab-overrides select { width: auto; }');
+        ->toContain('.form-table .ab-overrides select { width: auto; }')
+        // The MCP servers table is the same nested widefat: the wrapper scrolls and the cells are
+        // cells again, and none of the overrides table's column rules reach it.
+        ->toContain('.form-table .ab-mcp-servers { overflow-x: auto; contain: inline-size; }')
+        ->toContain('.form-table .ab-mcp-servers th, .form-table .ab-mcp-servers td { display: table-cell; width: auto; padding: 8px 10px; vertical-align: middle; }');
 
     // A locale that translates "Alpaca Bot" derives another id; the rules follow it.
     Functions\when('get_plugin_page_hookname')->alias(static fn(string $page, string $parent): string => 'robot-alpaca_page_' . $page);

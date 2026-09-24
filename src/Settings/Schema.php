@@ -19,6 +19,12 @@ use AlpacaBot\Toolkit\AbilitiesToolkit;
  * option (the REST route, the Settings API's sanitize callback, Store) resolves it the same way
  * and none can store the literal mask as the key.
  *
+ * An MCP server's header value is a secret too, but a nested one, and SECRETS is a list of
+ * top-level keys. sanitizeMcpServers() applies the same three-valued rule to it, with MASK kept as
+ * MASK because this class has no stored value to put there: the value is not in this option at
+ * all. Mcp\ServerSettings takes it out on every write, keeps it in Mcp\Secrets, and leaves MASK
+ * or '' in the row.
+ *
  * @phpstan-type Field array{type:'string'|'integer'|'number'|'boolean'|'array'|'select'|'checkbox-list', default:mixed, section:string, label:string, description?:string, options?:array<string,string>, min?:int|float, max?:int|float, sanitize?:callable(mixed, array<string, mixed>): mixed}
  */
 final class Schema
@@ -30,7 +36,25 @@ final class Schema
     public const SECRETS = ['provider.api_key'];
 
     /** @var list<string> the `array` fields whose value is a list; every other `array` field is a map */
-    public const LISTS = ['toolkits.abilities'];
+    public const LISTS = ['toolkits.abilities', 'toolkits.mcp_servers'];
+
+    /**
+     * An MCP server's id: a lowercase letter, then up to 23 of `[a-z0-9_]`. It starts with a letter
+     * because an id made only of digits becomes an int key in the `access.mcp` map, which neither
+     * sanitizeAccessMcp() nor the Access tab can hold, so that server would stay administrators
+     * only with no row to change it. `\z` and not `$`, because `$` also matches before a final
+     * LF. With no `.` and no `/` in it, no two ids share the filter name Access builds from
+     * `mcp.<id>`.
+     */
+    private const MCP_ID = '/^[a-z][a-z0-9_]{0,23}\z/';
+
+    /**
+     * An MCP server's tool-name prefix: a lowercase letter, then up to 15 of `[a-z0-9_]`. The
+     * model sees a tool as `<prefix>__<name>`, and a tool name has to start with a letter or `_`
+     * (Toolkit\ToolName), so a prefix starting with a digit would have every tool of that server
+     * renamed.
+     */
+    private const MCP_TOOL_PREFIX = '/^[a-z][a-z0-9_]{0,15}\z/';
 
     /**
      * Force tools on for one model: the stored value of `models.overrides[<m>][tools]` that
@@ -107,6 +131,7 @@ final class Schema
             'toolkits.enabled' => ['type' => 'checkbox-list', 'default' => ['web_fetch', 'summarize', 'draft_post'], 'section' => 'toolkits', 'label' => __('Enabled tools', 'alpaca-bot'), 'description' => __('What the assistant may do besides answer. A tool that is off is not offered to the model at all.', 'alpaca-bot'), 'options' => ['web_fetch' => __('Fetch a web page the user names', 'alpaca-bot'), 'summarize' => __('Summarize text', 'alpaca-bot'), 'draft_post' => __('Draft a post or page (never publishes)', 'alpaca-bot'), 'abilities' => __('Call the site\'s WordPress abilities you tick', 'alpaca-bot')]],
             'toolkits.user_agent' => ['type' => 'string', 'default' => 'AlpacaBot/0.5 (+https://github.com/carmelosantana/alpaca-bot)', 'section' => 'toolkits', 'label' => __('User agent for fetch tools', 'alpaca-bot')],
             'toolkits.abilities' => ['type' => 'array', 'default' => [], 'section' => 'toolkits', 'label' => __('Abilities the model may call', 'alpaca-bot'), 'description' => __('The WordPress abilities that WordPress and other plugins register on this site. Each one you tick becomes a tool of the abilities tool, which is offered only while it is on under Enabled tools, and only to users its Access row admits. Two ticked abilities that would reach the model under the same tool name are marked, and neither is offered. A call runs as the user whose turn it is, through the ability\'s own permission check. Alpaca Bot\'s own abilities are never offered.', 'alpaca-bot'), 'sanitize' => [self::class, 'sanitizeAbilities']],
+            'toolkits.mcp_servers' => ['type' => 'array', 'default' => [], 'section' => 'toolkits', 'label' => __('MCP servers', 'alpaca-bot'), 'description' => __('Remote MCP servers whose tools the model may call. The address must be https; it is checked when it is saved from this screen or over the REST API, and checked again before any connection is made to it. A connection to an MCP server never goes through a proxy, neither one set for WordPress nor one set in the server\'s environment, so a site whose outbound traffic has to use a proxy cannot reach one. The header value is kept in an option of its own that WordPress does not load on every page, and this screen only shows whether one is set.', 'alpaca-bot')],
             'access.chat' => self::access('chat', __('Chat', 'alpaca-bot'), __('Who may open the chat screen and use the chat REST routes. A tool needs its own row as well as this one.', 'alpaca-bot')),
             'access.tool.web_fetch' => self::access('tool.web_fetch', __('Tool: fetch a web page', 'alpaca-bot'), __('Who may run a turn that can fetch a page, and who may use [alpacabot_agent], which runs the same tool on the shortcode\'s behalf. It governs the next fetch, not the last one: a shortcode answer already cached on a post stands until its cache expires. The tool makes this server send an outbound request and hands the reply back; the Tools help tab says what that grants.', 'alpaca-bot')),
             'access.tool.summarize' => self::access('tool.summarize', __('Tool: summarize', 'alpaca-bot'), __('Who may run a turn that can summarize text through the model.', 'alpaca-bot')),
@@ -120,7 +145,9 @@ final class Schema
             // it, so a per-server key could never be saved. Access::stored('mcp.<id>') reads it,
             // so the row names are the same as every other row's. Empty until a server is
             // configured, and a server with no entry reads as manage_options (Access), which is
-            // to say a server nobody has ruled on is administrators-only.
+            // to say a server nobody has ruled on is administrators-only. An entry whose server
+            // `toolkits.mcp_servers` no longer lists is dropped on the next write of the option
+            // (Mcp\ServerSettings::beforeSave()), which this pure function cannot do for it.
             'access.mcp' => ['type' => 'array', 'default' => [], 'section' => 'access', 'label' => __('Per-server access', 'alpaca-bot'), 'sanitize' => [self::class, 'sanitizeAccessMcp']],
         ];
     }
@@ -164,6 +191,12 @@ final class Schema
             $raw = array_key_exists($key, $input) ? $input[$key] : ($current[$key] ?? $f['default']);
             if (in_array($key, self::SECRETS, true)) {
                 $raw = self::secret($raw, $current[$key] ?? '');
+            }
+            if ($key === 'toolkits.mcp_servers') {
+                // The one sanitizer handed something other than its field: the ids the stored list
+                // holds, which sanitizeMcpServers() never gives a row that brings no id of its own.
+                $out[$key] = self::sanitizeMcpServers($raw, self::serverIds($current[$key] ?? null));
+                continue;
             }
             $out[$key] = isset($f['sanitize']) ? ($f['sanitize'])($raw, $f) : self::coerce($raw, $f);
         }
@@ -305,10 +338,10 @@ final class Schema
      * this cannot read would otherwise be stored as a capability nobody chose. An id with no entry
      * reads as `manage_options` (Access::stored()), so dropping fails closed.
      *
-     * What it can check is the value and the shape of the id, not whether a server by that id
-     * exists: a save may reach here before, or after, the server it names is configured. An id has
-     * to be a non-empty string, which also drops the purely numeric ids PHP would have turned into
-     * int keys on the way in.
+     * What it can check is the value and the shape of the id (isMcpId(), the rule
+     * sanitizeMcpServers() gives every server), not whether a server by that id is listed: that
+     * takes the rest of the option, which this function is not handed. Mcp\ServerSettings::beforeSave()
+     * drops an entry whose server is not listed, on every write of the option.
      *
      * @return array<string, string>
      */
@@ -319,8 +352,172 @@ final class Schema
         }
         $out = [];
         foreach ($raw as $id => $capability) {
-            if (is_string($id) && $id !== '' && is_string($capability) && in_array($capability, Access::CAPABILITIES, true)) {
+            if (self::isMcpId($id) && is_string($capability) && in_array($capability, Access::CAPABILITIES, true)) {
+                /** @var string $id */
                 $out[$id] = $capability;
+            }
+        }
+        return $out;
+    }
+
+    /**
+     * `toolkits.mcp_servers` as it may be shown: each row's `header_value` is MASK when it holds a
+     * non-empty string and '' otherwise, so a row that reached the option or Store's memo with the
+     * value itself in it (a write that went round Mcp\ServerSettings, or the rest of the request
+     * after a write, since the memo keeps the row as it was posted) still shows no value. Every
+     * other field, and anything that is not a list of rows, is left as it is.
+     */
+    public static function maskedServers(mixed $rows): mixed
+    {
+        if (!is_array($rows)) {
+            return $rows;
+        }
+        foreach ($rows as $i => $row) {
+            if (is_array($row) && array_key_exists('header_value', $row)) {
+                $rows[$i]['header_value'] = is_string($row['header_value']) && $row['header_value'] !== '' ? self::MASK : '';
+            }
+        }
+        return $rows;
+    }
+
+    /**
+     * The string ids of a `toolkits.mcp_servers` list as it is held, in list order: what
+     * Mcp\ServerSettings reads a stored server by, and so what sanitize() reserves.
+     *
+     * @return list<string>
+     */
+    public static function serverIds(mixed $rows): array
+    {
+        $ids = [];
+        foreach (is_array($rows) ? $rows : [] as $row) {
+            if (is_array($row) && is_string($row['id'] ?? null)) {
+                $ids[] = $row['id'];
+            }
+        }
+        return $ids;
+    }
+
+    /** Whether `$id` is a server id as MCP_ID defines one: the one rule for a server's row, its Access entry and its Access select. */
+    public static function isMcpId(mixed $id): bool
+    {
+        return is_string($id) && preg_match(self::MCP_ID, $id) === 1;
+    }
+
+    /**
+     * The `toolkits.mcp_servers` list, each row read into
+     * `{id, url, header_name, header_value, prefix, timeout, max_bytes, approved}` and a row that
+     * cannot be read as a server dropped. What each field has to be, and why the rule is here:
+     *
+     * - `url` is https with a host, after esc_url_raw(). A row without one is dropped, which is
+     *   what the form's blank "add a server" row is; so is a row whose `remove` box was ticked.
+     *   Whether the *address* is public is not asked here: that is a DNS lookup, and this is a
+     *   pure function. Mcp\ServerSettings asks it when the settings page or the REST route saves
+     *   a URL that is new or changed, and Mcp\Egress asks it again when a client is built.
+     * - `prefix` matches MCP_TOOL_PREFIX, is not `ability` (AbilitiesToolkit names its tools
+     *   `ability__…`), and is not already taken by an earlier row; a row failing any of that is
+     *   dropped, since its tools would have no name of their own.
+     * - `id` names the server in its Access entry (`access.mcp[<id>]`, the row `mcp.<id>`, the
+     *   filter `alpaca_bot/capability/mcp/<id>`) and its header value (Mcp\Secrets), so it has to
+     *   survive an edit of the prefix or the URL, and it is never taken from another row. Every
+     *   row that brings an id matching MCP_ID keeps it, first come first served, before any row is
+     *   given one; a row whose id is missing, malformed or already kept gets its prefix, then
+     *   `<prefix>_2`, `_3`… until one is neither kept nor in `$reserved`. Mcp\ServerSettings
+     *   reads a row whose id the stored list holds as that stored server, and so a row that
+     *   brings no id must never be given one of those ids: `$reserved` is them (sanitize() passes
+     *   the stored list's ids), and it holds even for a server this same write removes. Keeping
+     *   ids before making any is what stops a new row listed first from taking an existing
+     *   server's id. Either way a new row cannot take a stored server's Access entry or secret.
+     * - `header_name` is `[A-Za-z0-9-]{1,64}` or ''.
+     * - `header_value` follows the secret rule (the class docblock): '' clears, MASK keeps, any
+     *   other string is the new value with CR, LF and NUL removed, so no value can end the header
+     *   early or cut it; anything that is not a string reads as MASK.
+     * - `timeout` is 1-120 seconds and `max_bytes` 1 KiB-8 MiB, clamped; a value that is not a
+     *   number is the default, 30 seconds and 1 MiB, as ServerConfig::fromSettings() has them.
+     * - `approved` keeps `tool name => fingerprint` where the name is `[A-Za-z0-9_.-]{1,128}` and
+     *   the fingerprint 64 lowercase hex characters (ToolDefinition::fingerprint()). A name PHP
+     *   made into an int key is dropped, as fromSettings() drops it. A map that is absent means no
+     *   approvals, which is what a form with every box clear posts.
+     *
+     * @param list<string> $reserved ids a row that brings no usable id is never given: the stored list's
+     * @return list<array{id: string, url: string, header_name: string, header_value: string, prefix: string, timeout: float, max_bytes: int, approved: array<string, string>}>
+     */
+    public static function sanitizeMcpServers(mixed $raw, array $reserved = []): array
+    {
+        if (!is_array($raw)) {
+            return [];
+        }
+        $rows = [];
+        $asked = [];
+        $prefixes = [];
+        foreach ($raw as $row) {
+            if (!is_array($row) || !empty($row['remove'])) {
+                continue;
+            }
+            $url = self::mcpUrl($row['url'] ?? null);
+            $prefix = $row['prefix'] ?? null;
+            if ($url === '' || !is_string($prefix) || preg_match(self::MCP_TOOL_PREFIX, $prefix) !== 1 || $prefix === 'ability' || in_array($prefix, $prefixes, true)) {
+                continue;
+            }
+            $prefixes[] = $prefix;
+            $asked[] = $row['id'] ?? null;
+            $timeout = is_numeric($row['timeout'] ?? null) ? (float) $row['timeout'] : 30.0;
+            $maxBytes = is_numeric($row['max_bytes'] ?? null) ? (int) $row['max_bytes'] : 1048576;
+            $name = $row['header_name'] ?? '';
+            $value = $row['header_value'] ?? null;
+            $rows[] = [
+                'id' => '',
+                'url' => $url,
+                'header_name' => is_string($name) && preg_match('/^[A-Za-z0-9-]{1,64}\z/', $name) === 1 ? $name : '',
+                'header_value' => is_string($value) && $value !== self::MASK ? str_replace(["\r", "\n", "\0"], '', $value) : self::MASK,
+                'prefix' => $prefix,
+                'timeout' => max(1.0, min(120.0, $timeout)),
+                'max_bytes' => max(1024, min(8388608, $maxBytes)),
+                'approved' => self::approvals($row['approved'] ?? null),
+            ];
+        }
+        $ids = [];
+        foreach ($asked as $i => $id) {
+            if (self::isMcpId($id) && !in_array($id, $ids, true)) {
+                /** @var string $id */
+                $ids[$i] = $id;
+            }
+        }
+        foreach ($rows as $i => $row) {
+            if (!isset($ids[$i])) {
+                $id = $row['prefix'];
+                $n = 2;
+                while (in_array($id, $ids, true) || in_array($id, $reserved, true)) {
+                    $id = $row['prefix'] . '_' . $n;
+                    ++$n;
+                }
+                $ids[$i] = $id;
+            }
+            $rows[$i]['id'] = $ids[$i];
+        }
+        return $rows;
+    }
+
+    /** An MCP server's URL as sanitizeMcpServers() keeps it, or '' when it is not https with a host. */
+    private static function mcpUrl(mixed $raw): string
+    {
+        $url = is_string($raw) ? esc_url_raw(trim($raw)) : '';
+        $scheme = strtolower((string) wp_parse_url($url, PHP_URL_SCHEME));
+        // The host trimmed of dots, as Mcp\Egress reads it: `https://./mcp` has none.
+        $host = trim((string) wp_parse_url($url, PHP_URL_HOST), '.');
+        return $scheme === 'https' && $host !== '' ? $url : '';
+    }
+
+    /**
+     * A server row's `approved` map, as sanitizeMcpServers() keeps it.
+     *
+     * @return array<string, string>
+     */
+    private static function approvals(mixed $raw): array
+    {
+        $out = [];
+        foreach (is_array($raw) ? $raw : [] as $name => $fingerprint) {
+            if (is_string($name) && preg_match('/^[A-Za-z0-9_.-]{1,128}\z/', $name) === 1 && is_string($fingerprint) && preg_match('/^[0-9a-f]{64}\z/', $fingerprint) === 1) {
+                $out[$name] = $fingerprint;
             }
         }
         return $out;

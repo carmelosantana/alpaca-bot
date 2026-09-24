@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace AlpacaBot\Admin;
 
 use AlpacaBot\Access;
+use AlpacaBot\Mcp\ServerSettings;
 use AlpacaBot\Plugin;
 use AlpacaBot\Provider\ModelCatalog;
 use AlpacaBot\Rest\Controller;
@@ -47,6 +48,11 @@ use AlpacaBot\Toolkit\SchemaTool;
  * `alpaca_bot_settings[toolkits.abilities][]` (renderAbilities()); its options are the site's,
  * not the schema's, which is why it is not a checkbox-list field.
  *
+ * The MCP servers are a table too, a row per server posted as
+ * `alpaca_bot_settings[toolkits.mcp_servers][<index>][<field>]` (renderMcpServers()). A save
+ * that carries a server whose URL is new or changed has that address checked in the sanitize
+ * callback (withoutRefusedServers()), where a refusal can be put on the screen.
+ *
  * The Access tab is not one Schema field per control either. Every row is the capability select
  * the schema describes, on Access::stored(), and under a row whose filter moves it off that value,
  * or cannot be asked from this page, a line says "Set in code" (renderAccess()). The Chat row has
@@ -55,9 +61,11 @@ use AlpacaBot\Toolkit\SchemaTool;
  * `toolkits.mcp_servers` lists gets a row posting one entry of that map, as
  * `alpaca_bot_settings[access.mcp][<server id>]`. The carry-over leaves the map out, so a save
  * from another tab posts nothing for it and Schema::sanitize() keeps the stored map, sanitized
- * again, rather than replacing it with what the page could print of it. The Access tab carries
- * every stored entry it shows no select for as a hidden input, so saving it drops no entry whose
- * id postable() admits and whose value is one of Access::CAPABILITIES.
+ * again, rather than replacing it with what the page could print of it. The Access tab posts the
+ * selects of the listed servers and nothing else. An entry whose server the list no longer has
+ * is not carried, because every write of the option drops it, from whichever tab
+ * (Mcp\ServerSettings::beforeSave()): a server added later under the same id starts at
+ * administrators only instead of inheriting it.
  *
  * @phpstan-import-type Field from Schema
  */
@@ -72,25 +80,32 @@ final class SettingsPage
     /** @var \Closure(string): bool */
     private \Closure $exists;
 
-    /** @param (callable(string): bool)|null $exists function_exists() or a stand-in for it, as Abilities\Register takes one */
-    public function __construct(private Store $store, private ModelCatalog $catalog, private Access $access, ?callable $exists = null)
+    private ServerSettings $servers;
+
+    /**
+     * @param (callable(string): bool)|null $exists  function_exists() or a stand-in for it, as Abilities\Register takes one
+     * @param ServerSettings|null           $servers the address check a save of `toolkits.mcp_servers` runs; one over AddressPin by default
+     */
+    public function __construct(private Store $store, private ModelCatalog $catalog, private Access $access, ?callable $exists = null, ?ServerSettings $servers = null)
     {
         $this->exists = $exists === null ? function_exists(...) : \Closure::fromCallable($exists);
+        $this->servers = $servers ?? new ServerSettings();
     }
 
     /** On admin_init: the setting, its sections (one page id per tab) and its fields. */
     public function register(): void
     {
+        $servers = $this->servers;
         register_setting(self::GROUP, Plugin::OPTION, [
             'type' => 'array',
-            'sanitize_callback' => static function (mixed $input): array {
+            'sanitize_callback' => static function (mixed $input) use ($servers): array {
                 $stored = get_option(Plugin::OPTION, []);
                 $stored = is_array($stored) ? $stored : [];
                 if (self::postIsTruncated()) {
                     add_settings_error(Plugin::OPTION, 'truncated', __('Nothing was saved: the form was longer than PHP accepts in one request (max_input_vars), so its end never arrived. Raise max_input_vars in php.ini, or set per-model overrides through the REST API.', 'alpaca-bot'));
                     $input = [];
                 }
-                return Schema::sanitize(is_array($input) ? $input : [], $stored);
+                return self::withoutRefusedServers(Schema::sanitize(is_array($input) ? $input : [], $stored), $stored, $servers);
             },
             'default' => Schema::defaults(),
         ]);
@@ -112,10 +127,11 @@ final class SettingsPage
                 $html = match (true) {
                     $key === 'models.overrides' => $this->renderOverrides(),
                     $key === 'toolkits.abilities' => $this->renderAbilities($f),
+                    $key === 'toolkits.mcp_servers' => $this->renderMcpServers($f),
                     str_starts_with($key, 'access.') => $this->renderAccess(substr($key, strlen('access.')), $f),
                     default => Fields::render($key, $f, $this->store->get($key)),
                 };
-                echo $html; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- Fields escapes every attribute and text node, and renderAbilities() and renderAccess() escape what they add.
+                echo $html; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- Fields escapes every attribute and text node, and renderAbilities(), renderMcpServers() and renderAccess() escape what they add.
             }, self::page($f['section']), 'alpaca_bot_' . $f['section'], $args);
         }
         // One row per MCP server. The servers are the site's, not the schema's, so the rows are
@@ -163,19 +179,6 @@ final class SettingsPage
             // Fields::hidden() could print.
             if ($f['section'] !== $active && $key !== 'access.mcp') {
                 echo Fields::hidden($key, $this->store->get($key)); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- escaped in Fields.
-            }
-        }
-        if ($active === 'access') {
-            // This tab posts the access.mcp map, one entry per MCP row, and a posted map replaces
-            // the stored one whole: an entry with no row here (a server the list no longer has)
-            // is carried, or saving the tab would drop it. Only a string under an id postable()
-            // admits is carried; Schema::sanitizeAccessMcp() then drops one that is not a
-            // capability it accepts.
-            $stored = $this->store->get('access.mcp', []);
-            foreach (is_array($stored) ? $stored : [] as $id => $capability) {
-                if (is_string($id) && is_string($capability) && self::postable($id) && !in_array($id, $this->mcpServers(), true)) {
-                    printf('<input type="hidden" name="%s" value="%s">', esc_attr(Plugin::OPTION . '[access.mcp][' . $id . ']'), esc_attr($capability));
-                }
             }
         }
         do_settings_sections(self::page($active));
@@ -352,10 +355,13 @@ final class SettingsPage
 
     /**
      * The ids of the MCP servers `toolkits.mcp_servers` lists, in list order: the ones the Access
-     * tab gives a row (core keeps one field per id, so a repeated id is one row). A server with no
-     * id, or one postable() does not admit, gets none, and so reads as whatever Access::stored()
-     * has for it: administrators only unless an entry for that exact id was stored by some other
-     * writer (a REST PUT, or an edit of the option).
+     * tab gives a row (core keeps one field per id, so a repeated id is one row). Only an id
+     * Schema::isMcpId() admits gets one, which is every id Schema::sanitizeMcpServers() stores and
+     * the only kind of key Schema::sanitizeAccessMcp() keeps, so the tab never shows a select a
+     * save would drop. That id rule's characters, `[a-z0-9_]`, all come back from a browser and
+     * PHP's form parser as themselves in `alpaca_bot_settings[access.mcp][<id>]`, and an id
+     * starting with a letter is never read as an int key. A row that reached the option with any
+     * other id gets no select, and reads as administrators only (Access::stored()).
      *
      * @return list<string>
      */
@@ -365,7 +371,8 @@ final class SettingsPage
         $ids = [];
         foreach (is_array($servers) ? $servers : [] as $server) {
             $id = is_array($server) ? ($server['id'] ?? null) : null;
-            if (is_string($id) && self::postable($id)) {
+            if (Schema::isMcpId($id)) {
+                /** @var string $id */
                 $ids[] = $id;
             }
         }
@@ -373,27 +380,58 @@ final class SettingsPage
     }
 
     /**
-     * Whether the page gives a server id a select posting as
-     * `alpaca_bot_settings[access.mcp][<id>]`. The aim is that the select cannot write some other
-     * server's key. It admits an id made only of printable ASCII other than `]` and `&`, that is
-     * not a single space, and that is not an integer as PHP writes one. That is an allowlist, not
-     * the whole set that survives the round trip through esc_attr(), a browser and PHP's form
-     * parser: CRLF, a tab or `é` came back intact in Chromium and are refused all the same. One id
-     * holding every admitted character, the space included, came back as itself in Chromium.
+     * `$clean` with each MCP server whose new or changed address failed the check
+     * (ServerSettings::refusals()) put back as `$stored` has it, or left out when `$stored` has no
+     * server by its id, and a notice on the screen for each. A stored row is put back whole, so a
+     * refused edit changes nothing about that server, its header value and approvals included;
+     * the rest of the post is saved. The notice names the URL and the reason, escaped here
+     * because settings_errors() prints a message as it is given.
      *
-     * What is left out, and why; each case was seen to come back changed. PHP ends a bracketed
-     * segment at its first `]`, so `a]b` posts as `a`, and cuts the name at a NUL byte. A browser
-     * posts a lone LF or CR as CRLF, so `a\nb` posts as `a\r\nb`, and a trailing one too: `x\n`
-     * posts as `x\r\n`. The pattern's `D` modifier is what refuses that last one, since without
-     * it `$` also matches before a final LF. esc_attr() leaves an entity such as `&amp;` as it is,
-     * and the browser decodes it, so `a&amp;b` posts as `a&b`. PHP reads `[ ]` as `[]`, an
-     * append, so a single space posts as the int key 0 (two spaces come back as themselves). An
-     * integer as PHP writes one (`12`, not `012` or ` 12`) becomes an int key. An int key is
-     * dropped by Schema::sanitizeAccessMcp().
+     * @param array<string, mixed> $clean  Schema::sanitize()'s output for this post
+     * @param array<string, mixed> $stored the option as it is now
+     * @return array<string, mixed>
      */
-    private static function postable(string $id): bool
+    private static function withoutRefusedServers(array $clean, array $stored, ServerSettings $servers): array
     {
-        return preg_match('/^[\x20-\x25\x27-\x5C\x5E-\x7E]+$/D', $id) === 1 && $id !== ' ' && (string) (int) $id !== $id;
+        $rows = is_array($clean['toolkits.mcp_servers'] ?? null) ? $clean['toolkits.mcp_servers'] : [];
+        $refused = $servers->refusals($rows, $stored['toolkits.mcp_servers'] ?? []);
+        if ($refused === []) {
+            return $clean;
+        }
+        $was = [];
+        foreach (is_array($stored['toolkits.mcp_servers'] ?? null) ? $stored['toolkits.mcp_servers'] : [] as $row) {
+            if (is_array($row) && is_string($row['id'] ?? null)) {
+                $was[$row['id']] = $row;
+            }
+        }
+        foreach ($refused as $i => $reason) {
+            $row = $rows[$i];
+            $before = $was[$row['id']] ?? null;
+            $message = $before !== null
+                /* translators: 1: the MCP server's URL as posted, 2: why its address was refused, 3: the URL it keeps */
+                ? sprintf(__('The MCP server address %1$s was not saved: %2$s The server keeps %3$s.', 'alpaca-bot'), $row['url'], $reason, is_string($before['url'] ?? null) ? $before['url'] : '')
+                /* translators: 1: the MCP server's URL as posted, 2: why its address was refused */
+                : sprintf(__('The MCP server %1$s was not added: %2$s', 'alpaca-bot'), $row['url'], $reason);
+            add_settings_error(Plugin::OPTION, 'mcp_address', esc_html($message));
+            if ($before !== null) {
+                $rows[$i] = $before;
+            } else {
+                unset($rows[$i]);
+            }
+        }
+        // Again through the schema: a stored row put back can hold a prefix another row of this
+        // post has just taken, and the schema keeps the first of two. The one it leaves out is
+        // said, not lost quietly.
+        $kept = Schema::sanitizeMcpServers(array_values($rows));
+        $keptIds = array_column($kept, 'id');
+        foreach ($rows as $row) {
+            if (!in_array($row['id'] ?? null, $keptIds, true)) {
+                /* translators: 1: an MCP server's URL, 2: its tool-name prefix */
+                add_settings_error(Plugin::OPTION, 'mcp_prefix', esc_html(sprintf(__('The MCP server %1$s was not saved: its prefix %2$s is the one a server whose change was refused keeps.', 'alpaca-bot'), is_string($row['url'] ?? null) ? $row['url'] : '', is_string($row['prefix'] ?? null) ? $row['prefix'] : '')));
+            }
+        }
+        $clean['toolkits.mcp_servers'] = $kept;
+        return $clean;
     }
 
     /**
@@ -468,6 +506,104 @@ final class SettingsPage
             ? '<p>' . esc_html__('No abilities are registered on this site besides Alpaca Bot\'s own.', 'alpaca-bot') . '</p>'
             : '<ul>' . $items . '</ul>';
         return '<input type="hidden" name="' . $name . '" value="">' . $list . $desc;
+    }
+
+    /**
+     * The MCP servers table: a row per stored server, then one blank row to add one, every
+     * control posting as `alpaca_bot_settings[toolkits.mcp_servers][<index>][<field>]`, so a
+     * post is the list Schema::sanitizeMcpServers() reads. A stored row's id is a hidden input
+     * and nothing else: an edit of the prefix or the URL keeps it, and with it the server's
+     * Access entry and header value. The blank row has none, so a server added there is given
+     * one on save; its URL left empty, the schema drops it.
+     *
+     * The header value is a password control showing Schema::MASK when a value is kept and ''
+     * when not, through Schema::maskedServers() as the carry-over does, so no value reaches the
+     * page. Posting the mask back keeps the value, '' clears it, anything else replaces it.
+     *
+     * The approvals cell, `div#ab-mcp-tools-<id>`, holds a hidden input per approved tool, so a
+     * save carries every approval as it is; nothing on this page changes one. Ticking `remove`
+     * drops the row on save, and
+     * with it the server's header value and Access entry (Mcp\ServerSettings).
+     *
+     * The table is a `widefat` inside a Settings API row like the overrides table, and
+     * `div.ab-mcp-servers` gets the same rules (Assets). Every value from a row goes through
+     * esc_attr() or esc_html() as it is printed.
+     *
+     * @param Field $f
+     */
+    private function renderMcpServers(array $f): string
+    {
+        $stored = Schema::maskedServers($this->store->get('toolkits.mcp_servers', []));
+        $rows = array_values(array_filter(is_array($stored) ? $stored : [], 'is_array'));
+        $body = '';
+        foreach ($rows as $i => $row) {
+            $body .= self::serverRow($i, $row);
+        }
+        $body .= self::serverRow(count($rows), null);
+        $head = '';
+        foreach (self::serverColumns() as $label) {
+            $head .= '<th>' . esc_html($label) . '</th>';
+        }
+        return '<div class="ab-mcp-servers" id="ab-mcp-servers"><table class="widefat striped"><thead><tr>' . $head . '</tr></thead><tbody>' . $body . '</tbody></table></div>'
+            . '<p class="description">' . esc_html((string) ($f['description'] ?? '')) . '</p>'
+            . '<p class="description">' . esc_html__('The prefix names this server\'s tools for the model, as prefix__tool: a lowercase letter, then up to 15 lowercase letters, digits or underscores, and not "ability". The last row adds a server; leave its URL empty to add none.', 'alpaca-bot') . '</p>';
+    }
+
+    /** @return list<string> the MCP servers table's column headings, in column order */
+    private static function serverColumns(): array
+    {
+        return [__('Prefix', 'alpaca-bot'), __('URL', 'alpaca-bot'), __('Header name', 'alpaca-bot'), __('Header value', 'alpaca-bot'), __('Timeout (seconds)', 'alpaca-bot'), __('Largest response (bytes)', 'alpaca-bot'), __('Approved tools', 'alpaca-bot'), __('Remove', 'alpaca-bot')];
+    }
+
+    /**
+     * One row of the MCP servers table: `$row` as stored and masked, or null for the blank row
+     * that adds a server.
+     *
+     * @param array<array-key, mixed>|null $row
+     */
+    private static function serverRow(int $i, ?array $row): string
+    {
+        $id = is_string($row['id'] ?? null) ? $row['id'] : null;
+        $labels = self::serverColumns();
+        $cells = [
+            ($id === null ? '' : self::serverInput($i, 'id', 'hidden', '', $id, ''))
+                . self::serverInput($i, 'prefix', 'text', 'small-text', $row['prefix'] ?? '', $labels[0], ' pattern="[a-z][a-z0-9_]{0,15}" maxlength="16"'),
+            self::serverInput($i, 'url', 'url', 'regular-text', $row['url'] ?? '', $labels[1], ' pattern="https://.*"'),
+            self::serverInput($i, 'header_name', 'text', 'regular-text', $row['header_name'] ?? '', $labels[2]),
+            self::serverInput($i, 'header_value', 'password', 'regular-text', $row['header_value'] ?? '', $labels[3], ' autocomplete="new-password"'),
+            self::serverInput($i, 'timeout', 'number', 'small-text', $row['timeout'] ?? 30, $labels[4], ' step="0.1" min="1" max="120"'),
+            self::serverInput($i, 'max_bytes', 'number', 'small-text', $row['max_bytes'] ?? 1048576, $labels[5], ' step="1" min="1024" max="8388608"'),
+            '<div id="' . esc_attr('ab-mcp-tools-' . ($id ?? 'new')) . '">' . self::serverApprovals($i, $id, $row['approved'] ?? []) . '</div>',
+            $id === null ? '' : self::serverInput($i, 'remove', 'checkbox', '', '1', $labels[7]),
+        ];
+        return '<tr><td>' . implode('</td><td>', $cells) . '</td></tr>';
+    }
+
+    /** One control of a server row, posting as `alpaca_bot_settings[toolkits.mcp_servers][<i>][<field>]`; `$extra` is attributes already escaped. */
+    private static function serverInput(int $i, string $field, string $type, string $class, mixed $value, string $label, string $extra = ''): string
+    {
+        return '<input type="' . $type . '"' . ($class === '' ? '' : ' class="' . $class . '"')
+            . ' name="' . esc_attr(Plugin::OPTION . '[toolkits.mcp_servers][' . $i . '][' . $field . ']') . '"'
+            . ' value="' . esc_attr(is_scalar($value) ? (string) $value : '') . '"' . $extra
+            . ($label === '' ? '' : ' aria-label="' . esc_attr($label) . '"') . '>';
+    }
+
+    /** A server row's approvals cell: a hidden input per approved tool, and how many there are. */
+    private static function serverApprovals(int $i, ?string $id, mixed $approved): string
+    {
+        $out = '';
+        $count = 0;
+        foreach (is_array($approved) ? $approved : [] as $tool => $fingerprint) {
+            if (is_scalar($fingerprint)) {
+                $out .= '<input type="hidden" name="' . esc_attr(Plugin::OPTION . '[toolkits.mcp_servers][' . $i . '][approved][' . $tool . ']') . '" value="' . esc_attr((string) $fingerprint) . '">';
+                ++$count;
+            }
+        }
+        if ($id === null) {
+            return $out . esc_html__('Save the server first.', 'alpaca-bot');
+        }
+        /* translators: %d: how many of a server's tools are approved */
+        return $out . esc_html(sprintf(_n('%d tool approved.', '%d tools approved.', $count, 'alpaca-bot'), $count));
     }
 
     /**

@@ -364,3 +364,28 @@ it('puts the drawer on the other admin screens: its loader on admin_enqueue_scri
         ->and((new ReflectionProperty(AlpacaBot\Admin\Drawer::class, 'access'))->getValue($drawer))->toBe($plugin->get(AlpacaBot\Access::class))
         ->and((new ReflectionProperty(AlpacaBot\Admin\Drawer::class, 'prefs'))->getValue($drawer))->toBe($plugin->get(UserPrefs::class));
 });
+
+// The split of an MCP server's header value into its own option has to run on every write of the
+// settings option, whoever makes it, so it is hooked at boot rather than by the settings page;
+// and the page and the REST route are handed the same instance, so their address check is the
+// one the container holds.
+it('hooks the MCP server settings onto the option\'s writes and hands the same instance to the settings page and the REST route', function (): void {
+    Functions\when('add_shortcode')->justReturn();
+    $hooked = null;
+    Filters\expectAdded('pre_update_option_' . Plugin::OPTION)->once()->with(Mockery::on(static function (mixed $cb) use (&$hooked): bool {
+        $hooked = $cb;
+        return true;
+    }), 10, 2);
+    $plugin = Plugin::boot();
+    $plugin->register();
+    $servers = $plugin->get(AlpacaBot\Mcp\ServerSettings::class);
+    expect($hooked)->toBe([$servers, 'beforeSave'])
+        ->and((new ReflectionProperty(SettingsPage::class, 'servers'))->getValue($plugin->get(SettingsPage::class)))->toBe($servers);
+
+    Functions\when('register_rest_route')->justReturn(true);
+    $settings = null;
+    foreach ((new ReflectionMethod(Plugin::class, 'controllers'))->invoke($plugin) as $controller) {
+        $settings = $controller instanceof AlpacaBot\Rest\SettingsController ? $controller : $settings;
+    }
+    expect((new ReflectionProperty(AlpacaBot\Rest\SettingsController::class, 'servers'))->getValue($settings))->toBe($servers);
+});

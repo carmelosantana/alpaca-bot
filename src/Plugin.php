@@ -100,6 +100,12 @@ final class Plugin
         add_action('add_option_' . self::OPTION, function (): void {
             delete_transient(Provider\ModelCatalog::TRANSIENT);
         });
+        // An MCP server's header value is taken out of its row on every write of the option,
+        // whoever makes it (Mcp\ServerSettings says why that is a filter). The settings page and
+        // the REST route are handed this instance for the address check they run before a write.
+        $servers = new Mcp\ServerSettings();
+        $this->set(Mcp\ServerSettings::class, $servers);
+        $servers->register();
         $conversations = new Chat\ConversationStore($store);
         $this->set(Chat\ConversationStore::class, $conversations);
         add_action('init', [$conversations, 'registerPostType']);
@@ -182,7 +188,7 @@ final class Plugin
         // are built, and it would decide wrong where is_admin() is false at plugins_loaded but a
         // test (wp-phpunit sets no screen until a test does) later fires the actions itself.
         // options.php, which every save posts to, is wp-admin and fires admin_init as any screen.
-        $settingsPage = new Admin\SettingsPage($store, $this->get(Provider\ModelCatalog::class), $this->get(Access::class));
+        $settingsPage = new Admin\SettingsPage($store, $this->get(Provider\ModelCatalog::class), $this->get(Access::class), null, $servers);
         $this->set(Admin\SettingsPage::class, $settingsPage);
         add_action('admin_init', [$settingsPage, 'register']);
         $chatScreen = new Admin\ChatScreen($store, $this->get(Provider\ModelCatalog::class), $conversations, $prefs);
@@ -272,7 +278,7 @@ final class Plugin
             new Rest\StreamController($this->get(Chat\Pipeline::class), $this->get(Store::class)),
             new Rest\ConversationsController($this->get(Chat\ConversationStore::class), $this->get(Store::class)),
             new Rest\ModelsController($this->get(Provider\ModelCatalog::class), $this->get(Store::class)),
-            new Rest\SettingsController($this->get(Store::class)),
+            new Rest\SettingsController($this->get(Store::class), $this->get(Mcp\ServerSettings::class)),
             new Rest\UsageController($this->get(Chat\UsageMeter::class), $this->get(Store::class)),
             new Rest\ViewController($this->get(Chat\ConversationStore::class), $this->get(Store::class), $this->get(Provider\ModelCatalog::class), new View\Markdown(), $this->get(Chat\UserPrefs::class)),
         ]);
