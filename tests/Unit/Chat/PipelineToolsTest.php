@@ -137,8 +137,8 @@ it('records a tool that fails, and one the model names that does not exist, as n
         ->and($r->receipt['total_tokens'])->toBe(4);
 });
 
-// Each record carries the size in bytes of the result the model was given, and the receipt sums
-// them: the one number that says how much the tools put into the turn's context.
+// Each record carries the size in bytes of the result its tool returned, and the receipt sums them:
+// the one number that says how much the turn's tools handed back.
 it('reports the sum of the turn\'s tool result sizes on the receipt, the stored row and the usage action', function (): void {
     $toolkit = echoToolkit('echo_tool');
     $provider = agentProvider([
@@ -388,6 +388,8 @@ it('finishes the turn on a tool\'s own word when a toolkit ends the run with a T
     // failed, a tool asked the run to stop, and its message is the run's last word.
     expect($r->reply->content)->toBe("One moment.\n\nStopped: enough")
         ->and($r->reply->meta['tool_calls'])->toBe([['name' => 'stop_here', 'arguments' => ['text' => 'enough'], 'result_excerpt' => 'Stopped: enough', 'ok' => true, 'result_bytes' => 15]])
+        // Counted though the run ended on it and no later request sent it to the model (docs/api.md).
+        ->and($r->receipt['tool_result_bytes'])->toBe(15)
         ->and($r->receipt['total_tokens'])->toBe(3);
 });
 

@@ -9,7 +9,9 @@ Every example below was run against a local harness site, `alpaca10.wp.test`, as
 user with an Application Password, and the output shown is what came back (long model
 reasoning is cut with `…`, and the site's private provider URL is replaced with
 `http://ollama.example:11434/v1`). Where an example could not be run against a live site it says
-so and cites the integration test it comes from.
+so and cites the integration test it comes from. One key was added to captured output by hand:
+the receipts of the two chat samples (sections 3 and 4) predate `tool_result_bytes`, added in
+0.6.0, and carry the `0` that a turn which ran no tool answers with.
 
 ## 1. Where the API is
 
@@ -235,7 +237,8 @@ The 200 body is `{conversation_id, message, receipt, contexts}`:
 - `receipt` is the usage row the turn wrote: `{user_id, model, prompt_tokens,
   completion_tokens, total_tokens, duration_ms, tool_result_bytes, conversation_id, log_id,
   created}`. `tool_result_bytes` is the total size in bytes of every tool result the turn's
-  model was given, 0 for a turn that ran none.
+  tools returned, each as the tool handed it back (after any cut the tool makes), whether or not
+  a later request of the turn then sent it to the model; 0 for a turn that ran none.
 - `contexts` lists the context sources folded into the system prompt (`[]` when the request
   carried no `context`).
 

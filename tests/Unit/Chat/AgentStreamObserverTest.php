@@ -114,7 +114,7 @@ it('pairs a result carrying no id with the oldest unanswered call, and reports a
     ]);
 });
 
-// The excerpt is bounded for storage, so the size of what the model was given is kept beside
+// The excerpt is bounded for storage, so the size of what the tool returned is kept beside
 // it as a number: it is what the usage receipt sums into `tool_result_bytes`.
 it('reports the whole result\'s size in bytes on a record whose excerpt was cut', function (): void {
     $agent = agentSubject();
