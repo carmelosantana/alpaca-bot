@@ -64,7 +64,7 @@ use AlpacaBot\Toolkit\SchemaTool;
  * from another tab posts nothing for it and Schema::sanitize() keeps the stored map, sanitized
  * again, rather than replacing it with what the page could print of it. The Access tab posts the
  * selects of the listed servers and nothing else. An entry whose server the list no longer has
- * is not carried, because every write of the option drops it, from whichever tab
+ * is not carried, because every update_option() of the option drops it, from whichever tab
  * (Mcp\ServerSettings::beforeSave()): a server added later under the same id starts at
  * administrators only instead of inheriting it.
  *
@@ -85,7 +85,7 @@ final class SettingsPage
 
     /**
      * @param (callable(string): bool)|null $exists  function_exists() or a stand-in for it, as Abilities\Register takes one
-     * @param ServerSettings|null           $servers the address check a save of `toolkits.mcp_servers` runs; one over AddressPin by default
+     * @param ServerSettings|null           $servers the address check a save of `toolkits.mcp_servers` runs; one over AddressCheck by default
      */
     public function __construct(private Store $store, private ModelCatalog $catalog, private Access $access, ?callable $exists = null, ?ServerSettings $servers = null)
     {
@@ -386,14 +386,16 @@ final class SettingsPage
      * as the schema wrote it, is removed only by its `remove` box, and a refusal is said on the
      * screen. Four steps, in order.
      *
-     * 1. Addresses (ServerSettings::refusals()): a stored server whose new or changed URL is refused
-     *    is put back as `$stored` has it, whole (header value, approvals and Access entry stand,
-     *    since its id and origin do not change); a refused new row is left out.
-     * 2. Rows the schema left out: a stored server the post lists without `remove` that
-     *    Schema::sanitizeMcpServers() dropped is put back, as posted when its row is valid on its
-     *    own (it lost its prefix to an earlier row, which step 3 settles) and as stored when it is
-     *    not (a URL or prefix the schema does not accept). A new row with a URL that was dropped is
-     *    said.
+     * 1. Rows the schema left out (Schema::droppedMcpRows()): a stored server the post lists
+     *    without `remove` is put back, as posted when only its prefix was taken by an earlier row,
+     *    which step 3 settles, and as stored, said, when its URL or prefix is one the schema does
+     *    not accept. A new row with a URL comes back the same way when only its prefix was taken,
+     *    and is said and left out otherwise.
+     * 2. Addresses (ServerSettings::refusals()), over the list as step 1 left it, so a row step 1
+     *    put back as posted is checked too: a stored server whose new or changed URL is refused is
+     *    put back as `$stored` has it, whole (header value, approvals and Access entry stand, since
+     *    its id and origin do not change); a refused new row is left out. Steps 3 and 4 add no
+     *    URL: step 3 only puts rows back as stored or leaves rows out.
      * 3. Prefixes: while two rows share one, the row that keeps it is, in this order, a stored
      *    server whose prefix is its own stored one (as a row put back as stored is), any other
      *    stored server, a new row, and the first of equals. The other loses: a stored server is
@@ -430,6 +432,34 @@ final class SettingsPage
         $notices = ['mcp_address' => [], 'mcp_prefix' => [], 'mcp_dropped' => [], 'mcp_cleared' => []];
         $url = static fn(mixed $row): string => is_array($row) && is_string($row['url'] ?? null) ? $row['url'] : '';
 
+        $posted = $input['toolkits.mcp_servers'] ?? null;
+        foreach (Schema::droppedMcpRows($posted) as $key => $fault) {
+            /** @var array<array-key, mixed> $row droppedMcpRows() lists arrays only */
+            $row = is_array($posted) ? $posted[$key] : [];
+            $id = is_string($row['id'] ?? null) ? $row['id'] : null;
+            $alone = Schema::sanitizeMcpServers([$row], $storedRows);
+            if ($id !== null && isset($was[$id])) {
+                if (in_array($id, array_column($rows, 'id'), true)) {
+                    continue;
+                }
+                if ($fault === 'taken' && $alone !== []) {
+                    $rows[] = $alone[0];
+                } else {
+                    $rows[] = $was[$id];
+                    /* translators: 1: an MCP server's URL, 2: its id */
+                    $notices['mcp_dropped'][] = sprintf(__('The change to MCP server %1$s (%2$s) was not saved: its URL has to be https with a host, and its prefix a lowercase letter then up to 15 lowercase letters, digits or underscores, and not "ability".', 'alpaca-bot'), $url($was[$id]), $id);
+                }
+            } elseif (trim($url($row)) !== '') {
+                if ($fault === 'taken' && $alone !== []) {
+                    // No id: the last pass through the schema gives it one, against every row kept.
+                    $rows[] = array_merge($alone[0], ['id' => '']);
+                } else {
+                    /* translators: %s: the URL of an MCP server that was not added */
+                    $notices['mcp_dropped'][] = sprintf(__('The MCP server %s was not added: its URL has to be https with a host, and its prefix a lowercase letter then up to 15 lowercase letters, digits or underscores, and not "ability".', 'alpaca-bot'), $url($row));
+                }
+            }
+        }
+
         foreach ($servers->refusals($rows, $storedRows) as $i => $reason) {
             $before = $was[$rows[$i]['id']] ?? null;
             $notices['mcp_address'][] = $before !== null
@@ -441,30 +471,6 @@ final class SettingsPage
                 $rows[$i] = $before;
             } else {
                 unset($rows[$i]);
-            }
-        }
-
-        $posted = $input['toolkits.mcp_servers'] ?? null;
-        foreach (is_array($posted) ? $posted : [] as $row) {
-            if (!is_array($row) || !empty($row['remove'])) {
-                continue;
-            }
-            $id = is_string($row['id'] ?? null) ? $row['id'] : null;
-            $alone = Schema::sanitizeMcpServers([$row], $storedRows);
-            if ($id !== null && isset($was[$id])) {
-                if (in_array($id, array_column($rows, 'id'), true)) {
-                    continue;
-                }
-                if ($alone === []) {
-                    $rows[] = $was[$id];
-                    /* translators: 1: an MCP server's URL, 2: its id */
-                    $notices['mcp_dropped'][] = sprintf(__('The change to MCP server %1$s (%2$s) was not saved: its URL has to be https with a host, and its prefix a lowercase letter then up to 15 lowercase letters, digits or underscores, and not "ability".', 'alpaca-bot'), $url($was[$id]), $id);
-                } else {
-                    $rows[] = $alone[0];
-                }
-            } elseif (trim($url($row)) !== '' && $alone === []) {
-                /* translators: %s: the URL of an MCP server that was not added */
-                $notices['mcp_dropped'][] = sprintf(__('The MCP server %s was not added: its URL has to be https with a host, and its prefix a lowercase letter then up to 15 lowercase letters, digits or underscores, and not "ability".', 'alpaca-bot'), $url($row));
             }
         }
 
@@ -518,7 +524,7 @@ final class SettingsPage
             foreach ($rows as $row) {
                 if (($row['id'] ?? null) === $id) {
                     /* translators: 1: an MCP server's URL, 2: its id */
-                    $notices['mcp_cleared'][] = sprintf(__('The header value of MCP server %1$s (%2$s) was cleared, because its address moved to another host, port or scheme. Enter it again.', 'alpaca-bot'), $url($row), $id);
+                    $notices['mcp_cleared'][] = sprintf(__('The header value of MCP server %1$s (%2$s) was cleared, because its address moved to another host or port. Enter it again.', 'alpaca-bot'), $url($row), $id);
                 }
             }
         }

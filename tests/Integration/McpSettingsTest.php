@@ -439,6 +439,87 @@ final class McpSettingsTest extends TestCase
         $this->assertStringContainsString('https://93.184.216.35/mcp (bb)', $errors[0]['message']);
     }
 
+    /**
+     * N-1: an edit the schema drops for its prefix (another row took it) and the page puts back
+     * as posted still has its address checked. `aa` takes `bb`'s prefix and `bb` moves to a
+     * private or loopback address: `bb` keeps what is stored, `aa` loses the prefix, and nothing
+     * private is saved.
+     */
+    public function test_an_edit_put_back_after_a_prefix_clash_still_has_its_address_checked(): void
+    {
+        foreach (['https://10.9.9.9/mcp', 'https://127.0.0.1:6379/mcp'] as $private) {
+            $this->rest('PUT', '/settings', [
+                'toolkits.mcp_servers' => [
+                    ['url' => self::URL, 'prefix' => 'aa', 'header_value' => self::SECRET],
+                    ['url' => 'https://93.184.216.35/mcp', 'prefix' => 'bb', 'header_value' => self::OTHER],
+                ],
+                'access.mcp' => ['aa' => 'read', 'bb' => 'edit_posts'],
+            ]);
+            $before = get_option(Plugin::OPTION);
+            $GLOBALS['wp_settings_errors'] = [];
+            $posted = self::formPost($this->page('toolkits'));
+            $posted['toolkits.mcp_servers'][0]['prefix'] = 'bb';
+            $posted['toolkits.mcp_servers'][1]['url'] = $private;
+            $this->save($posted);
+
+            $after = get_option(Plugin::OPTION);
+            $this->assertSame($before['toolkits.mcp_servers'], $after['toolkits.mcp_servers'], $private);
+            $this->assertSame($before['access.mcp'], $after['access.mcp'], $private);
+            $this->assertSame(['aa' => self::SECRET, 'bb' => self::OTHER], Secrets::all(), $private);
+            $errors = get_settings_errors(Plugin::OPTION);
+            $this->assertSame(['mcp_address', 'mcp_prefix'], array_column($errors, 'code'), $private);
+            $this->assertStringContainsString($private, $errors[0]['message']);
+            $this->assertStringContainsString(self::URL . ' (aa)', $errors[1]['message']);
+        }
+    }
+
+    /**
+     * N-2: the form's add row is listed last, so a new server whose prefix a stored one holds is
+     * dropped by the schema; the page says so, and the typed value goes nowhere.
+     */
+    public function test_a_new_row_under_a_stored_prefix_is_named(): void
+    {
+        $this->rest('PUT', '/settings', ['toolkits.mcp_servers' => [['url' => self::URL, 'prefix' => 'aa', 'header_value' => self::SECRET]]]);
+        $before = get_option(Plugin::OPTION);
+        $posted = self::formPost($this->page('toolkits'));
+        $posted['toolkits.mcp_servers'][] = ['url' => 'https://93.184.216.36/mcp', 'prefix' => 'aa', 'header_value' => 'Bearer lost'];
+        $this->save($posted);
+
+        $this->assertSame($before['toolkits.mcp_servers'], get_option(Plugin::OPTION)['toolkits.mcp_servers']);
+        $this->assertSame(['aa' => self::SECRET], Secrets::all());
+        $errors = get_settings_errors(Plugin::OPTION);
+        $this->assertSame(['mcp_prefix'], array_column($errors, 'code'));
+        $this->assertStringContainsString('https://93.184.216.36/mcp', $errors[0]['message']);
+        $this->assertStringNotContainsString('Bearer lost', (string) wp_json_encode($errors));
+    }
+
+    /** R78 over real dispatch: a PUT that would drop a stored server's row writes nothing at all. */
+    public function test_a_put_that_would_drop_a_stored_row_is_refused_and_writes_nothing(): void
+    {
+        $this->rest('PUT', '/settings', [
+            'toolkits.mcp_servers' => [
+                ['url' => self::URL, 'prefix' => 'aa', 'header_value' => self::SECRET],
+                ['url' => 'https://93.184.216.35/mcp', 'prefix' => 'bb', 'header_value' => self::OTHER],
+            ],
+            'access.mcp' => ['aa' => 'read', 'bb' => 'edit_posts'],
+        ]);
+        $before = get_option(Plugin::OPTION);
+        $res = $this->rest('PUT', '/settings', [
+            'toolkits.user_agent' => 'Changed/2.0',
+            'toolkits.mcp_servers' => [
+                ['id' => 'aa', 'url' => self::URL, 'prefix' => 'bb', 'header_value' => 'Bearer typed'],
+                ['id' => 'bb', 'url' => 'https://93.184.216.35/mcp', 'prefix' => 'bb', 'header_value' => Schema::MASK],
+            ],
+        ]);
+        $this->assertSame(400, $res->get_status());
+        $this->assertSame('alpaca_bot_mcp_row', $res->get_data()['code']);
+        $this->assertSame([['index' => 1, 'id' => 'bb']], array_map(static fn(array $r): array => ['index' => $r['index'], 'id' => $r['id']], $res->get_data()['data']['rows']));
+        $this->assertStringNotContainsString('Bearer typed', (string) wp_json_encode($res->get_data()));
+        $this->assertStringNotContainsString(self::OTHER, (string) wp_json_encode($res->get_data()));
+        $this->assertSame($before, get_option(Plugin::OPTION));
+        $this->assertSame(['aa' => self::SECRET, 'bb' => self::OTHER], Secrets::all());
+    }
+
     /** m-4: a client that PUTs the same body without ids keeps the same id, and its Access entry, every time. */
     public function test_the_same_put_without_ids_keeps_the_same_server(): void
     {

@@ -21,9 +21,9 @@ use AlpacaBot\Toolkit\AbilitiesToolkit;
  *
  * An MCP server's header value is a secret too, but a nested one, and SECRETS is a list of
  * top-level keys. sanitizeMcpServers() applies the same three-valued rule to it, with MASK kept as
- * MASK because this class has no stored value to put there: the value is not in this option at
- * all. Mcp\ServerSettings takes it out on every write, keeps it in Mcp\Secrets, and leaves MASK
- * or '' in the row.
+ * MASK because this class has no stored value to put there: the value is kept out of this
+ * option. Mcp\ServerSettings takes it out on every update_option(), keeps it in Mcp\Secrets, and
+ * leaves MASK or '' in the row; add_option() on its own is the exception its docblock names.
  *
  * @phpstan-type Field array{type:'string'|'integer'|'number'|'boolean'|'array'|'select'|'checkbox-list', default:mixed, section:string, label:string, description?:string, options?:array<string,string>, min?:int|float, max?:int|float, sanitize?:callable(mixed, array<string, mixed>): mixed}
  */
@@ -131,7 +131,7 @@ final class Schema
             'toolkits.enabled' => ['type' => 'checkbox-list', 'default' => ['web_fetch', 'summarize', 'draft_post'], 'section' => 'toolkits', 'label' => __('Enabled tools', 'alpaca-bot'), 'description' => __('What the assistant may do besides answer. A tool that is off is not offered to the model at all.', 'alpaca-bot'), 'options' => ['web_fetch' => __('Fetch a web page the user names', 'alpaca-bot'), 'summarize' => __('Summarize text', 'alpaca-bot'), 'draft_post' => __('Draft a post or page (never publishes)', 'alpaca-bot'), 'abilities' => __('Call the site\'s WordPress abilities you tick', 'alpaca-bot')]],
             'toolkits.user_agent' => ['type' => 'string', 'default' => 'AlpacaBot/0.5 (+https://github.com/carmelosantana/alpaca-bot)', 'section' => 'toolkits', 'label' => __('User agent for fetch tools', 'alpaca-bot')],
             'toolkits.abilities' => ['type' => 'array', 'default' => [], 'section' => 'toolkits', 'label' => __('Abilities the model may call', 'alpaca-bot'), 'description' => __('The WordPress abilities that WordPress and other plugins register on this site. Each one you tick becomes a tool of the abilities tool, which is offered only while it is on under Enabled tools, and only to users its Access row admits. Two ticked abilities that would reach the model under the same tool name are marked, and neither is offered. A call runs as the user whose turn it is, through the ability\'s own permission check. Alpaca Bot\'s own abilities are never offered.', 'alpaca-bot'), 'sanitize' => [self::class, 'sanitizeAbilities']],
-            'toolkits.mcp_servers' => ['type' => 'array', 'default' => [], 'section' => 'toolkits', 'label' => __('MCP servers', 'alpaca-bot'), 'description' => __('Remote MCP servers whose tools the model may call. The address must be https; it is checked when it is saved from this screen or over the REST API, and a private or other special-purpose address is refused, even when it is the site\'s own host. Changing a server\'s scheme, host or port clears its header value, so it is never sent to an address it was not set for; type it again. A connection to an MCP server never goes through a proxy, neither one set for WordPress nor one set in the server\'s environment, so a site whose outbound traffic has to use a proxy cannot reach one. The header value is kept in an option of its own that WordPress does not load on every page, and this screen only shows whether one is set.', 'alpaca-bot')],
+            'toolkits.mcp_servers' => ['type' => 'array', 'default' => [], 'section' => 'toolkits', 'label' => __('MCP servers', 'alpaca-bot'), 'description' => __('Remote MCP servers whose tools the model may call. The address must be https; it is checked when it is saved from this screen or over the REST API, and a private or other special-purpose address is refused, even when it is the site\'s own host. Moving a server to another host or port clears its header value, so it is never sent to an address it was not set for; type it again. A connection to an MCP server never goes through a proxy, neither one set for WordPress nor one set in the server\'s environment, so a site whose outbound traffic has to use a proxy cannot reach one. The header value is kept in an option of its own that WordPress does not load on every page, and this screen only shows whether one is set.', 'alpaca-bot')],
             'access.chat' => self::access('chat', __('Chat', 'alpaca-bot'), __('Who may open the chat screen and use the chat REST routes. A tool needs its own row as well as this one.', 'alpaca-bot')),
             'access.tool.web_fetch' => self::access('tool.web_fetch', __('Tool: fetch a web page', 'alpaca-bot'), __('Who may run a turn that can fetch a page, and who may use [alpacabot_agent], which runs the same tool on the shortcode\'s behalf. It governs the next fetch, not the last one: a shortcode answer already cached on a post stands until its cache expires. The tool makes this server send an outbound request and hands the reply back; the Tools help tab says what that grants.', 'alpaca-bot')),
             'access.tool.summarize' => self::access('tool.summarize', __('Tool: summarize', 'alpaca-bot'), __('Who may run a turn that can summarize text through the model.', 'alpaca-bot')),
@@ -146,8 +146,8 @@ final class Schema
             // so the row names are the same as every other row's. Empty until a server is
             // configured, and a server with no entry reads as manage_options (Access), which is
             // to say a server nobody has ruled on is administrators-only. An entry whose server
-            // `toolkits.mcp_servers` no longer lists is dropped on the next write of the option
-            // (Mcp\ServerSettings::beforeSave()), which this pure function cannot do for it.
+            // `toolkits.mcp_servers` no longer lists is dropped on the next update_option() of the
+            // option (Mcp\ServerSettings::beforeSave()), which this pure function cannot do for it.
             'access.mcp' => ['type' => 'array', 'default' => [], 'section' => 'access', 'label' => __('Per-server access', 'alpaca-bot'), 'sanitize' => [self::class, 'sanitizeAccessMcp']],
         ];
     }
@@ -342,7 +342,7 @@ final class Schema
      * What it can check is the value and the shape of the id (isMcpId(), the rule
      * sanitizeMcpServers() gives every server), not whether a server by that id is listed: that
      * takes the rest of the option, which this function is not handed. Mcp\ServerSettings::beforeSave()
-     * drops an entry whose server is not listed, on every write of the option.
+     * drops an entry whose server is not listed, on every update_option() of the option.
      *
      * @return array<string, string>
      */
@@ -456,14 +456,12 @@ final class Schema
         $asked = [];
         $prefixes = [];
         foreach ($raw as $row) {
-            if (!is_array($row) || !empty($row['remove'])) {
+            if (!is_array($row) || !empty($row['remove']) || self::mcpRowFault($row, $prefixes) !== null) {
                 continue;
             }
             $url = self::mcpUrl($row['url'] ?? null);
-            $prefix = $row['prefix'] ?? null;
-            if ($url === '' || !is_string($prefix) || preg_match(self::MCP_TOOL_PREFIX, $prefix) !== 1 || $prefix === 'ability' || in_array($prefix, $prefixes, true)) {
-                continue;
-            }
+            /** @var string $prefix mcpRowFault() passed it */
+            $prefix = $row['prefix'];
             $prefixes[] = $prefix;
             $asked[] = $row['id'] ?? null;
             $timeout = is_numeric($row['timeout'] ?? null) ? (float) $row['timeout'] : 30.0;
@@ -515,6 +513,54 @@ final class Schema
             $rows[$i]['id'] = $ids[$i];
         }
         return $rows;
+    }
+
+    /**
+     * Each row of `$raw` that sanitizeMcpServers() leaves out, by its key in `$raw`, with why:
+     * `url` (not https with a host), `prefix` (not MCP_TOOL_PREFIX, or `ability`) or `taken` (an
+     * earlier row that is kept has it). A row that is not an array, or whose `remove` is ticked,
+     * is not listed, since leaving it out is what it asks for. Both functions ask mcpRowFault(),
+     * so the two cannot disagree about a row.
+     *
+     * @return array<array-key, 'url'|'prefix'|'taken'>
+     */
+    public static function droppedMcpRows(#[\SensitiveParameter] mixed $raw): array
+    {
+        $dropped = [];
+        $prefixes = [];
+        foreach (is_array($raw) ? $raw : [] as $key => $row) {
+            if (!is_array($row) || !empty($row['remove'])) {
+                continue;
+            }
+            $fault = self::mcpRowFault($row, $prefixes);
+            if ($fault === null) {
+                /** @var string $prefix */
+                $prefix = $row['prefix'];
+                $prefixes[] = $prefix;
+            } else {
+                $dropped[$key] = $fault;
+            }
+        }
+        return $dropped;
+    }
+
+    /**
+     * Why sanitizeMcpServers() cannot keep `$row`, given the prefixes of the rows it has kept
+     * before it, or null when it can.
+     *
+     * @param array<array-key, mixed> $row
+     * @param list<string>            $prefixes
+     * @return 'url'|'prefix'|'taken'|null
+     */
+    private static function mcpRowFault(#[\SensitiveParameter] array $row, array $prefixes): ?string
+    {
+        $prefix = $row['prefix'] ?? null;
+        return match (true) {
+            self::mcpUrl($row['url'] ?? null) === '' => 'url',
+            !is_string($prefix) || preg_match(self::MCP_TOOL_PREFIX, $prefix) !== 1 || $prefix === 'ability' => 'prefix',
+            in_array($prefix, $prefixes, true) => 'taken',
+            default => null,
+        };
     }
 
     /** An MCP server's URL as sanitizeMcpServers() keeps it, or '' when it is not https with a host. */

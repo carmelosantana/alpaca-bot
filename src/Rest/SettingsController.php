@@ -68,17 +68,26 @@ use AlpacaBot\Settings\Store;
  * value taken out of its row, or an `access.mcp` entry dropped with its server, is gone from the
  * reply too.
  *
- * A PUT carrying `toolkits.mcp_servers` has the address of each server whose URL is new or
- * changed checked first (Mcp\ServerSettings::refusals()), each row under the id the write will
- * give it. When one fails, the reply is a 400 with the code `alpaca_bot_mcp_address`, naming each
- * refused URL and why, and nothing is written, the other keys of the same PUT included. The
- * message never carries a header value.
+ * A PUT carrying `toolkits.mcp_servers` is refused whole, 400 and nothing written, the other keys
+ * of the same PUT included, in two cases, both checked before anything is stored:
+ * - `alpaca_bot_mcp_row`: a row the schema would drop (Schema::droppedMcpRows()) that names a
+ *   stored server's id, or that is new and has a URL. A client that sends a row for a server means
+ *   to keep it, so a 200 that had quietly deleted it, its header value and its Access entry with
+ *   it, would say the write went as asked. The error's data carries `rows`, each
+ *   `{index, id, url, reason}` (droppedRows()). Leaving a server out of the list, or sending its
+ *   row with `remove`, still deletes it, and a row with neither a stored id nor a URL is still
+ *   ignored.
+ * - `alpaca_bot_mcp_address`: the address of a server whose URL is new or changed does not pass
+ *   the check (Mcp\ServerSettings::refusals()), each row checked under the id the write will give
+ *   it. The message names each refused URL and why.
+ * Neither error carries a header value.
  *
- * A stored server whose URL the PUT moves to another scheme, host or port loses its header value
- * when the PUT sends the mask for it (Mcp\ServerSettings says why). The write is not refused for
- * that: its row reads back '' like any server with no value, and the reply carries
- * `X-Alpaca-Bot-Mcp-Cleared`, the ids of those servers comma-separated, because '' alone cannot
- * tell a value just dropped from one never set. A header rather than an error or a body key keeps
+ * A stored server whose URL the PUT moves to another host or port loses its header value when the
+ * PUT sends the mask for it (Mcp\ServerSettings says why). The write is not refused for that: its
+ * row reads back '' like any server with no value, and the reply carries
+ * `X-Alpaca-Bot-Mcp-Cleared`, the ids of those servers comma-separated, naming only servers that
+ * had a value (Mcp\ServerSettings::clearedByMove()), because '' alone cannot tell a value just
+ * dropped from one never set. A header rather than an error or a body key keeps
  * the body the settings array and nothing else, as `X-Alpaca-Bot-Default-Model` does for
  * `GET /models`.
  *
@@ -113,7 +122,7 @@ final class SettingsController extends Controller
 {
     private ServerSettings $servers;
 
-    /** @param ServerSettings|null $servers the address check a PUT of `toolkits.mcp_servers` runs; one over AddressPin by default */
+    /** @param ServerSettings|null $servers the address check a PUT of `toolkits.mcp_servers` runs; one over AddressCheck by default */
     public function __construct(private Store $store, ?ServerSettings $servers = null)
     {
         $this->servers = $servers ?? new ServerSettings();
@@ -204,6 +213,17 @@ final class SettingsController extends Controller
         $cleared = [];
         if (array_key_exists('toolkits.mcp_servers', $input)) {
             $stored = $this->store->get('toolkits.mcp_servers');
+            $dropped = self::droppedRows($input['toolkits.mcp_servers'], $stored);
+            if ($dropped !== []) {
+                $lines = [];
+                foreach ($dropped as $row) {
+                    /* translators: %s: the row's index in the posted list */
+                    $name = $row['url'] === '' ? sprintf(__('row %s', 'alpaca-bot'), $row['index']) : $row['url'];
+                    /* translators: 1: an MCP server's URL, or which row it is, 2: why the row cannot be kept */
+                    $lines[] = sprintf(__('%1$s: %2$s', 'alpaca-bot'), $name, $row['reason']);
+                }
+                return Errors::badRequest(__('Nothing was saved: an MCP server row could not be kept.', 'alpaca-bot') . ' ' . implode(' ', $lines), 'alpaca_bot_mcp_row', ['rows' => $dropped]);
+            }
             $rows = Schema::sanitizeMcpServers($input['toolkits.mcp_servers'], $stored);
             $refused = $this->servers->refusals($rows, $stored);
             if ($refused !== []) {
@@ -222,6 +242,38 @@ final class SettingsController extends Controller
             $response->header('X-Alpaca-Bot-Mcp-Cleared', implode(',', $cleared));
         }
         return $response;
+    }
+
+    /**
+     * The rows of a posted `toolkits.mcp_servers` that the schema would drop and that a PUT must
+     * not lose quietly: one that names a stored server's id, and a new one with a URL. A row whose
+     * `remove` is ticked, and a blank row, are not among them (Schema::droppedMcpRows()). Each is
+     * `{index, id, url, reason}`: its key in the posted list, the id it posted when that is a
+     * string, the URL it posted, and why. The header value is not read.
+     *
+     * @return list<array{index: array-key, id: string|null, url: string, reason: string}>
+     */
+    private static function droppedRows(#[\SensitiveParameter] mixed $raw, mixed $stored): array
+    {
+        $storedIds = Schema::serverIds($stored);
+        $out = [];
+        foreach (Schema::droppedMcpRows($raw) as $key => $fault) {
+            /** @var array<array-key, mixed> $row droppedMcpRows() lists arrays only */
+            $row = is_array($raw) ? $raw[$key] : [];
+            $id = is_string($row['id'] ?? null) ? $row['id'] : null;
+            $url = is_string($row['url'] ?? null) ? $row['url'] : '';
+            if (!in_array($id, $storedIds, true) && trim($url) === '') {
+                continue;
+            }
+            $prefix = is_string($row['prefix'] ?? null) ? $row['prefix'] : '';
+            $out[] = ['index' => $key, 'id' => $id, 'url' => $url, 'reason' => match ($fault) {
+                'url' => __('the URL has to be https with a host.', 'alpaca-bot'),
+                'prefix' => __('the prefix has to be a lowercase letter then up to 15 lowercase letters, digits or underscores, and not "ability".', 'alpaca-bot'),
+                /* translators: %s: a tool-name prefix */
+                'taken' => sprintf(__('the prefix %s is already used by an earlier row of this request.', 'alpaca-bot'), $prefix),
+            }];
+        }
+        return $out;
     }
 
     /**

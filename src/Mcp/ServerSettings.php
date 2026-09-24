@@ -142,9 +142,10 @@ final class ServerSettings
 
     /**
      * The ids of the rows in `$rows` whose posted header value is the mask (or not a string, which
-     * reads the same) and whose URL has another scheme, host or port than the stored row of that
-     * id: the servers beforeSave() is about to give no value. A new id is not named, since a new
-     * server has no value to lose.
+     * reads the same), whose URL has another scheme, host or port than the stored row of that id,
+     * and for which Secrets holds a value: the servers beforeSave() is about to take a value from.
+     * A new id is not named, and nor is a stored server that holds no value, since neither has one
+     * to lose.
      *
      * @param array<array-key, mixed> $rows
      * @return list<string>
@@ -152,9 +153,10 @@ final class ServerSettings
     public function clearedByMove(#[\SensitiveParameter] array $rows, mixed $stored): array
     {
         $urls = self::urls($stored);
+        $held = Secrets::all();
         $out = [];
         foreach ($rows as $row) {
-            if (!is_array($row) || !is_string($row['id'] ?? null) || !isset($urls[$row['id']])) {
+            if (!is_array($row) || !is_string($row['id'] ?? null) || !isset($urls[$row['id']], $held[$row['id']])) {
                 continue;
             }
             $posted = $row['header_value'] ?? '';

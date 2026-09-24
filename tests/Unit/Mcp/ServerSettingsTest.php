@@ -200,7 +200,9 @@ it('refuses a private literal, localhost, an IPv6 literal and a name that resolv
         ->and($refused[3])->toContain('10.0.0.7');
 });
 
-it('uses AddressPin when no resolver is handed in', function (): void {
+// That the default is AddressCheck, which takes core's own-host opt-in out, needs core's filter
+// to run, so McpSettingsTest::test_the_sites_own_host_is_no_exemption_for_an_mcp_server shows it.
+it('refuses a loopback address when no resolver is handed in', function (): void {
     expect((new ServerSettings())->refusals([mcpRow(['url' => 'https://127.0.0.1/mcp'])], []))->toHaveKey(0);
 });
 
@@ -241,13 +243,17 @@ it('stores a value posted with a new origin, as any value is', function (): void
 });
 
 // The page and the REST route tell the person saving; the filter itself has nowhere to put it.
+// A server that holds no value loses nothing, so it is not named (N-7).
 it('names the stored servers whose value a posted mask would drop because the origin changed', function (): void {
-    $stored = [mcpRow(), mcpRow(['id' => 'gh', 'prefix' => 'gh', 'url' => 'https://gh.example.com/mcp']), mcpRow(['id' => 'kept', 'prefix' => 'kept', 'url' => 'https://kept.example.com/a'])];
+    $options = [Secrets::OPTION => ['trk' => 'Bearer t', 'gh' => 'Bearer g', 'kept' => 'Bearer k']];
+    mcpSecretsIn($options);
+    $stored = [mcpRow(), mcpRow(['id' => 'gh', 'prefix' => 'gh', 'url' => 'https://gh.example.com/mcp']), mcpRow(['id' => 'kept', 'prefix' => 'kept', 'url' => 'https://kept.example.com/a']), mcpRow(['id' => 'none', 'prefix' => 'none', 'url' => 'https://none.example.com/mcp', 'header_value' => ''])];
     $rows = [
         mcpRow(['url' => 'https://other.example.com/mcp']),
         mcpRow(['id' => 'gh', 'prefix' => 'gh', 'url' => 'https://gh.example.com:444/mcp', 'header_value' => 'Bearer typed']),
         mcpRow(['id' => 'kept', 'prefix' => 'kept', 'url' => 'https://kept.example.com/b']),
         mcpRow(['id' => 'new', 'prefix' => 'new', 'url' => 'https://new.example.com/mcp']),
+        mcpRow(['id' => 'none', 'prefix' => 'none', 'url' => 'https://elsewhere.example.net/mcp']),
     ];
     expect((new ServerSettings())->clearedByMove($rows, $stored))->toBe(['trk']);
 });

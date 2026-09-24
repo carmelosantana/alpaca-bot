@@ -101,11 +101,14 @@ final class Errors
      *
      * `$code` is `alpaca_bot_bad_request` unless a route has a refusal a client needs to tell
      * apart: `PUT /settings` answers `alpaca_bot_mcp_address` for an MCP server address that did
-     * not pass the check.
+     * not pass the check, and `alpaca_bot_mcp_row` for an MCP server row the schema would drop,
+     * with the rows in `$data`.
+     *
+     * @param array<string, mixed> $data added to the error's data beside `status`
      */
-    public static function badRequest(string $message, string $code = 'alpaca_bot_bad_request'): \WP_Error
+    public static function badRequest(string $message, string $code = 'alpaca_bot_bad_request', array $data = []): \WP_Error
     {
-        return new \WP_Error($code, $message, ['status' => 400]);
+        return new \WP_Error($code, $message, ['status' => 400] + $data);
     }
 
     /**

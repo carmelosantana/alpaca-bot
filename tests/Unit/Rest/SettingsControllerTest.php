@@ -306,8 +306,8 @@ it('reveals no header value to a caller the read row admitted without manage_opt
         ->and(json_encode($res->get_data()))->not->toContain('Bearer t');
 });
 
-// Store's memo holds the row as it was posted until the request ends (the filter that takes the
-// value out runs on the option, not on the memo), and the reply is read from the memo.
+// update_option() is a stand-in here, so no filter takes the value out of the row and Store's memo
+// still holds it; the reply is the mask because the route masks what it reads back (masked()).
 it('answers a PUT that set a header value with the mask, never the value', function (): void {
     $controller = new SettingsController(new Store(), new Mcp\ServerSettings(static fn(string $host, string $url): array => ['93.184.216.34']));
     $res = $controller->update(restRequest('PUT', '/settings', ['toolkits.mcp_servers' => [['url' => 'https://mcp.example.com/mcp', 'prefix' => 'trk', 'header_value' => 'Bearer new-secret']]]));
@@ -359,10 +359,14 @@ it('names in a header each server whose value was dropped because its URL moved 
         ['id' => 'trk', 'url' => 'https://mcp.example.com/mcp', 'header_name' => 'Authorization', 'header_value' => Schema::MASK, 'prefix' => 'trk', 'approved' => []],
         ['id' => 'gh', 'url' => 'https://gh.example.com/mcp', 'header_name' => 'Authorization', 'header_value' => Schema::MASK, 'prefix' => 'gh', 'approved' => []],
     ];
+    // `none` holds no value, so moving it drops nothing and it is not named (N-7).
+    $this->stored['toolkits.mcp_servers'][] = ['id' => 'none', 'url' => 'https://none.example.com/mcp', 'header_name' => '', 'header_value' => '', 'prefix' => 'none', 'approved' => []];
+    settingsWithSecrets($this, ['trk' => 'Bearer t', 'gh' => 'Bearer g']);
     $controller = new SettingsController(new Store(), new Mcp\ServerSettings(static fn(string $host, string $url): array => ['93.184.216.34']));
     $res = $controller->update(restRequest('PUT', '/settings', ['toolkits.mcp_servers' => [
         ['id' => 'trk', 'url' => 'https://steal.example.net/mcp', 'prefix' => 'trk', 'header_value' => Schema::MASK],
         ['id' => 'gh', 'url' => 'https://gh.example.com/v2', 'prefix' => 'gh', 'header_value' => Schema::MASK],
+        ['id' => 'none', 'url' => 'https://elsewhere.example.net/mcp', 'prefix' => 'none', 'header_value' => Schema::MASK],
     ]]));
     expect($res->get_status())->toBe(200)
         ->and($res->get_headers())->toBe(['X-Alpaca-Bot-Mcp-Cleared' => 'trk']);
@@ -387,4 +391,49 @@ it('checks each row under the id the write will give it', function (): void {
     $this->stored['toolkits.mcp_servers'][0]['prefix'] = 'old';
     (new SettingsController(new Store(), $servers))->update(restRequest('PUT', '/settings', ['toolkits.mcp_servers' => [['url' => 'https://mcp.example.com/mcp', 'prefix' => 'trk']]]));
     expect($asked)->toBe(['mcp.example.com'])->and($this->written['toolkits.mcp_servers'][0]['id'])->toBe('trk_2');
+});
+
+// R78: a PUT that would drop a row naming a stored server, or a new row with a URL, is refused
+// whole, as a refused address is: the row is named, and nothing is written. Leaving a server out,
+// or sending `remove`, is how a client deletes one.
+it('refuses a PUT that would drop a row, names the row and why, and writes nothing', function (array $rows, int $index, ?string $id, string $url, string $reason): void {
+    $this->stored['toolkits.mcp_servers'] = [
+        ['id' => 'aa', 'url' => 'https://aa.example.com/mcp', 'header_name' => 'Authorization', 'header_value' => Schema::MASK, 'prefix' => 'aa', 'approved' => []],
+        ['id' => 'bb', 'url' => 'https://bb.example.com/mcp', 'header_name' => 'Authorization', 'header_value' => Schema::MASK, 'prefix' => 'bb', 'approved' => []],
+    ];
+    $controller = new SettingsController(new Store(), new Mcp\ServerSettings(static fn(string $host, string $url): array => throw new RuntimeException('no lookup was expected')));
+    $response = $controller->update(restRequest('PUT', '/settings', ['models.num_ctx' => 2048, 'toolkits.mcp_servers' => $rows]));
+    expect($response)->toBeInstanceOf(WP_Error::class)
+        ->and($response->get_error_code())->toBe('alpaca_bot_mcp_row')
+        ->and($response->get_error_data()['status'])->toBe(400)
+        ->and($response->get_error_data()['rows'])->toHaveCount(1)
+        ->and($response->get_error_data()['rows'][0])->toMatchArray(['index' => $index, 'id' => $id, 'url' => $url])
+        ->and($response->get_error_data()['rows'][0]['reason'])->toContain($reason)
+        ->and($response->get_error_message())->toContain($url)
+        ->and(json_encode([$response->get_error_message(), $response->get_error_data()]))->not->toContain('Bearer typed')
+        ->and($this->written)->toBeNull();
+})->with([
+    'a stored server takes a prefix another row holds' => [[['id' => 'aa', 'url' => 'https://aa.example.com/mcp', 'prefix' => 'bb', 'header_value' => 'Bearer typed'], ['id' => 'bb', 'url' => 'https://bb.example.com/mcp', 'prefix' => 'bb']], 1, 'bb', 'https://bb.example.com/mcp', 'prefix bb'],
+    'a stored server given an http URL' => [[['id' => 'aa', 'url' => 'http://aa.example.com/mcp', 'prefix' => 'aa', 'header_value' => 'Bearer typed'], ['id' => 'bb', 'url' => 'https://bb.example.com/mcp', 'prefix' => 'bb']], 0, 'aa', 'http://aa.example.com/mcp', 'https'],
+    'a stored server given a prefix the rule refuses' => [[['id' => 'aa', 'url' => 'https://aa.example.com/mcp', 'prefix' => 'Aa'], ['id' => 'bb', 'url' => 'https://bb.example.com/mcp', 'prefix' => 'bb']], 0, 'aa', 'https://aa.example.com/mcp', 'prefix'],
+    'a stored server sent with no URL' => [[['id' => 'aa', 'url' => '', 'prefix' => 'aa'], ['id' => 'bb', 'url' => 'https://bb.example.com/mcp', 'prefix' => 'bb']], 0, 'aa', '', 'https'],
+    'a new row whose prefix a stored server holds' => [[['id' => 'aa', 'url' => 'https://aa.example.com/mcp', 'prefix' => 'aa'], ['id' => 'bb', 'url' => 'https://bb.example.com/mcp', 'prefix' => 'bb'], ['url' => 'https://new.example.com/mcp', 'prefix' => 'aa', 'header_value' => 'Bearer typed']], 2, null, 'https://new.example.com/mcp', 'prefix aa'],
+    'a new row with no prefix' => [[['id' => 'aa', 'url' => 'https://aa.example.com/mcp', 'prefix' => 'aa'], ['id' => 'bb', 'url' => 'https://bb.example.com/mcp', 'prefix' => 'bb'], ['url' => 'https://new.example.com/mcp', 'prefix' => '', 'header_value' => 'Bearer typed']], 2, null, 'https://new.example.com/mcp', 'prefix'],
+]);
+
+it('lets a blank row, a removed row and a left-out server go without a refusal', function (): void {
+    $this->stored['toolkits.mcp_servers'] = [
+        ['id' => 'aa', 'url' => 'https://aa.example.com/mcp', 'header_name' => '', 'header_value' => '', 'prefix' => 'aa', 'approved' => []],
+        ['id' => 'bb', 'url' => 'https://bb.example.com/mcp', 'header_name' => '', 'header_value' => '', 'prefix' => 'bb', 'approved' => []],
+        ['id' => 'cc', 'url' => 'https://cc.example.com/mcp', 'header_name' => '', 'header_value' => '', 'prefix' => 'cc', 'approved' => []],
+    ];
+    $controller = new SettingsController(new Store(), new Mcp\ServerSettings(static fn(string $host, string $url): array => throw new RuntimeException('no lookup was expected')));
+    $res = $controller->update(restRequest('PUT', '/settings', ['toolkits.mcp_servers' => [
+        ['id' => 'aa', 'url' => 'https://aa.example.com/mcp', 'prefix' => 'aa'],
+        ['id' => 'bb', 'url' => 'http://bb.example.com/mcp', 'prefix' => 'Nope', 'remove' => '1'],
+        ['url' => '', 'prefix' => ''],
+        ['url' => '  ', 'prefix' => 'x'],
+    ]]));
+    expect($res)->toBeInstanceOf(WP_REST_Response::class)
+        ->and(array_column($this->written['toolkits.mcp_servers'], 'id'))->toBe(['aa']);
 });

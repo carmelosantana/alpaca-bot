@@ -533,7 +533,7 @@ Rules worth knowing before you write:
 - **`toolkits.mcp_servers` is a list of remote MCP servers, replaced wholesale.** Each row is
   `{id, url, header_name, header_value, prefix, timeout, max_bytes, approved}`:
 
-  - `url` must be `https` with a host, or the row is dropped. The address is checked on the way
+  - `url` must be `https` with a host (see below for a row that has none). The address is checked on the way
     in for every server whose URL is new or changed: a private, loopback, link-local or other
     special-purpose address, or a name that resolves to one, is refused, and the PUT answers
     `400 alpaca_bot_mcp_address` naming the URL and why, and writes nothing, the other keys of
@@ -545,8 +545,7 @@ Rules worth knowing before you write:
     through a proxy, neither WordPress's (`WP_PROXY_HOST`) nor one set in the server's
     environment, so a site that must reach the internet through a proxy cannot reach one.
   - `prefix` names the server's tools for the model, `<prefix>__<tool>`: a lowercase letter, then
-    up to 15 of `[a-z0-9_]`, unique in the list, and never `ability`. A row without one is
-    dropped.
+    up to 15 of `[a-z0-9_]`, unique in the list, and never `ability`.
   - `id` is what the server is known by: its `access.mcp` entry, its capability filter
     `alpaca_bot/capability/mcp/<id>`, its header value. A lowercase letter, then up to 23 of
     `[a-z0-9_]`. Send a stored server's `id` back with its row to keep it. A row without one is
@@ -558,20 +557,29 @@ Rules worth knowing before you write:
     `Authorization` and `Bearer …`. The value has the key's three spellings (`""` clears it,
     `"••••"` keeps what is stored, any other string replaces it) with CR, LF and NUL removed,
     except that `"••••"` keeps nothing for a new server, which has nothing stored, or for a
-    stored server whose URL now has another scheme, host or port. The value is not sent to an
-    address it was not set for, so a server moved to another host needs its value sent again; a
-    new path on the same scheme, host and port keeps it. When `"••••"` kept nothing for that
-    reason, the reply names those servers' ids, comma-separated, in an `X-Alpaca-Bot-Mcp-Cleared`
-    header, and their rows read `""`. The value is not kept in `alpaca_bot_settings`, which WordPress loads on every request, but in
+    stored server whose URL now has another host or port. The value is not sent to an address it
+    was not set for, so a server moved to another host needs its value sent again; a new path on
+    the same host and port keeps it. When a stored value was dropped that way, the reply names
+    those servers' ids, comma-separated, in an `X-Alpaca-Bot-Mcp-Cleared` header, and their rows
+    read `""`; a server that had no value is not named. The value is not kept in
+    `alpaca_bot_settings`, which WordPress loads on every request, but in
     `alpaca_bot_mcp_secrets`, which it does not; the row holds `"••••"` or `""`.
   - `timeout` (1-120 seconds, default 30) and `max_bytes` (1024-8388608, default 1048576) bound
     one call.
   - `approved` is tool name => the 64-hex-character fingerprint of the definition that was
     approved; anything else is dropped.
 
-  A server left out of the list is removed, and its header value and its `access.mcp` entry go
-  with it, so a server added later under the same id starts at administrators only. The schema
-  route flags the field `secret_fields: ["header_value"]`.
+  A row the list cannot keep (a URL that is not `https` with a host, a prefix the rule refuses,
+  or a prefix an earlier row of the PUT already has) is refused rather than dropped when it names
+  a stored server's `id` or is a new row with a URL: the PUT answers
+  `400 alpaca_bot_mcp_row` and writes nothing, the other keys included. The error's
+  `data.rows` names each such row as `{index, id, url, reason}`: its index in the posted list,
+  the `id` it sent (or `null`), the URL it sent, and why. A row with neither a stored server's
+  `id` nor a URL, and a row sent with `"remove": true`, are left out without a word.
+
+  A server left out of the list, or sent with `"remove": true`, is removed, and its header value
+  and its `access.mcp` entry go with it, so a server added later under the same id starts at
+  administrators only. The schema route flags the field `secret_fields: ["header_value"]`.
 
 - **`privacy.usage_retention_days`** (0-3650, 0 = keep forever) drives a daily cron event,
   `alpaca_bot/usage/cleanup`, that deletes usage receipts (`chat_log` rows) older than the
@@ -808,6 +816,7 @@ route the same object is the `error` frame's data.
 | Status | Code | When | Extra `data` |
 |---|---|---|---|
 | 400 | `alpaca_bot_bad_request` | An empty turn; a model the catalog does not list; an image that is not a `data:` URL; a `conversation_id` that is not yours; a settings PUT naming no schema key | |
+| 400 | `alpaca_bot_mcp_row` | A settings PUT whose `toolkits.mcp_servers` has a row the schema cannot keep that names a stored server's id or is a new row with a URL; nothing is written | `rows`: each `{index, id, url, reason}` |
 | 400 | `alpaca_bot_mcp_address` | A settings PUT whose `toolkits.mcp_servers` has a new or changed URL whose address is refused (private, loopback, link-local or special-purpose, or a name resolving to one); nothing is written, and the message names each URL and why | |
 | 400 | `rest_invalid_param`, `rest_missing_callback_param` | Core's schema validation: `limit` out of 0-200, `user` not `me`/`all`, `refresh` not a boolean, a stream GET with no `token` | `params`, `details` |
 | 401 | `rest_forbidden` | Not authenticated (no cookie+nonce, no Application Password) | |
