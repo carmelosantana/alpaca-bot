@@ -72,7 +72,7 @@ final class UninstallTest extends TestCase
      */
     private const NEIGHBOUR_TRANSIENTS = [
         'alpaca_bot_models_backup', 'alpaca_bot_rl_backup', 'alpaca_bot_stream_notatoken', 'alpaca_bot_usage_site_2026',
-        'alpaca_bot_mcp_drift_9srv', 'other_plugin_models',
+        'alpaca_bot_mcp_drift_9srv', 'alpaca_bot_shortcode_notahash', 'alpaca_bot_cache_notahash', 'other_plugin_models',
     ];
 
     private function uninstall(): void
@@ -284,6 +284,7 @@ final class UninstallTest extends TestCase
             $this->assertFalse($this->postRow($ours[$which]), "$which post is still there");
             $this->assertSame(0, $this->postMetaRows($ours[$which]), "$which post meta is still there");
             $this->assertNull(get_post($ours[$which]), "get_post() still answers $which from the cache");
+            $this->assertSame([], get_post_meta($ours[$which]), "get_post_meta() still answers $which from the cache");
         }
         $this->assertSame('', get_post_meta($ours['page'], 'alpaca_bot_cache_' . md5('0.4 shortcode'), true), '0.4.17\'s shortcode cache is still on the page');
         $this->assertTrue($this->postRow($ours['page']), 'the page carrying the 0.4 cache is not ours');
@@ -299,8 +300,16 @@ final class UninstallTest extends TestCase
         // Collected, not asserted one at a time, so a failure names every neighbour that went.
         $lost = array_values(array_filter([...self::NEIGHBOUR_OPTIONS, $this->hashPlusOne()], fn(string $n): bool => !$this->optionRow($n)));
         $this->assertSame([], $lost, 'options that are not the plugin\'s were deleted');
-        $lost = array_values(array_filter(self::NEIGHBOUR_TRANSIENTS, fn(string $n): bool => !$this->optionRow('_transient_' . $n)));
-        $this->assertSame([], $lost, 'transients that are not the plugin\'s were deleted');
+        // Value and timeout rows both: a neighbour that kept its value and lost its timeout never expires.
+        $lost = [];
+        foreach (self::NEIGHBOUR_TRANSIENTS as $n) {
+            foreach (['_transient_', '_transient_timeout_'] as $kind) {
+                if (!$this->optionRow($kind . $n)) {
+                    $lost[] = $kind . $n;
+                }
+            }
+        }
+        $this->assertSame([], $lost, 'transient rows that are not the plugin\'s were deleted');
         // Read through the API: a site transient is an options row on a single site and a sitemeta row on a network.
         $this->assertSame('not ours', get_site_transient(ModelCatalog::TRANSIENT), 'the site transient of the same name is not ours');
         $this->assertTrue($this->postRow($theirs['archive']), 'a post of a neighbouring type was deleted');
