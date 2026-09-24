@@ -24,7 +24,7 @@ it('adds one direct test under its own prefixed id, keeping every test already t
 it('answers in the shape core renders, good when web_fetch is off or can run pinned, recommended when it cannot', function (): void {
     foreach ([
         'off' => [[], true, false, 'good', 'switched off'],
-        'pinned' => [['web_fetch'], true, false, 'good', 'address it checked'],
+        'pinned' => [['web_fetch'], true, false, 'good', 'addresses it checked'],
         'no curl' => [['web_fetch'], false, false, 'recommended', 'cURL'],
         'proxy' => [['web_fetch'], true, true, 'recommended', 'WP_PROXY_HOST'],
     ] as $case => [$enabled, $curl, $proxied, $status, $says]) {

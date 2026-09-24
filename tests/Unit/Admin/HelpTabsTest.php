@@ -112,13 +112,13 @@ it('describes what the chat screen does now, and points support at the wordpress
     expect($order)->toBe($sorted)->not->toContain(false);
 });
 
-it('tells a site owner what the tools grant: the fetch is an outbound request pinned to the checked address, what the pin does not cover, and who can reach it', function (): void {
+it('tells a site owner what the tools grant: the fetch is an outbound request pinned to the checked addresses, what the pin does not cover, and who can reach it', function (): void {
     // H-1 and M-3 of the 0.5.0 security audit, both accepted for this release and both argued
     // until now only in a source docblock, where the only person who can act on them will never
-    // read it. What must be here: what web_fetch does, that the connection is pinned to the
+    // read it. What must be here: what web_fetch does, that the connection can go only to an
     // address the check passed, on every redirect, and what the pin does not reach (a proxy, the
     // site's own host, a server without cURL), who can reach it with no model involved, that an
-    // egress policy is the supported mitigation, and -- since 0.6 closed M-3 -- that opening a
+    // egress policy still covers what the pin does not, and -- since 0.6 closed M-3 -- that opening a
     // capability filter to a role does not hand that role the tools: each one has a row of its
     // own in Settings > Access.
     Functions\when('esc_url')->returnArg();

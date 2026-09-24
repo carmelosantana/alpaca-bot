@@ -10,8 +10,8 @@ use AlpacaBot\Toolkit\WebFetchToolkit;
 /**
  * One Site Health test: whether web_fetch can run pinned on this server.
  *
- * web_fetch holds its connections to the address its check passed by handing that address to
- * cURL (Toolkit\CurlPin), and refuses to fetch at all on a server whose PHP has no cURL for it
+ * web_fetch holds its connections to the addresses its check passed by handing them to cURL
+ * (Toolkit\CurlPin, which says when only the first goes), and refuses to fetch at all on a server whose PHP has no cURL for it
  * to use. On such a server the tool can still be on in Settings while answering every call with
  * a refusal, and the only place the reason would otherwise surface is a tool error in a chat. Site Health
  * is where a site owner looks for "this server lacks X", so that is where it is said. The same
@@ -75,12 +75,12 @@ final class SiteHealth
             return self::result('good', __('Alpaca Bot\'s web_fetch tool is switched off', 'alpaca-bot'), __('The model cannot fetch pages from this server, so there is nothing to pin.', 'alpaca-bot'));
         }
         if (!($this->curl ?? WebFetchToolkit::curlCarries(...))(true)) {
-            return self::result('recommended', __('Alpaca Bot\'s web_fetch cannot run on this server', 'alpaca-bot'), __('web_fetch connects to the address its check passed, and only cURL can be held to it. WordPress would send the request without cURL here, so web_fetch refuses every fetch. Ask your host for PHP\'s cURL extension with SSL, or switch web_fetch off under Alpaca Bot › Settings › Tools.', 'alpaca-bot'));
+            return self::result('recommended', __('Alpaca Bot\'s web_fetch cannot run on this server', 'alpaca-bot'), __('web_fetch connects only to an address its check passed, and only cURL can be held to that. WordPress would send the request without cURL here, so web_fetch refuses every fetch. Ask your host for PHP\'s cURL extension with SSL, or switch web_fetch off under Alpaca Bot › Settings › Tools.', 'alpaca-bot'));
         }
         if (($this->proxied ?? static fn(): bool => (new \WP_HTTP_Proxy())->is_enabled())()) {
             return self::result('recommended', __('Alpaca Bot\'s web_fetch goes through a proxy that looks names up itself', 'alpaca-bot'), __('WP_PROXY_HOST and WP_PROXY_PORT are set, so WordPress hands a request to the proxy with the host name and the proxy resolves it. This site\'s own host, localhost and anything in WP_PROXY_BYPASS_HOSTS are not proxied. For the hosts that are, the address web_fetch checked is not the one the proxy connects to. What the proxy may reach, web_fetch may reach: restrict the proxy from private ranges and the cloud metadata address.', 'alpaca-bot'));
         }
-        return self::result('good', __('Alpaca Bot\'s web_fetch connects to the address it checked', 'alpaca-bot'), __('A page web_fetch reads is looked up once, checked, and fetched from exactly that address through cURL, and so is each redirect it follows. The exception is this site\'s own host, which WordPress exempts from the address check and which web_fetch does not pin either, so whatever else answers on it stays reachable.', 'alpaca-bot'));
+        return self::result('good', __('Alpaca Bot\'s web_fetch connects only to addresses it checked', 'alpaca-bot'), __('A page web_fetch reads is looked up once, checked, and fetched through cURL from an address that passed and from no other, and so is each redirect it follows. The exception is this site\'s own host, which WordPress exempts from the address check and which web_fetch does not pin either, so whatever else answers on it stays reachable.', 'alpaca-bot'));
     }
 
     /** @return array{label: string, status: string, badge: array{label: string, color: string}, description: string, actions: string, test: string} */
