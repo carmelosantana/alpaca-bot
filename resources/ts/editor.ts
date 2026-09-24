@@ -67,7 +67,8 @@ function start(cfg: MountSettings, wp: EditorWp): void {
   const host = document.createElement('div');
   host.className = 'ab-sidebar';
   let mounted: Promise<void> | null = null;
-  // Whether the chips the server last rendered (rendered()) had no post chip, which a save may yet bring (the file docblock).
+  // Whether the composer is without the post chip a save may yet bring: set by rendered(), cleared
+  // once postChip() answers that there is one (the file docblock).
   let waiting = false;
   let asking = false;
 
