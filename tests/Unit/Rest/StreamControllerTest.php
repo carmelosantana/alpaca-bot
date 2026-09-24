@@ -292,7 +292,7 @@ it('writes a start frame with the real conversation id, a delta per chunk, then 
         ->and($done['conversation_id'])->toBe(42)
         // message.meta carries the turn's duration on the wire too: the same number as receipt.duration_ms.
         ->and($done['message'])->toMatchArray(['role' => 'assistant', 'content' => 'ab', 'model' => 'qwen3:8b', 'usage' => ['prompt_tokens' => 5, 'completion_tokens' => 2], 'meta' => ['duration_ms' => $done['receipt']['duration_ms'], 'reasoning' => 'thinking']])
-        ->and($done['receipt'])->toMatchArray(['user_id' => 3, 'model' => 'qwen3:8b', 'total_tokens' => 7, 'conversation_id' => 42, 'log_id' => 9])
+        ->and($done['receipt'])->toMatchArray(['user_id' => 3, 'model' => 'qwen3:8b', 'total_tokens' => 7, 'tool_result_bytes' => 0, 'conversation_id' => 42, 'log_id' => 9])
         ->and($done['contexts'])->toBe([])
         // The stored transcript is what was streamed.
         ->and($h->meta[42]['ab_messages'][1]['content'])->toBe('ab');

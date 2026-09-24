@@ -53,7 +53,7 @@ it('completes a chat and returns conversation, message, receipt and contexts', f
         ->and($data['message']['content'])->toBe('yo')
         ->and($data['message']['model'])->toBe('llama3.2')
         ->and($data['message']['usage'])->toBe(['prompt_tokens' => 5, 'completion_tokens' => 2])
-        ->and($data['receipt'])->toMatchArray(['user_id' => 3, 'model' => 'llama3.2', 'total_tokens' => 7, 'conversation_id' => 42, 'log_id' => 9])
+        ->and($data['receipt'])->toMatchArray(['user_id' => 3, 'model' => 'llama3.2', 'total_tokens' => 7, 'tool_result_bytes' => 0, 'conversation_id' => 42, 'log_id' => 9])
         ->and($data['contexts'])->toBe([['id' => 'c', 'label' => 'Editing: Hello', 'text' => 'Body', 'meta' => ['post_id' => 9]]])
         ->and($call['messages'][0]->content())->toContain('## Editing: Hello');
 });
