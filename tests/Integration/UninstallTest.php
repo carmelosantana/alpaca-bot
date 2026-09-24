@@ -324,6 +324,65 @@ final class UninstallTest extends TestCase
         $this->assertNotFalse(wp_next_scheduled('other_plugin_cleanup'), 'another plugin\'s cron event was unscheduled');
     }
 
+    /**
+     * The plugin writes no terms or comments on its posts, but other code can, and the posts go
+     * in SQL rather than through wp_delete_post(). So what hangs off them by post id goes with
+     * them: term relationships in a taxonomy registered for posts (with the term recounted),
+     * comments and their meta. A relationship in `link_category` names a link, not a post, even
+     * when the id is the same number, and stays; so does a comment on a post that is not ours.
+     */
+    public function test_it_removes_terms_and_comments_attached_to_its_posts_and_recounts_the_terms(): void
+    {
+        global $wpdb;
+        register_taxonomy('uninstall_label', [ConversationStore::POST_TYPE]);
+        try {
+            $store = Plugin::instance()->get(Store::class);
+            $store->set('privacy.save_history', true);
+            $user = self::factory()->user->create();
+            $conversation = Plugin::instance()->get(ConversationStore::class)->create($user, 'Labelled')->id;
+            $published = self::factory()->post->create(['post_type' => ConversationStore::POST_TYPE, 'post_status' => 'publish']);
+            $receipt = Plugin::instance()->get(UsageMeter::class)->record($user, 'fake-model', 1, 1, 1);
+            $label = wp_insert_term('labelled', 'uninstall_label');
+            $this->assertIsArray($label);
+            wp_set_object_terms($published, [(int) $label['term_id']], 'uninstall_label');
+            wp_set_object_terms($conversation, [(int) $label['term_id']], 'uninstall_label');
+            wp_set_object_terms($receipt, ['tagged'], 'post_tag');
+            $this->assertSame(1, (int) get_term((int) $label['term_id'], 'uninstall_label')->count, 'one published conversation carries the label');
+            $comment = wp_insert_comment(['comment_post_ID' => $conversation, 'comment_content' => 'a note', 'comment_approved' => 1]);
+            add_comment_meta($comment, 'note_meta', 'x');
+            $reply = wp_insert_comment(['comment_post_ID' => $receipt, 'comment_content' => 'another', 'comment_approved' => 1]);
+
+            // Theirs: a link's category under the same number as our conversation, and a comment on a plain post.
+            $linkCat = wp_insert_term('links', 'link_category');
+            $this->assertIsArray($linkCat);
+            $wpdb->insert($wpdb->term_relationships, ['object_id' => $conversation, 'term_taxonomy_id' => (int) $linkCat['term_taxonomy_id']]);
+            $plain = self::factory()->post->create();
+            $theirComment = wp_insert_comment(['comment_post_ID' => $plain, 'comment_content' => 'kept', 'comment_approved' => 1]);
+            add_comment_meta($theirComment, 'note_meta', 'kept');
+
+            // Prime the caches the API answers from.
+            update_object_term_cache([$conversation, $published], ConversationStore::POST_TYPE);
+            get_comment($comment);
+
+            $this->uninstall();
+
+            $ours = implode(',', array_map('intval', [$conversation, $published, $receipt]));
+            $left = (int) $wpdb->get_var("SELECT COUNT(*) FROM {$wpdb->term_relationships} tr JOIN {$wpdb->term_taxonomy} tt ON tt.term_taxonomy_id = tr.term_taxonomy_id WHERE tr.object_id IN ({$ours}) AND tt.taxonomy <> 'link_category'");
+            $this->assertSame(0, $left, 'term relationships of deleted posts are still there');
+            $this->assertSame(1, (int) $wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$wpdb->term_relationships} WHERE object_id = %d AND term_taxonomy_id = %d", $conversation, (int) $linkCat['term_taxonomy_id'])), 'a link_category relationship was deleted');
+            clean_term_cache((int) $label['term_id'], 'uninstall_label');
+            $this->assertSame(0, (int) get_term((int) $label['term_id'], 'uninstall_label')->count, 'the label still counts a deleted conversation');
+            $this->assertFalse(get_object_term_cache($published, 'uninstall_label'), 'the term cache still answers for a deleted post');
+            $this->assertSame(0, (int) $wpdb->get_var("SELECT COUNT(*) FROM {$wpdb->comments} WHERE comment_post_ID IN ({$ours})"), 'comments on deleted posts are still there');
+            $this->assertSame(0, (int) $wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$wpdb->commentmeta} WHERE comment_id IN (%d, %d)", $comment, $reply)), 'their comment meta is still there');
+            $this->assertNull(get_comment($comment), 'get_comment() still answers from the cache');
+            $this->assertNotNull(get_comment($theirComment), 'a comment on a post that is not ours was deleted');
+            $this->assertSame('kept', get_comment_meta($theirComment, 'note_meta', true));
+        } finally {
+            unregister_taxonomy('uninstall_label');
+        }
+    }
+
     /** Run twice, and on a site that never stored anything: nothing to remove is not an error. */
     public function test_it_is_safe_to_run_on_a_site_with_nothing_to_remove(): void
     {
