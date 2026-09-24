@@ -468,4 +468,7 @@ it('reads a row with no id as the stored server with the same URL and prefix, wh
     expect(array_column(Schema::sanitize(['toolkits.mcp_servers' => [['url' => 'https://other.example.com/mcp', 'prefix' => 'trk']]], $stored)['toolkits.mcp_servers'], 'id'))->toBe(['trk_2'])
         // The post removes trk by id and adds the same URL and prefix: that is a new server.
         ->and(array_column(Schema::sanitize(['toolkits.mcp_servers' => [['id' => 'trk', 'url' => 'https://mcp.example.com/mcp', 'prefix' => 'trk', 'remove' => '1'], ['url' => 'https://mcp.example.com/mcp', 'prefix' => 'trk']]], $stored)['toolkits.mcp_servers'], 'id'))->toBe(['trk_2']);
+    // An option that holds one id twice (a hand edit) gives it to one row only.
+    $twice = [['id' => 'trk', 'url' => 'https://mcp.example.com/mcp', 'prefix' => 'trk'], ['id' => 'trk', 'url' => 'https://gh.example.com/mcp', 'prefix' => 'gh']];
+    expect(array_column(Schema::sanitizeMcpServers([['url' => 'https://mcp.example.com/mcp', 'prefix' => 'trk'], ['url' => 'https://gh.example.com/mcp', 'prefix' => 'gh']], $twice), 'id'))->toBe(['trk', 'gh']);
 });

@@ -374,11 +374,17 @@ it('names in a header each server whose value was dropped because its URL moved 
 it('checks each row under the id the write will give it', function (): void {
     $this->stored['toolkits.mcp_servers'] = [['id' => 'trk', 'url' => 'https://mcp.example.com/mcp', 'header_name' => '', 'header_value' => '', 'prefix' => 'trk', 'approved' => []]];
     $asked = [];
-    $controller = new SettingsController(new Store(), new Mcp\ServerSettings(static function (string $host, string $url) use (&$asked): array {
+    $servers = new Mcp\ServerSettings(static function (string $host, string $url) use (&$asked): array {
         $asked[] = $host;
         return ['93.184.216.34'];
-    }));
+    });
     // No id, same URL and prefix: the stored server, so its unchanged URL is not looked up.
-    $controller->update(restRequest('PUT', '/settings', ['toolkits.mcp_servers' => [['url' => 'https://mcp.example.com/mcp', 'prefix' => 'trk']]]));
+    (new SettingsController(new Store(), $servers))->update(restRequest('PUT', '/settings', ['toolkits.mcp_servers' => [['url' => 'https://mcp.example.com/mcp', 'prefix' => 'trk']]]));
     expect($asked)->toBe([])->and($this->written['toolkits.mcp_servers'][0]['id'])->toBe('trk');
+
+    // No id, the stored URL under another prefix: a new server, which Store will write as trk_2
+    // since trk is taken, so its URL is looked up. Checked as `trk` it would read as unchanged.
+    $this->stored['toolkits.mcp_servers'][0]['prefix'] = 'old';
+    (new SettingsController(new Store(), $servers))->update(restRequest('PUT', '/settings', ['toolkits.mcp_servers' => [['url' => 'https://mcp.example.com/mcp', 'prefix' => 'trk']]]));
+    expect($asked)->toBe(['mcp.example.com'])->and($this->written['toolkits.mcp_servers'][0]['id'])->toBe('trk_2');
 });
