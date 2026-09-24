@@ -12,6 +12,9 @@ reasoning is cut with `…`, and the site's private provider URL is replaced wit
 so and cites the integration test it comes from. One key was added to captured output by hand:
 the receipts of the two chat samples (sections 3 and 4) predate `tool_result_bytes`, added in
 0.6.0, and carry the `0` that a turn which ran no tool answers with.
+The `GET /settings` sample in section 3 was taken on a `wp-env` development site instead: the
+route run in-process as an administrator (`rest_do_request()`), its JSON piped through
+`jq -c .`, over settings written for the sample.
 
 ## 1. Where the API is
 
@@ -420,11 +423,13 @@ capability. Two things are secrets, and both read back as `••••` when on
 none is: `provider.api_key`, and the `header_value` of each row of `toolkits.mcp_servers`:
 
 ```
-$ curl -s -u "admin:$PW" "$B/settings"
-{"provider.kind":"ollama","provider.base_url":"http:\/\/ollama.example:11434\/v1","provider.api_key":"","provider.timeout":60,"models.default":"qwen3-vl:2b","models.temperature":0.7,"models.num_ctx":8192,"models.keep_alive":"5m","models.overrides":[],"chat.system_prompt":"","chat.welcome":"How can I help?","chat.placeholder":"Message Alpaca Bot","chat.user_can_change_model":true,"chat.context_messages":20,"chat.history_limit":20,"chat.spellcheck":true,"chat.assistant_avatar":"","privacy.save_history":true,"privacy.usage_log":true,"privacy.usage_retention_days":0,"governance.site_monthly_tokens":0,"governance.user_monthly_tokens":0,"toolkits.enabled":["web_fetch","summarize","draft_post"],"toolkits.user_agent":"AlpacaBot\/0.5 (+https:\/\/github.com\/carmelosantana\/alpaca-bot)","toolkits.abilities":[],"toolkits.mcp_servers":[],"access.chat":"edit_posts","access.tool.web_fetch":"edit_posts","access.tool.summarize":"edit_posts","access.tool.draft_post":"edit_posts","access.tool.abilities":"manage_options","access.settings.read":"manage_options","access.settings.write":"manage_options","access.shortcode":"edit_posts","access.mcp":[]}
+$ curl -s -u "admin:$PW" "$B/settings" | jq -c .
+{"provider.kind":"ollama","provider.base_url":"http://ollama.example:11434/v1","provider.api_key":"","provider.timeout":60,"models.default":"qwen3-vl:2b","models.temperature":0.7,"models.num_ctx":8192,"models.keep_alive":"5m","models.overrides":[],"chat.system_prompt":"","chat.welcome":"How can I help?","chat.placeholder":"Message Alpaca Bot","chat.user_can_change_model":true,"chat.context_messages":20,"chat.history_limit":20,"chat.spellcheck":true,"chat.assistant_avatar":"","privacy.save_history":true,"privacy.usage_log":true,"privacy.usage_retention_days":90,"governance.site_monthly_tokens":0,"governance.user_monthly_tokens":0,"toolkits.enabled":["web_fetch","summarize","draft_post"],"toolkits.user_agent":"AlpacaBot/0.5.0 (+https://github.com/carmelosantana/alpaca-bot)","toolkits.abilities":[],"toolkits.mcp_servers":[{"id":"docs","url":"https://mcp.example.com/mcp","header_name":"Authorization","header_value":"••••","prefix":"docs","timeout":30,"max_bytes":1048576,"approved":[]}],"access.chat":"edit_posts","access.tool.web_fetch":"edit_posts","access.tool.summarize":"edit_posts","access.tool.draft_post":"edit_posts","access.tool.abilities":"manage_options","access.settings.read":"manage_options","access.settings.write":"manage_options","access.shortcode":"edit_posts","access.mcp":[]}
 ```
 
-(`provider.base_url` is the site's own value.) What this route answers is what is *stored*, which
+(`provider.base_url`, `models.default` and the one server row were written for the sample; every
+other key is its default. `toolkits.user_agent`'s default names the installed version,
+`Plugin::VERSION`.) What this route answers is what is *stored*, which
 for two keys is not the same as what the plugin *uses*:
 
 - `provider.base_url` loses to a non-empty `OLLAMA_API_URL` constant — see the rule below the
