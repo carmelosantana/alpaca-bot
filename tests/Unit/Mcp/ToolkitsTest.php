@@ -132,3 +132,28 @@ it('skips a stored row it cannot read as a server', function (string $field): vo
     $kits = mcpToolkits([$field => new stdClass()], [], $built, $asked);
     expect($kits->for(5))->toBe([])->and($built)->toBe([]);
 })->with([['url'], ['header_name'], ['prefix']]);
+
+// N-2: the schema keeps two servers' tools apart by their prefixes, but Store hands back what is
+// stored, and a row written round the schema (add_option(), a hand edit) never met that rule. A
+// row whose prefix the rule refuses, or that an earlier row already holds, is not offered.
+it('skips a stored row whose prefix the schema refuses or an earlier row holds', function (array $rows, array $offered): void {
+    $row = static fn(string $id, string $prefix): array => ['id' => $id, 'url' => 'https://' . $id . '.example.com/mcp', 'header_name' => '', 'header_value' => '', 'prefix' => $prefix, 'approved' => ['search' => str_repeat('a', 64)]];
+    $kits = mcpToolkits([], ['toolkits.mcp_servers' => array_map(static fn(array $r): array => $row(...$r), $rows)], $built, $asked);
+    expect(array_keys($kits->for(5)))->toBe($offered);
+})->with([
+    'trk and trk_, whose tools _x and x would both be trk___x' => [[['trk', 'trk'], ['trku', 'trk_']], ['mcp.trk']],
+    'a prefix holding __' => [[['ab', 'a__b'], ['cd', 'cd']], ['mcp.cd']],
+    'the abilities\' prefix' => [[['abl', 'ability'], ['cd', 'cd']], ['mcp.cd']],
+    'one prefix on two rows: the earlier keeps it' => [[['one', 'trk'], ['two', 'trk']], ['mcp.one']],
+]);
+
+// Which row keeps a prefix does not depend on who asks: an earlier row holds it even for a user its
+// Access row refuses, and even when it approves nothing, so no user is offered the later one.
+it('lets an earlier row hold its prefix whoever asks and whatever it approves', function (): void {
+    $row = static fn(string $id, array $approved): array => ['id' => $id, 'url' => 'https://' . $id . '.example.com/mcp', 'header_name' => '', 'header_value' => '', 'prefix' => 'trk', 'approved' => $approved];
+    $kits = mcpToolkits([], ['toolkits.mcp_servers' => [$row('one', ['search' => str_repeat('a', 64)]), $row('two', ['search' => str_repeat('a', 64)])], 'access.mcp' => ['one' => 'edit_others_posts']], $built, $asked);
+    Functions\when('user_can')->alias(static fn(int $user, string $cap): bool => $cap !== 'edit_others_posts');
+    expect($kits->for(5))->toBe([]);
+    $empty = mcpToolkits([], ['toolkits.mcp_servers' => [$row('one', []), $row('two', ['search' => str_repeat('a', 64)])]], $built, $asked);
+    expect($empty->for(5))->toBe([]);
+});

@@ -21,6 +21,11 @@ use AlpacaBot\Settings\Store;
  * - ServerConfig::fromSettings() cannot read it (an object where a string belongs, which only a
  *   write round the schema can store). It is skipped for every user, rather than failing the
  *   turn of everyone the registry is asked about;
+ * - its prefix is one Schema::isMcpPrefix() refuses (the rule, or the reserved `ability`), or
+ *   one an earlier row already holds. Schema::sanitizeMcpServers() refuses both on the way in;
+ *   this is the same rule for a row written round it, so two servers' tools still cannot reach
+ *   the model under one name. Which row holds a prefix is decided before the checks below, so it
+ *   is the earlier row whoever asks and whatever that row approves;
  * - it approves nothing: there would be nothing to offer, and no reason to hold its header value;
  * - the user fails its `mcp.<id>` row (Access::allows(), asked of `$userId` with user_can()).
  *   That row defaults to `manage_options`. It is not in Access::defaults(), because there is one
@@ -49,6 +54,7 @@ final class Toolkits
     {
         $rows = $this->store->get('toolkits.mcp_servers', []);
         $out = [];
+        $held = [];
         foreach (is_array($rows) ? $rows : [] as $row) {
             if (!is_array($row) || !Schema::isMcpId($row['id'] ?? null)) {
                 continue;
@@ -60,6 +66,10 @@ final class Toolkits
             } catch (\Throwable) {
                 continue;
             }
+            if (!Schema::isMcpPrefix($read->prefix) || in_array($read->prefix, $held, true)) {
+                continue;
+            }
+            $held[] = $read->prefix;
             if ($read->approved === [] || !$this->access->allows($userId, Access::MCP_PREFIX . $id, $userId)) {
                 continue;
             }

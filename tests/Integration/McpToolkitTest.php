@@ -79,6 +79,26 @@ final class McpToolkitTest extends TestCase
         $this->assertSame('', $kit->guidelines());
     }
 
+    /**
+     * N-2: rows written straight into the option never met Schema::sanitizeMcpServers(), so the
+     * registry holds them to the same prefix rule: `trk` and `trk_` would put `_x` and `x` under
+     * one name, `trk___x`, and only the row whose prefix the rule admits is offered.
+     */
+    public function test_a_row_written_round_the_schema_is_held_to_the_prefix_rule(): void
+    {
+        global $wpdb;
+        $admin = $this->asAdmin();
+        $row = static fn(string $id, string $prefix): array => ['id' => $id, 'url' => 'https://' . $id . '.example.com/mcp', 'header_name' => '', 'header_value' => '', 'prefix' => $prefix, 'approved' => ['x' => str_repeat('a', 64), '_x' => str_repeat('b', 64)]];
+        delete_option(Plugin::OPTION);
+        // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery -- the point is a write no filter or sanitize callback sees.
+        $wpdb->insert($wpdb->options, ['option_name' => Plugin::OPTION, 'option_value' => serialize(['toolkits.mcp_servers' => [$row('trk', 'trk'), $row('trku', 'trk_')]]), 'autoload' => 'off']);
+        wp_cache_delete(Plugin::OPTION, 'options');
+        wp_cache_delete('notoptions', 'options');
+        $this->assertSame(['trk', 'trk_'], array_column(get_option(Plugin::OPTION)['toolkits.mcp_servers'], 'prefix'));
+
+        $this->assertSame(['mcp.trk'], array_keys($this->registry(new ClientFactory())->enabled($admin)));
+    }
+
     /** @param array<string, string> $approved */
     private function saveServer(array $approved): void
     {
