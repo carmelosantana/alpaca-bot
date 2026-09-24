@@ -11,9 +11,11 @@ namespace AlpacaBot\Mcp;
  * The settings screen has to be able to say "changed since approval: review" without opening a
  * connection while a page renders, so the finding is recorded where it is made and read from the
  * marker when the row is drawn. Discovery::tools() records it each time it lists a server,
- * rewriting the server's marker or clearing it; a listing that fails leaves the
- * marker as it was. set() is public so that whatever else lists a server records what it finds
- * the same way.
+ * rewriting the server's marker or clearing it, and so does McpToolkit::tools() through the
+ * `$onDrift` Mcp\Toolkits hands it, once per toolkit, which is once per turn on the chat path;
+ * a listing that fails leaves the marker as it was. set() does not compare with what is stored:
+ * given names it calls set_transient() every time, so a listing that finds the same names again
+ * restarts the marker's week, and given none it calls delete_transient().
  *
  * A week rather than forever because the marker is a hint about a remote server, not a fact
  * about this site.

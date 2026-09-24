@@ -76,6 +76,7 @@ it('streams deltas, persists both messages, records usage, and returns a Result'
             'completion_tokens' => 2,
             'total_tokens' => 7,
             'duration_ms' => $result->receipt['duration_ms'],
+            'tool_result_bytes' => 0,
             'conversation_id' => 42,
             'log_id' => 9,
             'created' => 1_725_000_000,

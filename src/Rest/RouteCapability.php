@@ -38,7 +38,8 @@ final class RouteCapability
          *
          * Opening `chat` or `chat/stream` does not open the tools with it.
          * Toolkit\Registry::enabled() offers a turn only the toolkits whose Settings › Access row
-         * the turn's user passes (`alpaca_bot/capability/tool/{id}`), before `alpaca_bot/toolkits`
+         * the turn's user passes (`alpaca_bot/capability/tool/{id}`, or `alpaca_bot/capability/mcp/{id}`
+         * for an MCP server), before `alpaca_bot/toolkits`
          * runs, so a role admitted here only to converse gets no tools until a row admits it —
          * `web_fetch`, which makes the web server send an outbound request and hands the reply
          * back, included. `draft_post` re-checks a capability of its own on top. `read` and

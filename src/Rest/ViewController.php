@@ -209,7 +209,7 @@ final class ViewController extends Controller
      * core's validation), the content is the bubble's to escape or render, and the receipt
      * reads usage and duration_ms exactly as it does off a stored reply. `images` are passed as
      * strings; MessageBubble decides which are data URLs it will render. `tool_calls` are the
-     * records the reply's meta carries (Pipeline: `{name, arguments, result_excerpt, ok}`),
+     * records the reply's meta carries (Pipeline: `{name, arguments, result_excerpt, ok, result_bytes}`),
      * kept as posted, records only: the receipt counts them, and nothing here reads inside one.
      */
     public function bubble(\WP_REST_Request $request): \WP_REST_Response|\WP_Error

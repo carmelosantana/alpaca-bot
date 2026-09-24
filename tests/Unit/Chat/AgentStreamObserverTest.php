@@ -47,7 +47,7 @@ it('records each tool call with its result, matched by call id, bounded excerpts
 
     $calls = $observer->toolCalls();
     expect($calls)->toHaveCount(3)
-        ->and($calls[0])->toBe(['name' => 'summarize', 'arguments' => ['text' => 'abc'], 'result_excerpt' => 'boom', 'ok' => false])
+        ->and($calls[0])->toBe(['name' => 'summarize', 'arguments' => ['text' => 'abc'], 'result_excerpt' => 'boom', 'ok' => false, 'result_bytes' => 4])
         ->and($calls[1]['name'])->toBe('web_fetch')
         ->and($calls[1]['ok'])->toBeTrue()
         // The excerpt is cut in characters, not bytes, and says it was cut.
@@ -56,7 +56,7 @@ it('records each tool call with its result, matched by call id, bounded excerpts
         ->and($calls[1]['arguments']['url'])->toBe('https://example.test/')
         ->and($calls[1]['arguments']['nested']['n'])->toBe(3)
         ->and(mb_strlen($calls[1]['arguments']['nested']['note']))->toBe(AgentStreamObserver::ARGUMENT_CHARS + 1)
-        ->and($calls[2])->toBe(['name' => 'draft_post', 'arguments' => ['title' => 'T'], 'result_excerpt' => 'slow', 'ok' => false]);
+        ->and($calls[2])->toBe(['name' => 'draft_post', 'arguments' => ['title' => 'T'], 'result_excerpt' => 'slow', 'ok' => false, 'result_bytes' => 4]);
 });
 
 // Every record is stored on the assistant turn for the life of the conversation, against the
@@ -109,9 +109,24 @@ it('pairs a result carrying no id with the oldest unanswered call, and reports a
     $agent->notify('agent.tool_call', new ToolCall('', 'b', []));
     $agent->notify('agent.tool_result', ToolResult::success('ra'));
     expect($observer->toolCalls())->toBe([
-        ['name' => 'a', 'arguments' => [], 'result_excerpt' => 'ra', 'ok' => true],
-        ['name' => 'b', 'arguments' => [], 'result_excerpt' => '', 'ok' => false],
+        ['name' => 'a', 'arguments' => [], 'result_excerpt' => 'ra', 'ok' => true, 'result_bytes' => 2],
+        ['name' => 'b', 'arguments' => [], 'result_excerpt' => '', 'ok' => false, 'result_bytes' => 0],
     ]);
+});
+
+// The excerpt is bounded for storage, so the size of what the model was given is kept beside
+// it as a number: it is what the usage receipt sums into `tool_result_bytes`.
+it('reports the whole result\'s size in bytes on a record whose excerpt was cut', function (): void {
+    $agent = agentSubject();
+    $observer = new AgentStreamObserver();
+    $agent->attach($observer);
+    $long = str_repeat('é', AgentStreamObserver::RESULT_CHARS + 5);
+    $agent->notify('agent.tool_call', new ToolCall('c1', 'web_fetch', []));
+    $agent->notify('agent.tool_result', ToolResult::success($long)->withCallId('c1'));
+    $record = $observer->toolCalls()[0];
+    expect($record['result_bytes'])->toBe(strlen($long))
+        ->and($record['result_bytes'])->toBe(2 * (AgentStreamObserver::RESULT_CHARS + 5))
+        ->and(mb_strlen($record['result_excerpt']))->toBe(AgentStreamObserver::RESULT_CHARS + 1);
 });
 
 it('keeps the last agent.error message and ignores a subject that is not an agent', function (): void {

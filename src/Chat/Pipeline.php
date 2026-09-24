@@ -75,7 +75,8 @@ use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Message\UserMessage;
  * behind) is the same code. The model gets the same generation options a plain turn sends
  * (Provider\BoundOptionsProvider), the text streams as it is produced (agentTurn() says how),
  * and the stored reply carries `meta['tool_calls']`, one `{name, arguments, result_excerpt,
- * ok}` per call. The stored reply is the one thing on this branch that can differ from what
+ * ok, result_bytes}` per call, and the receipt `tool_result_bytes`, the sum of their
+ * `result_bytes`. The stored reply is the one thing on this branch that can differ from what
  * streamed: a model whose template cannot really call tools writes the call as prose, and when
  * the faked call is `done` the whole answer is inside it, so the reply is recovered from it
  * before anything is stored (FakedToolCall::recovered(), which says how, and why the
@@ -377,6 +378,7 @@ final class Pipeline
         }
         $durationMs = self::elapsedMs($started);
 
+        $toolCalls = $observer?->toolCalls() ?? [];
         // The duration rides on the stored reply as well as the receipt, so a reloaded
         // transcript shows the same `model · tokens · seconds` line a live turn did.
         $reply = new Message(
@@ -386,7 +388,7 @@ final class Pipeline
             ['prompt_tokens' => $prompt, 'completion_tokens' => $completion],
             0,
             [],
-            ['duration_ms' => $durationMs] + ($reasoning !== '' ? ['reasoning' => $reasoning] : []) + self::toolCallsMeta($observer?->toolCalls() ?? []),
+            ['duration_ms' => $durationMs] + ($reasoning !== '' ? ['reasoning' => $reasoning] : []) + self::toolCallsMeta($toolCalls),
         );
         /**
          * Filters the finished assistant reply before it is appended to the conversation, saved and
@@ -408,7 +410,8 @@ final class Pipeline
         if (!$ephemeral) {
             $this->conversations->save($conversation);
         }
-        $logId = $this->meter->record($userId, $model, $prompt, $completion, $durationMs, $conversation->id);
+        $toolResultBytes = self::toolResultBytes($toolCalls);
+        $logId = $this->meter->record($userId, $model, $prompt, $completion, $durationMs, $conversation->id, $toolResultBytes);
         $result = new Result($conversation, $reply, [
             'user_id' => $userId,
             'model' => $model,
@@ -416,6 +419,7 @@ final class Pipeline
             'completion_tokens' => $completion,
             'total_tokens' => $prompt + $completion,
             'duration_ms' => $durationMs,
+            'tool_result_bytes' => $toolResultBytes,
             'conversation_id' => $conversation->id,
             'log_id' => $logId,
             'created' => $reply->created,
@@ -469,7 +473,7 @@ final class Pipeline
      * (`meta['tool_calls']`): a draft the run created exists whether or not the reply was
      * finished, and the record is how the transcript says so.
      *
-     * @param list<array{name: string, arguments: array<string, mixed>, result_excerpt: string, ok: bool}> $toolCalls
+     * @param list<array{name: string, arguments: array<string, mixed>, result_excerpt: string, ok: bool, result_bytes: int}> $toolCalls
      */
     private function settle(bool $streamEnded, bool $ephemeral, int $userId, Conversation $conversation, string $model, string $content, string $reasoning, int $prompt, int $completion, float $started, array $toolCalls = []): void
     {
@@ -524,7 +528,7 @@ final class Pipeline
      * what was stored. An ephemeral turn has no post to store on and stores nothing; the receipt
      * is recorded either way.
      *
-     * @param list<array{name: string, arguments: array<string, mixed>, result_excerpt: string, ok: bool}> $toolCalls
+     * @param list<array{name: string, arguments: array<string, mixed>, result_excerpt: string, ok: bool, result_bytes: int}> $toolCalls
      */
     private function storePartial(bool $ephemeral, int $userId, Conversation $conversation, string $model, string $content, string $reasoning, int $prompt, int $completion, int $durationMs, array $toolCalls): void
     {
@@ -542,7 +546,7 @@ final class Pipeline
         if (!$ephemeral) {
             $this->conversations->save($conversation);
         }
-        $this->meter->record($userId, $model, $prompt, $completion, $durationMs, $conversation->id);
+        $this->meter->record($userId, $model, $prompt, $completion, $durationMs, $conversation->id, self::toolResultBytes($toolCalls));
     }
 
     /**
@@ -808,12 +812,23 @@ final class Pipeline
      * `tool_calls` for a reply's meta: present only when a call was made, so a plain turn's
      * meta is exactly what it was before tools existed.
      *
-     * @param list<array{name: string, arguments: array<string, mixed>, result_excerpt: string, ok: bool}> $toolCalls
-     * @return array{tool_calls?: list<array{name: string, arguments: array<string, mixed>, result_excerpt: string, ok: bool}>}
+     * @param list<array{name: string, arguments: array<string, mixed>, result_excerpt: string, ok: bool, result_bytes: int}> $toolCalls
+     * @return array{tool_calls?: list<array{name: string, arguments: array<string, mixed>, result_excerpt: string, ok: bool, result_bytes: int}>}
      */
     private static function toolCallsMeta(array $toolCalls): array
     {
         return $toolCalls === [] ? [] : ['tool_calls' => $toolCalls];
+    }
+
+    /**
+     * The receipt's `tool_result_bytes`: the sum of the records' `result_bytes`, 0 for a turn
+     * that ran no tool.
+     *
+     * @param list<array{name: string, arguments: array<string, mixed>, result_excerpt: string, ok: bool, result_bytes: int}> $toolCalls
+     */
+    private static function toolResultBytes(array $toolCalls): int
+    {
+        return (int) array_sum(array_column($toolCalls, 'result_bytes'));
     }
 
     /**

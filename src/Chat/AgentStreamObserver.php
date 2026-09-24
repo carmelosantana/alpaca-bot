@@ -45,16 +45,23 @@ use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Tool\ToolResult;
  * is queued and left for drain() after run() returns: suspending a fiber the pipeline is not
  * resuming would leave it hanging, and suspending outside any fiber is a FiberError.
  *
- * A tool call record is `{name, arguments, result_excerpt, ok}`, paired to its result by the
- * result's callId, else to the oldest unanswered call (a provider that sends no ids, or the
- * same id twice, still gets one record per call). `ok` is Success; Error and Timeout are not.
+ * A tool call record is `{name, arguments, result_excerpt, ok, result_bytes}`, paired to its
+ * result by the result's callId, else to the oldest unanswered call (a provider that sends no
+ * ids, or the same id twice, still gets one record per call). `ok` is Success; Error and Timeout
+ * are not. `result_bytes` is the size in bytes of the whole result the agent handed back, not of
+ * the excerpt, and 0 for a call never answered. The agent keeps a result in the turn's
+ * conversation and sends it with each later request of the turn (AbstractAgent::run()), where the
+ * prompt tokens count it without saying how much of them it was; the excerpt is cut for storage,
+ * so this number is the one record of that size, and the usage receipt sums it
+ * (`tool_result_bytes`, Chat\UsageMeter).
  * Every record is stored on the assistant turn for the life of the conversation and counts
  * against the transcript's packet budget (ConversationStore::save()), so every part of it the
  * model chose is bounded, in characters, with an ellipsis where a cut was made: the result to
  * RESULT_CHARS, the tool's name to NAME_CHARS, each string argument to ARGUMENT_CHARS, and the
  * arguments record as a whole to ARGUMENTS_CHARS over its keys and values at every depth
- * (boundedArguments()). A record is therefore never larger than the sum of those three
- * ceilings plus its marks, whatever the model put in the call — the name included, which was
+ * (boundedArguments()). `ok` and `result_bytes` are a bool and an int, not text. A record is
+ * therefore never larger than the sum of those three ceilings plus its marks, its keys and those
+ * two scalars, whatever the model put in the call — the name included, which was
  * unbounded until 0.5.0 and stored whole (a 50,000-character name measured at 51,274 chars on
  * the record). The full result was for the model and is gone with the run; the arguments are
  * what ran, and the per-string bound keeps a URL or a title whole while a drafted post's body,
@@ -121,7 +128,7 @@ final class AgentStreamObserver implements \SplObserver
     /** @var list<array{id: string, name: string, arguments: array<string, mixed>}> calls announced and not yet answered, oldest first */
     private array $pending = [];
 
-    /** @var list<array{name: string, arguments: array<string, mixed>, result_excerpt: string, ok: bool}> */
+    /** @var list<array{name: string, arguments: array<string, mixed>, result_excerpt: string, ok: bool, result_bytes: int}> */
     private array $toolCalls = [];
 
     private ?string $error = null;
@@ -235,15 +242,15 @@ final class AgentStreamObserver implements \SplObserver
     /**
      * Every tool call heard, in the order their results arrived; a call still unanswered (the
      * run was cut off, or cancelled, before its result) is listed last as not ok with nothing
-     * to show, so the record still says it was made.
+     * to show and 0 bytes, so the record still says it was made.
      *
-     * @return list<array{name: string, arguments: array<string, mixed>, result_excerpt: string, ok: bool}>
+     * @return list<array{name: string, arguments: array<string, mixed>, result_excerpt: string, ok: bool, result_bytes: int}>
      */
     public function toolCalls(): array
     {
         $out = $this->toolCalls;
         foreach ($this->pending as $call) {
-            $out[] = ['name' => $call['name'], 'arguments' => $call['arguments'], 'result_excerpt' => '', 'ok' => false];
+            $out[] = ['name' => $call['name'], 'arguments' => $call['arguments'], 'result_excerpt' => '', 'ok' => false, 'result_bytes' => 0];
         }
         return $out;
     }
@@ -310,6 +317,7 @@ final class AgentStreamObserver implements \SplObserver
             'arguments' => $call['arguments'],
             'result_excerpt' => self::bounded($result->content, self::RESULT_CHARS),
             'ok' => $result->status === ToolResultStatus::Success,
+            'result_bytes' => strlen($result->content),
         ];
     }
 

@@ -334,7 +334,8 @@ final class SettingsPage
     /**
      * The arguments `$row`'s filter is given at runtime, in the same shape, for the page to ask
      * it with. A tool row and an MCP row get a user id, which is what Access declares they fire
-     * with (Toolkit\Registry::enabled() passes a tool row the turn's user); here it is the
+     * with (Toolkit\Registry::enabled() passes a tool row the turn's user, and Mcp\Toolkits::for()
+     * an MCP row); here it is the
      * administrator viewing the page. A settings row gets a
      * WP_REST_Request of the verb it authorises on `/settings`, as SettingsController passes the
      * request. The shortcode row gets post id 0 and the `[alpacabot]` tag, which is what

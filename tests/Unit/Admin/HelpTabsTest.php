@@ -188,6 +188,24 @@ it('tells the person switching tools on what an ability call is: another plugin\
         ->toContain('longer than ' . AlpacaBot\Toolkit\SchemaTool::RESULT_CHARS . ' characters is cut');
 });
 
+// An MCP server's tools are another party's, and in this release nothing contacts one: the tab
+// says both, and does not borrow web_fetch's address rules, which differ (review R88).
+it('tells the person adding an MCP server what is offered, whose text it is, who may use it, and that no server is contacted yet in this release', function (): void {
+    Functions\when('esc_url')->returnArg();
+    $tools = helpTabContent('alpaca-bot-tools');
+    // The one paragraph about MCP, so what it says is not borrowed from the abilities one.
+    preg_match('~<p><strong>An MCP server.*?</p>~s', $tools, $m);
+    $mcp = str_replace('&#039;', "'", $m[0] ?? '');
+    expect($mcp)->toContain('no MCP server is contacted')->toContain('php-agents 0.16')
+        ->toContain('only the tools you tick')->toContain('prefix__tool')
+        ->toContain('withheld until you approve it again')->toContain('lists twice')
+        ->toContain("the server's text")->toContain('shortened and flattened exactly as the model gets it')
+        ->toContain('starts at Administrators')
+        ->toContain("even when it is the site's own host")
+        ->toContain('<code>alpaca_bot/mcp/called</code>')
+        ->and($tools)->not->toContain('same address rules');
+});
+
 /** The content of one tab as add() hands it to the chat screen; how many tabs there are is the ordering test's to pin. */
 function helpTabContent(string $tabId): string
 {

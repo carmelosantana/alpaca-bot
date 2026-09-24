@@ -46,7 +46,7 @@ use AlpacaBot\Toolkit\AddressRefused;
  * Store and gets no check at all, and nor does anything else that writes the option. Mcp\Egress
  * checks the address again whenever it builds a client, and pins the connection to what it
  * checked; in this release nothing builds one: no code calls Egress::client(), and the
- * ClientFactory the plugin constructs (for Mcp\Discovery) is given no closure, so every MCP client
+ * ClientFactory the plugin constructs (for Mcp\Discovery and Mcp\Toolkits) is given no closure, so every MCP client
  * it hands out is UnavailableClient, which contacts nothing. The check is AddressCheck::resolve(),
  * which does not let the site's own host through (AddressCheck says why).
  *

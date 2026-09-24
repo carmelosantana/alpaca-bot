@@ -141,7 +141,9 @@ final class Plugin
         // read from the registry until a turn runs, well after plugins_loaded. It is handed the
         // container's Access rather than making one: enabled() holds each toolkit to its row, and
         // sharing the instance is what keeps that on the one memoised read of the settings option.
-        $registry = new Toolkit\Registry($store, $this->get(Access::class));
+        // The MCP servers reach it through Mcp\Toolkits over the same Store and Access, and the
+        // container's ClientFactory, the seam Mcp\Discovery lists servers through as well.
+        $registry = new Toolkit\Registry($store, $this->get(Access::class), new Mcp\Toolkits($store, $this->get(Access::class), $this->get(Mcp\ClientFactory::class)));
         $this->set(Chat\Pipeline::class, new Chat\Pipeline($store, $factory, $this->get(Provider\ModelCatalog::class), $conversations, $meter, $caps, $collector, $prefs, $registry));
         // The built-in toolkits, under the ids Schema's `toolkits.enabled` options name. The ones
         // that act as a user (summarize, draft_post and abilities) take get_current_user_id as a

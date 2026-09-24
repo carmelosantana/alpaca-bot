@@ -220,7 +220,7 @@ before sending is not in the body.
 ```
 $ curl -s -u "admin:$PW" -H 'Content-Type: application/json' \
     -d '{"message":"Reply with exactly three words."}' "$B/chat"
-{"conversation_id":163,"message":{"role":"assistant","content":"Boring is right.","model":"qwen3-vl:2b","usage":{"prompt_tokens":16,"completion_tokens":3776},"created":1788736235,"images":[],"meta":{"reasoning":"Hmm, the user asked me to reply with exactly three words. …"}},"receipt":{"user_id":1,"model":"qwen3-vl:2b","prompt_tokens":16,"completion_tokens":3776,"total_tokens":3792,"duration_ms":14941,"conversation_id":163,"log_id":164,"created":1788736235},"contexts":[]}
+{"conversation_id":163,"message":{"role":"assistant","content":"Boring is right.","model":"qwen3-vl:2b","usage":{"prompt_tokens":16,"completion_tokens":3776},"created":1788736235,"images":[],"meta":{"reasoning":"Hmm, the user asked me to reply with exactly three words. …"}},"receipt":{"user_id":1,"model":"qwen3-vl:2b","prompt_tokens":16,"completion_tokens":3776,"total_tokens":3792,"duration_ms":14941,"tool_result_bytes":0,"conversation_id":163,"log_id":164,"created":1788736235},"contexts":[]}
 ```
 
 The 200 body is `{conversation_id, message, receipt, contexts}`:
@@ -233,7 +233,9 @@ The 200 body is `{conversation_id, message, receipt, contexts}`:
   completion tokens and count against the monthly caps, which is why a three-word answer above
   cost 3,776 of them.
 - `receipt` is the usage row the turn wrote: `{user_id, model, prompt_tokens,
-  completion_tokens, total_tokens, duration_ms, conversation_id, log_id, created}`.
+  completion_tokens, total_tokens, duration_ms, tool_result_bytes, conversation_id, log_id,
+  created}`. `tool_result_bytes` is the total size in bytes of every tool result the turn's
+  model was given, 0 for a turn that ran none.
 - `contexts` lists the context sources folded into the system prompt (`[]` when the request
   carried no `context`).
 
@@ -345,9 +347,10 @@ $ curl -s -u "admin:$PW" "$B/conversations/163"
 `meta.duration_ms` (the samples above predate it). A reply cut short by a client that
 disconnected mid-stream, or by a failure after a tool had already run, is stored with
 `meta.partial: true`. A reply that ran tools (a toolkit is enabled and the model can call
-tools) carries `meta.tool_calls`, one `{name, arguments, result_excerpt, ok}` per call in the
-order their results came back: the arguments as the model sent them with each string held to
-1,000 characters, the first 200 characters of the result, and whether the tool succeeded. A
+tools) carries `meta.tool_calls`, one `{name, arguments, result_excerpt, ok, result_bytes}` per
+call in the order their results came back: the arguments as the model sent them with each string
+held to 1,000 characters, the first 200 characters of the result, whether the tool succeeded, and
+the size of the whole result in bytes (0 for a call that was never answered). A
 turn that ran no tool has no `tool_calls` key. A message whose images were
 dropped to keep the transcript within the database's packet limit carries
 `meta.images_evicted`, the count of images it lost; `images` is then shorter by that many,
@@ -715,7 +718,7 @@ event: delta
 data: {"text":"orange","reasoning":"","held":false}
 
 event: done
-data: {"conversation_id":169,"message":{"role":"assistant","content":"orange","model":"minicpm-v4.6:1b","usage":{"prompt_tokens":18,"completion_tokens":283},"created":1788736395,"images":[],"meta":{"reasoning":"First, the user says: \"Name one colour. One word only.\" …"}},"receipt":{"user_id":1,"model":"minicpm-v4.6:1b","prompt_tokens":18,"completion_tokens":283,"total_tokens":301,"duration_ms":5282,"conversation_id":169,"log_id":170,"created":1788736395},"contexts":[]}
+data: {"conversation_id":169,"message":{"role":"assistant","content":"orange","model":"minicpm-v4.6:1b","usage":{"prompt_tokens":18,"completion_tokens":283},"created":1788736395,"images":[],"meta":{"reasoning":"First, the user says: \"Name one colour. One word only.\" …"}},"receipt":{"user_id":1,"model":"minicpm-v4.6:1b","prompt_tokens":18,"completion_tokens":283,"total_tokens":301,"duration_ms":5282,"tool_result_bytes":0,"conversation_id":169,"log_id":170,"created":1788736395},"contexts":[]}
 ```
 
 | Event | Data | When |

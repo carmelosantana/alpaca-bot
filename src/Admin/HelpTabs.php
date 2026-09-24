@@ -165,6 +165,13 @@ final class HelpTabs
                 '<strong>' . esc_html__('Settings › Access', 'alpaca-bot') . '</strong>',
                 (string) SchemaTool::RESULT_CHARS,
             ))
+            . self::p('<strong>' . esc_html__('An MCP server\'s tools are another party\'s code, and their descriptions and results are its text.', 'alpaca-bot') . '</strong> ' . sprintf(
+                /* translators: 1: Settings › Tools, 2: Settings › Access, 3: alpaca_bot/mcp/called */
+                esc_html__('In this release no MCP server is contacted: the MCP client arrives with php-agents 0.16, so Discover tools says so and no MCP tool reaches the model. The rules the plugin already applies: the model is offered only the tools you tick under %1$s, named prefix__tool, and only while the server still describes each one as it did when you ticked it. A tool the server has changed is withheld until you approve it again, and a name the server lists twice is never offered. A tool\'s description and its results are the server\'s text, which the model is told to treat as data; the list shows each description shortened and flattened exactly as the model gets it. Each server has a row of its own under %2$s, and it starts at Administrators. A server\'s address is checked when it is saved from this screen or over the REST API, and a private or other special-purpose address is refused even when it is the site\'s own host, which web_fetch may reach. Every call fires %3$s with its arguments, the user and the result, for a site that wants a record of them.', 'alpaca-bot'),
+                '<strong>' . esc_html__('Settings › Tools', 'alpaca-bot') . '</strong>',
+                '<strong>' . esc_html__('Settings › Access', 'alpaca-bot') . '</strong>',
+                '<code>alpaca_bot/mcp/called</code>',
+            ))
             . self::p('<strong>' . esc_html__('Each tool has a row of its own in Settings › Access, as well as Chat.', 'alpaca-bot') . '</strong> ' . sprintf(
                 /* translators: 1: alpaca_bot/capability/chat, 2: alpaca_bot/toolkits, 3: draft_post, 4: web_fetch, 5: summarize */
                 esc_html__('Opening the chat to a role — with the Chat row, or with %1$s in code — does not hand it the tools: a tool is offered only to a user who passes that tool\'s row, Contributors and up by default for %4$s, %5$s and %3$s, Administrators for the abilities tool. Lower a tool\'s row to give it to a role you opened the chat to, and raise it to keep it from one. %3$s asks the post type\'s own capability as well and refuses a user who lacks it. The %2$s filter runs after the rows, so a site can still add a toolkit of its own or take one away per user, in code.', 'alpaca-bot'),

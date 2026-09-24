@@ -83,7 +83,7 @@ it('runs the agent loop when a toolkit is enabled and the model supports tools: 
     expect(array_map(static fn(Delta $d): array => [$d->text, $d->reasoning], $seen))->toBe([['', 'thinking'], ['Let me check', ''], ['', ''], ["\n\npong ", ''], ['received', '']])
         ->and($ranWith)->toBe([['', 'thinking'], ['Let me check', ''], ['', '']]);
 
-    $record = ['name' => 'echo_tool', 'arguments' => ['text' => 'ping'], 'result_excerpt' => 'echo:ping', 'ok' => true];
+    $record = ['name' => 'echo_tool', 'arguments' => ['text' => 'ping'], 'result_excerpt' => 'echo:ping', 'ok' => true, 'result_bytes' => 9];
     expect($r->reply->content)->toBe("Let me check\n\npong received")
         ->and($r->reply->meta)->toBe(['duration_ms' => $r->receipt['duration_ms'], 'reasoning' => 'thinking', 'tool_calls' => [$record]])
         // Output::$usage is the sum over the run (AbstractAgent::run() adds each iteration's
@@ -130,11 +130,58 @@ it('records a tool that fails, and one the model names that does not exist, as n
 
     expect($r->reply->content)->toBe('Neither worked.')
         ->and($r->reply->meta['tool_calls'])->toBe([
-            ['name' => 'echo_tool', 'arguments' => ['text' => 'ping'], 'result_excerpt' => 'nope: ping', 'ok' => false],
-            ['name' => 'no_such_tool', 'arguments' => ['x' => 1], 'result_excerpt' => 'Unknown tool: no_such_tool', 'ok' => false],
+            ['name' => 'echo_tool', 'arguments' => ['text' => 'ping'], 'result_excerpt' => 'nope: ping', 'ok' => false, 'result_bytes' => 10],
+            ['name' => 'no_such_tool', 'arguments' => ['x' => 1], 'result_excerpt' => 'Unknown tool: no_such_tool', 'ok' => false, 'result_bytes' => 26],
         ])
         ->and($calls)->toHaveCount(2)
         ->and($r->receipt['total_tokens'])->toBe(4);
+});
+
+// Each record carries the size in bytes of the result the model was given, and the receipt sums
+// them: the one number that says how much the tools put into the turn's context.
+it('reports the sum of the turn\'s tool result sizes on the receipt, the stored row and the usage action', function (): void {
+    $toolkit = echoToolkit('echo_tool');
+    $provider = agentProvider([
+        [new Response('', ProviderFinishReason::ToolUse, [new ToolCall('c1', 'echo_tool', ['text' => 'ping']), new ToolCall('c2', 'echo_tool', ['text' => 'pöng'])])],
+        [new Response('Both echoed.', ProviderFinishReason::Stop, usage: new Usage(2, 2, 4))],
+    ]);
+    $h = pipelineWith($provider, [], [], TOOL_MODEL, null, registryWith(['echo' => $toolkit]));
+    $recorded = null;
+    Actions\expectDone('alpaca_bot/usage/recorded')->once()->whenHappen(static function (array $receipt) use (&$recorded): void {
+        $recorded = $receipt;
+    });
+
+    $r = $h->pipeline->complete(3, 'echo twice');
+
+    // 'echo:ping' is 9 bytes and 'echo:pöng' 10, the ö being two.
+    expect(array_column($r->reply->meta['tool_calls'], 'result_bytes'))->toBe([9, 10])
+        ->and($r->receipt['tool_result_bytes'])->toBe(19)
+        ->and($recorded['tool_result_bytes'])->toBe(19)
+        ->and($h->writes[3][2]['meta_input']['tool_result_bytes'])->toBe(19);
+});
+
+it('reports on an abandoned turn\'s receipt the size of what had come back before the consumer left', function (): void {
+    $toolkit = echoToolkit('draft_post', 'Use it.', static fn(array $a): ToolResult => ToolResult::success('{"id": 225}'));
+    $provider = agentProvider([
+        [new Response('', ProviderFinishReason::ToolUse, [new ToolCall('c1', 'draft_post', ['text' => 'One'])])],
+        [new Response('', ProviderFinishReason::ToolUse, [new ToolCall('c2', 'draft_post', ['text' => 'Two'])])],
+    ]);
+    $h = pipelineWith($provider, [], [], TOOL_MODEL, null, registryWith(['draft' => $toolkit]));
+    Actions\expectDone('alpaca_bot/chat/failed')->once();
+    $recorded = null;
+    Actions\expectDone('alpaca_bot/usage/recorded')->once()->whenHappen(static function (array $receipt) use (&$recorded): void {
+        $recorded = $receipt;
+    });
+
+    $gen = $h->pipeline->send(3, 'draft two');
+    $gen->current();
+    $gen->next();
+    unset($gen);
+
+    // The first call answered 11 bytes; the second was made and never answered.
+    $row = array_values(array_filter($h->writes, static fn(array $w): bool => $w[0] === 'wp_insert_post' && $w[1] === 'chat_log'));
+    expect($recorded['tool_result_bytes'])->toBe(11)
+        ->and($row[0][2]['meta_input']['tool_result_bytes'])->toBe(11);
 });
 
 it('yields the answer a model gives through the done tool, which it never streamed, after the run', function (): void {
@@ -210,7 +257,7 @@ it('keeps the turn when the provider fails after a tool ran: the partial reply i
     // ... but a draft exists in their Posts list, and the transcript is how they learn of it:
     // the reply is stored as the abandoned path stores one, partial, with what streamed and
     // the record of the call; the receipt bills the call that completed; the post stays.
-    $record = ['name' => 'draft_post', 'arguments' => ['text' => 'Hello'], 'result_excerpt' => '{"id": 225}', 'ok' => true];
+    $record = ['name' => 'draft_post', 'arguments' => ['text' => 'Hello'], 'result_excerpt' => '{"id": 225}', 'ok' => true, 'result_bytes' => 11];
     expect($failed[1]->messages[1]->content)->toBe('Drafting.')
         ->and($failed[1]->messages[1]->meta['partial'])->toBeTrue()
         ->and($failed[1]->messages[1]->meta['tool_calls'])->toBe([$record])
@@ -252,7 +299,7 @@ it('keeps the turn when anything else throws after a tool ran, the same way: the
     expect(fn() => $turn->throw(new \LogicException('boom')))->toThrow(\RuntimeException::class, 'Provider error: boom');
     expect($failed[0])->toBeInstanceOf(\LogicException::class);
 
-    $record = ['name' => 'draft_post', 'arguments' => ['text' => 'Hello'], 'result_excerpt' => '{"id": 225}', 'ok' => true];
+    $record = ['name' => 'draft_post', 'arguments' => ['text' => 'Hello'], 'result_excerpt' => '{"id": 225}', 'ok' => true, 'result_bytes' => 11];
     expect($failed[1]->messages)->toHaveCount(2)
         ->and($failed[1]->messages[1]->content)->toContain('Drafting.')->toContain('Done.')
         ->and($failed[1]->messages[1]->meta['partial'])->toBeTrue()
@@ -320,7 +367,7 @@ it('finishes the turn on a tool\'s own word when a toolkit ends the run with a T
     // The library reports a termination as an Error finish with no error announced: nothing
     // failed, a tool asked the run to stop, and its message is the run's last word.
     expect($r->reply->content)->toBe("One moment.\n\nStopped: enough")
-        ->and($r->reply->meta['tool_calls'])->toBe([['name' => 'stop_here', 'arguments' => ['text' => 'enough'], 'result_excerpt' => 'Stopped: enough', 'ok' => true]])
+        ->and($r->reply->meta['tool_calls'])->toBe([['name' => 'stop_here', 'arguments' => ['text' => 'enough'], 'result_excerpt' => 'Stopped: enough', 'ok' => true, 'result_bytes' => 15]])
         ->and($r->receipt['total_tokens'])->toBe(3);
 });
 
@@ -374,7 +421,7 @@ it('stores the partial reply with the calls made so far, and lets the fiber go t
         ->and($failed[0]->getMessage())->toContain('abandoned')
         ->and($failed[1]->messages[1]->content)->toBe("first\n\nsecond")
         ->and($failed[1]->messages[1]->meta['partial'])->toBeTrue()
-        ->and($failed[1]->messages[1]->meta['tool_calls'])->toBe([['name' => 'echo_tool', 'arguments' => ['text' => 'ping'], 'result_excerpt' => 'echo:ping', 'ok' => true]])
+        ->and($failed[1]->messages[1]->meta['tool_calls'])->toBe([['name' => 'echo_tool', 'arguments' => ['text' => 'ping'], 'result_excerpt' => 'echo:ping', 'ok' => true, 'result_bytes' => 9]])
         ->and(array_map(static fn(array $w): string => $w[0], $h->writes))->toBe(['wp_insert_post', 'update_post_meta', 'wp_update_post', 'wp_insert_post']);
 });
 
@@ -568,8 +615,8 @@ it('yields an empty delta before each tool runs, so a consumer that leaves then 
     // never runs, and the record says its call was made and not answered.
     expect($ran)->toBe(1)
         ->and($failed->messages[1]->meta['tool_calls'])->toBe([
-            ['name' => 'draft_post', 'arguments' => ['text' => 'One'], 'result_excerpt' => '{"id": 225}', 'ok' => true],
-            ['name' => 'draft_post', 'arguments' => ['text' => 'Two'], 'result_excerpt' => '', 'ok' => false],
+            ['name' => 'draft_post', 'arguments' => ['text' => 'One'], 'result_excerpt' => '{"id": 225}', 'ok' => true, 'result_bytes' => 11],
+            ['name' => 'draft_post', 'arguments' => ['text' => 'Two'], 'result_excerpt' => '', 'ok' => false, 'result_bytes' => 0],
         ]);
 });
 
@@ -783,7 +830,7 @@ it('recovers the answer a faked done call buried in its own JSON, from the recor
         // The record says what actually ran, once: the API call the agent made. The leaked
         // web_fetch is the same call written out as prose, and listing it again would tell the
         // reader of the transcript that a fetch was attempted twice.
-        ->and($r->reply->meta['tool_calls'])->toBe([['name' => 'web_fetch', 'arguments' => ['text' => 'https://en.wikipedia.org/wiki/Alpaca'], 'result_excerpt' => 'Alpaca - Wikipedia', 'ok' => true]])
+        ->and($r->reply->meta['tool_calls'])->toBe([['name' => 'web_fetch', 'arguments' => ['text' => 'https://en.wikipedia.org/wiki/Alpaca'], 'result_excerpt' => 'Alpaca - Wikipedia', 'ok' => true, 'result_bytes' => 18]])
         ->and($h->writes[1][2][1]['content'])->toBe($r->reply->content);
 });
 

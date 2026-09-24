@@ -2,6 +2,10 @@
 
 declare(strict_types=1);
 
+use AlpacaBot\Access;
+use AlpacaBot\Mcp\ClientFactory;
+use AlpacaBot\Mcp\McpToolkit;
+use AlpacaBot\Mcp\Toolkits;
 use AlpacaBot\Settings\Store;
 use AlpacaBot\Toolkit\Registry;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Contract\ToolkitInterface;
@@ -11,7 +15,8 @@ use Brain\Monkey\Filters;
 use Brain\Monkey\Functions;
 
 // The registry knows every toolkit the plugin built; the `toolkits.enabled` setting says which of
-// them a turn may use; `alpaca_bot/toolkits` runs over that subset, with the user id, and is
+// them a turn may use; `alpaca_bot/toolkits` runs over that subset and the MCP servers the user
+// may use (Mcp\Toolkits), with the user id, and is
 // where a site adds its own toolkit or takes one away for one user. The setting never sees a
 // third-party id (Schema::coerce() keeps only the built-ins' ids), so the filter is the one
 // extension point and it runs after the setting on purpose.
@@ -130,7 +135,6 @@ it('lets the alpaca_bot/toolkits filter add back a toolkit the floor dropped, si
 });
 
 it('takes an explicit row at registration, for a toolkit whose row is not tool.{id}', function (): void {
-    // Task 27 registers each MCP server's toolkit under its own `mcp.{id}` row.
     $server = Mockery::mock(ToolkitInterface::class);
     $asked = [];
     Functions\when('user_can')->alias(static function (int $user, string $cap) use (&$asked): bool {
@@ -160,4 +164,47 @@ it('finds a tool in a toolkit by name, the last of that name, and none when the 
     expect(Registry::tool($kit, 'web_fetch')?->execute([])->content)->toBe('new')
         ->and(Registry::tool($kit, 'first')?->name())->toBe('first')
         ->and(Registry::tool($kit, 'summarize'))->toBeNull();
+});
+
+// The MCP servers are a third source, after the built-ins' setting and floor and before the
+// filter: each server the user passes the `mcp.<id>` row of is its own toolkit (Mcp\Toolkits),
+// and `toolkits.enabled` does not name them, since its options are the built-ins' ids.
+
+it('adds each MCP server the user passes as its own toolkit, before the filter and outside the toolkits.enabled list', function (): void {
+    $asked = [];
+    Functions\when('user_can')->alias(static function (int $user, string $cap) use (&$asked): bool {
+        $asked[] = [$user, $cap];
+        return true;
+    });
+    Functions\when('get_option')->justReturn([]);
+    $store = new Store([
+        'toolkits.enabled' => [],
+        'toolkits.mcp_servers' => [['id' => 'trk', 'url' => 'https://mcp.example.com/mcp', 'header_value' => '', 'prefix' => 'trk', 'approved' => ['search' => str_repeat('a', 64)]]],
+    ]);
+    $access = new Access($store);
+    $fetch = Mockery::mock(ToolkitInterface::class);
+    $seen = null;
+    Filters\expectApplied('alpaca_bot/toolkits')->once()->andReturnUsing(static function (array $toolkits, int $user) use (&$seen): array {
+        $seen = [array_keys($toolkits), $user];
+        return $toolkits;
+    });
+    $r = new Registry($store, $access, new Toolkits($store, $access, new ClientFactory()));
+    $r->register('web_fetch', $fetch);
+    $enabled = $r->enabled(3);
+    expect(array_keys($enabled))->toBe(['mcp.trk'])
+        ->and($enabled['mcp.trk'])->toBeInstanceOf(McpToolkit::class)
+        ->and($seen)->toBe([['mcp.trk'], 3])
+        ->and($asked)->toBe([[3, 'manage_options']]);
+});
+
+it('lets the alpaca_bot/toolkits filter take an MCP server away', function (): void {
+    Functions\when('get_option')->justReturn([]);
+    $store = new Store(['toolkits.mcp_servers' => [['id' => 'trk', 'url' => 'https://mcp.example.com/mcp', 'header_value' => '', 'prefix' => 'trk', 'approved' => ['search' => str_repeat('a', 64)]]]]);
+    $access = new Access($store);
+    Filters\expectApplied('alpaca_bot/toolkits')->once()->andReturnUsing(static function (array $toolkits): array {
+        unset($toolkits['mcp.trk']);
+        return $toolkits;
+    });
+    $r = new Registry($store, $access, new Toolkits($store, $access, new ClientFactory()));
+    expect($r->enabled(3))->not->toHaveKey('mcp.trk');
 });

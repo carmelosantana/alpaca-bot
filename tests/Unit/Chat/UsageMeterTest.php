@@ -31,7 +31,7 @@ it('records a chat_log post with token meta, bumps both cached month totals in p
         && $p['post_status'] === 'private'
         && $p['post_author'] === 3
         && $p['post_title'] === 'm · 30 tokens'
-        && $p['meta_input'] === ['model' => 'm', 'prompt_tokens' => 10, 'completion_tokens' => 20, 'total_tokens' => 30, 'duration_ms' => 1234, 'conversation_id' => 5])->andReturn(77);
+        && $p['meta_input'] === ['model' => 'm', 'prompt_tokens' => 10, 'completion_tokens' => 20, 'total_tokens' => 30, 'duration_ms' => 1234, 'tool_result_bytes' => 0, 'conversation_id' => 5])->andReturn(77);
     Functions\expect('get_transient')->once()->with('alpaca_bot_usage_3_2024-08')->andReturn(['tokens' => 100, 'requests' => 4]);
     Functions\expect('get_transient')->once()->with('alpaca_bot_usage_site_2024-08')->andReturn(['tokens' => 1000, 'requests' => 40]);
     Functions\expect('set_transient')->once()->with('alpaca_bot_usage_3_2024-08', ['tokens' => 130, 'requests' => 5], 1200)->andReturn(true);
@@ -50,6 +50,7 @@ it('records a chat_log post with token meta, bumps both cached month totals in p
         'completion_tokens' => 20,
         'total_tokens' => 30,
         'duration_ms' => 1234,
+        'tool_result_bytes' => 0,
         'conversation_id' => 5,
         'log_id' => 77,
         'created' => 1_725_000_000,
@@ -66,7 +67,7 @@ it('writes a numbers-only row that still counts when the usage log is off', func
         && $p['post_status'] === 'private'
         && $p['post_author'] === 3
         && $p['post_title'] === '2 tokens'
-        && $p['meta_input'] === ['model' => '', 'prompt_tokens' => 1, 'completion_tokens' => 1, 'total_tokens' => 2, 'duration_ms' => 1, 'conversation_id' => 0])->andReturn(79);
+        && $p['meta_input'] === ['model' => '', 'prompt_tokens' => 1, 'completion_tokens' => 1, 'total_tokens' => 2, 'duration_ms' => 1, 'tool_result_bytes' => 0, 'conversation_id' => 0])->andReturn(79);
     Functions\expect('get_transient')->once()->with('alpaca_bot_usage_3_2024-08')->andReturn(['tokens' => 8, 'requests' => 1]);
     Functions\expect('get_transient')->once()->with('alpaca_bot_usage_site_2024-08')->andReturn(['tokens' => 8, 'requests' => 1]);
     Functions\expect('set_transient')->once()->with('alpaca_bot_usage_3_2024-08', ['tokens' => 10, 'requests' => 2], 1200)->andReturn(true);
@@ -85,10 +86,41 @@ it('writes a numbers-only row that still counts when the usage log is off', func
         'completion_tokens' => 1,
         'total_tokens' => 2,
         'duration_ms' => 1,
+        'tool_result_bytes' => 0,
         'conversation_id' => 9,
         'log_id' => 79,
         'created' => 1_725_000_000,
     ]);
+});
+
+// The size of what the turn's tools handed back is a number like the token counts: stored
+// whatever `privacy.usage_log` says, since it says nothing about what a tool returned, and
+// clamped so a caller's -1 cannot read as a size.
+it('stores and reports the bytes the turn\'s tool results came to, with the usage log on or off', function (bool $detailed): void {
+    Functions\when('get_option')->justReturn(['privacy.usage_log' => $detailed]);
+    $meta = null;
+    Functions\expect('wp_insert_post')->once()->withArgs(function (array $p) use (&$meta): bool {
+        $meta = $p['meta_input'];
+        return true;
+    })->andReturn(81);
+    Functions\when('get_transient')->justReturn(false);
+    Functions\when('delete_transient')->justReturn(true);
+    $receipt = null;
+    Actions\expectDone('alpaca_bot/usage/recorded')->once()->withArgs(function (array $r) use (&$receipt): bool {
+        $receipt = $r;
+        return true;
+    });
+    expect((new UsageMeter(new Store()))->record(3, 'm', 10, 20, 5, 7, 2048))->toBe(81)
+        ->and($meta['tool_result_bytes'])->toBe(2048)
+        ->and($receipt['tool_result_bytes'])->toBe(2048);
+})->with([[true], [false]]);
+
+it('clamps a negative tool result size to zero', function (): void {
+    Functions\expect('wp_insert_post')->once()->withArgs(fn(array $p): bool => $p['meta_input']['tool_result_bytes'] === 0)->andReturn(82);
+    Functions\when('get_transient')->justReturn(false);
+    Functions\when('delete_transient')->justReturn(true);
+    Actions\expectDone('alpaca_bot/usage/recorded')->once()->withArgs(fn(array $r): bool => $r['tool_result_bytes'] === 0);
+    expect((new UsageMeter(new Store()))->record(3, 'm', 1, 1, 1, 0, -1))->toBe(82);
 });
 
 it('clears both month caches, reports log_id 0 and still fires the receipt when the insert fails', function (): void {
