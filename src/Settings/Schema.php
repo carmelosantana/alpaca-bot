@@ -623,7 +623,9 @@ final class Schema
         if ($scheme !== 'https' || $host === '') {
             return 'url';
         }
-        return wp_parse_url($url, PHP_URL_USER) === null && wp_parse_url($url, PHP_URL_PASS) === null ? null : 'userinfo';
+        // A password comes with a user name, if an empty one (`https://:pass@host/`), so asking for
+        // the user name finds both.
+        return wp_parse_url($url, PHP_URL_USER) === null ? null : 'userinfo';
     }
 
     /**
