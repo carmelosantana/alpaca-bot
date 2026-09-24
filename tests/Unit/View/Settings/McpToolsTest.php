@@ -82,9 +82,11 @@ it('offers no box for a name a save could not keep, and says so', function (): v
     $number = new ToolDefinition('123', 'A number.', ['type' => 'object']);
     $long = new ToolDefinition(str_repeat('a', 129), 'Long.', ['type' => 'object']);
     $zero = new ToolDefinition('0123', 'Leading zero: PHP keeps it a string.', ['type' => 'object']);
-    $html = (new McpTools(0, [mcpToolRow($spaced, 'new', true), mcpToolRow($number, 'new', true), mcpToolRow($long, 'new', true), mcpToolRow($zero, 'new', true)]))->render();
-    expect(substr_count($html, 'type="checkbox"'))->toBe(1)
+    $longest = new ToolDefinition(str_repeat('b', 128), 'The longest name kept.', ['type' => 'object']);
+    $html = (new McpTools(0, [mcpToolRow($spaced, 'new', true), mcpToolRow($number, 'new', true), mcpToolRow($long, 'new', true), mcpToolRow($zero, 'new', true), mcpToolRow($longest, 'new', true)]))->render();
+    expect(substr_count($html, 'type="checkbox"'))->toBe(2)
         ->and($html)->toContain('name="alpaca_bot_settings[toolkits.mcp_servers][0][approved][0123]"')
+        ->and($html)->toContain('name="alpaca_bot_settings[toolkits.mcp_servers][0][approved][' . str_repeat('b', 128) . ']"')
         ->and(substr_count($html, 'This name cannot be approved, so the tool has no box.'))->toBe(3)
         ->and($html)->toContain('<code>bad name</code>')->toContain('<code>123</code>');
 });
