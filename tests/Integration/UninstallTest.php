@@ -103,7 +103,7 @@ final class UninstallTest extends TestCase
         return (int) $wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$wpdb->usermeta} WHERE user_id = %d AND meta_key = %s", $user, $key)) > 0;
     }
 
-    /** Every option row the test wrote or the plugin wrote for it, so the gone/kept assertions read the rows, not a guess. */
+    /** Gone from the table, and from what the API answers after the cache was primed. */
     private function assertOptionGone(string $name): void
     {
         $this->assertFalse($this->optionRow($name), "option row $name is still there");
@@ -147,7 +147,8 @@ final class UninstallTest extends TestCase
             $_SERVER['REMOTE_ADDR'] = $address;
         }
 
-        // Transients: through the code that writes them.
+        // Transients: the rate limit and drift ones through the code that writes them; the rest
+        // under the name that code builds, from its own constant.
         (new RateLimit())->hit($user);
         Drift::set('srv', ['tool_a']);
         set_transient(ModelCatalog::TRANSIENT, [['id' => 'fake-model']], 300);
