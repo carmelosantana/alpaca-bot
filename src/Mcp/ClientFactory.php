@@ -7,7 +7,7 @@ namespace AlpacaBot\Mcp;
 /**
  * Where a client for one server comes from. With no closure, for() returns a new
  * UnavailableClient. With one, for() returns whatever the closure returns for the server it was
- * asked about, which is how a test hands in a FakeClient.
+ * asked about, which is how a test hands in its own double.
  *
  * It reads nothing from the ServerConfig itself and records nothing: the header value reaches the
  * closure a caller passed, if there is one, and goes nowhere else from here.

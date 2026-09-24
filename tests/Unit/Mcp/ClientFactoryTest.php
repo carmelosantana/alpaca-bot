@@ -3,11 +3,11 @@
 declare(strict_types=1);
 
 use AlpacaBot\Mcp\ClientFactory;
-use AlpacaBot\Mcp\FakeClient;
 use AlpacaBot\Mcp\McpUnavailable;
 use AlpacaBot\Mcp\ServerConfig;
 use AlpacaBot\Mcp\ToolDefinition;
 use AlpacaBot\Mcp\UnavailableClient;
+use AlpacaBot\Tests\Integration\FakeClient;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Enum\ToolResultStatus;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Tool\ToolResult;
 
@@ -62,31 +62,4 @@ it('the fake lists what it was seeded with, records every call, and answers a ca
     $failing = new FakeClient([], [], new McpUnavailable('list failed'));
     expect(fn() => $failing->listTools())->toThrow(McpUnavailable::class);
     expect($failing->listed)->toBe(1);
-});
-
-/*
- * FakeClient ships in src/, so it is in the zip and autoloadable on every site. ClientFactory's
- * default builds an UnavailableClient, so a FakeClient exists only where some code constructs one.
- * This holds the lexical half of that: it reads alpaca-bot.php and every PHP file under src/ as
- * tokens, comments dropped, and fails on any name or string literal outside FakeClient's own file
- * that mentions the class. A class name assembled at run time is
- * not something a token scan can see.
- */
-it('is named by no plugin code but its own file', function (): void {
-    $root = dirname(__DIR__, 3);
-    $files = [$root . '/alpaca-bot.php'];
-    foreach (new RecursiveIteratorIterator(new RecursiveDirectoryIterator($root . '/src', FilesystemIterator::SKIP_DOTS)) as $file) {
-        if ($file->getExtension() === 'php' && $file->getPathname() !== $root . '/src/Mcp/FakeClient.php') {
-            $files[] = $file->getPathname();
-        }
-    }
-    $named = [];
-    foreach ($files as $path) {
-        foreach (token_get_all((string) file_get_contents($path)) as $token) {
-            if (is_array($token) && in_array($token[0], [T_STRING, T_NAME_QUALIFIED, T_NAME_FULLY_QUALIFIED, T_NAME_RELATIVE, T_CONSTANT_ENCAPSED_STRING, T_ENCAPSED_AND_WHITESPACE], true) && str_contains($token[1], 'FakeClient')) {
-                $named[] = substr($path, strlen($root) + 1) . ':' . $token[2];
-            }
-        }
-    }
-    expect(count($files))->toBeGreaterThan(1)->and($named)->toBe([]);
 });

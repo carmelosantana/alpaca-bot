@@ -2,8 +2,10 @@
 
 declare(strict_types=1);
 
-namespace AlpacaBot\Mcp;
+namespace AlpacaBot\Tests\Integration;
 
+use AlpacaBot\Mcp\ClientInterface;
+use AlpacaBot\Mcp\ToolDefinition;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Tool\ToolResult;
 
 /**
@@ -11,18 +13,18 @@ use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Tool\ToolResult;
  * seeded with, and callTool() with the result seeded under that tool's name, or an error
  * ToolResult when there is none.
  *
- * It is in src/ by the 0.6 plan's drafting decision 9, and so it ships in the zip with the rest of
- * src/. It holds no credentials and opens no connection. ClientFactory's default does not build
- * it: a FakeClient exists only where some code constructs one, and ClientFactoryTest fails if code
- * in alpaca-bot.php or src/, outside this file, names the class.
+ * Both suites autoload it: the unit suite through the root composer.json's `autoload-dev`
+ * (`AlpacaBot\Tests\` to tests/), and the integration suite through tools/integration/composer.json
+ * (`AlpacaBot\Tests\Integration\` to tests/Integration/). `.distignore` drops `tests` from the
+ * zip, so the class is not in the plugin a site installs. It holds no credentials and opens no
+ * connection.
  *
- * It throws whatever Throwable it was seeded with, including one that is not McpUnavailable, so a
- * test can hand a caller an exception outside the interface's contract.
+ * It steps outside ClientInterface's contract in two ways, so a test can reach a caller's edge
+ * cases: it throws whatever Throwable it was seeded with, McpUnavailable or not, and it answers an
+ * unseeded name with an error ToolResult that no server sent.
  *
  * `$calls` records every callTool() in order, and `$listed` counts every listTools(), each
  * including a call that then throws.
- *
- * @since 0.6.0
  */
 final class FakeClient implements ClientInterface
 {
