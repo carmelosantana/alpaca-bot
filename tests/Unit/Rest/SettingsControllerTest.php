@@ -457,6 +457,18 @@ it('names a refused http URL without the password it carried', function (): void
         ->and(json_encode([$response->get_error_message(), $response->get_error_data()]))->not->toContain('s3cret');
 });
 
+// A password with an unencoded `#`, `?` or `/` in it is no userinfo to wp_parse_url(): the URL is
+// refused as malformed, and its refusal still must not answer the credential back.
+it('names a refused URL without a password that wp_parse_url() could not find', function (): void {
+    $controller = new SettingsController(new Store(), new Mcp\ServerSettings(static fn(string $host, string $url): array => throw new RuntimeException('no lookup was expected')));
+    foreach (['https://alice:p#ss@evil.example.com/mcp', 'https://alice:p/ss@evil.example.com/mcp', 'https://alice:p?ss@evil.example.com/mcp'] as $url) {
+        $response = $controller->update(restRequest('PUT', '/settings', ['toolkits.mcp_servers' => [['url' => $url, 'prefix' => 'pp']]]));
+        expect($response->get_error_code())->toBe('alpaca_bot_mcp_row')
+            ->and($response->get_error_data()['rows'][0]['url'])->toBe('https://evil.example.com/mcp')
+            ->and(json_encode([$response->get_error_message(), $response->get_error_data()]))->not->toContain('alice')->not->toContain('ss@');
+    }
+});
+
 it('lets a blank row, a removed row and a left-out server go without a refusal', function (): void {
     $this->stored['toolkits.mcp_servers'] = [
         ['id' => 'aa', 'url' => 'https://aa.example.com/mcp', 'header_name' => '', 'header_value' => '', 'prefix' => 'aa', 'approved' => []],

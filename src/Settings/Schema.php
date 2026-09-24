@@ -638,12 +638,16 @@ final class Schema
     /**
      * `$url` with any user name and password taken out, for a refusal that names the URL it
      * refused: `https://user:pass@host/mcp` is `https://host/mcp`. What is taken is everything
-     * between `//` and the last `@` before the first `/`, `?` or `#` after it, which is where
-     * wp_parse_url() finds the host. A URL without `//` is returned as it is.
+     * between the first `//` and the last `@` in the string, wherever that `@` is. That is more
+     * than wp_parse_url() calls userinfo: a password with an unencoded `/`, `?` or `#` in it is
+     * no userinfo to it, and the URL is refused as malformed rather than for its credential, and
+     * the refusal must not answer that password back either. An `@` in a path or a query is
+     * taken with what comes before it, which costs only the host in a refusal's text. A URL
+     * without `//` is returned as it is.
      */
     public static function withoutUserinfo(string $url): string
     {
-        return (string) preg_replace('#^([^/?\#]*//)[^/?\#]*@#', '$1', $url);
+        return (string) preg_replace('#^([^/?\#]*//).*@#s', '$1', $url);
     }
 
     /**
