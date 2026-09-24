@@ -151,13 +151,18 @@ final class UninstallTest extends TestCase
             $_SERVER['REMOTE_ADDR'] = $address;
         }
 
-        // Transients: the rate limit and drift ones through the code that writes them; the rest
-        // under the name that code builds, from its own constant.
+        // Transients: the rate limit, drift and stream ones through the code that writes them; the
+        // model catalog under its constant, and the shortcode answer under Chat::cacheKey().
         (new RateLimit())->hit($user);
         Drift::set('srv', ['tool_a']);
         set_transient(ModelCatalog::TRANSIENT, [['id' => 'fake-model']], 300);
-        set_transient(ChatController::STREAM_TRANSIENT . wp_generate_password(32, false), ['user_id' => $user], 120);
-        set_transient(Chat::TRANSIENT_PREFIX . md5('shortcode'), 'cached answer', 60);
+        // The stream ticket through the route that issues it, and the shortcode answer under the
+        // key Chat::answer() stores it by, so a change to either name's shape shows up here.
+        wp_set_current_user($user);
+        $issued = $this->rest('POST', '/chat', ['message' => 'later', 'stream' => true]);
+        $this->assertSame(202, $issued->get_status(), print_r($issued->get_data(), true));
+        $this->assertIsArray(get_transient(ChatController::STREAM_TRANSIENT . $issued->get_data()['token']));
+        set_transient(Chat::cacheKey('alpaca_bot', ['prompt' => 'hello'], 0, 60), 'cached answer', 60);
 
         // Posts: a conversation with its transcript, a receipt (and the month totals it caches).
         $conversations = $plugin->get(ConversationStore::class);
