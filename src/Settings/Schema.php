@@ -414,8 +414,8 @@ final class Schema
      *   Whether the *address* is public is not asked here: that is a DNS lookup, and this is a
      *   pure function. Mcp\ServerSettings asks it when the settings page or the REST route saves
      *   a URL that is new or changed. Mcp\Egress::client() asks it again, for whatever builds a
-     *   client; nothing in this release does (no code calls it, and ClientFactory, whose default
-     *   client is UnavailableClient, is not constructed either).
+     *   client; nothing in this release does (no code calls it, and the ClientFactory the plugin
+     *   constructs is given no closure, so it hands out only UnavailableClient).
      * - `prefix` matches MCP_TOOL_PREFIX, is not `ability` (AbilitiesToolkit names its tools
      *   `ability__…`), and is not already taken by an earlier row; a row failing any of that is
      *   dropped, since its tools would have no name of their own.
@@ -574,6 +574,17 @@ final class Schema
     }
 
     /**
+     * Whether `$name` is a key an `approved` map keeps: a string of `[A-Za-z0-9_.-]{1,128}`. An
+     * int is not, and PHP makes an int of an array key that is a decimal integer in canonical
+     * form (`'123'`, `'-1'`, not `'0123'`), so a caller asking about a tool's name asks about
+     * the key the name becomes: `isToolName(array_key_first([$name => true]))`.
+     */
+    public static function isToolName(mixed $name): bool
+    {
+        return is_string($name) && preg_match('/^[A-Za-z0-9_.-]{1,128}\z/', $name) === 1;
+    }
+
+    /**
      * A server row's `approved` map, as sanitizeMcpServers() keeps it.
      *
      * @return array<string, string>
@@ -582,7 +593,7 @@ final class Schema
     {
         $out = [];
         foreach (is_array($raw) ? $raw : [] as $name => $fingerprint) {
-            if (is_string($name) && preg_match('/^[A-Za-z0-9_.-]{1,128}\z/', $name) === 1 && is_string($fingerprint) && preg_match('/^[0-9a-f]{64}\z/', $fingerprint) === 1) {
+            if (self::isToolName($name) && is_string($fingerprint) && preg_match('/^[0-9a-f]{64}\z/', $fingerprint) === 1) {
                 $out[$name] = $fingerprint;
             }
         }

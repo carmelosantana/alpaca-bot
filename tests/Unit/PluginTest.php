@@ -394,3 +394,31 @@ it('hooks the MCP server settings onto the option\'s writes and hands the same i
     }
     expect((new ReflectionProperty(AlpacaBot\Rest\SettingsController::class, 'servers'))->getValue($settings))->toBe($servers);
 });
+
+// The view routes get the MCP approval fragment through a Discovery over the container's one
+// ClientFactory, which is the seam Task 28's real client arrives through; and the drift marker
+// forgets what a save of the settings answered, whoever makes the save.
+it('hands the view routes a Discovery over the container\'s client factory, and hooks the drift marker onto the option\'s updates', function (): void {
+    Functions\when('add_shortcode')->justReturn();
+    $plugin = Plugin::boot();
+    $plugin->register();
+    $factory = $plugin->get(AlpacaBot\Mcp\ClientFactory::class);
+    expect($factory)->toBeInstanceOf(AlpacaBot\Mcp\ClientFactory::class)
+        // has_action() answers the priority it is hooked at.
+        ->and(has_action('update_option_' . Plugin::OPTION, [AlpacaBot\Mcp\Drift::class, 'afterSave']))->toBe(10);
+
+    $registered = [];
+    Functions\when('register_rest_route')->alias(static function (string $ns, string $path) use (&$registered): void {
+        $registered[] = $path;
+    });
+    $view = null;
+    foreach ((new ReflectionMethod(Plugin::class, 'controllers'))->invoke($plugin) as $controller) {
+        $view = $controller instanceof ViewController ? $controller : $view;
+    }
+    $discovery = (new ReflectionProperty(ViewController::class, 'discovery'))->getValue($view);
+    expect($discovery)->toBeInstanceOf(AlpacaBot\Mcp\Discovery::class)
+        ->and((new ReflectionProperty(AlpacaBot\Mcp\Discovery::class, 'clients'))->getValue($discovery))->toBe($factory)
+        ->and((new ReflectionProperty(AlpacaBot\Mcp\Discovery::class, 'store'))->getValue($discovery))->toBe($plugin->get(Store::class));
+    $view->register();
+    expect($registered)->toContain('/view/mcp-tools/(?P<id>[a-z0-9_]{1,24})');
+});

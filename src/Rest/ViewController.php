@@ -9,7 +9,11 @@ use AlpacaBot\Chat\Message;
 use AlpacaBot\Chat\UserPrefs;
 use AlpacaBot\Context\CurrentScreenSource;
 use AlpacaBot\Errors;
+use AlpacaBot\Mcp\Discovery;
+use AlpacaBot\Mcp\McpUnavailable;
+use AlpacaBot\Mcp\ServerConfig;
 use AlpacaBot\Provider\ModelCatalog;
+use AlpacaBot\Settings\Schema;
 use AlpacaBot\Settings\Store;
 use AlpacaBot\View\Chat\Drawer;
 use AlpacaBot\View\Chat\HistorySelect;
@@ -19,13 +23,17 @@ use AlpacaBot\View\Chat\ModelSelect;
 use AlpacaBot\View\Chat\Notice;
 use AlpacaBot\View\Chat\Participants;
 use AlpacaBot\View\Markdown;
+use AlpacaBot\View\Settings\McpTools;
 
 /**
  * The `/view/*` routes: the chat screen's fragments, rendered server-side by the same components
- * the screen is built from, for htmx (the selects) and chat.ts (the bubbles) to swap in, and the
- * whole chat for the admin-wide drawer and the block editor's sidebar (`/view/panel`). Each answers `text/html`, not JSON, and is
- * for those: a client that wants data reads the JSON routes. Every route takes the Chat row of Settings › Access (`edit_posts` by default), as the
- * screen and the chat routes do, under its own `alpaca_bot/capability/view/{name}` filter.
+ * the screen is built from, for htmx (the selects) and chat.ts (the bubbles) to swap in, the
+ * whole chat for the admin-wide drawer and the block editor's sidebar (`/view/panel`), and one
+ * MCP server's approval list for the settings page (`/view/mcp-tools`). Each answers
+ * `text/html`, not JSON, and is for those: a client that wants data reads the JSON routes. Every
+ * route but `/view/mcp-tools` takes the Chat row of Settings › Access (`edit_posts` by default),
+ * as the screen and the chat routes do; `/view/mcp-tools` is `manage_options`, and asks for it
+ * again itself (mcpTools()). Each is under its own `alpaca_bot/capability/view/{name}` filter.
  *
  * - `GET /view/messages/{id}`: the transcript (#ab-messages) of one of the user's conversations;
  *   404 for anyone else's, as `/conversations/{id}` answers.
@@ -47,6 +55,9 @@ use AlpacaBot\View\Markdown;
  *   the post and the screen as the composer's context chips.
  * - `POST /view/drawer {open, conversation_id}`: stores what the admin-wide drawer shows
  *   (Admin\Drawer) and answers an empty fragment.
+ * - `GET /view/mcp-tools/{id}?index=`: a stored MCP server's tools as the settings form's
+ *   approval list (View\Settings\McpTools), declared only when the controller was handed a
+ *   Mcp\Discovery, which Plugin::controllers() does.
  *
  * Core renders a callback's return as JSON, so a callback answers a WP_REST_Response whose data
  * is the HTML string and whose `X-Alpaca-Bot-View: 1` header marks it; serve(), on
@@ -61,11 +72,16 @@ final class ViewController extends Controller
 
     private const ROLES = ['user', 'assistant'];
 
-    public function __construct(private ConversationStore $conversations, private Store $store, private ModelCatalog $catalog, private Markdown $markdown, private UserPrefs $prefs) {}
+    /** The longest reason a server could not be listed that the fragment prints, in characters. */
+    private const REASON_CHARS = 500;
+
+    /** `$discovery` is optional, so a controller built without one (a test, a site's own) keeps every other route. */
+    public function __construct(private ConversationStore $conversations, private Store $store, private ModelCatalog $catalog, private Markdown $markdown, private UserPrefs $prefs, private ?Discovery $discovery = null) {}
 
     /**
      * `/view/models` shares the chat rate limit for the reason `/models` does: `refresh=1` is a
-     * synchronous provider call. The rest are not limited. Each works on the site's own database or
+     * synchronous provider call. `/view/mcp-tools` shares it for the same reason: it asks a remote
+     * server synchronously. The rest are not limited. Each works on the site's own database or
      * builds a bubble from the request, and `/view/panel` also renders the model select through
      * the catalog, which asks the provider when its cache is empty, as the chat screen's own
      * render does; that screen is not rate limited either.
@@ -98,6 +114,9 @@ final class ViewController extends Controller
                 'open' => ['type' => 'boolean'],
                 'conversation_id' => ['type' => 'integer', 'minimum' => 0],
             ]],
+            ...($this->discovery === null ? [] : [
+                ['path' => '/view/mcp-tools/(?P<id>[a-z0-9_]{1,24})', 'methods' => 'GET', 'callback' => [$this, 'mcpTools'], 'capability' => 'manage_options', 'rate_limit' => true, 'args' => ['index' => ['type' => 'integer', 'default' => 0, 'minimum' => 0]]],
+            ]),
         ];
     }
 
@@ -262,6 +281,67 @@ final class ViewController extends Controller
             $this->prefs->setDrawerConversation($userId, (int) $request->get_param('conversation_id'));
         }
         return self::html('');
+    }
+
+    /**
+     * `GET /view/mcp-tools/{id}?index=`: the server's tools as the approval list of the settings
+     * form, swapped in by htmx under that server's row (`index` is the row's index, which is what
+     * the checkboxes have to post under).
+     *
+     * `manage_options` is asked twice, and the second time is the point. The route's own gate goes
+     * through `alpaca_bot/capability/view/mcp-tools` like every other route here, and a filter
+     * decides it; this callback then asks the capability again on its own account, the way
+     * SettingsController::show() does for `?reveal=1`. Listing a server hands its ServerConfig,
+     * the stored header value in it, to the client the ClientFactory builds, which is how the
+     * credential reaches a remote host once a real client exists, so a site that loosened the
+     * filter for a custom role must not have handed that role this. It shares the chat bucket's
+     * rate limit (routes()).
+     *
+     * A server that cannot be listed is the fragment's own notice with a 200 rather than an error
+     * status: the administrator asked a question, and "this server did not answer, and here is
+     * what it said" is the answer. reason() says what the notice carries.
+     */
+    public function mcpTools(\WP_REST_Request $request): \WP_REST_Response|\WP_Error
+    {
+        if ($this->discovery === null || !current_user_can('manage_options')) {
+            return Errors::forbidden();
+        }
+        $server = $this->discovery->server((string) $request->get_param('id'));
+        if ($server === null) {
+            return Errors::notFound(__('MCP server', 'alpaca-bot'));
+        }
+        try {
+            $tools = $this->discovery->tools($server);
+            $error = '';
+        } catch (McpUnavailable $e) {
+            $tools = [];
+            $error = self::reason($e, $server);
+        }
+        return self::html((new McpTools(max(0, (int) $request->get_param('index')), $tools, $error, $server->approved))->render());
+    }
+
+    /**
+     * What the notice says for a server that could not be listed. McpUnavailable::NOT_YET, a
+     * constant the library's absence is spelled with, becomes a translated sentence of the same
+     * meaning. Any other message is untrusted text: a client may put a remote server's own words
+     * in it. McpTools prints it escaped. Before that, every piece of the server's header value 8
+     * characters or longer that is either the whole value or the part after its first run of
+     * whitespace (the credential of `Bearer …`) is replaced with Schema::MASK wherever it appears,
+     * and then the message is cut to REASON_CHARS characters, so a cut cannot leave the start of a
+     * value behind. A shorter piece is not looked for, since replacing it would blank out
+     * ordinary words; nor is a value that reaches the message changed (encoded, split, cut).
+     */
+    private static function reason(McpUnavailable $e, #[\SensitiveParameter] ServerConfig $server): string
+    {
+        $message = $e->getMessage();
+        if ($message === McpUnavailable::NOT_YET) {
+            return __('This server\'s tools cannot be listed yet: the MCP client arrives with php-agents 0.16.', 'alpaca-bot');
+        }
+        $value = $server->headerValue;
+        $parts = preg_split('/\s+/', $value, 2);
+        $secrets = array_filter([$value, is_array($parts) ? ($parts[1] ?? '') : ''], static fn(string $s): bool => mb_strlen($s) >= 8);
+        $message = str_replace($secrets, Schema::MASK, $message);
+        return mb_strlen($message) > self::REASON_CHARS ? mb_substr($message, 0, self::REASON_CHARS) . '…' : $message;
     }
 
     /**

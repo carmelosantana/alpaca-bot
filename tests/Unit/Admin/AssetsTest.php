@@ -25,16 +25,19 @@ it('enqueues nothing, and adds no inline style, on any screen but the chat scree
 // The overrides table is a widefat nested in a Settings API row, and core's forms.css reaches
 // its cells (no left padding on the model name, a stacked column under 782px). The settings page
 // loads no plugin stylesheet, so the few rules that answer that ride inline on core's `forms`
-// handle, after the rules they answer; nothing of the chat screen's is loaded for them.
-it('adds the overrides table rules inline to core forms stylesheet on the settings page, under whatever id core derives, and enqueues nothing there', function (): void {
+// handle, after the rules they answer. The one script it gets is htmx, for the Tools tab's
+// Discover button (an hx-get at the MCP approval fragment); nothing else of the chat screen's.
+it('adds the overrides table rules inline to core forms stylesheet on the settings page, under whatever id core derives, and enqueues htmx there and nothing else', function (): void {
+    Functions\when('plugins_url')->alias(fn(string $p) => '/plugins/alpaca-bot/' . $p);
     $css = null;
     Functions\expect('wp_add_inline_style')->once()->with('forms', Mockery::on(static function (string $code) use (&$css): bool {
         $css = $code;
         return true;
     }));
-    Functions\expect('wp_enqueue_script')->never();
+    Functions\expect('wp_enqueue_script')->once()->with('alpaca-bot-htmx', '/plugins/alpaca-bot/assets/js/htmx.min.js', [], Assets::HTMX_VERSION, true);
     Functions\expect('wp_enqueue_style')->never();
     Functions\expect('wp_enqueue_media')->never();
+    Functions\expect('wp_localize_script')->never();
     (new Assets())->enqueue('alpaca-bot_page_alpaca-bot-settings');
     expect($css)->toContain('.form-table .ab-overrides th')->toContain('.form-table .ab-overrides td')
         // Core's own widefat cell padding (common.css), restored over forms.css's form-table rules.
@@ -69,6 +72,7 @@ it('adds the overrides table rules inline to core forms stylesheet on the settin
     // A locale that translates "Alpaca Bot" derives another id; the rules follow it.
     Functions\when('get_plugin_page_hookname')->alias(static fn(string $page, string $parent): string => 'robot-alpaca_page_' . $page);
     Functions\expect('wp_add_inline_style')->once()->with('forms', Mockery::type('string'));
+    Functions\expect('wp_enqueue_script')->once()->with('alpaca-bot-htmx', Mockery::any(), [], Assets::HTMX_VERSION, true);
     (new Assets())->enqueue('robot-alpaca_page_alpaca-bot-settings');
 });
 

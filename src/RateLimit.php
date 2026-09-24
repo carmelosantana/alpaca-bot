@@ -8,10 +8,11 @@ namespace AlpacaBot;
  * A fixed-window counter: PER_MINUTE hits per user per UTC calendar minute, kept in a transient.
  * Filter `alpaca_bot/rate_limit` (int $perMinute, int $userId, string $bucket) sets the limit
  * per call, and is the only way the limit changes. Every surface that spends provider tokens
- * on a request records a hit here, in the one `chat` bucket: every REST route flagged
- * `rate_limit` (Rest\Controller::rateLimited() -- `POST /chat`, `GET /models`, `GET /view/models`),
- * the chat and summarize abilities (Abilities\Register) and the shortcodes (Shortcodes\Chat),
- * so one person on any of them is one person to the counter. Not the stream redemption: it
+ * on a request records a hit here, in the one `chat` bucket, and so does the route that asks a
+ * remote MCP server for its tools: every REST route flagged `rate_limit`
+ * (Rest\Controller::rateLimited() -- `POST /chat`, `GET /models`, `GET /view/models`,
+ * `GET /view/mcp-tools/{id}`), the chat and summarize abilities (Abilities\Register) and the
+ * shortcodes (Shortcodes\Chat), so one person on any of them is one person to the counter. Not the stream redemption: it
  * carries no `rate_limit` flag because the POST that issued its ticket was already counted, and
  * what bounds it instead is Rest\StreamBudget's concurrency cap (Rest\StreamController::routes()
  * says so).
@@ -68,8 +69,8 @@ final class RateLimit
         /**
          * Filters the per-minute request limit for one hit, the only way the limit changes. The
          * bucket names the surface that shares the counter: `chat` covers every REST route
-         * flagged `rate_limit` (the chat POST, `/models`, `/view/models`, never the stream
-         * redemption) and, because Abilities\Register and Shortcodes\Chat count against the same
+         * flagged `rate_limit` (the chat POST, `/models`, `/view/models`, `/view/mcp-tools`, never
+         * the stream redemption) and, because Abilities\Register and Shortcodes\Chat count against the same
          * bucket, the chat and summarize abilities and a generation (or the agent shim's fetch)
          * for a shortcode on a page; set a limit per bucket, per role, or per user. Anything below 1 is
          * raised to 1 rather than closing the route: a filter that forgot to return should show up

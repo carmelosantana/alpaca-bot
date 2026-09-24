@@ -13,8 +13,9 @@ use AlpacaBot\Plugin;
  * stylesheet, and the media library for the image picker. `alpacaBot` is the bundle's settings
  * object: the REST root (rest_url(), so it is right under either permalink form), the REST
  * nonce it signs requests with, the largest image the site takes (maxImageBytes()), and the
- * strings it shows. The settings page gets none of that, only OVERRIDES_CSS inline on a core
- * handle, and every other admin screen gets nothing from enqueue(). Admin\Drawer enqueues a loader
+ * strings it shows. The settings page gets htmx alone of that, for the Tools tab's Discover
+ * button, and OVERRIDES_CSS inline on a core handle; every other admin screen gets nothing from
+ * enqueue(). Admin\Drawer enqueues a loader
  * of its own there, for the screens and the users its docblock names, and borrows settings() and
  * mount() from here, so the bundle it adds on the drawer's first open reads what it reads on the
  * chat screen.
@@ -104,6 +105,11 @@ final class Assets
     {
         if ($hook === SettingsPage::screen()) {
             wp_add_inline_style('forms', self::OVERRIDES_CSS);
+            // The Tools tab's Discover button is an hx-get at the MCP approval fragment
+            // (SettingsPage::renderMcpServers()); htmx is already shipped and pinned, under the
+            // handle and at the URL the chat screen and mount() use, so the drawer's loader on
+            // this screen finds it rather than adding a second copy (resources/ts/mount.ts).
+            self::enqueueHtmx();
             return;
         }
         if ($hook !== self::HOOK) {
@@ -163,10 +169,16 @@ final class Assets
     /** htmx, the bundle, the stylesheet and the bundle's settings: the class docblock. */
     private function enqueueChat(): void
     {
-        wp_enqueue_script('alpaca-bot-htmx', plugins_url('assets/js/htmx.min.js', ALPACA_BOT_FILE), [], self::HTMX_VERSION, true);
+        self::enqueueHtmx();
         wp_enqueue_script('alpaca-bot-chat', plugins_url('assets/js/chat.js', ALPACA_BOT_FILE), ['alpaca-bot-htmx', 'heartbeat'], self::version('assets/js/chat.js'), true);
         wp_enqueue_style('alpaca-bot', plugins_url('assets/css/alpaca-bot.css', ALPACA_BOT_FILE), [], self::version('assets/css/alpaca-bot.css'));
         wp_localize_script('alpaca-bot-chat', 'alpacaBot', $this->settings());
+    }
+
+    /** htmx, in the footer, at the version package.json pins. */
+    private static function enqueueHtmx(): void
+    {
+        wp_enqueue_script('alpaca-bot-htmx', plugins_url('assets/js/htmx.min.js', ALPACA_BOT_FILE), [], self::HTMX_VERSION, true);
     }
 
     /**

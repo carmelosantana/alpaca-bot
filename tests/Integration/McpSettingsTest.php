@@ -6,8 +6,12 @@ namespace AlpacaBot\Tests\Integration;
 
 use AlpacaBot\Access;
 use AlpacaBot\Admin\SettingsPage;
+use AlpacaBot\Mcp\ClientFactory;
+use AlpacaBot\Mcp\Drift;
+use AlpacaBot\Mcp\McpUnavailable;
 use AlpacaBot\Mcp\Secrets;
 use AlpacaBot\Mcp\ServerSettings;
+use AlpacaBot\Mcp\ToolDefinition;
 use AlpacaBot\Plugin;
 use AlpacaBot\Provider\ModelCatalog;
 use AlpacaBot\Settings\Schema;
@@ -34,6 +38,9 @@ final class McpSettingsTest extends TestCase
 
     private const OTHER = 'Bearer int-other-91c2';
 
+    /** The container's ClientFactory while a test has swapped in its own, put back on tear_down. */
+    private ?ClientFactory $savedClients = null;
+
     public function set_up(): void
     {
         parent::set_up();
@@ -42,6 +49,11 @@ final class McpSettingsTest extends TestCase
 
     public function tear_down(): void
     {
+        if ($this->savedClients !== null) {
+            Plugin::instance()->set(ClientFactory::class, $this->savedClients);
+            $this->savedClients = null;
+        }
+        Drift::set('trk', []);
         unset($_GET['tab']);
         $_POST = [];
         $GLOBALS['wp_settings_errors'] = [];
@@ -664,6 +676,123 @@ final class McpSettingsTest extends TestCase
         $res = $this->rest('PUT', '/settings', ['toolkits.mcp_servers' => [['url' => 'https://10.0.0.7/mcp', 'prefix' => 'trk']]]);
         $this->assertSame(200, $res->get_status(), print_r($res->get_data(), true));
         $this->assertInstanceOf(\AlpacaBot\Vendor\Symfony\Contracts\HttpClient\HttpClientInterface::class, (new \AlpacaBot\Mcp\Egress())->client(\AlpacaBot\Mcp\ServerConfig::fromSettings(['id' => 'trk', 'url' => 'https://10.0.0.7/mcp', 'prefix' => 'trk'])));
+    }
+
+    /**
+     * Discover, tick, save, over real core: the fragment `GET /view/mcp-tools/trk` answers is
+     * swapped into the Tools tab's approvals cell as htmx would swap it, a box is ticked, and the
+     * form is saved through options.php's path. A ticked box pins its tool to the fingerprint of
+     * the definition shown; a clear one drops the approval; an approval whose tool the server no
+     * longer lists is dropped. The drift the discovery recorded is shown on the tab until the
+     * save re-pins the tool, and the save takes it out.
+     */
+    public function test_a_tool_ticked_in_the_discovered_list_is_approved_at_the_fingerprint_it_was_shown_with(): void
+    {
+        $search = new ToolDefinition('search', 'Search, differently now.', ['type' => 'object']);
+        $write = new ToolDefinition('write', 'Write.', ['type' => 'object'], ['destructiveHint' => true]);
+        $plain = new ToolDefinition('plain', 'Plain.', ['type' => 'object']);
+        $client = new FakeClient([$search, $write, $plain]);
+        $seen = [];
+        $this->useClient(static function ($server) use ($client, &$seen): FakeClient {
+            $seen[] = $server->headerValue;
+            return $client;
+        });
+        $this->rest('PUT', '/settings', ['toolkits.mcp_servers' => [[
+            'url' => self::URL, 'prefix' => 'trk', 'header_value' => self::SECRET,
+            'approved' => ['search' => str_repeat('a', 64), 'gone' => str_repeat('b', 64)],
+        ]]]);
+
+        $res = $this->rest('GET', '/view/mcp-tools/trk', ['index' => 0]);
+        $this->assertSame(200, $res->get_status(), print_r($res->get_data(), true));
+        $this->assertSame('1', $res->get_headers()['X-Alpaca-Bot-View']);
+        $fragment = (string) $res->get_data();
+        // The client was handed the stored value, from where it is kept; the fragment carries none of it.
+        $this->assertSame([self::SECRET], $seen);
+        $this->assertStringNotContainsString(self::SECRET, $fragment);
+        $this->assertStringContainsString('changed since approval: review', $fragment);
+        $this->assertStringContainsString('<code>gone</code>', $fragment);
+        $this->assertSame(['search'], Drift::get('trk'));
+        $this->assertStringContainsString('<strong>changed since approval: review</strong> <code>search</code>', $this->page('toolkits'));
+
+        // As htmx swaps it: the fragment replaces what the cell held. Then the changed tool is ticked.
+        $page = self::swap($this->page('toolkits'), $fragment);
+        $page = str_replace('[approved][search]" value="' . $search->fingerprint() . '"', '[approved][search]" value="' . $search->fingerprint() . '" checked="checked"', $page, $ticked);
+        $this->assertSame(1, $ticked);
+        $this->save(self::formPost($page));
+
+        $after = get_option(Plugin::OPTION)['toolkits.mcp_servers'][0];
+        $this->assertSame(['search' => $search->fingerprint(), 'plain' => $plain->fingerprint()], $after['approved']);
+        $this->assertSame(Schema::MASK, $after['header_value']);
+        $this->assertSame(['trk' => self::SECRET], Secrets::all());
+        // The save re-pinned search, which answers its drift: the tab says nothing about it now.
+        $this->assertSame([], Drift::get('trk'));
+        $this->assertStringNotContainsString('changed since approval', $this->page('toolkits'));
+    }
+
+    /**
+     * While no client can list a server (the plugin's own ClientFactory, until php-agents brings
+     * one), Discover answers the translated sentence with a 200, and a save after it keeps every
+     * approval: the fragment carries them as the cell it replaced did.
+     */
+    public function test_a_discovery_that_fails_leaves_every_approval_standing_through_a_save(): void
+    {
+        $approved = ['search' => str_repeat('a', 64), 'repo.list' => str_repeat('b', 64)];
+        $this->rest('PUT', '/settings', ['toolkits.mcp_servers' => [['url' => self::URL, 'prefix' => 'trk', 'header_value' => self::SECRET, 'approved' => $approved]]]);
+        Drift::set('trk', ['search']);
+
+        $res = $this->rest('GET', '/view/mcp-tools/trk', ['index' => 0]);
+        $this->assertSame(200, $res->get_status());
+        $fragment = (string) $res->get_data();
+        $this->assertStringContainsString('notice-error', $fragment);
+        $this->assertStringContainsString('This server&#039;s tools cannot be listed yet: the MCP client arrives with php-agents 0.16.', $fragment);
+        $this->assertStringNotContainsString(McpUnavailable::NOT_YET, $fragment);
+        // A failed listing leaves the marker as it was.
+        $this->assertSame(['search'], Drift::get('trk'));
+
+        $this->save(self::formPost(self::swap($this->page('toolkits'), $fragment)));
+        $this->assertSame($approved, get_option(Plugin::OPTION)['toolkits.mcp_servers'][0]['approved']);
+        $this->assertSame(['search'], Drift::get('trk'));
+    }
+
+    /**
+     * The route's filter decides its gate, and the callback asks manage_options again: listing a
+     * server hands its stored header value to the client. An editor the filter admits is refused
+     * all the same, and the server is never listed for them; an unknown id is a 404.
+     */
+    public function test_the_route_is_manage_options_whatever_its_filter_says(): void
+    {
+        $client = new FakeClient([new ToolDefinition('search', 'Search.', ['type' => 'object'])]);
+        $this->useClient(static fn(): FakeClient => $client);
+        $this->rest('PUT', '/settings', ['toolkits.mcp_servers' => [['url' => self::URL, 'prefix' => 'trk', 'header_value' => self::SECRET]]]);
+        $this->assertSame(404, $this->rest('GET', '/view/mcp-tools/nope')->get_status());
+
+        wp_set_current_user(self::factory()->user->create(['role' => 'editor']));
+        $this->assertSame(403, $this->rest('GET', '/view/mcp-tools/trk')->get_status());
+        add_filter('alpaca_bot/capability/view/mcp-tools', static fn(): string => 'edit_posts');
+        $res = $this->rest('GET', '/view/mcp-tools/trk');
+        $this->assertSame(403, $res->get_status());
+        $this->assertSame('rest_forbidden', $res->get_data()['code']);
+        $this->assertSame(0, $client->listed);
+
+        $this->asAdmin();
+        $this->assertSame(200, $this->rest('GET', '/view/mcp-tools/trk')->get_status());
+        $this->assertSame(1, $client->listed);
+    }
+
+    /** `$page` with trk's approvals cell holding `$fragment` in place of what it held, as htmx's innerHTML swap leaves it. */
+    private static function swap(string $page, string $fragment): string
+    {
+        $out = (string) preg_replace_callback('#(<div id="ab-mcp-tools-trk">).*?(</div>)#s', static fn(array $m): string => $m[1] . $fragment . $m[2], $page, 1, $swapped);
+        self::assertSame(1, $swapped);
+        return $out;
+    }
+
+    /** Swaps the container's ClientFactory for one over `$build` until tear_down, and makes the next REST server see it. */
+    private function useClient(\Closure $build): void
+    {
+        $this->savedClients ??= Plugin::instance()->get(ClientFactory::class);
+        Plugin::instance()->set(ClientFactory::class, new ClientFactory($build));
+        $GLOBALS['wp_rest_server'] = null;
     }
 
     /**

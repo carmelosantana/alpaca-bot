@@ -17,6 +17,23 @@ test('withQuery adds its query under either permalink form, keeping a ?rest_rout
 });
 
 /**
+ * The settings screen enqueues htmx itself (Admin\Assets, for the Tools tab's Discover button), at
+ * the URL mount() hands the loader, so the drawer opened there must not run a second copy of it.
+ * happy-dom loads no file, so a script() that added a tag would never settle: the race says which.
+ */
+test('script() takes a file the page already carries at that URL as loaded, and adds no second tag', async () => {
+  const src = 'https://alpaca-bot.test/wp-content/plugins/alpaca-bot/assets/js/htmx.min.js?ver=2.0.10';
+  installDom(`<script src="${src.replace('&', '&amp;')}"></script>`);
+  const { script } = await import('../../resources/ts/mount.ts');
+  const settled = await Promise.race([script(src).then(() => 'loaded'), new Promise<string>((r) => setTimeout(() => r('pending'), 50))]);
+  assert.equal(settled, 'loaded');
+  assert.equal(document.querySelectorAll('script').length, 1);
+  // Another file is added as before: happy-dom loads no file, so the tag it adds fails at once
+  // and is removed, and script() rejects, where a file taken as present resolves.
+  assert.equal(await script('https://alpaca-bot.test/wp-content/plugins/alpaca-bot/assets/js/chat.js?ver=1').then(() => 'loaded', () => 'failed'), 'failed');
+});
+
+/**
  * What the drawer's every fetch of GET /view/panel carries (resources/ts/drawer.ts): the first
  * mount, its retry, and "New chat" all build their query here, off the data attributes
  * Admin\Drawer::footer() prints on the drawer element.

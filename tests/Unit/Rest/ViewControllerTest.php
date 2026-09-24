@@ -329,3 +329,128 @@ it('stores what the drawer shows, writing only what the request named, and answe
     Functions\expect('update_user_meta')->once()->with(3, 'alpaca_bot_drawer_conversation', '0');
     viewController()->drawer(restRequest('POST', '/x', ['open' => true, 'conversation_id' => 0]));
 });
+
+// ---------------------------------------------------------------- the MCP approval fragment
+
+/**
+ * A ViewController with a Discovery over one stored server, `trk`, whose header value is `$secret`
+ * and whose client is `$client`.
+ */
+function viewControllerWithMcp(AlpacaBot\Tests\Integration\FakeClient $client, string $secret = 'Bearer tok-secret-123', array $approved = []): ViewController
+{
+    Functions\when('get_option')->justReturn(['trk' => $secret]);
+    Functions\when('set_transient')->justReturn(true);
+    Functions\when('delete_transient')->justReturn(true);
+    Functions\when('wp_strip_all_tags')->alias('strip_tags');
+    $store = new Store(['models.default' => 'llama3.2', 'toolkits.mcp_servers' => [[
+        'id' => 'trk', 'url' => 'https://mcp.example.com/mcp', 'header_name' => 'Authorization',
+        'header_value' => AlpacaBot\Settings\Schema::MASK, 'prefix' => 'trk', 'approved' => $approved,
+    ]]]);
+    $discovery = new AlpacaBot\Mcp\Discovery($store, new AlpacaBot\Mcp\ClientFactory(static fn(): AlpacaBot\Tests\Integration\FakeClient => $client));
+    return new ViewController(new ConversationStore($store), $store, new ModelCatalog(new Factory($store)), new Markdown(), new UserPrefs(), $discovery);
+}
+
+it('declares the MCP tools route only when it has a Discovery: manage_options, rate limited, with the row index as an argument', function (): void {
+    $routes = viewControllerWithMcp(new AlpacaBot\Tests\Integration\FakeClient())->routes();
+    $mcp = array_values(array_filter($routes, static fn(array $r): bool => str_starts_with($r['path'], '/view/mcp-tools')));
+    expect($mcp)->toHaveCount(1)
+        ->and($mcp[0]['path'])->toBe('/view/mcp-tools/(?P<id>[a-z0-9_]{1,24})')
+        ->and($mcp[0]['methods'])->toBe('GET')
+        ->and($mcp[0]['capability'])->toBe('manage_options')
+        ->and($mcp[0]['rate_limit'])->toBeTrue()
+        ->and($mcp[0]['args'])->toBe(['index' => ['type' => 'integer', 'default' => 0, 'minimum' => 0]])
+        ->and(ViewController::routeKey($mcp[0]['path']))->toBe('view/mcp-tools')
+        ->and(count($routes))->toBe(9)
+        ->and(array_filter(viewController()->routes(), static fn(array $r): bool => str_starts_with($r['path'], '/view/mcp-tools')))->toBe([]);
+});
+
+// The route's own gate is `alpaca_bot/capability/view/mcp-tools`, and a filter decides it. The
+// callback asks manage_options again, as SettingsController::show() does for `?reveal=1`: discovery
+// sends the stored credential to a remote host, so a role a filter admitted must not get that.
+it('refuses a user the route\'s filter admitted but who does not hold manage_options, and never lists the server', function (): void {
+    $client = new AlpacaBot\Tests\Integration\FakeClient([new AlpacaBot\Mcp\ToolDefinition('search', 'Search.', ['type' => 'object'])]);
+    $c = viewControllerWithMcp($client);
+    Functions\when('current_user_can')->alias(static fn(string $cap): bool => $cap !== 'manage_options');
+    $res = $c->mcpTools(restRequest('GET', '/x', ['id' => 'trk', 'index' => 0]));
+    expect($res)->toBeInstanceOf(WP_Error::class)
+        ->and($res->get_error_code())->toBe('rest_forbidden')
+        ->and($res->get_error_data()['status'])->toBe(403)
+        ->and($client->listed)->toBe(0);
+});
+
+it('refuses the route on a controller that was built without a Discovery', function (): void {
+    Functions\when('current_user_can')->justReturn(true);
+    $res = viewController()->mcpTools(restRequest('GET', '/x', ['id' => 'trk', 'index' => 0]));
+    expect($res)->toBeInstanceOf(WP_Error::class)->and($res->get_error_data()['status'])->toBe(403);
+});
+
+it('answers 404 for a server id the settings do not hold', function (): void {
+    Functions\when('current_user_can')->justReturn(true);
+    $client = new AlpacaBot\Tests\Integration\FakeClient();
+    $res = viewControllerWithMcp($client)->mcpTools(restRequest('GET', '/x', ['id' => 'nope', 'index' => 0]));
+    expect($res)->toBeInstanceOf(WP_Error::class)
+        ->and($res->get_error_code())->toBe('alpaca_bot_not_found')
+        ->and($res->get_error_data()['status'])->toBe(404)
+        ->and($client->listed)->toBe(0);
+});
+
+it('answers the approval list as an HTML fragment, its boxes posting under the index it was asked for', function (): void {
+    Functions\when('current_user_can')->justReturn(true);
+    $search = new AlpacaBot\Mcp\ToolDefinition('search', 'Search.', ['type' => 'object']);
+    $res = viewControllerWithMcp(new AlpacaBot\Tests\Integration\FakeClient([$search]))->mcpTools(restRequest('GET', '/x', ['id' => 'trk', 'index' => 3]));
+    expect($res)->toBeInstanceOf(WP_REST_Response::class)
+        ->and($res->get_status())->toBe(200)
+        ->and($res->headers['X-Alpaca-Bot-View'])->toBe('1')
+        ->and($res->get_data())->toContain('name="alpaca_bot_settings[toolkits.mcp_servers][3][approved][search]" value="' . $search->fingerprint() . '" checked="checked"');
+});
+
+// R81: NOT_YET is a constant, untranslated; the page shows a translated sentence of the same
+// meaning. Anything else is a 200 carrying the notice, not an error status.
+it('answers a server that cannot be listed with the fragment\'s notice, NOT_YET as a translated sentence, keeping the approvals', function (): void {
+    Functions\when('current_user_can')->justReturn(true);
+    $translated = [];
+    Functions\when('__')->alias(static function (string $text) use (&$translated): string {
+        $translated[] = $text;
+        return $text;
+    });
+    $fp = str_repeat('a', 64);
+    $res = viewControllerWithMcp(new AlpacaBot\Tests\Integration\FakeClient([], [], new AlpacaBot\Mcp\McpUnavailable(AlpacaBot\Mcp\McpUnavailable::NOT_YET)), approved: ['search' => $fp])
+        ->mcpTools(restRequest('GET', '/x', ['id' => 'trk', 'index' => 0]));
+    $sentence = 'This server\'s tools cannot be listed yet: the MCP client arrives with php-agents 0.16.';
+    expect($res)->toBeInstanceOf(WP_REST_Response::class)
+        ->and($res->get_status())->toBe(200)
+        ->and($res->get_data())->toBe('<div class="notice notice-error inline"><p>' . $sentence . '</p></div><input type="hidden" name="alpaca_bot_settings[toolkits.mcp_servers][0][approved][search]" value="' . $fp . '">')
+        ->and($translated)->toContain($sentence);
+});
+
+// R81: every other message is untrusted: escaped where the notice prints it, and the header
+// value this server is sent is replaced wherever it appears, whole or as the credential after
+// its scheme word, before the message is cut to 500 characters.
+it('prints any other reason escaped, without the header value, and cut to 500 characters', function (): void {
+    Functions\when('current_user_can')->justReturn(true);
+    Functions\when('esc_html')->alias(static fn(string $s): string => htmlspecialchars($s, ENT_QUOTES));
+    $fail = static fn(string $message): string => (string) viewControllerWithMcp(new AlpacaBot\Tests\Integration\FakeClient([], [], new AlpacaBot\Mcp\McpUnavailable($message)))
+        ->mcpTools(restRequest('GET', '/x', ['id' => 'trk', 'index' => 0]))->get_data();
+    $html = $fail('401 <script>alert(1)</script> for "Bearer tok-secret-123", token tok-secret-123');
+    expect($html)->not->toContain('<script')
+        ->toContain('&lt;script&gt;alert(1)&lt;/script&gt;')
+        ->not->toContain('tok-secret-123')
+        ->toContain('for &quot;••••&quot;, token ••••');
+    $long = $fail(str_repeat('x', 499) . 'tok-secret-123' . str_repeat('y', 600));
+    preg_match('#<p>(.*)</p>#s', $long, $m);
+    expect($long)->not->toContain('tok-secret')
+        ->and(mb_strlen($m[1]))->toBe(501)
+        ->and($m[1])->toBe(str_repeat('x', 499) . '•…');
+});
+
+// A credential under 8 characters is not looked for on its own: replacing it would blank out
+// ordinary words. The whole value still is, when it is 8 or more.
+it('replaces only a header value, or a credential in it, of 8 characters or more', function (): void {
+    Functions\when('current_user_can')->justReturn(true);
+    $fail = static fn(string $secret, string $message): string => (string) viewControllerWithMcp(new AlpacaBot\Tests\Integration\FakeClient([], [], new AlpacaBot\Mcp\McpUnavailable($message)), $secret)
+        ->mcpTools(restRequest('GET', '/x', ['id' => 'trk', 'index' => 0]))->get_data();
+    expect($fail('Bearer t', 'got Bearer t at the gate'))->toContain('got •••• at the gate')
+        ->and($fail('Token abc', 'the abc of it'))->toContain('the abc of it')
+        ->and($fail('Bearer  12345678', 'saw 12345678'))->toContain('saw ••••')
+        ->and($fail('', 'nothing to hide'))->toContain('nothing to hide');
+});

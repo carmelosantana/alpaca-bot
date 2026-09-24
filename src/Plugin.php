@@ -107,6 +107,14 @@ final class Plugin
         $servers = new Mcp\ServerSettings();
         $this->set(Mcp\ServerSettings::class, $servers);
         $servers->register();
+        // Where every MCP client comes from. Built with no closure, so what it builds is
+        // UnavailableClient, which lists nothing and contacts nothing (ClientFactory).
+        $this->set(Mcp\ClientFactory::class, new Mcp\ClientFactory());
+        // A save that re-pins a drifted tool, or drops its approval, answers the drift marker for
+        // it (Mcp\Drift). On `update_option_*` for the reason the catalog bust above gives: every
+        // writer of the option fires it. A site's first save fires `add_option_*` instead, and
+        // there is no stored pin for it to have changed.
+        add_action('update_option_' . self::OPTION, [Mcp\Drift::class, 'afterSave'], 10, 2);
         $conversations = new Chat\ConversationStore($store);
         $this->set(Chat\ConversationStore::class, $conversations);
         add_action('init', [$conversations, 'registerPostType']);
@@ -281,7 +289,7 @@ final class Plugin
             new Rest\ModelsController($this->get(Provider\ModelCatalog::class), $this->get(Store::class)),
             new Rest\SettingsController($this->get(Store::class), $this->get(Mcp\ServerSettings::class)),
             new Rest\UsageController($this->get(Chat\UsageMeter::class), $this->get(Store::class)),
-            new Rest\ViewController($this->get(Chat\ConversationStore::class), $this->get(Store::class), $this->get(Provider\ModelCatalog::class), new View\Markdown(), $this->get(Chat\UserPrefs::class)),
+            new Rest\ViewController($this->get(Chat\ConversationStore::class), $this->get(Store::class), $this->get(Provider\ModelCatalog::class), new View\Markdown(), $this->get(Chat\UserPrefs::class), new Mcp\Discovery($this->get(Store::class), $this->get(Mcp\ClientFactory::class))),
         ]);
         $access = $this->get(Access::class);
         $controllers = array_values(array_filter(

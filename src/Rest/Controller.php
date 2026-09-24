@@ -169,8 +169,8 @@ abstract class Controller
 
     /**
      * Wraps `$callback` so an exhausted bucket answers 429 without running it. Routes are
-     * limited together under the 'chat' bucket: the limiter guards model spend per person, and
-     * one person opening two chat routes is still one person.
+     * limited together under the 'chat' bucket: the limiter guards model spend, and calls out to
+     * other hosts, per person, and one person opening two such routes is still one person.
      *
      * The refusal is a WP_REST_Response built from Errors::tooMany() rather than the WP_Error
      * itself: core renders a WP_Error's status and body but has nowhere to carry a header, and

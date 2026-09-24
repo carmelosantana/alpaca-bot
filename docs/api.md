@@ -100,7 +100,9 @@ Each route declares a capability or a row of **Settings › Access**. Chat, stre
 conversations, models, usage and the view fragments take the Chat row, `edit_posts` (Contributors
 and up) unless the site changed it; the settings routes take the `settings.read` and
 `settings.write` rows, `manage_options` each unless the site changed them. Whichever it is, it is
-only the default the route's own filters are handed.
+only the default the route's own filters are handed. One view fragment is the exception:
+`/view/mcp-tools/{id}` declares `manage_options` itself, and its callback asks for
+`manage_options` again whatever its filter answers, as `?reveal=1` does on `GET /settings`.
 
 | Filter key | Routes covered | Default |
 |---|---|---|
@@ -118,6 +120,7 @@ only the default the route's own filters are handed.
 | `view/bubble` | `GET\|POST /view/bubble` | Chat row (`edit_posts`) |
 | `view/panel` | `GET /view/panel` | Chat row (`edit_posts`) |
 | `view/drawer` | `POST /view/drawer` | Chat row (`edit_posts`) |
+| `view/mcp-tools` | `GET /view/mcp-tools/{id}` | `manage_options`, and the callback asks `manage_options` again |
 
 The filter is `alpaca_bot/capability/{key}` with signature `(string $capability,
 \WP_REST_Request $request)`, and the key is the route path with its `{id}` segment removed, so
@@ -182,6 +185,7 @@ that returned a boolean by mistake would otherwise open the route rather than cl
 | `POST` | `/view/bubble` | Chat row (`edit_posts`) | no |
 | `GET` | `/view/panel?conversation_id=&post_id=&screen_id=&screen_title=` | Chat row (`edit_posts`) | no |
 | `POST` | `/view/drawer` | Chat row (`edit_posts`) | no |
+| `GET` | `/view/mcp-tools/{id}?index=` | `manage_options`, asked again by the callback | yes (`chat` bucket) |
 
 Every response is JSON except a redeemed stream, which is `text/event-stream`, and the `/view/*`
 fragments, which are `text/html` (section 3, "The `/view/*` fragments"). In the examples,
@@ -625,7 +629,8 @@ total is. Both are `SettingsRoutesTest::test_usage_route_reports_the_month`.
 The chat screen (section 7) is server-rendered, and these routes render its pieces again on
 demand: htmx swaps the selects, the screen's script asks for the bubbles, and `/view/panel`
 renders the whole chat for the admin-wide drawer, whose state `/view/drawer` stores, and for
-the block editor's sidebar. They are for the plugin's own chat. A client
+the block editor's sidebar; `/view/mcp-tools` renders one MCP server's approval list for the
+settings page's Tools tab. They are for the plugin's own screens. A client
 that wants data reads the JSON routes above; these answer HTML, escaped where
 it is built, under `Content-Type: text/html; charset=utf-8` and an `X-Alpaca-Bot-View: 1`
 header. An error is still core's JSON error shape.
@@ -640,6 +645,14 @@ header. An error is still core's JSON error shape.
 | `POST /view/bubble` | A finished bubble, an assistant's content rendered as markdown; a user turn with its images is the optimistic bubble the screen shows while the turn runs | `role` (required), `content`, `model`, `usage` (`{prompt_tokens, completion_tokens}` or null), `duration_ms`, `images` (array of `data:` URLs; a user turn only), `tool_calls` (the reply's `meta.tool_calls`; the receipt ends `· 2 tools`) |
 | `GET /view/panel` | The whole chat (header, transcript and composer) in the drawer's panel, with its close button, which the block editor's sidebar hides in favour of its own | `conversation_id`: one of your own to open; 0, a missing one or anyone else's is a new chat, as `?conversation=` is on the chat screen. `post_id`: the post being edited, rendered as the composer's post chip when you may edit it and it is not an `auto-draft`, as `&post=` is on the chat screen. `screen_id` and `screen_title`: the screen's id and page title, cleaned as `POST /chat` cleans `context.screen` and rendered as the composer's screen chip; either one empty, or cleaned to nothing, is no chip. A chip's hidden fields are what the chat bundle sends as `context` |
 | `POST /view/drawer` | Nothing (an empty fragment); stores what the admin-wide drawer shows for you, as user meta `alpaca_bot_drawer_open` and `alpaca_bot_drawer_conversation` | `open` (boolean), `conversation_id` (integer, 0 or more). A parameter you leave out is left as it was; the conversation is not checked here, and one that is not yours opens as a new chat when `/view/panel` is asked for it |
+| `GET /view/mcp-tools/{id}` | The tools the stored MCP server `{id}` lists, as the Tools tab's approval list: a checkbox per tool whose value is the fingerprint of the definition shown, ticked when the tool is approved at that fingerprint, or new and not annotated `destructiveHint: true`; a tool approved at another fingerprint is marked "changed since approval: review" and starts clear. Listing the server rewrites or clears its drift marker (below). `manage_options`, asked again by the callback whatever `alpaca_bot/capability/view/mcp-tools` answers, and rate limited in the `chat` bucket. 404 for an id the settings do not hold. A server that cannot be listed answers 200 with an error notice (the reason, escaped, with the server's header value replaced by `••••`, cut to 500 characters) and a hidden input per stored approval | `index` (integer, 0 or more, default 0): the server's row on the Tools tab, which decides the names the checkboxes post under, `alpaca_bot_settings[toolkits.mcp_servers][<index>][approved][<tool>]` |
+
+Saving the Tools tab with those boxes is the approval: a ticked box pins its tool to the
+fingerprint it carries, and a clear one drops the tool's approval. The drift marker is a
+transient per server, `alpaca_bot_mcp_drift_<id>`, a week long, naming the approved tools whose
+definition no longer matched their pin when the server was last listed; the Tools tab reads it
+to say "changed since approval: review" without asking the server, and a save that re-pins a
+named tool or drops its approval takes the name out.
 
 Your effective model is the one you last chose in the select (stored as user meta
 `alpaca_bot_default_model`) while the site lets users choose and the provider still lists it,
@@ -869,7 +882,7 @@ anyway. A failed first turn leaves no empty conversation behind.
 
 ## 6. Rate limit
 
-`POST /chat`, `GET /models` and `GET /view/models` -- every route the section 3 table marks
+`POST /chat`, `GET /models`, `GET /view/models` and `GET /view/mcp-tools/{id}` -- every route the section 3 table marks
 `chat` bucket, and only those -- share one fixed-window counter: 30 hits per user per UTC
 calendar minute by default, kept in a transient. The same counter is spent outside the REST API
 by the `chat` and `summarize` abilities and by the `[alpacabot]` shortcodes, so one person on any

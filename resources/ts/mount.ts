@@ -7,7 +7,8 @@
  * htmx comes next, because the fragment is fetched through it: GET /view/panel is swapped in with
  * htmx.ajax(), which also wires the hx-* attributes the header's selects carry. The chat bundle
  * comes last, once the fragment is in the document, because chat.ts boots against the #ab-form it
- * finds when it runs and would find none if it ran first. A file that loaded is not added again.
+ * finds when it runs and would find none if it ran first. A file that loaded, or that the page
+ * already carries at the same URL, is not added again.
  * A host calls mountPanel() again only after a mount that failed; a mounted chat it shows and
  * hides (the sidebar moves it as well, and editor.ts says why), so a turn in flight is never
  * re-rendered.
@@ -23,9 +24,17 @@ declare global {
 
 const added = new Map<string, Promise<void>>();
 
-/** Adds a script once per page, resolving when it has run. */
+/**
+ * Adds a script once per page, resolving when it has run. A script the page already carries at
+ * the same URL counts as run: the settings screen enqueues htmx at the URL Admin\Assets::mount()
+ * hands this loader, as a footer script, which has run by the time anyone opens the drawer.
+ */
 export function script(src: string): Promise<void> {
   let loading = added.get(src);
+  if (!loading && Array.from(document.scripts).some((el) => el.src === new URL(src, document.baseURI).href)) {
+    loading = Promise.resolve();
+    added.set(src, loading);
+  }
   if (!loading) {
     loading = new Promise<void>((resolve, reject) => {
       const el = document.createElement('script');

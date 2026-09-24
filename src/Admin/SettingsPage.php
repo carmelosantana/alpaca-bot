@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace AlpacaBot\Admin;
 
 use AlpacaBot\Access;
+use AlpacaBot\Mcp\Drift;
 use AlpacaBot\Mcp\ServerSettings;
 use AlpacaBot\Plugin;
 use AlpacaBot\Provider\ModelCatalog;
@@ -15,6 +16,7 @@ use AlpacaBot\Settings\Store;
 use AlpacaBot\Shortcodes\Chat as ChatShortcode;
 use AlpacaBot\Toolkit\AbilitiesToolkit;
 use AlpacaBot\Toolkit\SchemaTool;
+use AlpacaBot\View\Hx;
 
 /**
  * The Settings API page for `alpaca_bot_settings`: one setting, one group (`alpaca_bot`), a
@@ -632,9 +634,18 @@ final class SettingsPage
      * page. Posting the mask back keeps the value, '' clears it, anything else replaces it.
      *
      * The approvals cell, `div#ab-mcp-tools-<id>`, holds a hidden input per approved tool, so a
-     * save carries every approval as it is; nothing on this page changes one. Ticking `remove`
-     * drops the row on save, and
-     * with it the server's header value and Access entry (Mcp\ServerSettings).
+     * save that never pressed Discover carries every approval as it is, and, when the drift marker
+     * (Mcp\Drift) names tools the row approves, a line saying they changed since approval; the
+     * marker is read rather than the server asked, so drawing the page opens no connection.
+     * Beside the cell, a stored server's Discover button is an hx-get at `GET
+     * /view/mcp-tools/<id>` with the row's index, whose fragment (View\Settings\McpTools)
+     * replaces the cell's contents with a box per tool the stored server lists, posting under the
+     * same names; ticking one and saving is the approval, and a box left clear drops one. It lists
+     * the server as saved, not as the row's fields are edited. The blank row's button is disabled.
+     * The table's wrapper carries the REST nonce in `hx-headers`, which htmx hands down to the
+     * requests of the elements inside it, so the fragment request authenticates as the chat
+     * screen's do. Assets enqueues htmx on this page for that button. Ticking `remove` drops the
+     * row on save, and with it the server's header value and Access entry (Mcp\ServerSettings).
      *
      * The table is a `widefat` inside a Settings API row like the overrides table, and
      * `div.ab-mcp-servers` gets the same rules (Assets). Every value from a row goes through
@@ -655,9 +666,10 @@ final class SettingsPage
         foreach (self::serverColumns() as $label) {
             $head .= '<th>' . esc_html($label) . '</th>';
         }
-        return '<div class="ab-mcp-servers" id="ab-mcp-servers"><table class="widefat striped"><thead><tr>' . $head . '</tr></thead><tbody>' . $body . '</tbody></table></div>'
+        return '<div class="ab-mcp-servers" id="ab-mcp-servers"' . Hx::attrs(['headers' => Hx::formHeaders()]) . '><table class="widefat striped"><thead><tr>' . $head . '</tr></thead><tbody>' . $body . '</tbody></table></div>'
             . '<p class="description">' . esc_html((string) ($f['description'] ?? '')) . '</p>'
-            . '<p class="description">' . esc_html__('The prefix names this server\'s tools for the model, as prefix__tool: a lowercase letter, then up to 15 lowercase letters, digits or underscores, and not "ability". The last row adds a server; leave its URL empty to add none.', 'alpaca-bot') . '</p>';
+            . '<p class="description">' . esc_html__('The prefix names this server\'s tools for the model, as prefix__tool: a lowercase letter, then up to 15 lowercase letters, digits or underscores, and not "ability". The last row adds a server; leave its URL empty to add none.', 'alpaca-bot') . '</p>'
+            . '<p class="description">' . esc_html__('Discover tools lists the tools a saved server offers. Tick the ones to approve and save; a box left clear drops that tool\'s approval. Each approval is of the tool as it was shown, so a tool the server changes afterwards is marked for review.', 'alpaca-bot') . '</p>';
     }
 
     /** @return list<string> the MCP servers table's column headings, in column order */
@@ -684,7 +696,7 @@ final class SettingsPage
             self::serverInput($i, 'header_value', 'password', 'regular-text', $row['header_value'] ?? '', $labels[3], ' autocomplete="new-password"'),
             self::serverInput($i, 'timeout', 'number', 'small-text', $row['timeout'] ?? 30, $labels[4], ' step="0.1" min="1" max="120"'),
             self::serverInput($i, 'max_bytes', 'number', 'small-text', $row['max_bytes'] ?? 1048576, $labels[5], ' step="1" min="1024" max="8388608"'),
-            '<div id="' . esc_attr('ab-mcp-tools-' . ($id ?? 'new')) . '">' . self::serverApprovals($i, $id, $row['approved'] ?? []) . '</div>',
+            '<div id="' . esc_attr('ab-mcp-tools-' . ($id ?? 'new')) . '">' . self::serverApprovals($i, $id, $row['approved'] ?? []) . '</div>' . self::discoverButton($i, $id),
             $id === null ? '' : self::serverInput($i, 'remove', 'checkbox', '', '1', $labels[7]),
         ];
         return '<tr><td>' . implode('</td><td>', $cells) . '</td></tr>';
@@ -699,7 +711,10 @@ final class SettingsPage
             . ($label === '' ? '' : ' aria-label="' . esc_attr($label) . '"') . '>';
     }
 
-    /** A server row's approvals cell: a hidden input per approved tool, and how many there are. */
+    /**
+     * A server row's approvals cell: a hidden input per approved tool, how many there are, and
+     * which of them the drift marker names, in the marker's order.
+     */
     private static function serverApprovals(int $i, ?string $id, mixed $approved): string
     {
         $out = '';
@@ -714,7 +729,23 @@ final class SettingsPage
             return $out . esc_html__('Save the server first.', 'alpaca-bot');
         }
         /* translators: %d: how many of a server's tools are approved */
-        return $out . esc_html(sprintf(_n('%d tool approved.', '%d tools approved.', $count, 'alpaca-bot'), $count));
+        $out .= esc_html(sprintf(_n('%d tool approved.', '%d tools approved.', $count, 'alpaca-bot'), $count));
+        $drifted = array_values(array_filter(Drift::get($id), static fn(string $tool): bool => is_array($approved) && array_key_exists($tool, $approved)));
+        if ($drifted !== []) {
+            $out .= '<p class="description"><strong>' . esc_html__('changed since approval: review', 'alpaca-bot') . '</strong> '
+                . implode(', ', array_map(static fn(string $tool): string => '<code>' . esc_html($tool) . '</code>', $drifted)) . '</p>';
+        }
+        return $out;
+    }
+
+    /** A row's Discover button: the approval fragment for a stored server, disabled on the blank row. */
+    private static function discoverButton(int $i, ?string $id): string
+    {
+        $label = esc_html__('Discover tools', 'alpaca-bot');
+        if ($id === null) {
+            return '<button type="button" class="button" disabled>' . $label . '</button>';
+        }
+        return '<button type="button" class="button"' . Hx::attrs(['get' => '/mcp-tools/' . $id, 'vals' => ['index' => $i], 'target' => '#ab-mcp-tools-' . $id, 'swap' => 'innerHTML']) . '>' . $label . '</button>';
     }
 
     /**

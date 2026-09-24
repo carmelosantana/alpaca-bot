@@ -462,15 +462,29 @@ it('posts nothing for the access.mcp map from another tab, and from the Access t
 // control posting under the row's index. The id is a hidden input, so an edit of the prefix or
 // the URL keeps the server's id, and with it its Access entry and its header value.
 
-it('draws a row per stored server and a blank one, posting every control under the row\'s index', function (): void {
+/**
+ * What a server row asks WordPress for beyond escaping: the REST URL and nonce its Discover button
+ * carries, and the drift marker it reads (Mcp\Drift), which `$drift` seeds by server id.
+ *
+ * @param array<string, list<string>> $drift
+ */
+function stubMcpServerRows(array $drift = []): void
+{
     Functions\when('checked')->alias(fn($a, $b = true, $echo = true) => $a == $b ? ' checked="checked"' : '');
+    Functions\when('rest_url')->alias(fn(string $p) => 'https://site.test/wp-json/' . $p);
+    Functions\when('wp_create_nonce')->justReturn('nonce-1');
+    Functions\when('get_transient')->alias(static fn(string $key): mixed => $drift[substr($key, strlen('alpaca_bot_mcp_drift_'))] ?? false);
+}
+
+it('draws a row per stored server and a blank one, posting every control under the row\'s index', function (): void {
+    stubMcpServerRows();
     $html = (settingsFields(['toolkits.mcp_servers' => [
         ['id' => 'trk', 'url' => 'https://mcp.example.com/mcp', 'header_name' => 'Authorization', 'header_value' => Schema::MASK, 'prefix' => 'trk', 'timeout' => 12.5, 'max_bytes' => 2048, 'approved' => ['search' => str_repeat('a', 64)]],
         ['id' => 'gh', 'url' => 'https://gh.example.com/mcp', 'header_name' => '', 'header_value' => '', 'prefix' => 'gh', 'timeout' => 30.0, 'max_bytes' => 1048576, 'approved' => []],
     ]])['alpaca_bot_toolkits.mcp_servers']['render'])();
 
     $n = 'alpaca_bot_settings[toolkits.mcp_servers]';
-    expect($html)->toContain('<div class="ab-mcp-servers" id="ab-mcp-servers"><table class="widefat striped">')
+    expect($html)->toContain('<div class="ab-mcp-servers" id="ab-mcp-servers" hx-headers="{&quot;X-WP-Nonce&quot;:&quot;nonce-1&quot;}"><table class="widefat striped">')
         ->toContain('<input type="hidden" name="' . $n . '[0][id]" value="trk">')
         ->toContain('name="' . $n . '[0][prefix]" value="trk"')
         ->toContain('<input type="url" class="regular-text" name="' . $n . '[0][url]" value="https://mcp.example.com/mcp" pattern="https://.*"')
@@ -479,7 +493,7 @@ it('draws a row per stored server and a blank one, posting every control under t
         ->toContain('name="' . $n . '[0][timeout]" value="12.5"')
         ->toContain('name="' . $n . '[0][max_bytes]" value="2048"')
         ->toContain('<input type="checkbox" name="' . $n . '[0][remove]" value="1" aria-label="Remove">')
-        // The approvals Task 26's discovery fills, carried as they are until then.
+        // The approvals as stored, carried by a save that never pressed Discover.
         ->toContain('<div id="ab-mcp-tools-trk"><input type="hidden" name="' . $n . '[0][approved][search]" value="' . str_repeat('a', 64) . '">')
         ->toContain('<input type="hidden" name="' . $n . '[1][id]" value="gh">')
         ->toContain('name="' . $n . '[1][header_value]" value=""')
@@ -491,7 +505,7 @@ it('draws a row per stored server and a blank one, posting every control under t
 });
 
 it('never prints a header value into the table, whatever the row holds', function (): void {
-    Functions\when('checked')->alias(fn($a, $b = true, $echo = true) => $a == $b ? ' checked="checked"' : '');
+    stubMcpServerRows();
     $html = (settingsFields(['toolkits.mcp_servers' => [
         ['id' => 'raw', 'url' => 'https://mcp.example.com/mcp', 'header_value' => 'Bearer raw-secret', 'prefix' => 'raw'],
     ]])['alpaca_bot_toolkits.mcp_servers']['render'])();
@@ -500,7 +514,7 @@ it('never prints a header value into the table, whatever the row holds', functio
 });
 
 it('escapes what a stored row holds at every attribute and text node', function (): void {
-    Functions\when('checked')->alias(fn($a, $b = true, $echo = true) => $a == $b ? ' checked="checked"' : '');
+    stubMcpServerRows();
     Functions\when('esc_attr')->alias(fn($s) => htmlspecialchars((string) $s, ENT_QUOTES));
     Functions\when('esc_html')->alias(fn($s) => htmlspecialchars((string) $s, ENT_QUOTES));
     $evil = '"><script>alert(1)</script>';
@@ -508,6 +522,39 @@ it('escapes what a stored row holds at every attribute and text node', function 
         ['id' => $evil, 'url' => $evil, 'header_name' => $evil, 'prefix' => $evil, 'timeout' => $evil, 'max_bytes' => $evil, 'approved' => [$evil => $evil]],
     ]])['alpaca_bot_toolkits.mcp_servers']['render'])();
     expect($html)->not->toContain('<script');
+});
+
+// Discover is an hx-get at the approval fragment, swapped into the row's approvals cell. The
+// fragment's boxes post under the row's index, which hx-vals hands the route; the nonce rides on
+// the table's wrapper, which htmx hands down to every request inside it.
+it('gives each stored server a Discover button that swaps its approval list into its row, and the blank row a disabled one', function (): void {
+    stubMcpServerRows();
+    $html = (settingsFields(['toolkits.mcp_servers' => [
+        ['id' => 'trk', 'url' => 'https://mcp.example.com/mcp', 'prefix' => 'trk', 'approved' => ['search' => str_repeat('a', 64)]],
+        ['id' => 'gh', 'url' => 'https://gh.example.com/mcp', 'prefix' => 'gh', 'approved' => []],
+    ]])['alpaca_bot_toolkits.mcp_servers']['render'])();
+    $button = static fn(string $id, int $i): string => '<button type="button" class="button" hx-get="https://site.test/wp-json/alpaca-bot/v1/view/mcp-tools/' . $id . '" hx-vals="{&quot;index&quot;:' . $i . '}" hx-target="#ab-mcp-tools-' . $id . '" hx-swap="innerHTML">Discover tools</button>';
+    expect($html)->toContain('<div class="ab-mcp-servers" id="ab-mcp-servers" hx-headers="{&quot;X-WP-Nonce&quot;:&quot;nonce-1&quot;}"><table')
+        ->toContain('1 tool approved.</div>' . $button('trk', 0))
+        ->toContain('0 tools approved.</div>' . $button('gh', 1))
+        ->toContain('Save the server first.</div><button type="button" class="button" disabled>Discover tools</button>')
+        ->toContain('<p class="description">Discover tools lists the tools a saved server offers. Tick the ones to approve and save; a box left clear drops that tool&#039;s approval.')
+        ->and(substr_count($html, 'hx-get='))->toBe(2);
+});
+
+// Drift is the marker discovery (and, from Task 27, a turn) leaves when an approved tool's
+// definition no longer matches its pin; the page reads it rather than asking the server. It
+// names only tools the row still approves, and sits inside the cell the fragment replaces.
+it('says which approved tools were found changed since approval, from the drift marker', function (): void {
+    stubMcpServerRows(['trk' => ['report', 'dropped'], 'gh' => ['issues']]);
+    $html = (settingsFields(['toolkits.mcp_servers' => [
+        ['id' => 'trk', 'url' => 'https://mcp.example.com/mcp', 'prefix' => 'trk', 'approved' => ['search' => str_repeat('a', 64), 'report' => str_repeat('b', 64)]],
+        ['id' => 'gh', 'url' => 'https://gh.example.com/mcp', 'prefix' => 'gh', 'approved' => []],
+        ['id' => 'none', 'url' => 'https://none.example.com/mcp', 'prefix' => 'none', 'approved' => ['search' => str_repeat('a', 64)]],
+    ]])['alpaca_bot_toolkits.mcp_servers']['render'])();
+    expect($html)->toContain('2 tools approved.<p class="description"><strong>changed since approval: review</strong> <code>report</code></p></div>')
+        ->and(substr_count($html, 'changed since approval'))->toBe(1)
+        ->and($html)->not->toContain('dropped')->not->toContain('issues');
 });
 
 // The address check at save time runs in the page's sanitize callback, which is where a person is
