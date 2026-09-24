@@ -34,13 +34,15 @@
  * `auto-draft`, the post chip is fetched into the composer the chat already has (mount.ts
  * postChip()), without a reload, since a reload would lose the editor's state, and without a
  * remount, which would lose the composer the bundle is bound to. The chip is asked for after a
- * mount without one and after each save the editor finishes, until one comes: whether there is a
- * chip is the server's answer, so a post the user may not edit is asked about once per save and
- * never named.
+ * mount or a New chat that brings none, and after each save the editor finishes, until one comes:
+ * whether there is a chip is the server's answer, so a post the user may not edit is asked about
+ * once per save and never named. A chip the user took off stays off through later saves, which
+ * ask for none once one has come.
  *
  * "New chat" starts over in place, as it does in the drawer (mount.ts newChat()): the chat
- * screen's link would leave the editor. The image button stays: the block editor loads the media
- * library (edit-form-blocks.php calls wp_enqueue_media()).
+ * screen's link would leave the editor. It puts back the chips the server renders for the post,
+ * a post chip the user took off included. The image button stays: the block editor loads the
+ * media library (edit-form-blocks.php calls wp_enqueue_media()).
  *
  * This is an entry esbuild builds, and runs when the page loads it.
  */
@@ -65,7 +67,7 @@ function start(cfg: MountSettings, wp: EditorWp): void {
   const host = document.createElement('div');
   host.className = 'ab-sidebar';
   let mounted: Promise<void> | null = null;
-  // Whether the chat was mounted without a post chip, which a save may yet bring (the file docblock).
+  // Whether the chips the server last rendered (rendered()) had no post chip, which a save may yet bring (the file docblock).
   let waiting = false;
   let asking = false;
 
@@ -99,12 +101,25 @@ function start(cfg: MountSettings, wp: EditorWp): void {
     if (mounted) return;
     host.dataset.post = post();
     mounted = mountPanel(host, cfg, nonce(), panelQuery(host, '0')).then(
-      () => {
-        waiting = host.querySelector('#ab-form .ab-chip[data-chip="post"]') === null;
-        askForChip();
-      },
+      rendered,
       (e: unknown) => { console.error(e); mounted = null; },
     );
+  }
+
+  /**
+   * After the composer's chips have come from the server (the mount, a New chat): whether they
+   * came without a post chip, and a request for one if so, since the post may have been saved
+   * while they were on their way: a save the mount's chips predate, or one whose chip a New chat's
+   * then replaced.
+   */
+  function rendered(): void {
+    waiting = host.querySelector('#ab-form .ab-chip[data-chip="post"]') === null;
+    askForChip();
+  }
+
+  /** "New chat" in place (the file docblock). */
+  function startOver(): void {
+    void newChat(host, cfg, nonce(), panelQuery(host, '0')).then((swapped) => { if (swapped) rendered(); });
   }
 
   const h = wp.element.createElement;
@@ -132,11 +147,11 @@ function start(cfg: MountSettings, wp: EditorWp): void {
     // The header's own "New chat" link, which would otherwise leave for the chat screen.
     if (!(e.target as Element).closest('.page-title-action')) return;
     e.preventDefault();
-    void newChat(host, cfg, nonce(), panelQuery(host, '0'));
+    startOver();
   });
   host.addEventListener('ab:new-chat', (e) => {
     e.preventDefault();
-    void newChat(host, cfg, nonce(), panelQuery(host, '0'));
+    startOver();
   });
   wp.plugins.registerPlugin('alpaca-bot', {
     icon: 'format-chat',

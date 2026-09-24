@@ -37,10 +37,11 @@ test('panelQuery names the conversation and what the drawer element says the chi
 });
 
 /**
- * The two fetches of GET /view/panel a host makes after the mount, each taking one part of the
+ * The two fetches of GET /view/panel a host makes after the mount, each taking some of the
  * fragment into the chat it already has, so the composer the chat bundle is bound to stays:
- * newChat(), "New chat" in place (the drawer's and the editor sidebar's), and postChip(), the
- * post chip the editor sidebar adds once its new post has been saved (resources/ts/editor.ts).
+ * newChat(), "New chat" in place (the drawer's and the editor sidebar's), which takes the
+ * transcript, the history and the chips, and postChip(), the post chip the editor sidebar adds
+ * once its new post has been saved (resources/ts/editor.ts).
  * Every assertion compares a primitive, never a node (tests/ts/env.ts says why).
  */
 const CFG = { panel: 'https://alpaca-bot.test/wp-json/alpaca-bot/v1/view/panel', prefs: '', htmx: '', htmxId: '', chat: '', css: '', title: 'Alpaca Bot', failed: 'failed' };
@@ -65,12 +66,15 @@ function serve(t: { after(fn: () => void): void }, body: string, status = 200): 
   return seen;
 }
 
-test('newChat swaps a fresh transcript and history into the chat it has, and keeps its composer, chips and all', async (t) => {
-  installDom(`<aside id="host" data-post="12">${panel({ conversation: '5', messages: '<article class="ab-msg">old turn</article>', history: '<option data-id="5" selected>Old</option>', chips: row(chip('post', 'context[post_id]', '12', 'Editing: Hello')) })}</aside>`);
+test('newChat swaps a fresh transcript, history and chips row into the chat it has, and keeps its composer and what is typed', async (t) => {
+  // The user took the post chip off; the screen chip is still on.
+  installDom(`<aside id="host" data-post="12" data-screen-id="post" data-screen-title="Edit Post">${panel({ conversation: '5', messages: '<article class="ab-msg">old turn</article>', history: '<option data-id="5" selected>Old</option>', chips: row(chip('screen', 'context[screen][id]', 'post', 'On: Edit Post')) })}</aside>`);
   const { newChat, panelQuery } = await import('../../resources/ts/mount.ts');
   const host = document.getElementById('host') as HTMLElement;
-  const seen = serve(t, panel({ conversation: '0', messages: '<div class="ab-welcome">new</div>', history: '<option data-id="5">Old</option>', chips: '' }));
+  const seen = serve(t, panel({ conversation: '0', messages: '<div class="ab-welcome">new</div>', history: '<option data-id="5">Old</option>', chips: row(chip('post', 'context[post_id]', '12', 'Editing: Hello &amp; &lt;b&gt;') + chip('screen', 'context[screen][id]', 'post', 'On: Edit Post')) }));
   host.querySelector<HTMLTextAreaElement>('#ab-message')!.value = 'typed';
+  // Marks the composer as it is, to tell it apart from a replaced one.
+  (host.querySelector('#ab-form') as HTMLFormElement & { abMark?: number }).abMark = 1;
 
   assert.equal(await newChat(host, CFG, 'n1', panelQuery(host, '0')), true);
   assert.equal(seen.length, 1);
@@ -83,9 +87,28 @@ test('newChat swaps a fresh transcript and history into the chat it has, and kee
   assert.equal(host.querySelector<HTMLInputElement>('#ab-form [name="conversation_id"]')?.value, '0');
   assert.equal(host.querySelector('#ab-chat')?.getAttribute('data-conversation'), '0');
   assert.equal(host.querySelector('#ab-status')?.childElementCount, 0);
-  // The composer is the one it had: the box keeps what was typed, and the chip is still on.
+  // The composer is the one it had, and the box keeps what was typed.
+  assert.equal((host.querySelector('#ab-form') as HTMLFormElement & { abMark?: number }).abMark, 1);
   assert.equal(host.querySelector<HTMLTextAreaElement>('#ab-message')?.value, 'typed');
-  assert.equal(host.querySelectorAll('#ab-form .ab-chip[data-chip="post"]').length, 1);
+  // The chip the user took off is back: the fragment's chips row, in the one row, where Composer
+  // puts it (before the box), with the server's labels and fields.
+  assert.deepEqual(Array.from(host.querySelectorAll<HTMLElement>('#ab-form .ab-chip')).map((c) => c.dataset.chip), ['post', 'screen']);
+  assert.equal(host.querySelectorAll('#ab-form .ab-composer__chips').length, 1);
+  assert.equal(host.querySelector('#ab-form > .ab-composer__chips[role="group"] + .ab-composer__row') !== null, true);
+  assert.equal(host.querySelector('#ab-form .ab-chip[data-chip="post"] .ab-chip__label')?.textContent, 'Editing: Hello & <b>');
+  assert.equal(host.querySelector<HTMLInputElement>('#ab-form [name="context[post_id]"]')?.value, '12');
+  assert.equal(host.querySelector<HTMLInputElement>('#ab-form [name="context[screen][id]"]')?.value, 'post');
+});
+
+test('newChat leaves no chip the fragment does not have, and no chips row when it has none', async (t) => {
+  installDom(`<aside id="host" data-post="12">${panel({ conversation: '5', messages: '', history: '', chips: row(chip('post', 'context[post_id]', '12', 'Editing: Hello') + chip('screen', 'context[screen][id]', 'post', 'On: Edit Post')) })}</aside>`);
+  const { newChat, panelQuery } = await import('../../resources/ts/mount.ts');
+  const host = document.getElementById('host') as HTMLElement;
+  // An auto-draft, say, on a host that names no screen: the server renders no chip at all.
+  serve(t, panel({ conversation: '0', messages: '', history: '', chips: '' }));
+  assert.equal(await newChat(host, CFG, 'n', panelQuery(host, '0')), true);
+  assert.equal(host.querySelectorAll('#ab-form .ab-chip, #ab-form .ab-composer__chips, #ab-form [name^="context["]').length, 0);
+  assert.equal(host.querySelectorAll('#ab-form .ab-composer__row').length, 1);
 });
 
 test('newChat changes nothing when the fragment is refused', async (t) => {
@@ -93,9 +116,10 @@ test('newChat changes nothing when the fragment is refused', async (t) => {
   const { newChat, panelQuery } = await import('../../resources/ts/mount.ts');
   const host = document.getElementById('host') as HTMLElement;
   // A body that would parse, so the status is what refuses it.
-  serve(t, panel({ conversation: '0', messages: '', history: '', chips: '' }), 403);
+  serve(t, panel({ conversation: '0', messages: '', history: '', chips: row(chip('post', 'context[post_id]', '12', 'Editing: Hello')) }), 403);
   assert.equal(await newChat(host, CFG, 'n', panelQuery(host, '0')), false);
   assert.equal(host.querySelectorAll('#ab-messages article').length, 1);
+  assert.equal(host.querySelectorAll('#ab-form .ab-chip').length, 0);
   assert.equal(host.querySelector<HTMLInputElement>('#ab-form [name="conversation_id"]')?.value, '5');
 });
 
@@ -179,6 +203,31 @@ test('postChip adds nothing when the server renders no post chip, refuses the fr
   assert.equal(await postChip(host, CFG, 'n'), true);
   assert.equal(seen.length, 0);
   assert.equal(host.querySelectorAll('#ab-form .ab-chip').length, 1);
+});
+
+test('postChip does not double a post chip that New chat brought back while it was asking', async (t) => {
+  // The editor on a post saved a moment ago: its save asks for the chip, and New chat is pressed
+  // before that answer arrives, bringing the chip back with the fresh fragment first.
+  installDom(`<div id="host" data-post="12">${panel({ conversation: '5', messages: '', history: '', chips: '' })}</div>`);
+  const { newChat, panelQuery, postChip } = await import('../../resources/ts/mount.ts');
+  const host = document.getElementById('host') as HTMLElement;
+  const body = panel({ conversation: '0', messages: '', history: '', chips: row(chip('post', 'context[post_id]', '12', 'Editing: Hello')) });
+  const real = globalThis.fetch;
+  t.after(() => { globalThis.fetch = real; });
+  let release: () => void = () => {};
+  const held = new Promise<void>((resolve) => { release = resolve; });
+  let calls = 0;
+  globalThis.fetch = (async () => {
+    if (calls++ === 0) await held;
+    return new Response(body, { status: 200, headers: { 'Content-Type': 'text/html' } });
+  }) as typeof fetch;
+
+  const asking = postChip(host, CFG, 'n');
+  assert.equal(await newChat(host, CFG, 'n', panelQuery(host, '0')), true);
+  release();
+  assert.equal(await asking, true);
+  assert.equal(calls, 2);
+  assert.equal(host.querySelectorAll('#ab-form .ab-chip[data-chip="post"]').length, 1);
 });
 
 /**

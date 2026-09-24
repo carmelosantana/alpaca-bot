@@ -115,9 +115,13 @@ export async function mountPanel(host: HTMLElement, cfg: MountSettings, nonce: s
  * "New chat" in place, for a host that keeps the chat on a page the chat screen's link would leave
  * (the drawer, the editor sidebar): a fresh transcript and history from GET /view/panel swapped
  * in, and the conversation set back to 0. The composer stays, because the bundle's listeners are
- * bound to it and a replaced form would have none, and so do its context chips. Answers true for a
- * 2xx response whose body parses to an element, once it has swapped in the transcript and the
- * history that element holds (one it lacks is left as it was) and set the conversation back to 0.
+ * bound to it and a replaced form would have none, and so does what is typed in it. Its context
+ * chips are the fragment's: the fragment's chips row takes the place of the composer's, before the
+ * box, where Composer puts it, so a chip the user took off comes back and a chip the fragment
+ * lacks goes, and a fragment with no chips leaves no row. Which chips there are, their labels and
+ * their fields are the server's, as they are at the mount. Answers true for a 2xx response whose
+ * body parses to an element, once it has swapped in the transcript and the history that element
+ * holds (one it lacks is left as it was) and its chips, and set the conversation back to 0.
  * A request that is refused, a body that is not an element, or a request that fails outright
  * answers false and changes nothing; the outright failure (a network error, which fetch() rejects
  * with) is caught and logged to the console. So neither the request nor its parse rejects the
@@ -136,6 +140,12 @@ export async function newChat(host: HTMLElement, cfg: MountSettings, nonce: stri
   for (const id of ['ab-messages', 'ab-history']) {
     const next = fresh.querySelector('#' + id);
     if (next) host.querySelector('#' + id)?.replaceWith(next);
+  }
+  const box = host.querySelector('#ab-form .ab-composer__row');
+  if (box) {
+    host.querySelector('#ab-form .ab-composer__chips')?.remove();
+    const chips = fresh.querySelector('#ab-form .ab-composer__chips');
+    if (chips) box.before(chips);
   }
   const field = host.querySelector<HTMLInputElement>('#ab-form [name="conversation_id"]');
   if (field) field.value = '0';
@@ -156,9 +166,10 @@ export async function newChat(host: HTMLElement, cfg: MountSettings, nonce: stri
  * composer with no row gets the fragment's. Nothing else of the fragment is taken.
  *
  * Answers whether the composer has a post chip now: true without a request when it has one
- * already, false when the fragment was refused or had none. A request that fails outright (a
- * network error) rejects, as fetch() does; editor.ts, its caller, logs that and asks again after
- * the next save.
+ * already, true without adding one when one arrived while it asked (a New chat whose fragment had
+ * one, newChat()), false when the fragment was refused or had none. A request that fails outright
+ * (a network error) rejects, as fetch() does; editor.ts, its caller, logs that and asks again
+ * after the next save.
  */
 export async function postChip(host: HTMLElement, cfg: MountSettings, nonce: string): Promise<boolean> {
   const form = host.querySelector<HTMLFormElement>('#ab-form');
@@ -166,6 +177,8 @@ export async function postChip(host: HTMLElement, cfg: MountSettings, nonce: str
   if (form.querySelector('.ab-chip[data-chip="post"]')) return true;
   const res = await fetch(withQuery(cfg.panel, panelQuery(host, '0')), { credentials: 'same-origin', headers: { 'X-WP-Nonce': nonce } });
   const chip = (res.ok ? fromHtml(await res.text()) : null)?.querySelector('#ab-form .ab-chip[data-chip="post"]');
+  // A New chat that answered while this was asking may have brought the chip back already.
+  if (form.querySelector('.ab-chip[data-chip="post"]')) return true;
   const box = form.querySelector('.ab-composer__row');
   if (!chip || !box) return false;
   const row = form.querySelector('.ab-composer__chips');
