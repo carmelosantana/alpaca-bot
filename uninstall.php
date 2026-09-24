@@ -1,12 +1,13 @@
 <?php
 /**
  * Alpaca Bot's uninstall routine: WordPress includes this file when the plugin is deleted from
- * the Plugins screen, or on `wp plugin uninstall`. The plugin is inactive then and was not loaded
- * for the request, so nothing here uses its autoloader or a class of its own: every name is
- * written out below, and the list is the inventory. tests/Unit/UninstallInventoryTest.php fails
- * when a quoted `alpaca_bot_*` or `ab_*` string in src/ is neither named here nor listed there as
- * not stored, or when src/ gains a post type, a cron event, a role change or a network-wide
- * option; tests/Integration/UninstallTest.php runs this file over one of each row and a
+ * the Plugins screen, or on `wp plugin uninstall`. The plugin is inactive then, and was not loaded
+ * for the request unless `wp plugin uninstall --deactivate` loaded it before deactivating it, so
+ * nothing here uses its autoloader or a class of its own: every name is written out below, and
+ * the list is the inventory. tests/Unit/UninstallInventoryTest.php fails when a quoted
+ * `alpaca_bot_*` or `ab_*` string in src/ is neither named here nor listed there as not stored,
+ * or when src/ gains a post type, a cron event, a role change, or a network-wide option or
+ * transient; tests/Integration/UninstallTest.php runs this file over one of each row and a
  * neighbour of each that is not ours.
  *
  * What it removes, on each site:
@@ -19,13 +20,14 @@
  * - posts: every `chat_history` (conversations) and `chat_log` (usage receipts) post in any
  *   status, and all of their post meta, which is where the transcript, the receipt's numbers and
  *   Migrate04's attempts count live;
- * - post meta 0.4.17's shortcode cache left on the page that showed it (the page stays);
+ * - post meta: 0.4.17's shortcode cache, left on the post that showed it (the post stays);
  * - the `alpaca_bot/usage/cleanup` cron event.
- * And once, because the users table is shared by a network: the three Chat\UserPrefs user meta
- * keys and 0.4.17's `alpaca_bot_user_settings`.
+ * And once, because a network's sites share one user meta table: the three Chat\UserPrefs user
+ * meta keys and 0.4.17's `alpaca_bot_user_settings`.
  *
  * What it leaves: drafts the create-draft tool wrote. They are ordinary posts of the site's own
- * types, owned by the user who asked for them, and nothing marks them as the plugin's.
+ * types, owned by the user who asked for them, and nothing marks them as the plugin's. The 0.4
+ * names are 0.4.17's; a name only an earlier 0.4 release wrote was not looked for.
  *
  * Fixed names are deleted by name. Dynamic names are found with a LIKE on the escaped prefix,
  * anchored at the start, and each row it returns is deleted only if the whole name matches the
@@ -40,14 +42,15 @@
  * A persistent object cache: a transient then lives in the cache, not in the options table, and
  * a cache cannot be listed by prefix. The two with a fixed name are deleted through
  * delete_transient(), which reaches the cache. The dynamic ones cannot be found there and are
- * left to expire: every one is written with an expiry, the longest an MCP drift marker's week, a
- * shortcode answer's the `cache` seconds its shortcode asked for.
+ * left to expire. Every one is written with an expiry: a week for an MCP drift marker, the
+ * `cache` seconds its shortcode asked for on a shortcode answer (0.4.17's as well as this
+ * version's), and at most an hour for the rest.
  *
  * Multisite: every site's rows are removed, not only the current site's, because the plugin's
  * files are gone for all of them whether it was network-activated or activated per site. Each
- * site costs a switch_to_blog() and a few queries, so a very large network pays for that in one
- * request; `wp plugin uninstall` runs it under PHP's command line, which has no time limit by
- * default.
+ * site costs a switch_to_blog() and a query or two for every name and pattern below, more where
+ * there are rows to delete, so a very large network pays for that in one request. `wp plugin
+ * uninstall` runs it under PHP's command line, which has no time limit by default.
  *
  * `chat_history` and `chat_log` are not prefixed (0.4 named them, and existing sites hold rows
  * under them). Every post of those types is removed, so a site where another plugin also used
