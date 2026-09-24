@@ -636,11 +636,12 @@ final class SettingsPage
      * The approvals cell, `div#ab-mcp-tools-<id>`, holds a hidden input per approved tool, so a
      * save that never pressed Discover carries every approval as it is, and, when the drift marker
      * (Mcp\Drift) names tools the row approves, a line saying they changed since approval; the
-     * marker is read rather than the server asked, so drawing the page opens no connection.
+     * marker is read rather than the server asked, so drawing the row asks no server anything.
      * Beside the cell, a stored server's Discover button is an hx-get at `GET
      * /view/mcp-tools/<id>` with the row's index, whose fragment (View\Settings\McpTools)
      * replaces the cell's contents with a box per tool the stored server lists, posting under the
-     * same names; ticking one and saving is the approval, and a box left clear drops one. It lists
+     * same names, or, when the server cannot be listed, with the reason and the approvals as they
+     * were; ticking a box and saving is the approval, and a box left clear drops one. It lists
      * the server as saved, not as the row's fields are edited. The blank row's button is disabled.
      * The table's wrapper carries the REST nonce in `hx-headers`, which htmx hands down to the
      * requests of the elements inside it, so the fragment request authenticates as the chat
@@ -669,7 +670,7 @@ final class SettingsPage
         return '<div class="ab-mcp-servers" id="ab-mcp-servers"' . Hx::attrs(['headers' => Hx::formHeaders()]) . '><table class="widefat striped"><thead><tr>' . $head . '</tr></thead><tbody>' . $body . '</tbody></table></div>'
             . '<p class="description">' . esc_html((string) ($f['description'] ?? '')) . '</p>'
             . '<p class="description">' . esc_html__('The prefix names this server\'s tools for the model, as prefix__tool: a lowercase letter, then up to 15 lowercase letters, digits or underscores, and not "ability". The last row adds a server; leave its URL empty to add none.', 'alpaca-bot') . '</p>'
-            . '<p class="description">' . esc_html__('Discover tools lists the tools a saved server offers. Tick the ones to approve and save; a box left clear drops that tool\'s approval. Each approval is of the tool as it was shown, so a tool the server changes afterwards is marked for review.', 'alpaca-bot') . '</p>';
+            . '<p class="description">' . esc_html__('Discover tools lists the tools a saved server offers. Tick the ones to approve and save; a box left clear drops that tool\'s approval. Each approval is of the tool as it was shown, so a tool the server changes afterwards is marked for review the next time it is listed.', 'alpaca-bot') . '</p>';
     }
 
     /** @return list<string> the MCP servers table's column headings, in column order */

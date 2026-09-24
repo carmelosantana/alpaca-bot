@@ -10,8 +10,8 @@ namespace AlpacaBot\Mcp;
  *
  * The settings screen has to be able to say "changed since approval: review" without opening a
  * connection while a page renders, so the finding is recorded where it is made and read from the
- * marker when the row is drawn. Discovery::tools() records it each time it lists a server for an
- * administrator, rewriting the server's marker or clearing it; a listing that fails leaves the
+ * marker when the row is drawn. Discovery::tools() records it each time it lists a server,
+ * rewriting the server's marker or clearing it; a listing that fails leaves the
  * marker as it was. set() is public so that whatever else lists a server records what it finds
  * the same way.
  *

@@ -27,7 +27,8 @@ const added = new Map<string, Promise<void>>();
 /**
  * Adds a script once per page, resolving when it has run. A script the page already carries at
  * the same URL counts as run: the settings screen enqueues htmx at the URL Admin\Assets::mount()
- * hands this loader, as a footer script, which has run by the time anyone opens the drawer.
+ * hands this loader, as a plain footer script, and the parser runs such a script as it puts it in
+ * the document, so one that is there has run.
  */
 export function script(src: string): Promise<void> {
   let loading = added.get(src);

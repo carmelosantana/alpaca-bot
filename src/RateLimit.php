@@ -8,8 +8,8 @@ namespace AlpacaBot;
  * A fixed-window counter: PER_MINUTE hits per user per UTC calendar minute, kept in a transient.
  * Filter `alpaca_bot/rate_limit` (int $perMinute, int $userId, string $bucket) sets the limit
  * per call, and is the only way the limit changes. Every surface that spends provider tokens
- * on a request records a hit here, in the one `chat` bucket, and so does the route that asks a
- * remote MCP server for its tools: every REST route flagged `rate_limit`
+ * on a request records a hit here, in the one `chat` bucket, and so does the route that lists an
+ * MCP server's tools: every REST route flagged `rate_limit`
  * (Rest\Controller::rateLimited() -- `POST /chat`, `GET /models`, `GET /view/models`,
  * `GET /view/mcp-tools/{id}`), the chat and summarize abilities (Abilities\Register) and the
  * shortcodes (Shortcodes\Chat), so one person on any of them is one person to the counter. Not the stream redemption: it

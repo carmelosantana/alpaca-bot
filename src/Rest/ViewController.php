@@ -80,8 +80,9 @@ final class ViewController extends Controller
 
     /**
      * `/view/models` shares the chat rate limit for the reason `/models` does: `refresh=1` is a
-     * synchronous provider call. `/view/mcp-tools` shares it for the same reason: it asks a remote
-     * server synchronously. The rest are not limited. Each works on the site's own database or
+     * synchronous provider call. `/view/mcp-tools` shares it too: it lists a server through the
+     * MCP client synchronously, which is a call to a remote host once the client is a real one.
+     * The rest are not limited. Each works on the site's own database or
      * builds a bubble from the request, and `/view/panel` also renders the model select through
      * the catalog, which asks the provider when its cache is empty, as the chat screen's own
      * render does; that screen is not rate limited either.
@@ -292,8 +293,8 @@ final class ViewController extends Controller
      * through `alpaca_bot/capability/view/mcp-tools` like every other route here, and a filter
      * decides it; this callback then asks the capability again on its own account, the way
      * SettingsController::show() does for `?reveal=1`. Listing a server hands its ServerConfig,
-     * the stored header value in it, to the client the ClientFactory builds, which is how the
-     * credential reaches a remote host once a real client exists, so a site that loosened the
+     * the stored header value in it, to the ClientFactory's builder, which is how the credential
+     * reaches a remote host once the builder makes a real client, so a site that loosened the
      * filter for a custom role must not have handed that role this. It shares the chat bucket's
      * rate limit (routes()).
      *
@@ -327,8 +328,8 @@ final class ViewController extends Controller
      * in it. McpTools prints it escaped. Before that, every piece of the server's header value 8
      * characters or longer that is either the whole value or the part after its first run of
      * whitespace (the credential of `Bearer …`) is replaced with Schema::MASK wherever it appears,
-     * and then the message is cut to REASON_CHARS characters, so a cut cannot leave the start of a
-     * value behind. A shorter piece is not looked for, since replacing it would blank out
+     * and then the message is cut to REASON_CHARS characters, with an ellipsis, so a cut cannot
+     * leave the start of a replaced piece behind. A shorter piece is not looked for, since replacing it would blank out
      * ordinary words; nor is a value that reaches the message changed (encoded, split, cut).
      */
     private static function reason(McpUnavailable $e, #[\SensitiveParameter] ServerConfig $server): string

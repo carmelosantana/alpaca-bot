@@ -22,8 +22,10 @@ use AlpacaBot\View\Component;
  *
  * Each tool shows its name, its title when it has one, whether it has changed since approval,
  * whether the server calls it destructive, and its description through SchemaTool::describe(),
- * the shortening the model gets, so the administrator approves the text the model will read. The
- * title goes through describe() too. Every one of those is the server's text, printed escaped.
+ * the plugin's rule for a tool description another party wrote (AbilitiesToolkit hands the model
+ * its abilities' descriptions through the same function), so what is shown is cleaned and cut as
+ * that rule has it. The title goes through describe() too. The name, the title and the
+ * description are the server's text, and each is printed escaped.
  *
  * A tool whose name Schema::isToolName() refuses, asked of the key the name becomes, is listed
  * with no box and a line saying its name cannot be approved: Schema::sanitizeMcpServers() would

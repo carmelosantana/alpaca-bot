@@ -396,7 +396,7 @@ it('hooks the MCP server settings onto the option\'s writes and hands the same i
 });
 
 // The view routes get the MCP approval fragment through a Discovery over the container's one
-// ClientFactory, which is the seam Task 28's real client arrives through; and the drift marker
+// ClientFactory, the seam a real client arrives through; and the drift marker
 // forgets what a save of the settings answered, whoever makes the save.
 it('hands the view routes a Discovery over the container\'s client factory, and hooks the drift marker onto the option\'s updates', function (): void {
     Functions\when('add_shortcode')->justReturn();

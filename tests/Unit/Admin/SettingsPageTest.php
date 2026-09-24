@@ -542,8 +542,8 @@ it('gives each stored server a Discover button that swaps its approval list into
         ->and(substr_count($html, 'hx-get='))->toBe(2);
 });
 
-// Drift is the marker discovery (and, from Task 27, a turn) leaves when an approved tool's
-// definition no longer matches its pin; the page reads it rather than asking the server. It
+// Drift is the marker discovery leaves when an approved tool's definition no longer matches its
+// pin; the page reads it rather than asking the server. It
 // names only tools the row still approves, and sits inside the cell the fragment replaces.
 it('says which approved tools were found changed since approval, from the drift marker', function (): void {
     stubMcpServerRows(['trk' => ['report', 'dropped'], 'gh' => ['issues']]);
