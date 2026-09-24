@@ -11,15 +11,16 @@ use AlpacaBot\Toolkit\WebFetchToolkit;
  * One Site Health test: whether web_fetch can run pinned on this server.
  *
  * web_fetch holds its connections to the addresses its check passed by handing them to cURL
- * (Toolkit\CurlPin, which says when only the first goes), and refuses to fetch at all on a server whose PHP has no cURL for it
- * to use. On such a server the tool can still be on in Settings while answering every call with
- * a refusal, and the only place the reason would otherwise surface is a tool error in a chat. Site Health
- * is where a site owner looks for "this server lacks X", so that is where it is said. The same
- * page is the natural place for the other server-level thing the pin cannot reach, and the only
- * other one this test can see: a proxy configured for the HTTP API is sent the name and resolves
- * it itself. What the pin does not reach on any server -- this site's own host, a public address
- * the site's own network routes somewhere private -- is the Tools help tab's and README's to
- * say, since no server fact decides it.
+ * (Toolkit\CurlPin, which says when only the first goes), and refuses to fetch at all on a
+ * server whose PHP has no cURL for it to use. On such a server the tool can still be on in
+ * Settings while answering every call with a refusal, and the only place the reason would
+ * otherwise surface is a tool error in a chat. Site Health is where a site owner looks for
+ * "this server lacks X", so that is where it is said. The same page is the natural place for
+ * the other server-level thing the pin cannot reach, and the only other one this test can see:
+ * a proxy configured for the HTTP API is sent the name and resolves it itself. What the pin does
+ * not reach on any server -- this site's own host, a public address the site's own network routes
+ * somewhere private -- is the Tools help tab's and README's to say, since no server fact decides
+ * it.
  *
  * A direct test, not an async one: both facts are local (an extension check and two constants),
  * so there is nothing to wait on. Status `recommended`, not `critical`: on a server without
