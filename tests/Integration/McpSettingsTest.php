@@ -271,6 +271,164 @@ final class McpSettingsTest extends TestCase
     }
 
     /**
+     * I-1 / R76, the reviewer's case: `settings.write` and `settings.read` lowered to editors, an
+     * editor PUTs a stored server's id with a URL of their own and the mask. The write goes
+     * through, the administrator's value is not kept for the new host, the reply says which
+     * server lost it, and the editor still cannot reveal anything.
+     */
+    public function test_an_editor_who_may_write_the_settings_cannot_move_a_stored_header_value_to_their_host(): void
+    {
+        $this->rest('PUT', '/settings', [
+            'toolkits.mcp_servers' => [['url' => self::URL, 'prefix' => 'trk', 'header_value' => self::SECRET]],
+            'access.settings.write' => 'edit_posts',
+            'access.settings.read' => 'edit_posts',
+        ]);
+        $this->assertSame(['trk' => self::SECRET], Secrets::all());
+        wp_set_current_user(self::factory()->user->create(['role' => 'editor']));
+
+        $res = $this->rest('PUT', '/settings', ['toolkits.mcp_servers' => [['id' => 'trk', 'url' => 'https://1.1.1.1/steal', 'prefix' => 'trk', 'header_value' => Schema::MASK]]]);
+        $this->assertSame(200, $res->get_status(), print_r($res->get_data(), true));
+        $this->assertSame('trk', $res->get_headers()['X-Alpaca-Bot-Mcp-Cleared'] ?? null);
+        $this->assertSame('', $res->get_data()['toolkits.mcp_servers'][0]['header_value']);
+        $this->assertSame('https://1.1.1.1/steal', get_option(Plugin::OPTION)['toolkits.mcp_servers'][0]['url']);
+        $this->assertSame([], Secrets::all());
+        $this->assertSame('', Secrets::resolve(get_option(Plugin::OPTION)['toolkits.mcp_servers'][0]));
+        $this->assertStringNotContainsString(self::SECRET, (string) wp_json_encode($this->rest('GET', '/settings', ['reveal' => 1])->get_data()));
+    }
+
+    /** R76 on the settings page: a path-only move keeps the value, a host move drops it, and the screen says which. */
+    public function test_the_settings_page_says_when_a_moved_server_lost_its_header_value(): void
+    {
+        $this->rest('PUT', '/settings', ['toolkits.mcp_servers' => [
+            ['url' => self::URL, 'prefix' => 'trk', 'header_value' => self::SECRET],
+            ['url' => 'https://93.184.216.35/mcp', 'prefix' => 'gh', 'header_value' => self::OTHER],
+        ]]);
+        $posted = self::formPost($this->page('toolkits'));
+        $posted['toolkits.mcp_servers'][0]['url'] = 'https://93.184.216.34/v2/mcp';
+        $posted['toolkits.mcp_servers'][1]['url'] = 'https://93.184.216.36/mcp';
+        $this->save($posted);
+
+        $this->assertSame(['trk' => self::SECRET], Secrets::all());
+        $errors = get_settings_errors(Plugin::OPTION);
+        $this->assertSame(['mcp_cleared'], array_column($errors, 'code'));
+        $this->assertStringContainsString('https://93.184.216.36/mcp', $errors[0]['message']);
+        $this->assertStringContainsString('gh', $errors[0]['message']);
+    }
+
+    /**
+     * I-2, the reviewer's case: aa and bb swap prefixes and bb's URL goes private. bb's edit is
+     * refused, so bb stays exactly as stored, and aa, whose new prefix is the one bb keeps, keeps
+     * its stored row too; the screen names each for what happened to it.
+     */
+    public function test_a_refused_edit_leaves_its_server_whole_when_another_row_took_its_prefix(): void
+    {
+        $this->rest('PUT', '/settings', [
+            'toolkits.mcp_servers' => [
+                ['url' => self::URL, 'prefix' => 'aa', 'header_value' => self::SECRET],
+                ['url' => 'https://93.184.216.35/mcp', 'prefix' => 'bb', 'header_value' => self::OTHER],
+            ],
+            'access.mcp' => ['aa' => 'read', 'bb' => 'edit_posts'],
+        ]);
+        $before = get_option(Plugin::OPTION);
+        $posted = self::formPost($this->page('toolkits'));
+        $posted['toolkits.mcp_servers'][0]['prefix'] = 'bb';
+        $posted['toolkits.mcp_servers'][1]['prefix'] = 'aa';
+        $posted['toolkits.mcp_servers'][1]['url'] = 'https://10.9.9.9/mcp';
+        $this->save($posted);
+
+        $after = get_option(Plugin::OPTION);
+        $this->assertEqualsCanonicalizing($before['toolkits.mcp_servers'], $after['toolkits.mcp_servers']);
+        $this->assertSame($before['access.mcp'], $after['access.mcp']);
+        $this->assertSame(['aa' => self::SECRET, 'bb' => self::OTHER], Secrets::all());
+        $errors = get_settings_errors(Plugin::OPTION);
+        $this->assertSame(['mcp_address', 'mcp_prefix'], array_column($errors, 'code'));
+        $this->assertStringContainsString('https://10.9.9.9/mcp', $errors[0]['message']);
+        $this->assertStringContainsString('https://93.184.216.35/mcp', $errors[0]['message']);
+        $this->assertStringContainsString(self::URL, $errors[1]['message']);
+        $this->assertStringNotContainsString('https://93.184.216.35/mcp', $errors[1]['message']);
+    }
+
+    /**
+     * I-3: one server's prefix changed to another's. The stored server is never deleted for it:
+     * the colliding edit is refused, both servers stay as stored, and the screen says so. A new
+     * row with a URL and no usable prefix is not dropped quietly either.
+     */
+    public function test_a_prefix_collision_keeps_the_stored_server_and_refuses_the_edit(): void
+    {
+        $this->rest('PUT', '/settings', [
+            'toolkits.mcp_servers' => [
+                ['url' => self::URL, 'prefix' => 'aa', 'header_value' => self::SECRET],
+                ['url' => 'https://93.184.216.35/mcp', 'prefix' => 'bb', 'header_value' => self::OTHER],
+            ],
+            'access.mcp' => ['aa' => 'read', 'bb' => 'edit_posts'],
+        ]);
+        $before = get_option(Plugin::OPTION);
+        $posted = self::formPost($this->page('toolkits'));
+        $posted['toolkits.mcp_servers'][0]['prefix'] = 'bb';
+        $posted['toolkits.mcp_servers'][2] = ['url' => 'https://93.184.216.36/mcp', 'prefix' => '', 'header_value' => 'Bearer lost'];
+        $posted['toolkits.user_agent'] = 'Changed/2.0';
+        $this->save($posted);
+
+        $after = get_option(Plugin::OPTION);
+        $this->assertSame('Changed/2.0', $after['toolkits.user_agent']);
+        $this->assertSame($before['toolkits.mcp_servers'], $after['toolkits.mcp_servers']);
+        $this->assertSame($before['access.mcp'], $after['access.mcp']);
+        $this->assertSame(['aa' => self::SECRET, 'bb' => self::OTHER], Secrets::all());
+        $errors = get_settings_errors(Plugin::OPTION);
+        $this->assertSame(['mcp_prefix', 'mcp_dropped'], array_column($errors, 'code'));
+        $this->assertStringContainsString(self::URL, $errors[0]['message']);
+        $this->assertStringContainsString('https://93.184.216.36/mcp', $errors[1]['message']);
+        $this->assertStringNotContainsString('Bearer lost', (string) wp_json_encode($errors));
+    }
+
+    /** m-4: a client that PUTs the same body without ids keeps the same id, and its Access entry, every time. */
+    public function test_the_same_put_without_ids_keeps_the_same_server(): void
+    {
+        foreach ([1, 2, 3, 4] as $put) {
+            $res = $this->rest('PUT', '/settings', ['toolkits.mcp_servers' => [['url' => self::URL, 'prefix' => 'trk', 'header_value' => Schema::MASK]], 'access.mcp' => ['trk' => 'read']]);
+            $this->assertSame(200, $res->get_status());
+            $this->assertSame(['trk'], array_column(get_option(Plugin::OPTION)['toolkits.mcp_servers'], 'id'), "PUT {$put}");
+            $this->assertSame(['trk' => 'read'], get_option(Plugin::OPTION)['access.mcp'], "PUT {$put}");
+        }
+    }
+
+    /**
+     * I-4 / R77: core's own opt-ins (the site's own host, `allowed_redirect_hosts`) do not let an
+     * MCP server through, at save time or when Egress builds a client; one the site adds on
+     * `http_request_host_is_external` does; web_fetch's AddressPin keeps core's exemption; and
+     * the filter is left as it was, core's callback in its place, after a refusal.
+     */
+    public function test_the_sites_own_host_is_no_exemption_for_an_mcp_server(): void
+    {
+        global $wp_filter;
+        update_option('home', 'http://10.0.0.5');
+        add_filter('allowed_redirect_hosts', static fn(array $hosts): array => [...$hosts, '10.0.0.6']);
+        $siteOwn = static fn(bool $external, string $host): bool => $host === '10.0.0.7' ? true : $external;
+        add_filter('http_request_host_is_external', $siteOwn, 10, 2);
+        $order = array_keys($wp_filter['http_request_host_is_external']->callbacks[10]);
+
+        foreach (['10.0.0.5', '10.0.0.6'] as $host) {
+            $res = $this->rest('PUT', '/settings', ['toolkits.mcp_servers' => [['url' => "https://{$host}/mcp", 'prefix' => 'trk']]]);
+            $this->assertSame(400, $res->get_status(), $host);
+            $this->assertSame('alpaca_bot_mcp_address', $res->get_data()['code'], $host);
+            try {
+                (new \AlpacaBot\Mcp\Egress())->client(\AlpacaBot\Mcp\ServerConfig::fromSettings(['id' => 'trk', 'url' => "https://{$host}/mcp", 'prefix' => 'trk']));
+                $this->fail("Egress built a client for {$host}");
+            } catch (\AlpacaBot\Toolkit\AddressRefused) {
+                // Refused, as at save time.
+            }
+            // web_fetch's rule is AddressPin's, core's exemption included.
+            $this->assertSame([$host], \AlpacaBot\Toolkit\AddressPin::resolve($host, "http://{$host}/"));
+        }
+        $this->assertSame($order, array_keys($wp_filter['http_request_host_is_external']->callbacks[10]));
+        $this->assertSame(10, has_filter('http_request_host_is_external', 'allowed_http_request_hosts'));
+
+        $res = $this->rest('PUT', '/settings', ['toolkits.mcp_servers' => [['url' => 'https://10.0.0.7/mcp', 'prefix' => 'trk']]]);
+        $this->assertSame(200, $res->get_status(), print_r($res->get_data(), true));
+        $this->assertInstanceOf(\AlpacaBot\Vendor\Symfony\Contracts\HttpClient\HttpClientInterface::class, (new \AlpacaBot\Mcp\Egress())->client(\AlpacaBot\Mcp\ServerConfig::fromSettings(['id' => 'trk', 'url' => 'https://10.0.0.7/mcp', 'prefix' => 'trk'])));
+    }
+
+    /**
      * A page over its own Store, registered in place of the plugin's, rendering `$tab`: the
      * plugin's Store memoises the option for the whole process, and these saves go round it
      * through update_option(). The page is handed the container's ServerSettings, so its address

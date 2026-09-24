@@ -131,14 +131,14 @@ final class Schema
             'toolkits.enabled' => ['type' => 'checkbox-list', 'default' => ['web_fetch', 'summarize', 'draft_post'], 'section' => 'toolkits', 'label' => __('Enabled tools', 'alpaca-bot'), 'description' => __('What the assistant may do besides answer. A tool that is off is not offered to the model at all.', 'alpaca-bot'), 'options' => ['web_fetch' => __('Fetch a web page the user names', 'alpaca-bot'), 'summarize' => __('Summarize text', 'alpaca-bot'), 'draft_post' => __('Draft a post or page (never publishes)', 'alpaca-bot'), 'abilities' => __('Call the site\'s WordPress abilities you tick', 'alpaca-bot')]],
             'toolkits.user_agent' => ['type' => 'string', 'default' => 'AlpacaBot/0.5 (+https://github.com/carmelosantana/alpaca-bot)', 'section' => 'toolkits', 'label' => __('User agent for fetch tools', 'alpaca-bot')],
             'toolkits.abilities' => ['type' => 'array', 'default' => [], 'section' => 'toolkits', 'label' => __('Abilities the model may call', 'alpaca-bot'), 'description' => __('The WordPress abilities that WordPress and other plugins register on this site. Each one you tick becomes a tool of the abilities tool, which is offered only while it is on under Enabled tools, and only to users its Access row admits. Two ticked abilities that would reach the model under the same tool name are marked, and neither is offered. A call runs as the user whose turn it is, through the ability\'s own permission check. Alpaca Bot\'s own abilities are never offered.', 'alpaca-bot'), 'sanitize' => [self::class, 'sanitizeAbilities']],
-            'toolkits.mcp_servers' => ['type' => 'array', 'default' => [], 'section' => 'toolkits', 'label' => __('MCP servers', 'alpaca-bot'), 'description' => __('Remote MCP servers whose tools the model may call. The address must be https; it is checked when it is saved from this screen or over the REST API, and checked again before any connection is made to it. A connection to an MCP server never goes through a proxy, neither one set for WordPress nor one set in the server\'s environment, so a site whose outbound traffic has to use a proxy cannot reach one. The header value is kept in an option of its own that WordPress does not load on every page, and this screen only shows whether one is set.', 'alpaca-bot')],
+            'toolkits.mcp_servers' => ['type' => 'array', 'default' => [], 'section' => 'toolkits', 'label' => __('MCP servers', 'alpaca-bot'), 'description' => __('Remote MCP servers whose tools the model may call. The address must be https; it is checked when it is saved from this screen or over the REST API, and a private or other special-purpose address is refused, even when it is the site\'s own host. Changing a server\'s scheme, host or port clears its header value, so it is never sent to an address it was not set for; type it again. A connection to an MCP server never goes through a proxy, neither one set for WordPress nor one set in the server\'s environment, so a site whose outbound traffic has to use a proxy cannot reach one. The header value is kept in an option of its own that WordPress does not load on every page, and this screen only shows whether one is set.', 'alpaca-bot')],
             'access.chat' => self::access('chat', __('Chat', 'alpaca-bot'), __('Who may open the chat screen and use the chat REST routes. A tool needs its own row as well as this one.', 'alpaca-bot')),
             'access.tool.web_fetch' => self::access('tool.web_fetch', __('Tool: fetch a web page', 'alpaca-bot'), __('Who may run a turn that can fetch a page, and who may use [alpacabot_agent], which runs the same tool on the shortcode\'s behalf. It governs the next fetch, not the last one: a shortcode answer already cached on a post stands until its cache expires. The tool makes this server send an outbound request and hands the reply back; the Tools help tab says what that grants.', 'alpaca-bot')),
             'access.tool.summarize' => self::access('tool.summarize', __('Tool: summarize', 'alpaca-bot'), __('Who may run a turn that can summarize text through the model.', 'alpaca-bot')),
             'access.tool.draft_post' => self::access('tool.draft_post', __('Tool: draft a post', 'alpaca-bot'), __('Who may run a turn that can write a draft. The tool also asks the post type\'s own capability of the same user, so this row can only narrow that.', 'alpaca-bot')),
             'access.tool.abilities' => self::access('tool.abilities', __('Tool: the site\'s abilities', 'alpaca-bot'), __('Who may run a turn that can call the abilities allowlisted under Tools. An ability runs with its own permission callback as well.', 'alpaca-bot')),
             'access.settings.read' => self::access('settings.read', __('Read settings over REST', 'alpaca-bot'), __('Who may read GET /settings and GET /settings/schema. The provider API key is never included; revealing it always needs an administrator.', 'alpaca-bot')),
-            'access.settings.write' => self::access('settings.write', __('Write settings over REST', 'alpaca-bot'), __('Who may send PUT /settings. provider.base_url is a settable field, so this row decides who can point every turn at another server. The Settings screen itself is always administrators.', 'alpaca-bot')),
+            'access.settings.write' => self::access('settings.write', __('Write settings over REST', 'alpaca-bot'), __('Who may send PUT /settings. provider.base_url is a settable field, so this row decides who can point every turn at another server. So is an MCP server\'s URL: moving one to another host drops its header value rather than send it there, and this row decides who can do that. The Settings screen itself is always administrators.', 'alpaca-bot')),
             'access.shortcode' => self::access('shortcode', __('Shortcodes', 'alpaca-bot'), __('Who triggers a generation by viewing a page carrying [alpacabot], or the deprecated [alpacabot_agent], which generates through the same rules. A visitor never does, whatever this says.', 'alpaca-bot')),
             // Every MCP server's row in one map, server id => capability, and not a key per
             // server: sanitize() rebuilds the option from this list and drops whatever is not in
@@ -184,7 +184,7 @@ final class Schema
      * @param array<string, mixed> $current the stored settings this write replaces
      * @return array<string, mixed>
      */
-    public static function sanitize(array $input, array $current): array
+    public static function sanitize(#[\SensitiveParameter] array $input, array $current): array
     {
         $out = [];
         foreach (self::fields() as $key => $f) {
@@ -193,9 +193,10 @@ final class Schema
                 $raw = self::secret($raw, $current[$key] ?? '');
             }
             if ($key === 'toolkits.mcp_servers') {
-                // The one sanitizer handed something other than its field: the ids the stored list
-                // holds, which sanitizeMcpServers() never gives a row that brings no id of its own.
-                $out[$key] = self::sanitizeMcpServers($raw, self::serverIds($current[$key] ?? null));
+                // The one sanitizer handed something other than its field: the stored list, whose
+                // ids sanitizeMcpServers() never gives a row that brings no id of its own, unless
+                // the row is that stored server (its docblock says when).
+                $out[$key] = self::sanitizeMcpServers($raw, $current[$key] ?? []);
                 continue;
             }
             $out[$key] = isset($f['sanitize']) ? ($f['sanitize'])($raw, $f) : self::coerce($raw, $f);
@@ -362,9 +363,9 @@ final class Schema
 
     /**
      * `toolkits.mcp_servers` as it may be shown: each row's `header_value` is MASK when it holds a
-     * non-empty string and '' otherwise, so a row that reached the option or Store's memo with the
-     * value itself in it (a write that went round Mcp\ServerSettings, or the rest of the request
-     * after a write, since the memo keeps the row as it was posted) still shows no value. Every
+     * non-empty string and '' otherwise, so a row that holds the value itself still shows none:
+     * one written round Mcp\ServerSettings (add_option() on its own, a hand edit, a write while
+     * the plugin was inactive), or one handed to a Store built with its settings in hand. Every
      * other field, and anything that is not a list of rows, is left as it is.
      */
     public static function maskedServers(mixed $rows): mixed
@@ -412,7 +413,9 @@ final class Schema
      *   what the form's blank "add a server" row is; so is a row whose `remove` box was ticked.
      *   Whether the *address* is public is not asked here: that is a DNS lookup, and this is a
      *   pure function. Mcp\ServerSettings asks it when the settings page or the REST route saves
-     *   a URL that is new or changed, and Mcp\Egress asks it again when a client is built.
+     *   a URL that is new or changed. Mcp\Egress::client() asks it again, for whatever builds a
+     *   client; nothing in this release does (ClientFactory hands every server
+     *   UnavailableClient).
      * - `prefix` matches MCP_TOOL_PREFIX, is not `ability` (AbilitiesToolkit names its tools
      *   `ability__…`), and is not already taken by an earlier row; a row failing any of that is
      *   dropped, since its tools would have no name of their own.
@@ -420,13 +423,16 @@ final class Schema
      *   filter `alpaca_bot/capability/mcp/<id>`) and its header value (Mcp\Secrets), so it has to
      *   survive an edit of the prefix or the URL, and it is never taken from another row. Every
      *   row that brings an id matching MCP_ID keeps it, first come first served, before any row is
-     *   given one; a row whose id is missing, malformed or already kept gets its prefix, then
-     *   `<prefix>_2`, `_3`… until one is neither kept nor in `$reserved`. Mcp\ServerSettings
-     *   reads a row whose id the stored list holds as that stored server, and so a row that
-     *   brings no id must never be given one of those ids: `$reserved` is them (sanitize() passes
-     *   the stored list's ids), and it holds even for a server this same write removes. Keeping
-     *   ids before making any is what stops a new row listed first from taking an existing
-     *   server's id. Either way a new row cannot take a stored server's Access entry or secret.
+     *   given one. A row whose id is missing, malformed or already kept is then the stored server
+     *   (in `$stored`, which sanitize() passes) whose URL and prefix it has, when the post names
+     *   that server's id in no row at all, a row whose `remove` is ticked included: a client
+     *   that writes its servers without ids sends the same body every time, and its servers keep
+     *   their ids. Any other such row gets its prefix, then `<prefix>_2`, `_3`… until one is
+     *   neither kept nor a stored server's id. Mcp\ServerSettings reads a row whose id the stored
+     *   list holds as that stored server, so a row that brings no id and is not one must never be
+     *   given one of those ids, even one this same write removes. Keeping ids before making any
+     *   is what stops a new row listed first from taking an existing server's id. Either way a
+     *   new row cannot take another server's Access entry or secret.
      * - `header_name` is `[A-Za-z0-9-]{1,64}` or ''.
      * - `header_value` follows the secret rule (the class docblock): '' clears, MASK keeps, any
      *   other string is the new value with CR, LF and NUL removed, so no value can end the header
@@ -438,10 +444,10 @@ final class Schema
      *   made into an int key is dropped, as fromSettings() drops it. A map that is absent means no
      *   approvals, which is what a form with every box clear posts.
      *
-     * @param list<string> $reserved ids a row that brings no usable id is never given: the stored list's
+     * @param mixed $stored the stored `toolkits.mcp_servers`: ids a row that brings no id of its own is never given, unless it is that server
      * @return list<array{id: string, url: string, header_name: string, header_value: string, prefix: string, timeout: float, max_bytes: int, approved: array<string, string>}>
      */
-    public static function sanitizeMcpServers(mixed $raw, array $reserved = []): array
+    public static function sanitizeMcpServers(#[\SensitiveParameter] mixed $raw, mixed $stored = []): array
     {
         if (!is_array($raw)) {
             return [];
@@ -480,6 +486,20 @@ final class Schema
             if (self::isMcpId($id) && !in_array($id, $ids, true)) {
                 /** @var string $id */
                 $ids[$i] = $id;
+            }
+        }
+        $reserved = self::serverIds($stored);
+        $named = self::serverIds($raw);
+        $same = [];
+        foreach (is_array($stored) ? $stored : [] as $row) {
+            if (is_array($row) && self::isMcpId($row['id'] ?? null) && !in_array($row['id'], $named, true)) {
+                $same[self::mcpUrl($row['url'] ?? null) . ' ' . (is_string($row['prefix'] ?? null) ? $row['prefix'] : '')] = $row['id'];
+            }
+        }
+        foreach ($rows as $i => $row) {
+            $adopt = $same[$row['url'] . ' ' . $row['prefix']] ?? null;
+            if (!isset($ids[$i]) && is_string($adopt) && !in_array($adopt, $ids, true)) {
+                $ids[$i] = $adopt;
             }
         }
         foreach ($rows as $i => $row) {

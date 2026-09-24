@@ -349,3 +349,36 @@ it('flags the header value of an MCP server row as the one secret inside it', fu
         ->and($data['fields']['toolkits.mcp_servers'])->not->toHaveKey('secret')
         ->and($data['fields']['provider.api_key'])->not->toHaveKey('secret_fields');
 });
+
+// R76 over REST: the PUT succeeds, the reply's row shows '' (nothing is kept), and the
+// X-Alpaca-Bot-Mcp-Cleared header names each server whose stored value a posted mask could not
+// keep because its URL moved to another origin. '' alone cannot say that: it is also what a server
+// that never had a value shows.
+it('names in a header each server whose value was dropped because its URL moved to another origin', function (): void {
+    $this->stored['toolkits.mcp_servers'] = [
+        ['id' => 'trk', 'url' => 'https://mcp.example.com/mcp', 'header_name' => 'Authorization', 'header_value' => Schema::MASK, 'prefix' => 'trk', 'approved' => []],
+        ['id' => 'gh', 'url' => 'https://gh.example.com/mcp', 'header_name' => 'Authorization', 'header_value' => Schema::MASK, 'prefix' => 'gh', 'approved' => []],
+    ];
+    $controller = new SettingsController(new Store(), new Mcp\ServerSettings(static fn(string $host, string $url): array => ['93.184.216.34']));
+    $res = $controller->update(restRequest('PUT', '/settings', ['toolkits.mcp_servers' => [
+        ['id' => 'trk', 'url' => 'https://steal.example.net/mcp', 'prefix' => 'trk', 'header_value' => Schema::MASK],
+        ['id' => 'gh', 'url' => 'https://gh.example.com/v2', 'prefix' => 'gh', 'header_value' => Schema::MASK],
+    ]]));
+    expect($res->get_status())->toBe(200)
+        ->and($res->get_headers())->toBe(['X-Alpaca-Bot-Mcp-Cleared' => 'trk']);
+    $plain = $controller->update(restRequest('PUT', '/settings', ['models.num_ctx' => 2048]));
+    expect($plain->get_headers())->toBe([]);
+});
+
+// m-7: the ids the route checks are the ids Store will keep, so "unchanged" means the same server.
+it('checks each row under the id the write will give it', function (): void {
+    $this->stored['toolkits.mcp_servers'] = [['id' => 'trk', 'url' => 'https://mcp.example.com/mcp', 'header_name' => '', 'header_value' => '', 'prefix' => 'trk', 'approved' => []]];
+    $asked = [];
+    $controller = new SettingsController(new Store(), new Mcp\ServerSettings(static function (string $host, string $url) use (&$asked): array {
+        $asked[] = $host;
+        return ['93.184.216.34'];
+    }));
+    // No id, same URL and prefix: the stored server, so its unchanged URL is not looked up.
+    $controller->update(restRequest('PUT', '/settings', ['toolkits.mcp_servers' => [['url' => 'https://mcp.example.com/mcp', 'prefix' => 'trk']]]));
+    expect($asked)->toBe([])->and($this->written['toolkits.mcp_servers'][0]['id'])->toBe('trk');
+});

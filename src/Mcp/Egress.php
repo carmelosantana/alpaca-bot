@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace AlpacaBot\Mcp;
 
-use AlpacaBot\Toolkit\AddressPin;
 use AlpacaBot\Toolkit\AddressRefused;
 use AlpacaBot\Vendor\Symfony\Component\HttpClient\HttpClient;
 use AlpacaBot\Vendor\Symfony\Contracts\HttpClient\HttpClientInterface;
@@ -25,14 +24,16 @@ use AlpacaBot\Vendor\Symfony\Contracts\HttpClient\HttpClientInterface;
  * otherwise (vendor-prefixed HttpClient.php:31-66), and both honour `resolve` (CurlHttpClient.php:188-204,
  * NativeHttpClient.php:191-192). The site's own host has no exemption here, unlike web_fetch: an
  * MCP server is an address an administrator typed, and an admin who means a private one opts it
- * in through core's `http_request_host_is_external`, as for any plugin.
+ * in with a listener of the site's own on core's `http_request_host_is_external`. The check is
+ * AddressCheck::resolve(), which takes core's own listeners on that filter out while it runs
+ * (AddressCheck says which and why); AddressPin::resolve() alone would let them through.
  *
  * @since 0.6.0
  */
 final class Egress
 {
     /**
-     * @param null|\Closure(string, string): list<string> $resolve   the address check, host and URL in, every checked address out, AddressRefused when refused; AddressPin::resolve() by default
+     * @param null|\Closure(string, string): list<string> $resolve   the address check, host and URL in, every checked address out, AddressRefused when refused; AddressCheck::resolve() by default
      * @param HttpClientInterface|null                    $transport the client the pin is laid over; HttpClient::create() by default, a test hands in Symfony's MockHttpClient
      */
     public function __construct(private ?\Closure $resolve = null, private ?HttpClientInterface $transport = null) {}
@@ -63,7 +64,7 @@ final class Egress
         // list would mean a `resolve` option Symfony does not have; the alternative would be
         // writing CURLOPT_RESOLVE under Symfony's client, which only its Curl transport has and
         // which would be a pin the Native transport silently does not carry.
-        $ip = ($this->resolve ?? AddressPin::resolve(...))($host, $server->url)[0];
+        $ip = ($this->resolve ?? static fn(string $host, string $url): array => AddressCheck::resolve($host, $url))($host, $server->url)[0];
         return new PinnedHttpClient($this->transport ?? HttpClient::create(), $host, $ip, $server->timeout, $server->maxBytes);
     }
 }

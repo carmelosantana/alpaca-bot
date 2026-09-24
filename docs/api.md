@@ -535,24 +535,34 @@ Rules worth knowing before you write:
 
   - `url` must be `https` with a host, or the row is dropped. The address is checked on the way
     in for every server whose URL is new or changed: a private, loopback, link-local or other
-    special-purpose address, or a name that resolves to one, is refused (the address rule
-    `web_fetch` uses, without its exemption for the site's own host), and the PUT answers `400 alpaca_bot_mcp_address` naming the URL and why, and writes
-    nothing, the other keys of the PUT included. It is checked again before any connection is
-    made to the server. A connection to an MCP server never goes through a proxy, neither
-    WordPress's (`WP_PROXY_HOST`) nor one set in the server's environment, so a site that must
-    reach the internet through a proxy cannot reach one.
+    special-purpose address, or a name that resolves to one, is refused, and the PUT answers
+    `400 alpaca_bot_mcp_address` naming the URL and why, and writes nothing, the other keys of
+    the PUT included. It is the address rule `web_fetch` uses without that tool's exemptions:
+    core's own `http_request_host_is_external` listeners, which let through the site's own host,
+    every `allowed_redirect_hosts` host and, on multisite, every domain of the network, are not
+    asked. A listener the site adds to `http_request_host_is_external` is, and returning `true`
+    for a host is how a private server is let in. A connection to an MCP server never goes
+    through a proxy, neither WordPress's (`WP_PROXY_HOST`) nor one set in the server's
+    environment, so a site that must reach the internet through a proxy cannot reach one.
   - `prefix` names the server's tools for the model, `<prefix>__<tool>`: a lowercase letter, then
     up to 15 of `[a-z0-9_]`, unique in the list, and never `ability`. A row without one is
     dropped.
   - `id` is what the server is known by: its `access.mcp` entry, its capability filter
     `alpaca_bot/capability/mcp/<id>`, its header value. A lowercase letter, then up to 23 of
-    `[a-z0-9_]`. Send a stored server's `id` back with its row to keep it; a row without one is
-    a new server, given an id made from its prefix, never one a stored server has.
+    `[a-z0-9_]`. Send a stored server's `id` back with its row to keep it. A row without one is
+    that stored server when its URL and prefix are the server's and no row of the PUT names the
+    server's id, so a client that writes its servers without ids can send the same body again
+    and keep them; any other row without one is a new server, given an id made from its prefix,
+    never one a stored server has.
   - `header_name` and `header_value` are one static header sent with every request, typically
     `Authorization` and `Bearer …`. The value has the key's three spellings (`""` clears it,
     `"••••"` keeps what is stored, any other string replaces it) with CR, LF and NUL removed,
-    except that a new server has nothing stored, so `"••••"` there means none. The value is not
-    kept in `alpaca_bot_settings`, which WordPress loads on every request, but in
+    except that `"••••"` keeps nothing for a new server, which has nothing stored, or for a
+    stored server whose URL now has another scheme, host or port. The value is not sent to an
+    address it was not set for, so a server moved to another host needs its value sent again; a
+    new path on the same scheme, host and port keeps it. When `"••••"` kept nothing for that
+    reason, the reply names those servers' ids, comma-separated, in an `X-Alpaca-Bot-Mcp-Cleared`
+    header, and their rows read `""`. The value is not kept in `alpaca_bot_settings`, which WordPress loads on every request, but in
     `alpaca_bot_mcp_secrets`, which it does not; the row holds `"••••"` or `""`.
   - `timeout` (1-120 seconds, default 30) and `max_bytes` (1024-8388608, default 1048576) bound
     one call.

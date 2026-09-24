@@ -100,8 +100,9 @@ final class Plugin
         add_action('add_option_' . self::OPTION, function (): void {
             delete_transient(Provider\ModelCatalog::TRANSIENT);
         });
-        // An MCP server's header value is taken out of its row on every write of the option,
-        // whoever makes it (Mcp\ServerSettings says why that is a filter). The settings page and
+        // An MCP server's header value is taken out of its row on every update_option() of the
+        // option, whoever calls it (Mcp\ServerSettings says why that is a filter, and what
+        // add_option() on its own does instead). The settings page and
         // the REST route are handed this instance for the address check they run before a write.
         $servers = new Mcp\ServerSettings();
         $this->set(Mcp\ServerSettings::class, $servers);

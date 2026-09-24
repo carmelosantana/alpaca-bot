@@ -72,8 +72,10 @@ final class Secrets
     /**
      * A `toolkits.mcp_servers` row's header value with the mask swapped for the value kept under
      * the row's id: what a caller hands ServerConfig::fromSettings() in the row's place. '' stays
-     * '', and a value the row carries itself is that value: Store's memo holds a posted row as it
-     * was posted until the request ends, while the option holds the mask.
+     * '', and a value the row carries itself is that value. A row carries one only when it was
+     * written round Mcp\ServerSettings (add_option() on its own, a hand edit, a write while the
+     * plugin was inactive) or handed to a Store built with its settings in hand; Store's memo
+     * after a write holds what the filter left, the mask.
      *
      * @param array<string, mixed> $row
      */

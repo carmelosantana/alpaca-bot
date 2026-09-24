@@ -362,7 +362,7 @@ it('never makes an id the stored list holds, and lets a row that names one keep 
     $rows = Schema::sanitizeMcpServers([
         ['url' => 'https://a.example.com/mcp', 'prefix' => 'trk'],
         ['id' => 'gh', 'url' => 'https://b.example.com/mcp', 'prefix' => 'gh'],
-    ], ['trk', 'gh', 'trk_2']);
+    ], [['id' => 'trk', 'url' => 'https://gone.example.com/mcp', 'prefix' => 'trk'], ['id' => 'gh'], ['id' => 'trk_2']]);
     expect(array_column($rows, 'id'))->toBe(['trk_3', 'gh']);
     $stored = ['toolkits.mcp_servers' => [['id' => 'trk', 'url' => 'https://gone.example.com/mcp', 'prefix' => 'trk']]];
     expect(array_column(Schema::sanitize(['toolkits.mcp_servers' => [['url' => 'https://new.example.com/mcp', 'prefix' => 'trk']]], $stored)['toolkits.mcp_servers'], 'id'))->toBe(['trk_2'])
@@ -449,4 +449,23 @@ it('names a server id by one rule, anchored at the very end', function (): void 
         ->and(Schema::isMcpId('A'))->toBeFalse()
         ->and(Schema::isMcpId(12))->toBeFalse()
         ->and(Schema::isMcpId(''))->toBeFalse();
+});
+
+// m-4: a client that writes its servers as configuration, without ids, sends the same body every
+// time. A row with no id whose URL and prefix are a stored server's, where that server's id is not
+// posted by any other row, is that server, so the id stays put from one PUT to the next rather than
+// flipping to `trk_2` and back (and the Access entry with it). A stored server whose id the post
+// does name (the Tools tab posts it, a ticked `remove` included) is never adopted this way.
+it('reads a row with no id as the stored server with the same URL and prefix, when the post names that id nowhere', function (): void {
+    $stored = ['toolkits.mcp_servers' => [['id' => 'trk', 'url' => 'https://mcp.example.com/mcp', 'prefix' => 'trk']]];
+    $same = ['toolkits.mcp_servers' => [['url' => 'https://mcp.example.com/mcp', 'prefix' => 'trk']]];
+    $current = $stored;
+    foreach ([1, 2, 3, 4] as $put) {
+        $current = Schema::sanitize($same, $current);
+        expect(array_column($current['toolkits.mcp_servers'], 'id'))->toBe(['trk'], "PUT {$put}");
+    }
+    // Another URL under that prefix is another server.
+    expect(array_column(Schema::sanitize(['toolkits.mcp_servers' => [['url' => 'https://other.example.com/mcp', 'prefix' => 'trk']]], $stored)['toolkits.mcp_servers'], 'id'))->toBe(['trk_2'])
+        // The post removes trk by id and adds the same URL and prefix: that is a new server.
+        ->and(array_column(Schema::sanitize(['toolkits.mcp_servers' => [['id' => 'trk', 'url' => 'https://mcp.example.com/mcp', 'prefix' => 'trk', 'remove' => '1'], ['url' => 'https://mcp.example.com/mcp', 'prefix' => 'trk']]], $stored)['toolkits.mcp_servers'], 'id'))->toBe(['trk_2']);
 });

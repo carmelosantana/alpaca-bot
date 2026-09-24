@@ -139,11 +139,12 @@ it('drops an access entry whose server is gone, so a later server cannot inherit
     expect($value['access.mcp'])->toBe(['trk' => 'edit_posts']);
 });
 
-// The drop above only closes the gap between two writes. In one write that removes a server and
-// adds another under the same id, the old entry is still in the map (a Tools-tab save posts no
-// access.mcp, so the stored map is kept) and the id is listed again. An entry for a new id that
-// is the one stored is carried, not chosen, and goes; one the write chose for it stays.
-it('does not let a new server inherit the entry of a server removed in the same write', function (): void {
+// The option can hold an access.mcp entry for an id its own list does not have only when it was
+// written without this filter (add_option() alone, a hand edit, a write while the plugin was
+// inactive). A new server listed under that id is not handed the entry: one identical to the
+// stored entry was carried, not chosen, and goes; one the write chose for it stays. ($old below is
+// built that way by hand: server `was` listed, an entry for `trk`.)
+it('does not hand a new server an entry the option held for an id its list did not have', function (): void {
     $stored = [];
     mcpSecretsIn($stored);
     $old = ['toolkits.mcp_servers' => [mcpRow()], 'access.mcp' => ['trk' => 'read']];
@@ -201,4 +202,78 @@ it('refuses a private literal, localhost, an IPv6 literal and a name that resolv
 
 it('uses AddressPin when no resolver is handed in', function (): void {
     expect((new ServerSettings())->refusals([mcpRow(['url' => 'https://127.0.0.1/mcp'])], []))->toHaveKey(0);
+});
+
+// R76: the mask keeps a stored value only for the origin it was set for. A user who may write
+// the settings but not read them (the `settings.write` row lowered) could otherwise post a stored
+// server's id, a URL of their own and the mask, and have the administrator's token sent to their
+// host. So a posted MASK keeps the value only when scheme, host and port are the stored row's;
+// a path is not part of it. A value posted with the new origin is stored as any value is.
+it('keeps a masked value only when the scheme, host and port are the stored ones', function (string $url, bool $kept): void {
+    $stored = [Secrets::OPTION => ['trk' => 'Bearer t']];
+    mcpSecretsIn($stored);
+    $value = (new ServerSettings())->beforeSave(
+        ['toolkits.mcp_servers' => [mcpRow(['url' => $url])]],
+        ['toolkits.mcp_servers' => [mcpRow(['url' => 'https://mcp.example.com/mcp'])]],
+    );
+    expect($value['toolkits.mcp_servers'][0]['header_value'])->toBe($kept ? Schema::MASK : '')
+        ->and($stored[Secrets::OPTION] ?? [])->toBe($kept ? ['trk' => 'Bearer t'] : []);
+})->with([
+    'the host changed' => ['https://steal.example.net/mcp', false],
+    'the port changed' => ['https://mcp.example.com:8443/mcp', false],
+    'the scheme changed' => ['http://mcp.example.com/mcp', false],
+    'a subdomain' => ['https://evil.mcp.example.com/mcp', false],
+    'only the path changed' => ['https://mcp.example.com/v2/mcp?x=1', true],
+    'the default port written out' => ['https://mcp.example.com:443/mcp', true],
+    'the host in capitals' => ['https://MCP.Example.COM/mcp', true],
+]);
+
+it('stores a value posted with a new origin, as any value is', function (): void {
+    $stored = [Secrets::OPTION => ['trk' => 'Bearer t']];
+    mcpSecretsIn($stored);
+    $value = (new ServerSettings())->beforeSave(
+        ['toolkits.mcp_servers' => [mcpRow(['url' => 'https://moved.example.net/mcp', 'header_value' => 'Bearer new'])]],
+        ['toolkits.mcp_servers' => [mcpRow()]],
+    );
+    expect($value['toolkits.mcp_servers'][0]['header_value'])->toBe(Schema::MASK)
+        ->and($stored[Secrets::OPTION])->toBe(['trk' => 'Bearer new']);
+});
+
+// The page and the REST route tell the person saving; the filter itself has nowhere to put it.
+it('names the stored servers whose value a posted mask would drop because the origin changed', function (): void {
+    $stored = [mcpRow(), mcpRow(['id' => 'gh', 'prefix' => 'gh', 'url' => 'https://gh.example.com/mcp']), mcpRow(['id' => 'kept', 'prefix' => 'kept', 'url' => 'https://kept.example.com/a'])];
+    $rows = [
+        mcpRow(['url' => 'https://other.example.com/mcp']),
+        mcpRow(['id' => 'gh', 'prefix' => 'gh', 'url' => 'https://gh.example.com:444/mcp', 'header_value' => 'Bearer typed']),
+        mcpRow(['id' => 'kept', 'prefix' => 'kept', 'url' => 'https://kept.example.com/b']),
+        mcpRow(['id' => 'new', 'prefix' => 'new', 'url' => 'https://new.example.com/mcp']),
+    ];
+    expect((new ServerSettings())->clearedByMove($rows, $stored))->toBe(['trk']);
+});
+
+// m-5: core's add_option() runs the settings page's sanitize callback a second time on a site's
+// first save, with nothing stored yet, so every row reads as new. A URL that passed once in the
+// request is not looked up again, so the second pass cannot refuse what the first let through
+// after its value was already kept.
+it('looks up a URL that passed once in a request no more', function (): void {
+    $asked = 0;
+    $settings = new ServerSettings(static function (string $host, string $url) use (&$asked): array {
+        ++$asked;
+        return ['93.184.216.34'];
+    });
+    $rows = [mcpRow(['url' => 'https://once.example.com/mcp'])];
+    expect($settings->refusals($rows, []))->toBe([])
+        ->and($settings->refusals($rows, []))->toBe([])
+        ->and($asked)->toBe(1);
+});
+
+it('asks again for a URL that was refused', function (): void {
+    $asked = 0;
+    $settings = new ServerSettings(static function (string $host, string $url) use (&$asked): array {
+        ++$asked;
+        throw new AddressRefused('no.');
+    });
+    $rows = [mcpRow(['url' => 'https://no.example.com/mcp'])];
+    $settings->refusals($rows, []);
+    expect($settings->refusals($rows, []))->toBe([0 => 'no.'])->and($asked)->toBe(2);
 });

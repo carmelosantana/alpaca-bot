@@ -69,9 +69,18 @@ use AlpacaBot\Settings\Store;
  * reply too.
  *
  * A PUT carrying `toolkits.mcp_servers` has the address of each server whose URL is new or
- * changed checked first (Mcp\ServerSettings::refusals()). When one fails, the reply is a 400
- * with the code `alpaca_bot_mcp_address`, naming each refused URL and why, and nothing is written,
- * the other keys of the same PUT included. The message never carries a header value.
+ * changed checked first (Mcp\ServerSettings::refusals()), each row under the id the write will
+ * give it. When one fails, the reply is a 400 with the code `alpaca_bot_mcp_address`, naming each
+ * refused URL and why, and nothing is written, the other keys of the same PUT included. The
+ * message never carries a header value.
+ *
+ * A stored server whose URL the PUT moves to another scheme, host or port loses its header value
+ * when the PUT sends the mask for it (Mcp\ServerSettings says why). The write is not refused for
+ * that: its row reads back '' like any server with no value, and the reply carries
+ * `X-Alpaca-Bot-Mcp-Cleared`, the ids of those servers comma-separated, because '' alone cannot
+ * tell a value just dropped from one never set. A header rather than an error or a body key keeps
+ * the body the settings array and nothing else, as `X-Alpaca-Bot-Default-Model` does for
+ * `GET /models`.
  *
  * The keys are dotted (`models.temperature`) and read from get_params(), core's merge of every
  * source; in practice only a JSON body can carry them. PHP rewrites a dot in a top-level
@@ -192,9 +201,11 @@ final class SettingsController extends Controller
         if ($input === []) {
             return Errors::badRequest(__('No settings were sent. Send a JSON body of dotted keys, e.g. {"models.temperature": 0.7}.', 'alpaca-bot'));
         }
+        $cleared = [];
         if (array_key_exists('toolkits.mcp_servers', $input)) {
-            $rows = Schema::sanitizeMcpServers($input['toolkits.mcp_servers']);
-            $refused = $this->servers->refusals($rows, $this->store->get('toolkits.mcp_servers'));
+            $stored = $this->store->get('toolkits.mcp_servers');
+            $rows = Schema::sanitizeMcpServers($input['toolkits.mcp_servers'], $stored);
+            $refused = $this->servers->refusals($rows, $stored);
             if ($refused !== []) {
                 $reasons = [];
                 foreach ($refused as $i => $reason) {
@@ -203,9 +214,14 @@ final class SettingsController extends Controller
                 }
                 return Errors::badRequest(__('Nothing was saved: an MCP server\'s address did not pass the check.', 'alpaca-bot') . ' ' . implode(' ', $reasons), 'alpaca_bot_mcp_address');
             }
+            $cleared = $this->servers->clearedByMove($rows, $stored);
         }
         $this->store->replace($input);
-        return new \WP_REST_Response($this->masked($this->store->all()));
+        $response = new \WP_REST_Response($this->masked($this->store->all()));
+        if ($cleared !== []) {
+            $response->header('X-Alpaca-Bot-Mcp-Cleared', implode(',', $cleared));
+        }
+        return $response;
     }
 
     /**
