@@ -43,14 +43,16 @@ use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Tool\ToolResult;
  * wp_get_ability() for the same reason, so an ability unregistered in between is refused rather
  * than run. Alpaca Bot's own `alpaca-bot/*` abilities are never offered, whatever the stored
  * list says: they are doors onto this plugin's own turns and toolkits (Abilities\Register), and
- * the model is not handed them as tools. That is the whole of the limit. The allowlist decides
- * which abilities the model may call directly; an allowlisted ability that runs other abilities
- * itself (a "run any ability" tool) reaches whatever those can reach, Alpaca Bot's own included,
- * so through it a turn can start another. An administrator should allowlist such an ability only
- * knowing that. Schema::sanitizeAbilities() refuses them on
- * the way into the option, and listed() and allowed() drop them on the way out, because what
- * Store hands back is what is stored, not what the schema would make of it (Registry's docblock
- * makes the same point about `toolkits.enabled`). And allowlisted abilities that share a tool
+ * the model is not handed them as tools. Schema::sanitizeAbilities() refuses them on the way
+ * into the option, and listed() and allowed() drop them on the way out, because what Store
+ * hands back is what is stored, not what the schema would make of it (Registry's docblock makes
+ * the same point about `toolkits.enabled`). That is all this class does about them. The
+ * allowlist decides which abilities the model may call directly; an allowlisted ability that
+ * runs other abilities itself (a "run any ability" tool) reaches whatever those can reach,
+ * Alpaca Bot's own included, and an administrator should allowlist such an ability only knowing
+ * that. What keeps a turn from starting another through one is not here: `alpaca-bot/chat` and
+ * `alpaca-bot/summarize` refuse while a turn is running (Abilities\Register), and run() passes
+ * their refusal's message on as the tool's error. And allowlisted abilities that share a tool
  * name (collisions(); ToolName says how that can happen) are all left out, since the model would
  * have one name for more than one tool; the Tools tab marks each of them.
  *
