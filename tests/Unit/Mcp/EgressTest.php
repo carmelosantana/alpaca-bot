@@ -48,8 +48,9 @@ it('pins the connection to the address the check passed, turns redirects off, an
 // Which addresses go into `resolve` depends on the transport under the pin. Symfony's Curl client
 // writes the value into CURLOPT_RESOLVE as it is ("$host:$port:$ip", CurlHttpClient.php:198-199),
 // so a comma-joined list there is libcurl's own `host:port:addr[,addr]` form; its Native client
-// connects to the value as one address (NativeHttpClient.php:341-369), so a list there would be a
-// name it cannot resolve. MockHttpClient is neither, and gets what Native gets: the first alone.
+// connects to the value as one address (NativeHttpClient.php:344, :371), so a list there would be a
+// name it cannot resolve. A MockHttpClient handed in is neither, and gets what Native gets: the
+// first alone.
 it('pins the first of the checked addresses alone on a transport that is not Symfony\'s Curl client', function (): void {
     $client = egressOver($seen, new MockResponse('{}'), static fn(string $host, string $url): array => ['93.184.216.34', '2606:2800:220:1::1']);
     $client->request('POST', 'https://mcp.example.test/mcp')->getContent();
