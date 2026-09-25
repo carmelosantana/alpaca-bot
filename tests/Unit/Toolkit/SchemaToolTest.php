@@ -28,12 +28,14 @@ it('gives an object schema with no properties an empty object for them, which Op
     expect(json_encode($declared))->toBe('{"type":"object","properties":{}}');
 });
 
-// Only the top level is repaired. A nested empty object still goes out as a JSON array, and this
-// pins that it does, so the day it stops is noticed.
-it('repairs only the top-level properties, and leaves a nested empty one as it came', function (): void {
-    $schema = ['type' => 'object', 'properties' => ['inner' => ['type' => 'object', 'properties' => []]]];
+// json_decode(..., true) makes one PHP value of `{}` and `[]`, at any depth, so an empty object
+// nested in the schema (an inner `properties`, `items`, `additionalProperties`) would go out as a
+// JSON array; php-agents' JsonSchemaRepair puts back each one whose keyword needs an object, and
+// leaves the keywords whose `[]` may really be an empty list (`enum`, `required`, `default`).
+it('gives every nested keyword that needs an object an empty object, and leaves empty lists as they came', function (): void {
+    $schema = json_decode('{"type":"object","properties":{"inner":{"type":"object","properties":{},"required":[]},"tags":{"type":"array","items":{}},"meta":{"type":"object","additionalProperties":{}},"pick":{"enum":[],"default":[]}}}', true);
     $params = (new SchemaTool('t', 'd', $schema, static fn(array $a): ToolResult => ToolResult::success('')))->toFunctionSchema()['function']['parameters'];
-    expect(json_encode($params))->toBe('{"type":"object","properties":{"inner":{"type":"object","properties":[]}}}');
+    expect(json_encode($params))->toBe('{"type":"object","properties":{"inner":{"type":"object","properties":{},"required":[]},"tags":{"type":"array","items":{}},"meta":{"type":"object","additionalProperties":{}},"pick":{"enum":[],"default":[]}}}');
 });
 
 // A tool result is text the model reads and may repeat, and an exception's message can quote a

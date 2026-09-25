@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace AlpacaBot\Toolkit;
 
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Contract\ToolInterface;
+use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Schema\JsonSchemaRepair;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Tool\ToolResult;
 
 /**
@@ -19,13 +20,17 @@ use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Tool\ToolResult;
  * rest_validate_value_from_schema() (WP 7.1 class-wp-ability.php:519-536). So this implements
  * ToolInterface directly:
  *
- * - toFunctionSchema() returns the schema as given, with one repair: an object schema whose
- *   `properties` is missing or an empty PHP array gets an empty object for it, because an empty
- *   PHP array encodes as the JSON array `[]`. Only that top-level `properties` is repaired. An
- *   empty object nested deeper (an inner `properties`, `items`, `additionalProperties`) still
- *   encodes as `[]`; SchemaToolTest pins that it does. Nothing else in the schema is touched
- *   here: its own text (a property's description, a title, an enum, a default) is neither
- *   cleaned nor capped by Alpaca Bot, and does not go through describe().
+ * - toFunctionSchema() returns the schema as given, with its empty objects put back. A schema
+ *   decoded with json_decode(..., true) holds `{}` as an empty PHP array, which encodes as the
+ *   JSON array `[]`, and providers refuse `"properties": []`. So an object schema (one whose
+ *   `type` is `object` or missing) is given `type: object` and, when it has none, an empty
+ *   `properties`; then php-agents' Schema\JsonSchemaRepair::repair() turns each array back into
+ *   an object at the keywords whose value must be one (`properties`, `items`,
+ *   `additionalProperties` and the rest its docblock lists), at any depth, and leaves the
+ *   keywords whose `[]` may be an empty list (`enum`, `required`, `default`) alone. repair()
+ *   only fires on a keyword it finds, which is why `properties` is added first. Nothing else in
+ *   the schema is touched here: its own text (a property's description, a title, an enum, a
+ *   default) is neither cleaned nor capped by Alpaca Bot, and does not go through describe().
  * - parameters() returns []. Its one caller in the library is SystemPrompt::withTools()
  *   (Prompt/SystemPrompt.php:76), which prints a "Parameters:" block only for a non-empty list,
  *   and which the agent loop this plugin runs does not call (AbstractAgent::buildSystemPrompt()
@@ -146,11 +151,9 @@ final class SchemaTool implements ToolInterface
         $schema = $this->schema;
         if (($schema['type'] ?? 'object') === 'object') {
             $schema['type'] = 'object';
-            if (($schema['properties'] ?? []) === []) {
-                $schema['properties'] = new \stdClass();
-            }
+            $schema['properties'] ??= [];
         }
-        return ['type' => 'function', 'function' => ['name' => $this->name, 'description' => $this->description, 'parameters' => $schema]];
+        return ['type' => 'function', 'function' => ['name' => $this->name, 'description' => $this->description, 'parameters' => JsonSchemaRepair::repair($schema)]];
     }
 
     public static function describe(string $untrusted): string
