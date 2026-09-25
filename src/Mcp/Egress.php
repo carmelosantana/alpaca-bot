@@ -23,8 +23,8 @@ use AlpacaBot\Vendor\Symfony\Contracts\HttpClient\HttpClientInterface;
  * often a client is built, and how long it is kept, is the caller's. PinnedHttpClient says
  * what else it holds the MCP client to.
  *
- * How many of the checked addresses are pinned is the transport's to decide, because `resolve`
- * maps a host to one string and each transport reads that string its own way:
+ * How many of the checked addresses are pinned depends on the transport, because `resolve` maps
+ * a host to one string and each transport reads that string its own way:
  *
  * - Symfony's Curl client writes it into CURLOPT_RESOLVE as `host:port:<string>`
  *   (CurlHttpClient.php:198-199), so a comma-joined list is libcurl's own `addr[,addr]` form, and
@@ -39,15 +39,19 @@ use AlpacaBot\Vendor\Symfony\Contracts\HttpClient\HttpClientInterface;
  *   What that costs is what AddressPin says handing back only the first cost web_fetch: the
  *   first address is an A record whenever the name has one, so over Native an IPv6-only server
  *   cannot reach a dual-stack MCP server.
- * - A transport handed to the constructor is handed the first alone as well; that is a test's
- *   seam, and the plugin hands none (Plugin builds `new Mcp\Egress()`).
+ * - Any other transport handed to the constructor (a test's MockHttpClient) is handed the first
+ *   alone as well. Handing one in is a test's seam; the plugin hands none (Plugin and
+ *   ClientFactory build `new Mcp\Egress()`).
  *
- * The client under the pin is HttpClient::create() (vendor-prefixed HttpClient.php:31-66): Curl
- * wherever ext-curl is loaded, except on Windows with none of `curl.cainfo`, `openssl.cafile` or
- * `openssl.capath` set; Native where it is not; and Amp before either where the unprefixed
- * amphp/http-client classes are loaded (HttpClient.php:14, :33-50), which the plugin does not ship
- * and another plugin could. The pin is laid only over the two it can vouch for: anything else
- * create() answers is replaced with a new NativeHttpClient, pinned to the first address. Amp's
+ * The client under the pin is HttpClient::create() (vendor-prefixed HttpClient.php:31-66), which
+ * answers with Curl, Native or Amp. Amp is a candidate only where the unprefixed
+ * amphp/http-client classes are loaded (HttpClient.php:14, :33), which the plugin does not ship
+ * and another plugin could; it is then chosen over Curl when ext-curl is missing, or when PHP's
+ * curl lacks HTTP/2 push or its libcurl HTTP/2 or 7.61 (:34-49), and over Native whenever Curl
+ * is not chosen (:60-62). Curl is chosen where ext-curl is loaded, except on Windows with none
+ * of `curl.cainfo`, `openssl.cafile` or `openssl.capath` set (:52-55), and Native otherwise.
+ * The pin is laid only over the two it can vouch for: anything else create() answers is
+ * replaced with a new NativeHttpClient, pinned to the first address. Amp's
  * client is not one of them, because its resolver does not hold to the map: resolve() looks the
  * name up for real whenever the pinned address's family is not the one asked for
  * (AmpResolver.php:36-43), and query() looks it up for real whenever an address is pinned at all
