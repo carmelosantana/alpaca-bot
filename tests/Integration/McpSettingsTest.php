@@ -641,6 +641,33 @@ final class McpSettingsTest extends TestCase
     }
 
     /**
+     * A header name with no letter in it, over real core: the PUT answers 400 and writes nothing,
+     * and on the page the new row is left out and the screen says a letter is needed. Neither
+     * answers the header value back.
+     */
+    public function test_a_header_name_with_no_letter_is_refused_over_rest_and_on_the_page(): void
+    {
+        $before = get_option(Plugin::OPTION, []);
+        $res = $this->rest('PUT', '/settings', ['toolkits.mcp_servers' => [['url' => self::URL, 'prefix' => 'trk', 'header_name' => '123', 'header_value' => self::SECRET]]]);
+        $this->assertSame(400, $res->get_status());
+        $this->assertSame('alpaca_bot_mcp_row', $res->get_data()['code']);
+        $this->assertStringContainsString('letter', $res->get_data()['data']['rows'][0]['reason']);
+        $this->assertStringNotContainsString(self::SECRET, (string) wp_json_encode($res->get_data()));
+        $this->assertSame($before, get_option(Plugin::OPTION, []));
+
+        $posted = self::formPost($this->page('toolkits'));
+        $posted['toolkits.mcp_servers'][0] = ['url' => self::URL, 'prefix' => 'trk', 'header_name' => '-1', 'header_value' => self::SECRET];
+        $this->save($posted);
+        $this->assertSame([], get_option(Plugin::OPTION)['toolkits.mcp_servers']);
+        $errors = get_settings_errors(Plugin::OPTION);
+        $this->assertSame(['mcp_dropped'], array_column($errors, 'code'));
+        $this->assertStringContainsString(self::URL . ' was not added', $errors[0]['message']);
+        $this->assertStringContainsString('letter', $errors[0]['message']);
+        $this->assertStringNotContainsString(self::SECRET, (string) wp_json_encode($errors));
+        $this->assertSame([], Secrets::all());
+    }
+
+    /**
      * R90: a prefix that ends in `_`, holds `__`, or is the abilities' own is refused over REST, the
      * rule is said, nothing is written, and the Tools tab's input carries the same rule as a pattern.
      */
