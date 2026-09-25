@@ -24,14 +24,15 @@ declare(strict_types=1);
  *   uninstall.php removes no table and no file.
  *
  * What this does not see. A name built into a variable and handed to a call site the map covers
- * is trusted to keep the shape the map says; there are five such sites, and
+ * is trusted to keep the shape the map says; there are six such sites, and
  * tests/Integration/UninstallTest.php writes each through the plugin's own code, so a change of
  * shape leaves a row it finds: RateLimit's `$key` (RateLimit::hit()), UsageMeter's `$key`
  * (UsageMeter::record() and monthSummary()), Shortcodes\Chat's `$key` (Chat::cacheKey()),
- * Rest\ChatController's `self::STREAM_TRANSIENT . $token` (a POST /chat with `stream`) and
- * Mcp\Drift's `self::PREFIX . $id` (Drift::set()). The last is only as good as the id the test
- * passes: a new id shape through Drift::set() is caught only if that test writes one, and the
- * ids are bounded by Settings\Schema's MCP_ID. A write through a function or method not on these
+ * Rest\ChatController's `self::STREAM_TRANSIENT . $token` (a POST /chat with `stream`),
+ * Mcp\Drift's `self::PREFIX . $id` (Drift::set()) and Mcp\TransientSessions's `self::name($key)`
+ * (TransientSessions::save()). Drift's is only as good as the id the test passes: a new id shape
+ * through Drift::set() is caught only if that test writes one, and the ids are bounded by
+ * Settings\Schema's MCP_ID. A write through a function or method not on these
  * lists is not seen, and nor is meta or a term handed to wp_insert_post() or wp_update_post() in
  * `meta_input` or `tax_input`: those two are read for `post_type` only.
  */
@@ -80,6 +81,7 @@ const UNINSTALL_WRITE_MAP = [
     'RateLimit.php|set_transient|$key' => 'alpaca_bot_rl_',
     'Shortcodes/Chat.php|set_transient|$key' => 'alpaca_bot_shortcode_',
     'Mcp/Drift.php|set_transient|self::PREFIX . $id' => 'alpaca_bot_mcp_drift_',
+    'Mcp/TransientSessions.php|set_transient|self::name($key)' => 'alpaca_bot_mcp_session_',
     'Rest/ChatController.php|set_transient|self::STREAM_TRANSIENT . $token' => 'alpaca_bot_stream_',
     'Settings/Migrate04.php|wp_update_post|wp_slash($update)' => 'chat_history',
     'Toolkit/DraftPostToolkit.php|wp_insert_post|$type' => 'left: a draft of the site\'s own post type, owned by the user who asked for it',

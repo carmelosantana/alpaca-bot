@@ -20,8 +20,8 @@
  *   options 0.4 wrote (one per settings field 0.4.17 had and five older ones, its version
  *   stamp, and its shortcode cache);
  * - transients: the model catalog, and every dynamic one (rate limit windows, usage month
- *   totals, shortcode answers, stream tickets, MCP drift markers, 0.4.17's model list and
- *   shortcode cache);
+ *   totals, shortcode answers, stream tickets, MCP drift markers, MCP sessions, 0.4.17's model
+ *   list and shortcode cache);
  * - posts: every `chat_history` (conversations) and `chat_log` (usage receipts) post in any
  *   status, and all of their post meta, which is where the transcript, the receipt's numbers and
  *   Migrate04's attempts count live; unless another loaded plugin has registered the type (the
@@ -164,6 +164,8 @@ if (!defined('WP_UNINSTALL_PLUGIN')) {
         'alpaca_bot_stream_' => '/^alpaca_bot_stream_[A-Za-z0-9]{32}\z/',
         // Mcp\Drift: an MCP server id, as Settings\Schema's MCP_ID allows it.
         'alpaca_bot_mcp_drift_' => '/^alpaca_bot_mcp_drift_[a-z][a-z0-9_]{0,23}\z/',
+        // Mcp\TransientSessions: an md5 of php-agents' session key.
+        'alpaca_bot_mcp_session_' => '/^alpaca_bot_mcp_session_[0-9a-f]{32}\z/',
         // 0.4.17's shortcode cache kept as a transient.
         'alpaca_bot_cache_' => '/^alpaca_bot_cache_[0-9a-f]{32}\z/',
     ];

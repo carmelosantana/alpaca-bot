@@ -10,6 +10,7 @@ use AlpacaBot\Chat\UsageMeter;
 use AlpacaBot\Chat\UserPrefs;
 use AlpacaBot\Mcp\Drift;
 use AlpacaBot\Mcp\Secrets;
+use AlpacaBot\Mcp\TransientSessions;
 use AlpacaBot\Plugin;
 use AlpacaBot\Provider\ModelCatalog;
 use AlpacaBot\RateLimit;
@@ -18,6 +19,8 @@ use AlpacaBot\Rest\StreamBudget;
 use AlpacaBot\Settings\Migrate04;
 use AlpacaBot\Settings\Store;
 use AlpacaBot\Shortcodes\Chat;
+use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Mcp\McpServer;
+use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Mcp\McpSession;
 
 /**
  * uninstall.php against a real database: one of each thing the plugin stores, written where the
@@ -72,7 +75,8 @@ final class UninstallTest extends TestCase
      */
     private const NEIGHBOUR_TRANSIENTS = [
         'alpaca_bot_models_backup', 'alpaca_bot_rl_backup', 'alpaca_bot_stream_notatoken', 'alpaca_bot_usage_site_2026',
-        'alpaca_bot_mcp_drift_9srv', 'alpaca_bot_shortcode_notahash', 'alpaca_bot_cache_notahash', 'other_plugin_models',
+        'alpaca_bot_mcp_drift_9srv', 'alpaca_bot_mcp_session_notahash', 'alpaca_bot_shortcode_notahash', 'alpaca_bot_cache_notahash',
+        'other_plugin_models',
     ];
 
     private function uninstall(): void
@@ -151,10 +155,12 @@ final class UninstallTest extends TestCase
             $_SERVER['REMOTE_ADDR'] = $address;
         }
 
-        // Transients: the rate limit, drift and stream ones through the code that writes them; the
-        // model catalog under its constant, and the shortcode answer under Chat::cacheKey().
+        // Transients: the rate limit, drift, MCP session and stream ones through the code that
+        // writes them; the model catalog under its constant, and the shortcode answer under
+        // Chat::cacheKey().
         (new RateLimit())->hit($user);
         Drift::set('srv', ['tool_a']);
+        (new TransientSessions())->save((new McpServer(url: 'https://mcp.example.com/mcp'))->sessionKey(), new McpSession(McpServer::PROTOCOL_2025, 'session-uninstall'));
         set_transient(ModelCatalog::TRANSIENT, [['id' => 'fake-model']], 300);
         // The stream ticket through the route that issues it, and the shortcode answer under the
         // key Chat::answer() stores it by, so a change to either name's shape shows up here.
@@ -283,7 +289,7 @@ final class UninstallTest extends TestCase
             }
             $this->assertTransientGone($name);
         }
-        $this->assertGreaterThanOrEqual(10, count($transients), 'rate limit x2, drift, models, stream, shortcode, usage x2, 0.4 models and cache, each with a timeout');
+        $this->assertGreaterThanOrEqual(11, count($transients), 'rate limit x2, drift, MCP session, models, stream, shortcode, usage x2, 0.4 models and cache, each with a timeout');
         // Ours: posts and every row of their meta.
         foreach (['conversation', 'receipt', 'stuck', 'trashed'] as $which) {
             $this->assertFalse($this->postRow($ours[$which]), "$which post is still there");
