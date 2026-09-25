@@ -154,6 +154,21 @@ it('turns a failed call into an error that names the prefix and no host, and sti
     }
 });
 
+// Carry 4: neither the model nor the action is handed anything a failed call chains: the result is
+// the plugin's fixed sentence, whatever the McpUnavailable carries as `previous`.
+it('hands the model and the action nothing of a failed call\'s chained JSON-RPC error', function (): void {
+    $search = new ToolDefinition('search', 'Search.', ['type' => 'object']);
+    $rpc = new AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Mcp\McpRpcException('tools/call', -32603, 'server words SECRETWORDS', ['leak' => 'SECRETDATA']);
+    $client = new FakeClient([$search], ['search' => new McpUnavailable('The MCP server answered with JSON-RPC error -32603.', 0, $rpc)]);
+    $heard = null;
+    Actions\expectDone('alpaca_bot/mcp/called')->once()->whenHappen(static function (string $id, string $tool, array $arguments, int $user, ToolResult $result) use (&$heard): void {
+        $heard = $result;
+    });
+    $result = mcpToolkit($client, ['search' => $search->fingerprint()])->tools()[0]->execute([]);
+    expect(serialize([$result, $heard]))->not->toContain('SECRETWORDS')->not->toContain('SECRETDATA')->not->toContain('-32603')
+        ->and($result->status)->toBe(ToolResultStatus::Error);
+});
+
 it('offers neither copy of a name the listing repeats, even under a pin a save kept without looking', function (): void {
     // View\Settings\McpTools gives a repeated name no box, but a save that never ran Discover
     // posts the stored approvals back as they were, so the pin can outlive the listing change.

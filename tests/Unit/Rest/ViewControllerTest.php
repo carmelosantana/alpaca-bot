@@ -429,6 +429,20 @@ it('answers a server that cannot be listed with the fragment\'s notice, keeping 
         ->and($res->get_data())->toBe('<div class="notice notice-error inline"><p>' . $sentence . '</p></div><input type="hidden" name="alpaca_bot_settings[toolkits.mcp_servers][0][approved][search]" value="' . $fp . '">');
 });
 
+// Carry 4: what the notice prints is the McpUnavailable's own message and nothing it chains. The
+// adapter keeps the library's exception as `previous`, and a JSON-RPC error there carries the
+// server's words and its `data`, unredacted by design.
+it('prints only the failure\'s own message, never what it chains or a JSON-RPC error\'s data', function (): void {
+    Functions\when('current_user_can')->justReturn(true);
+    $rpc = new AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Mcp\McpRpcException('tools/list', -32003, 'server words SECRETWORDS', ['leak' => 'SECRETDATA']);
+    $sentence = 'The MCP server answered with JSON-RPC error -32003.';
+    $html = (string) viewControllerWithMcp(new AlpacaBot\Tests\Integration\FakeClient([], [], new AlpacaBot\Mcp\McpUnavailable($sentence, 0, $rpc)))
+        ->mcpTools(restRequest('GET', '/x', ['id' => 'trk', 'index' => 0]))->get_data();
+    expect($html)->toContain($sentence)
+        ->not->toContain('SECRETWORDS')
+        ->not->toContain('SECRETDATA');
+});
+
 // R81: the message is untrusted: escaped where the notice prints it, and the header
 // value this server is sent is replaced wherever it appears, whole or as the credential after
 // its scheme word, before the message is cut to 500 characters.
