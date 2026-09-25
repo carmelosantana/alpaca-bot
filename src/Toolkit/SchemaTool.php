@@ -22,12 +22,12 @@ use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Tool\ToolResult;
  *
  * - toFunctionSchema() returns the schema as given, with its empty objects put back. A schema
  *   decoded with json_decode(..., true) holds `{}` as an empty PHP array, which encodes as the
- *   JSON array `[]`, and providers refuse `"properties": []`. So an object schema (one whose
+ *   JSON array `[]`, and some providers refuse `"properties": []`. So an object schema (one whose
  *   `type` is `object` or missing) is given `type: object` and, when it has none, an empty
- *   `properties`; then php-agents' Schema\JsonSchemaRepair::repair() turns each array back into
- *   an object at the keywords whose value must be one (`properties`, `items`,
- *   `additionalProperties` and the rest its docblock lists), at any depth, and leaves the
- *   keywords whose `[]` may be an empty list (`enum`, `required`, `default`) alone. repair()
+ *   `properties`; then php-agents' Schema\JsonSchemaRepair::repair() writes an object back
+ *   wherever decoding left an array at a keyword whose value must be an object (`properties`,
+ *   `items`, `additionalProperties` and the rest its docblock lists), at any depth, and leaves
+ *   the keywords whose `[]` may be an empty list (`enum`, `required`, `default`) alone. repair()
  *   only fires on a keyword it finds, which is why `properties` is added first. Nothing else in
  *   the schema is touched here: its own text (a property's description, a title, an enum, a
  *   default) is neither cleaned nor capped by Alpaca Bot, and does not go through describe().
