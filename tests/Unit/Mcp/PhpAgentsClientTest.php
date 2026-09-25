@@ -131,6 +131,7 @@ it('sends the one header the row names, and none when its name or its value is e
     'a name and a value' => ['X-Api-Key', 'key-4410', ['X-Api-Key: key-4410']],
     'no name' => ['', 'key-4410', []],
     'no value' => ['X-Api-Key', '', []],
+    'digits PHP keeps as a string key' => ['0123', 'key-4410', ['0123: key-4410']],
 ]);
 
 // PHP turns an array key that is a whole number into an int, and Symfony reads an int-keyed

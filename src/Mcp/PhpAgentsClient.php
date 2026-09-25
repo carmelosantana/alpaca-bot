@@ -49,9 +49,10 @@ final class PhpAgentsClient implements ClientInterface
 {
     /**
      * The library's client for `$server`. The one header the row names is sent only when both its
-     * name and its value are set. A name that is a whole number is refused here, before anything
-     * is built: PHP makes such an array key an int, and Symfony's client reads an int-keyed header
-     * as a whole `Name: value` line, so the value would be sent as the header's name.
+     * name and its value are set. A name PHP would make an int array key (a whole number written
+     * plainly: `123`, `-1`, not `0123`) is refused here, before anything is built: Symfony's client
+     * reads an int-keyed header as a whole `Name: value` line, so the value would be sent as the
+     * header's name.
      *
      * @throws McpUnavailable when the header name is a whole number
      * @throws \AlpacaBot\Toolkit\AddressRefused when Egress refuses the address
@@ -60,11 +61,12 @@ final class PhpAgentsClient implements ClientInterface
     {
         $headers = [];
         if ($server->headerName !== '' && $server->headerValue !== '') {
-            $headers[$server->headerName] = $server->headerValue;
-            if (!is_string(array_key_first($headers))) {
+            // Exactly the strings PHP turns into an int key: "123" and "-1", not "0123" or "-0".
+            if ((string) (int) $server->headerName === $server->headerName) {
                 /* translators: %s: the header name an administrator gave an MCP server, e.g. 123 */
                 throw new McpUnavailable(sprintf(__('This server was not contacted: its header name, %s, is a whole number, and the MCP client would send the header\'s value in the name\'s place. Give the header a name with a letter in it.', 'alpaca-bot'), $server->headerName));
             }
+            $headers[$server->headerName] = $server->headerValue;
         }
         // Named arguments: the library only ever adds trailing optional parameters, and
         // protocolVersion already sits between maxResponseBytes and maxResultBytes.
