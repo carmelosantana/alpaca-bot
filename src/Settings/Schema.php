@@ -602,7 +602,7 @@ final class Schema
         $name = $row['header_name'] ?? '';
         return match (true) {
             $url !== null => $url,
-            is_int($name) || is_string($name) && preg_match('/^[0-9-]{1,64}\z/', $name) === 1 => 'header',
+            is_int($name) || (is_string($name) && preg_match('/^[0-9-]{1,64}\z/', $name) === 1) => 'header',
             !self::isMcpPrefix($prefix) => 'prefix',
             in_array($prefix, $prefixes, true) => 'taken',
             default => null,
