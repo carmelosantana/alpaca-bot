@@ -107,6 +107,19 @@ it('keeps a server\'s value by its id when the row is renamed, re-prefixed or mo
     expect($stored[Secrets::OPTION])->toBe(['gh' => 'Bearer g', 'trk' => 'Bearer t', 'new' => 'Bearer n']);
 });
 
+// A header value reaches php-agents as a string, so the secrets option holds nothing else. A row
+// written round the schema can post a number, an array or a boolean; each reads as the mask does,
+// keeping the stored string for a stored server and nothing for a new one.
+it('keeps only strings in the secrets option, whatever a row posted as its header value', function (mixed $posted): void {
+    $stored = [Secrets::OPTION => ['trk' => 'Bearer t']];
+    mcpSecretsIn($stored);
+    (new ServerSettings())->beforeSave(
+        ['toolkits.mcp_servers' => [mcpRow(['header_value' => $posted]), mcpRow(['id' => 'new', 'prefix' => 'new', 'header_value' => $posted])]],
+        ['toolkits.mcp_servers' => [mcpRow()]],
+    );
+    expect($stored[Secrets::OPTION])->toBe(['trk' => 'Bearer t']);
+})->with([12345, 1.5, true, [['Bearer x']]]);
+
 it('writes the secrets option only when what it holds changes', function (): void {
     $stored = [Secrets::OPTION => ['trk' => 'Bearer t']];
     mcpSecretsIn($stored);
