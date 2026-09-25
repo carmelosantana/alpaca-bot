@@ -40,7 +40,7 @@ use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Tool\ToolResult;
  *
  * Everything else is the library's: which protocol version a server speaks, the session, how
  * content blocks become a result, a retry. over() builds its objects from a ServerConfig, through
- * Egress for the HTTP client, so every request the library makes is held to the address Egress
+ * Egress for the HTTP client, so every request the library makes is held to the addresses Egress
  * checked and pinned.
  *
  * @since 0.6.0

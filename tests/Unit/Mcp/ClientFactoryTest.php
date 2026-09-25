@@ -93,8 +93,9 @@ it('keeps the server out of the trace when the closure hands back something that
         ->and($frames[0]['args'][0] ?? null)->toBeInstanceOf(SensitiveParameterValue::class);
 });
 
-// The default build's own frames hold the server too: the closure's and PhpAgentsClient::over()'s.
-// Egress refusing the address throws from under both, so the trace passes through each of them.
+// The default build's own frames hold the server too: the closure's, PhpAgentsClient::over()'s
+// and Egress::client()'s. Egress refusing the address throws from under all three, so the trace
+// passes through each of them.
 it('keeps the server out of the default build\'s frames when building fails', function (): void {
     $before = (string) ini_get('zend.exception_ignore_args');
     ini_set('zend.exception_ignore_args', '0');
@@ -109,9 +110,11 @@ it('keeps the server out of the default build\'s frames when building fails', fu
         ini_set('zend.exception_ignore_args', $before);
     }
     $frames = array_values(array_filter($thrown?->getTrace() ?? [], static fn(array $frame): bool => ($frame['class'] ?? '') === PhpAgentsClient::class && $frame['function'] === 'over'
+        || ($frame['class'] ?? '') === Egress::class && $frame['function'] === 'client'
         || str_starts_with($frame['function'], '{closure') && ($frame['class'] ?? '') === ClientFactory::class));
     expect($thrown)->toBeInstanceOf(AlpacaBot\Toolkit\AddressRefused::class)
-        ->and($frames)->toHaveCount(2)
+        ->and($frames)->toHaveCount(3)
         ->and($frames[0]['args'][0] ?? null)->toBeInstanceOf(SensitiveParameterValue::class)
-        ->and($frames[1]['args'][0] ?? null)->toBeInstanceOf(SensitiveParameterValue::class);
+        ->and($frames[1]['args'][0] ?? null)->toBeInstanceOf(SensitiveParameterValue::class)
+        ->and($frames[2]['args'][0] ?? null)->toBeInstanceOf(SensitiveParameterValue::class);
 });

@@ -11,20 +11,24 @@ use AlpacaBot\Vendor\Symfony\Contracts\HttpClient\ResponseInterface;
 use AlpacaBot\Vendor\Symfony\Contracts\HttpClient\ResponseStreamInterface;
 
 /**
- * The client Egress hands the MCP client: every request held to one host, one address, no
- * redirects, the server's timeouts and a byte cap, whatever options the caller passes.
+ * The client Egress hands the MCP client: every request held to one host, the addresses Egress
+ * pinned, no redirects, the server's timeouts and a byte cap, whatever options the caller passes.
  *
  * The options are forced per request rather than set as defaults, because a caller's own
  * options win over a client's defaults (HttpClientTrait::mergeDefaultOptions(), `$options +=
  * $defaultOptions`), and each of these is load-bearing:
  *
- * - `resolve` [host => the checked address]: the connection goes to the address Egress took from
- *   the ones AddressPin passed, not to whatever the name answers at connect time. One address,
- *   where web_fetch hands cURL as many as its libcurl will take, because that is all this
- *   option holds; Egress says what that costs. The key is the request URL's own
- *   host, so Symfony normalises both the same way (HttpClientTrait.php:209-219). A host that is
- *   already an IP literal is pinned by the URL itself and gets an empty map instead, which is
- *   still an assignment: whatever `resolve` the caller passed is gone either way.
+ * - `resolve` [host => the addresses, comma-joined]: the connection goes to one of the addresses
+ *   Egress took from the ones AddressPin passed, not to whatever the name answers at connect
+ *   time. How many that is is Egress's to decide, by the transport under this client: every one
+ *   on Symfony's Curl client with a libcurl that reads the comma form, the first alone otherwise
+ *   (Egress says why, and what the first alone costs). This writes what it was handed and does
+ *   not look at the transport. It refuses to be built with a list that joins to '', because
+ *   Symfony reads an empty value as null (HttpClientTrait.php:212-213) and the Curl client writes
+ *   null as `-host:port`, a removal (CurlHttpClient.php:199): no pin at all. The key is the
+ *   request URL's own host, so Symfony normalises both the same way (HttpClientTrait.php:209-219).
+ *   A host that is already an IP literal is pinned by the URL itself and gets an empty map
+ *   instead, which is still an assignment: whatever `resolve` the caller passed is gone either way.
  * - `max_redirects` 0: a redirect followed here would be a second request that nothing judged --
  *   to a host the pin does not cover, or to another URL on this one -- so it is handed back as
  *   the 3xx it is (CurlResponse.php:420-422, :467) and getContent() raises RedirectionException
@@ -57,13 +61,25 @@ use AlpacaBot\Vendor\Symfony\Contracts\HttpClient\ResponseStreamInterface;
  */
 final class PinnedHttpClient implements HttpClientInterface
 {
+    /** The `resolve` value: the addresses, comma-joined. */
+    private string $addresses;
+
+    /**
+     * @param list<string> $ips the addresses to pin, as many as the transport under this reads from one `resolve` value (Egress decides)
+     * @throws \InvalidArgumentException when `$ips` joins to '', which Symfony would read as no pin at all
+     */
     public function __construct(
         private HttpClientInterface $client,
         private string $host,
-        private string $ip,
+        array $ips,
         private float $timeout,
         private int $maxBytes,
-    ) {}
+    ) {
+        $this->addresses = implode(',', $ips);
+        if ($this->addresses === '') {
+            throw new \InvalidArgumentException('A pinned client needs an address to pin to.');
+        }
+    }
 
     /** @param array<string, mixed> $options */
     public function request(string $method, string $url, array $options = []): ResponseInterface
@@ -83,7 +99,7 @@ final class PinnedHttpClient implements HttpClientInterface
                 $caller($dlNow, $dlSize, $info);
             }
         };
-        $options['resolve'] = SpecialPurposeAddress::isAddress(trim($raw, '[]')) ? [] : [$raw => $this->ip];
+        $options['resolve'] = SpecialPurposeAddress::isAddress(trim($raw, '[]')) ? [] : [$raw => $this->addresses];
         $options['max_redirects'] = 0;
         $options['timeout'] = $this->timeout;
         $options['max_duration'] = $this->timeout;

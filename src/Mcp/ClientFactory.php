@@ -19,7 +19,8 @@ namespace AlpacaBot\Mcp;
  * for()'s parameter is a #[\SensitiveParameter], so a trace taken with zend.exception_ignore_args
  * off holds a SensitiveParameterValue in that frame rather than the server. The closure's own
  * frame is the closure's: the one a caller passes gets the ServerConfig as it is, and the default
- * one marks its parameter sensitive, as PhpAgentsClient::over() does. print_r() or var_dump() of a
+ * one marks its parameter sensitive, as PhpAgentsClient::over() and Egress::client() do, the two
+ * frames under it that take the server. print_r() or var_dump() of a
  * trace that holds the server masks the header value through ServerConfig::__debugInfo();
  * json_encode() or var_export() of it writes the value.
  *

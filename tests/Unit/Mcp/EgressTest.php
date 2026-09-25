@@ -3,10 +3,13 @@
 declare(strict_types=1);
 
 use AlpacaBot\Mcp\Egress;
+use AlpacaBot\Mcp\PinnedHttpClient;
 use AlpacaBot\Toolkit\AddressRefused;
+use AlpacaBot\Vendor\Symfony\Component\HttpClient\CurlHttpClient;
 use AlpacaBot\Vendor\Symfony\Component\HttpClient\Exception\RedirectionException;
 use AlpacaBot\Vendor\Symfony\Component\HttpClient\Exception\TransportException;
 use AlpacaBot\Vendor\Symfony\Component\HttpClient\MockHttpClient;
+use AlpacaBot\Vendor\Symfony\Component\HttpClient\NativeHttpClient;
 use AlpacaBot\Vendor\Symfony\Component\HttpClient\Response\MockResponse;
 use AlpacaBot\Vendor\Symfony\Contracts\HttpClient\HttpClientInterface;
 
@@ -42,16 +45,114 @@ it('pins the connection to the address the check passed, turns redirects off, an
         ->and($seen['no_proxy'])->toBe('*');
 });
 
-// AddressPin hands back every address it checked, and web_fetch pins all of them, but Symfony's
-// `resolve` maps a host to one address and writes it into a string ("$host:$port:$ip",
-// CurlHttpClient.php:198-204), so an array there would be pinned to the word "Array". Egress
-// takes the first and says why in its own docblock; this holds it to that, both that the map's
-// value is a string and that the one taken is the first of the list.
-it('takes the first of the checked addresses, because Symfony maps a host to one address and not a list', function (): void {
+// Which addresses go into `resolve` depends on the transport under the pin. Symfony's Curl client
+// writes the value into CURLOPT_RESOLVE as it is ("$host:$port:$ip", CurlHttpClient.php:198-199),
+// so a comma-joined list there is libcurl's own `host:port:addr[,addr]` form; its Native client
+// connects to the value as one address (NativeHttpClient.php:341-369), so a list there would be a
+// name it cannot resolve. MockHttpClient is neither, and gets what Native gets: the first alone.
+it('pins the first of the checked addresses alone on a transport that is not Symfony\'s Curl client', function (): void {
     $client = egressOver($seen, new MockResponse('{}'), static fn(string $host, string $url): array => ['93.184.216.34', '2606:2800:220:1::1']);
     $client->request('POST', 'https://mcp.example.test/mcp')->getContent();
-    expect($seen['resolve'])->toBe(['mcp.example.test' => '93.184.216.34'])
-        ->and($seen['resolve']['mcp.example.test'])->toBeString();
+    expect($seen['resolve'])->toBe(['mcp.example.test' => '93.184.216.34']);
+});
+
+/**
+ * What Symfony's Curl client wrote into CURLOPT_RESOLVE for `$host`, the request `$pinned` makes
+ * to it. libcurl has no getter for the option, but the client records the same `$ip` it writes
+ * there in its own DNS map (CurlHttpClient.php:198-200), and that map is read here, before the
+ * request is cancelled: the cancel empties the map once no handle is open (CurlResponse.php:199-202,
+ * CurlClientState.php:72-73). Nothing is sent: building the response only adds its handle to the
+ * multi handle (CurlResponse.php:175-178), and a cancelled response is never performed, even when
+ * it is destroyed (TransportResponseTrait.php:75-80, :129-136).
+ */
+function curlPinned(CurlHttpClient $curl, string $host, HttpClientInterface $pinned): ?string
+{
+    $response = $pinned->request('POST', 'https://' . $host . '/mcp');
+    $written = (fn(): ?string => $this->multi->dnsCache->hostnames[$host] ?? null)->call($curl);
+    $response->cancel();
+    return $written;
+}
+
+it('hands Symfony\'s Curl client every checked address, comma-joined in the order the check gave them, on a libcurl that reads the form', function (): void {
+    $curl = new CurlHttpClient();
+    $ips = ['2606:2800:220:1::1', '93.184.216.34', '104.20.23.154'];
+    $pinned = (new Egress(static fn(string $host, string $url): array => $ips, $curl, static fn(): int => 0x073B00))->client(mcpServerConfig());
+    expect(curlPinned($curl, 'mcp.example.test', $pinned))->toBe('2606:2800:220:1::1,93.184.216.34,104.20.23.154');
+});
+
+// CurlPin's floor, and its reason: a libcurl older than the comma form reads the list as one
+// address it cannot parse, and a dropped entry is an unpinned request.
+it('hands Symfony\'s Curl client the first address alone on a libcurl older than the comma form', function (): void {
+    foreach ([0x073A00, 0] as $version) {
+        $curl = new CurlHttpClient();
+        $pinned = (new Egress(static fn(string $host, string $url): array => ['93.184.216.34', '2606:2800:220:1::1'], $curl, static fn(): int => $version))->client(mcpServerConfig());
+        expect(curlPinned($curl, 'mcp.example.test', $pinned))->toBe('93.184.216.34');
+    }
+});
+
+// With no version handed in, the one libcurl reads is this build's, which is new enough: the
+// default reader is exercised, not only the injected one.
+it('reads the libcurl the suite runs on when no version is handed in', function (): void {
+    $curl = new CurlHttpClient();
+    $pinned = (new Egress(static fn(string $host, string $url): array => ['93.184.216.34', '2606:2800:220:1::1'], $curl))->client(mcpServerConfig());
+    expect(curl_version()['version_number'])->toBeGreaterThanOrEqual(0x073B00)
+        ->and(curlPinned($curl, 'mcp.example.test', $pinned))->toBe('93.184.216.34,2606:2800:220:1::1');
+});
+
+it('hands Symfony\'s Native client the first address alone', function (): void {
+    $native = new NativeHttpClient();
+    $pinned = (new Egress(static fn(string $host, string $url): array => ['93.184.216.34', '2606:2800:220:1::1'], $native, static fn(): int => 0x080500))->client(mcpServerConfig());
+    // Read before the cancel, as curlPinned() does; NativeHttpClient.php:191-192 fills the map in
+    // request() itself, and the response connects only when it is first read.
+    $response = $pinned->request('POST', 'https://mcp.example.test/mcp');
+    $written = (fn(): array => $this->multi->dnsCache)->call($native);
+    $response->cancel();
+    expect($written)->toBe(['mcp.example.test' => '93.184.216.34']);
+});
+
+/** The transport a pinned client lays its pin over (PinnedHttpClient::$client). */
+function pinnedTransport(HttpClientInterface $pinned): HttpClientInterface
+{
+    return (fn(): HttpClientInterface => $this->client)->call($pinned);
+}
+
+// R28-9: the pin is laid only over a transport Egress can vouch for. HttpClient::create() answers
+// with Amp's client where the unprefixed amphp/http-client is loaded, and Amp's resolver lets a
+// lookup past the map (AmpResolver.php:42-43, :58-59), so anything create() answers other than the
+// Curl or the Native client is replaced with a Native client, which is handed the first address.
+it('replaces a default transport it cannot vouch for with Symfony\'s Native client, pinned to the first address', function (): void {
+    $pinned = (new Egress(static fn(string $host, string $url): array => ['93.184.216.34', '2606:2800:220:1::1'], null, static fn(): int => 0x080500, static fn(): HttpClientInterface => new MockHttpClient()))->client(mcpServerConfig());
+    $native = pinnedTransport($pinned);
+    expect($native)->toBeInstanceOf(NativeHttpClient::class);
+    /** @var NativeHttpClient $native */
+    $response = $pinned->request('POST', 'https://mcp.example.test/mcp');
+    $written = (fn(): array => $this->multi->dnsCache)->call($native);
+    $response->cancel();
+    expect($written)->toBe(['mcp.example.test' => '93.184.216.34']);
+});
+
+it('keeps a default transport that is Symfony\'s Curl or Native client as it was created', function (): void {
+    foreach ([new CurlHttpClient(), new NativeHttpClient()] as $created) {
+        $pinned = (new Egress(static fn(string $host, string $url): array => ['93.184.216.34'], null, null, static fn(): HttpClientInterface => $created))->client(mcpServerConfig());
+        expect(pinnedTransport($pinned))->toBe($created);
+    }
+});
+
+// PinnedHttpClient writes what it is handed, joined; Symfony's option normalisation
+// (HttpClientTrait.php:209-219) leaves a joined value as it is, because it unbrackets only a value
+// that opens with `[` and closes with `]`, and AddressPin hands every IPv6 address unbracketed.
+// It turns an empty value into null, which the Curl client writes as `-host:port`, a removal
+// (CurlHttpClient.php:199): an unpinned request. So an empty list is refused when the client is built.
+it('writes every address it was handed into resolve, comma-joined, and Symfony hands the transport that value unchanged', function (): void {
+    $seen = null;
+    $mock = new MockHttpClient(static function (string $method, string $url, array $options) use (&$seen): MockResponse {
+        $seen = $options;
+        return new MockResponse('{}');
+    });
+    (new PinnedHttpClient($mock, 'mcp.example.test', ['2606:2800:220:1::1', '93.184.216.34'], 12.5, 1024))->request('POST', 'https://mcp.example.test/mcp')->getContent();
+    expect($seen['resolve'])->toBe(['mcp.example.test' => '2606:2800:220:1::1,93.184.216.34']);
+    expect(static fn() => new PinnedHttpClient($mock, 'mcp.example.test', [], 12.5, 1024))->toThrow(InvalidArgumentException::class)
+        ->and(static fn() => new PinnedHttpClient($mock, 'mcp.example.test', [''], 12.5, 1024))->toThrow(InvalidArgumentException::class);
 });
 
 it('does not let the caller loosen it: its own resolve, redirects, timeouts and proxy rule are overwritten', function (): void {
@@ -123,4 +224,43 @@ it('refuses a server that is not https and one with no host name, both before an
     }
     $refusing = static fn(string $host, string $url): array => throw new AddressRefused('mcp.example.test resolves to 10.0.0.7');
     expect(static fn() => (new Egress($refusing, new MockHttpClient()))->client(mcpServerConfig()))->toThrow(AddressRefused::class, '10.0.0.7');
+});
+
+// Settings refuse a URL with a user name or a password at save (Schema's `userinfo` fault), but a
+// row written round the schema reaches this as it was stored. A credential there would be sent
+// as Basic auth by the transport, and quoted by any message that quotes the URL.
+it('refuses a URL carrying a user name or a password before any lookup, and does not repeat it', function (string $url): void {
+    $never = static fn(string $host, string $url): array => throw new LogicException('no lookup expected');
+    $thrown = null;
+    try {
+        (new Egress($never, new MockHttpClient()))->client(mcpServerConfig($url));
+    } catch (AddressRefused $e) {
+        $thrown = $e;
+    }
+    expect($thrown)->toBeInstanceOf(AddressRefused::class)
+        ->and($thrown?->getMessage())->toContain('user name or password')->toContain('header')
+        ->not->toContain('s3cret')->not->toContain('tok3n');
+})->with([
+    'a user and a password' => ['https://alice:s3cret@mcp.example.test/mcp'],
+    'a token for a user name' => ['https://tok3n@mcp.example.test/mcp'],
+    'a password with no user name' => ['https://:s3cret@mcp.example.test/mcp'],
+    'an empty user name' => ['https://@mcp.example.test/mcp'],
+]);
+
+// With zend.exception_ignore_args off, a trace carries every frame's arguments, and client()'s
+// is the ServerConfig, header value and all.
+it('keeps the server out of its own frame in a trace', function (): void {
+    $before = (string) ini_get('zend.exception_ignore_args');
+    ini_set('zend.exception_ignore_args', '0');
+    $thrown = null;
+    try {
+        (new Egress(static fn(string $host, string $url): array => throw new AddressRefused('refused'), new MockHttpClient()))->client(mcpServerConfig());
+    } catch (AddressRefused $e) {
+        $thrown = $e;
+    } finally {
+        ini_set('zend.exception_ignore_args', $before);
+    }
+    $frames = array_values(array_filter($thrown?->getTrace() ?? [], static fn(array $frame): bool => ($frame['class'] ?? '') === Egress::class && $frame['function'] === 'client'));
+    expect($frames)->toHaveCount(1)
+        ->and($frames[0]['args'][0] ?? null)->toBeInstanceOf(SensitiveParameterValue::class);
 });

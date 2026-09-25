@@ -10,19 +10,20 @@ namespace AlpacaBot\Toolkit;
  * of as its transport will take. web_fetch asks it and pins them into cURL in one
  * CURLOPT_RESOLVE entry (CurlPin, through core's `http_api_curl`, all of them on a libcurl that
  * reads more than one and the first alone below that, which CurlPin states); Mcp\Egress asks it
- * and pins the first into Symfony HttpClient's `resolve` option, which maps a host to one
- * address and no more (Mcp\Egress says what that costs there; Mcp\PinnedHttpClient says what
- * else it forces). That is why it is a class of its own rather than a method of
- * WebFetchToolkit: one rule, whichever transport asks it.
+ * and pins them through Symfony HttpClient's `resolve` option, all of them on Symfony's Curl
+ * client by the same libcurl rule and the first alone on its Native client (Mcp\Egress says why
+ * and what that costs; Mcp\PinnedHttpClient says what else it forces). That is why it is a
+ * class of its own rather than a method of WebFetchToolkit: one rule, whichever transport asks it.
  *
  * Why the addresses are returned and not just judged: a check that only answers yes or no leaves
  * the transport to resolve the name again when it connects, and a name under someone else's
  * control with a short TTL can answer the check with a public address and the connection with
  * 127.0.0.1 or the cloud metadata address (DNS rebinding; audit H-1). The caller connects to an
  * address this returns and to no other, so no answer but a checked one is ever used. The converse
- * does not hold and is not claimed: Mcp\Egress connects to one of them, and so does CurlPin on a
- * libcurl that reads one address from an entry. The containment runs used-inside-checked, which
- * is the direction the rebinding case turns on.
+ * does not hold and is not claimed: a transport connects to one of the addresses it is pinned
+ * to, and where only the first is pinned (CurlPin on a libcurl that reads one address from an
+ * entry, Mcp\Egress over Symfony's Native client) the rest are never tried. The containment runs
+ * used-inside-checked, which is the direction the rebinding case turns on.
  *
  * Every answer has to pass, not just one of them. A name that answers with a private address
  * among public ones is a name pointed at something private, and refusing it costs a legitimate

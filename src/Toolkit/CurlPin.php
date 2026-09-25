@@ -57,11 +57,33 @@ final class CurlPin
     public readonly string $entry;
 
     /**
+     * `$ips` is non-empty by type rather than by argument: an empty list would build `host:port:`,
+     * which is an entry libcurl cannot parse and so the unpinned-request case this class exists
+     * to prevent. This parameter is where that is enforced -- PHPStan refuses an empty list here
+     * and proves the one call site (WebFetchToolkit::pin()) hands over a non-empty one --
+     * and AddressPin::resolve() declares non-empty-list so a reader of either sees the same fact.
+     * Which of them go into the entry is carried()'s.
+     *
+     * @param non-empty-list<string>                 $ips     every address the check passed, AddressPin's order
+     * @param null|\Closure(mixed, int, mixed): bool $setopt  curl_setopt() by default; a test hands in a recorder
+     * @param null|\Closure(): int                   $version libcurl's version_number by default, 0 where the extension is absent; a test hands in its own
+     */
+    public function __construct(string $host, int $port, array $ips, private ?\Closure $setopt = null, ?\Closure $version = null)
+    {
+        $this->entry = $host . ':' . $port . ':' . implode(',', self::carried($ips, $version));
+    }
+
+    /**
+     * The addresses a CURLOPT_RESOLVE entry can carry on this libcurl: every one of `$ips` on a
+     * libcurl that reads the comma form, the first alone below that. CurlPin's entry is built from
+     * this, and so is the `resolve` value Mcp\Egress hands Symfony's Curl client, which writes it
+     * into the same option (Egress says how).
+     *
      * Why libcurl's version is read rather than assumed. The comma form is younger than the
      * option, so a build that predates it reads `1.2.3.4,::1` as one address it cannot parse,
      * and an entry libcurl cannot parse is an entry it may drop -- a dropped entry being a
-     * request that resolves the name for itself, unpinned, which is the one thing this class
-     * exists to prevent. 8.5.0 refuses such a request instead ("Couldn't parse CURLOPT_RESOLVE
+     * request that resolves the name for itself, unpinned, which is the one thing a pin exists
+     * to prevent. 8.5.0 refuses such a request instead ("Couldn't parse CURLOPT_RESOLVE
      * entry", connecting to nothing), and that is the half of this class's fail-closed claim
      * that a single address has always rested on; which way a build older than the comma form
      * answers is not something this code can find out from inside a request, and guessing it is
@@ -74,26 +96,20 @@ final class CurlPin
      * builds: WebFetchToolkit::fetch() builds the pin (`:163`) before it asks curlCarries()
      * whether cURL would carry the request at all (`:169`), so on a server with no ext-curl --
      * a configuration the plugin supports and answers with a refusal in the user's own words
-     * (`:170`) -- this constructor runs first. An unguarded curl_version() would be a fatal Error
-     * there, reached before that refusal could ever be returned.
+     * (`:170`) -- the constructor runs this first. An unguarded curl_version() would be a fatal
+     * Error there, reached before that refusal could ever be returned.
      *
-     * `$ips` is non-empty by type rather than by argument: an empty list would build `host:port:`,
-     * which is an entry libcurl cannot parse and so the unpinned-request case this class exists
-     * to prevent. This parameter is where that is enforced -- PHPStan refuses an empty list here
-     * and proves the one call site (WebFetchToolkit::pin()) hands over a non-empty one --
-     * and AddressPin::resolve() declares non-empty-list so a reader of either sees the same fact.
-     *
-     * @param non-empty-list<string>                 $ips     every address the check passed, AddressPin's order
-     * @param null|\Closure(mixed, int, mixed): bool $setopt  curl_setopt() by default; a test hands in a recorder
-     * @param null|\Closure(): int                   $version libcurl's version_number by default, 0 where the extension is absent; a test hands in its own
+     * @param list<string>         $ips     every address the check passed, in the check's order
+     * @param null|\Closure(): int $version libcurl's version_number by default, 0 where the extension is absent; a test hands in its own
+     * @return list<string> `$ips`, or its first address alone; empty only when `$ips` is
      */
-    public function __construct(string $host, int $port, array $ips, private ?\Closure $setopt = null, ?\Closure $version = null)
+    public static function carried(array $ips, ?\Closure $version = null): array
     {
         $version ??= static function (): int {
             $info = function_exists('curl_version') ? curl_version() : false;
             return is_array($info) ? (int) ($info['version_number'] ?? 0) : 0;
         };
-        $this->entry = $host . ':' . $port . ':' . implode(',', $version() >= self::MULTI_ADDRESS ? $ips : array_slice($ips, 0, 1));
+        return $version() >= self::MULTI_ADDRESS ? $ips : array_slice($ips, 0, 1);
     }
 
     /** The `http_api_curl` callback (accepted args: 1, the handle). */
