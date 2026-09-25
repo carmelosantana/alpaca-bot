@@ -46,15 +46,14 @@ namespace AlpacaBot\Mcp;
  *   9007199254740993.0 and 9007199254740992.0, and 99999999999999999999 and
  *   100000000000000000000, both past PHP_INT_MAX.
  *
- * php-agents 0.16's McpToolDefinition::fingerprint() is specified to be byte-identical to this
- * one (the contract frozen on Kanboard #4364). On the JSON path the two run the same canonical()
- * and the same flags, and ToolDefinitionTest pins digests that php-agents' own
- * McpToolDefinitionTest pins for the same definitions. Parity stops in two places:
- * - for a definition json_encode() cannot encode, php-agents hashes the empty string, which every
- *   such definition shares, and this class hashes the serialize() form;
- * - at a `serialize_precision` other than -1, php-agents' digest of a definition holding a float
- *   can move (0.1 and 1e23 do at 17, 123456.0 at 5) and this one does not.
- * A stored pin is only portable between the two classes where they agree.
+ * php-agents 0.16.0's McpToolDefinition::fingerprint() is a port of this method: its docblock
+ * says it runs the same canonical(), flags, precision hold and serialize() fallback as this class
+ * at commit 3a2682e, and its source does. ToolDefinitionTest pins vectors A and B, which only the
+ * serialize() path can hash, and P, a float that moves at a `serialize_precision` of 17 unless the
+ * precision is held, at -1 and at 17; PhpAgentsClientTest checks that the library's
+ * fingerprint() gives the same three digests. The pins are still this class's to check:
+ * PhpAgentsClient turns every definition the library lists into a ToolDefinition, and McpToolkit
+ * and Discovery hash that.
  *
  * destructive() is true only when the `destructiveHint` annotation is exactly `true`. The MCP
  * specification says a client must treat annotations as untrusted unless they come from a trusted

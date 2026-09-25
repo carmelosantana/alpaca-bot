@@ -118,9 +118,9 @@ it('agrees with php-agents 0.16 on the V5 pair, which differs only in 1.0 agains
 
 /*
  * A definition json_encode() cannot encode. 1e999 decodes to INF, which no JSON flag encodes, so
- * json_encode() returns false. Hashing '' in that case, as php-agents' McpToolDefinition does,
- * gives every such definition the one digest, and a server could rewrite an approved tool's
- * description behind an unchanged pin. The name and the annotations are held to the same rule.
+ * json_encode() returns false. Hashing '' in that case, as php-agents' McpToolDefinition did
+ * before 0.16.0, gives every such definition the one digest, and a server could rewrite an
+ * approved tool's description behind an unchanged pin. The name and the annotations are held to the same rule.
  */
 it('still tells definitions apart by name, description and annotations when the schema holds a number JSON cannot encode', function (): void {
     $schema = json_decode('{"type":"object","properties":{"n":{"type":"integer","maximum":1e999}}}', true);
@@ -186,3 +186,31 @@ it('puts serialize_precision back when fingerprint() throws', function (): void 
     }
     expect($after)->toBe('17');
 });
+
+/*
+ * Vectors A, B and P (Kanboard #4364 comment 1590), each the JSON a server lists, decoded as
+ * json_decode(..., true) decodes it. A and B hold 1e999, so only the serialize() path can hash
+ * them, and they differ in the description alone; php-agents before 0.16.0 hashed '' for both. P
+ * holds 0.1, which json_encode() writes as 0.10000000000000001 at serialize_precision 17, so it
+ * moves unless the precision is held at -1 for the call; php-agents before 0.16.0 gave
+ * f88b57b3... for it at 17. PhpAgentsClientTest checks php-agents 0.16.0's own fingerprint() gives
+ * the same three digests.
+ */
+it('pins vectors A, B and P, at serialize_precision -1 and 17', function (string $json, string $digest): void {
+    $entry = json_decode($json, true);
+    $before = (string) ini_get('serialize_precision');
+    $digests = [];
+    try {
+        foreach (['-1', '17'] as $precision) {
+            ini_set('serialize_precision', $precision);
+            $digests[] = (new ToolDefinition($entry['name'], $entry['description'], $entry['inputSchema'], $entry['annotations']))->fingerprint();
+        }
+    } finally {
+        ini_set('serialize_precision', $before);
+    }
+    expect($digests)->toBe([$digest, $digest]);
+})->with([
+    'A' => ['{"name":"t","description":"a","inputSchema":{"type":"object","properties":{"n":{"type":"number","maximum":1e999}}},"annotations":{"readOnlyHint":true}}', '6660688c022f245f5c8a9768b11ec1a3c1a0dd3de1872d301879fad7c8a34dee'],
+    'B' => ['{"name":"t","description":"b","inputSchema":{"type":"object","properties":{"n":{"type":"number","maximum":1e999}}},"annotations":{"readOnlyHint":true}}', '8176581eb88c5abdc60a54dabe456e93db0a2e0fd45179ba97db6083ad21cdbe'],
+    'P' => ['{"name":"t","description":"a","inputSchema":{"type":"object","properties":{"n":{"type":"number","maximum":0.1}}},"annotations":{}}', 'da6c52e490a72e261c856c1c1c1ddd7359577aec30c49bd649189647023ebc36'],
+]);
