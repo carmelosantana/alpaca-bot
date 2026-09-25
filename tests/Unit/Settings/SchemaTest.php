@@ -352,6 +352,27 @@ it('drops an mcp server whose URL carries a user name or password, and names the
         ->and(Schema::droppedMcpRows($raw))->toBe([0 => 'userinfo', 1 => 'userinfo', 2 => 'userinfo', 3 => 'userinfo', 4 => 'url']);
 });
 
+// A header name with no letter in it is refused, whole, and named apart from the others. PHP makes
+// an array key of a whole number written plainly an int (`123`, `-1`, `0`), and php-agents' header
+// map would then send the value as the header's name; `-0`, `0123` and a number past PHP_INT_MAX
+// stay string keys, but they are refused all the same, by the one rule the notice can state. A
+// JSON number is refused as the string of its digits is. A name the `[A-Za-z0-9-]{1,64}` rule
+// does not admit at all (`+1`, `Bad Header`) is not refused: it reads as '', as before.
+it('drops an mcp server whose header name has no letter in it, and names the fault', function (): void {
+    $names = ['123', '-1', '0', '-0', '0123', '99999999999999999999', '---', 123, -1];
+    $raw = array_map(static fn(int|string $name, int $i): array => ['url' => 'https://a' . $i . '.example.com/mcp', 'prefix' => 'p' . $i, 'header_name' => $name], $names, array_keys($names));
+    $kept = [
+        ['url' => 'https://k1.example.com/mcp', 'prefix' => 'k1', 'header_name' => 'X-1'],
+        ['url' => 'https://k2.example.com/mcp', 'prefix' => 'k2', 'header_name' => '0123a'],
+        ['url' => 'https://k3.example.com/mcp', 'prefix' => 'k3', 'header_name' => '+1'],
+        ['url' => 'https://k4.example.com/mcp', 'prefix' => 'k4', 'header_name' => ''],
+    ];
+    expect(Schema::droppedMcpRows($raw))->toBe(array_fill(0, count($names), 'header'))
+        ->and(Schema::sanitizeMcpServers($raw))->toBe([])
+        ->and(array_column(Schema::sanitizeMcpServers($kept), 'header_name'))->toBe(['X-1', '0123a', '', ''])
+        ->and(Schema::droppedMcpRows($kept))->toBe([]);
+});
+
 // The model knows an MCP tool as ToolName::fit('<prefix>__<name>'). A prefix with no `__` in it and
 // no `_` at its end makes the first `__` of that name the end of the prefix, so two servers,
 // whose prefixes differ, can never give two tools one name; and `ability` is refused, since

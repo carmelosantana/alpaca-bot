@@ -570,8 +570,12 @@ Rules worth knowing before you write:
     and keep them; any other row without one is a new server, given an id made from its prefix,
     never one a stored server has.
   - `header_name` and `header_value` are one static header sent with every request, typically
-    `Authorization` and `Bearer …`. The value has the key's three spellings (`""` clears it,
-    `"••••"` keeps what is stored, any other string replaces it) with CR, LF and NUL removed,
+    `Authorization` and `Bearer …`. The name is up to 64 of `[A-Za-z0-9-]` with a letter among
+    them. One of those characters with no letter (`123`, `-1`), or a JSON number, is refused
+    (below): PHP reads `123` as a number, and the value would be sent in the name's place. Any
+    other name reads as `""`. The value has the
+    key's three spellings (`""` clears it, `"••••"` keeps what is stored, any other string
+    replaces it) with CR, LF and NUL removed,
     except that `"••••"` keeps nothing for a new server, which has nothing stored, or for a
     stored server whose URL now has another host or port. The value is not sent to an address it
     was not set for, so a server moved to another host needs its value sent again; a new path on
@@ -586,7 +590,8 @@ Rules worth knowing before you write:
     approved; anything else is dropped.
 
   A row the list cannot keep (a URL that is not `https` with a host, a URL with a user name or
-  password in it, a prefix the rule refuses, or a prefix an earlier row of the PUT already has)
+  password in it, a header name with no letter in it, a prefix the rule refuses, or a prefix an
+  earlier row of the PUT already has)
   is refused rather than dropped when it names a stored server's `id` or is a new row with a
   URL: the PUT answers `400 alpaca_bot_mcp_row` and writes nothing, the other keys included. A
   credential goes in the header, which reads back masked, never in the URL, which reads back as

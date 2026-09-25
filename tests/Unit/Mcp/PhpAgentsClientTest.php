@@ -132,21 +132,33 @@ it('sends the one header the row names, and none when its name or its value is e
     'no name' => ['', 'key-4410', []],
     'no value' => ['X-Api-Key', '', []],
     'digits PHP keeps as a string key' => ['0123', 'key-4410', ['0123: key-4410']],
+    'a signed zero PHP keeps as a string key' => ['-0', 'key-4410', ['-0: key-4410']],
+    'a plus sign PHP keeps as a string key' => ['+1', 'key-4410', ['+1: key-4410']],
+    'a whole number past PHP_INT_MAX, which PHP keeps as a string key' => ['99999999999999999999', 'key-4410', ['99999999999999999999: key-4410']],
 ]);
+
+// What php-agents is handed is a string name and a string value, whatever the row stored: fromSettings()
+// types the row, and over() hands on only those two typed fields.
+it('hands the library a string header value even for a row that stored a number', function (): void {
+    $adapter = mcpAdapter([], $sent, ServerConfig::fromSettings(['id' => 'trk', 'url' => MCP_TEST_URL, 'header_name' => 'X-Api-Key', 'header_value' => 12345, 'prefix' => 'trk']));
+    $client = (new ReflectionProperty(PhpAgentsClient::class, 'client'))->getValue($adapter);
+    $server = (new ReflectionProperty(McpClient::class, 'server'))->getValue($client);
+    expect($server->headers)->toBe(['X-Api-Key' => '12345']);
+});
 
 // PHP turns an array key that is a whole number into an int, and Symfony reads an int-keyed
 // header as a whole "Name: value" line, so the value would go out as the header's name. The
 // adapter contacts nothing rather than send that, and says so without the value.
-it('refuses a header name that is a whole number before anything is sent, without the value', function (): void {
+it('refuses a header name that is a whole number before anything is sent, without the value', function (string $name): void {
     $sent = null;
-    $thrown = mcpThrown(static function () use (&$sent): void {
-        mcpAdapter([mcpReply(1, ['tools' => []])], $sent, new ServerConfig('trk', MCP_TEST_URL, '123', 'Bearer digits-5c0', 'trk'))->listTools();
+    $thrown = mcpThrown(static function () use (&$sent, $name): void {
+        mcpAdapter([mcpReply(1, ['tools' => []])], $sent, new ServerConfig('trk', MCP_TEST_URL, $name, 'Bearer digits-5c0', 'trk'))->listTools();
     });
     expect($thrown)->toBeInstanceOf(McpUnavailable::class)
-        ->and($thrown->getMessage())->toContain('123')
+        ->and($thrown->getMessage())->toContain($name)
         ->and($thrown->getMessage())->not->toContain('digits-5c0')
         ->and($sent)->toBe([]);
-});
+})->with(['123', '-1', '0']);
 
 it('returns the library\'s result unchanged, a tool error included', function (): void {
     $given = ToolResult::success('two hits');

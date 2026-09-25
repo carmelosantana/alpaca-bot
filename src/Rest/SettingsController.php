@@ -278,6 +278,7 @@ final class SettingsController extends Controller
             $out[] = ['index' => $key, 'id' => $id, 'url' => $url, 'reason' => match ($fault) {
                 'url' => __('the URL has to be https with a host.', 'alpaca-bot'),
                 'userinfo' => __('the URL may not carry a user name or password; send a credential as the header value, which reads back masked.', 'alpaca-bot'),
+                'header' => __('the header name has to have a letter in it.', 'alpaca-bot'),
                 /* translators: %s: what a prefix has to be (Schema::mcpPrefixRule()) */
                 'prefix' => sprintf(__('the prefix has to be %s.', 'alpaca-bot'), Schema::mcpPrefixRule()),
                 /* translators: %s: a tool-name prefix */

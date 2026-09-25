@@ -470,7 +470,11 @@ final class Schema
      *   given one of those ids, even one this same write removes. Keeping ids before making any
      *   is what stops a new row listed first from taking an existing server's id. Either way a
      *   new row cannot take another server's Access entry or secret.
-     * - `header_name` is `[A-Za-z0-9-]{1,64}` or ''.
+     * - `header_name` is `[A-Za-z0-9-]{1,64}` with a letter in it, or ''. A row whose name has no
+     *   letter (an int, or a string of digits and hyphens: `123`, `-1`, `0`) is dropped: PHP makes
+     *   a whole number written plainly an int array key, and php-agents' header map would then
+     *   send the value in the name's place (Mcp\PhpAgentsClient::over() refuses such a name too,
+     *   for a row written round this). Any other name the pattern does not admit reads as ''.
      * - `header_value` follows the secret rule (the class docblock): '' clears, MASK keeps, any
      *   other string is the new value with CR, LF and NUL removed, so no value can end the header
      *   early or cut it; anything that is not a string reads as MASK.
@@ -555,12 +559,13 @@ final class Schema
     /**
      * Each row of `$raw` that sanitizeMcpServers() leaves out, by its key in `$raw`, with why:
      * `url` (not https with a host), `userinfo` (https with a host, and a user name or password
-     * too), `prefix` (not MCP_TOOL_PREFIX, or `ability`) or `taken` (an earlier row that is kept
-     * has it). A row that is not an array, or whose `remove` is ticked,
+     * too), `header` (a header name with no letter in it), `prefix` (not MCP_TOOL_PREFIX, or
+     * `ability`) or `taken` (an earlier row that is kept has it). A row that is not an array, or
+     * whose `remove` is ticked,
      * is not listed, since leaving it out is what it asks for. Both functions ask mcpRowFault(),
      * so the two cannot disagree about a row.
      *
-     * @return array<array-key, 'url'|'userinfo'|'prefix'|'taken'>
+     * @return array<array-key, 'url'|'userinfo'|'header'|'prefix'|'taken'>
      */
     public static function droppedMcpRows(#[\SensitiveParameter] mixed $raw): array
     {
@@ -588,14 +593,16 @@ final class Schema
      *
      * @param array<array-key, mixed> $row
      * @param list<string>            $prefixes
-     * @return 'url'|'userinfo'|'prefix'|'taken'|null
+     * @return 'url'|'userinfo'|'header'|'prefix'|'taken'|null
      */
     private static function mcpRowFault(#[\SensitiveParameter] array $row, array $prefixes): ?string
     {
         $prefix = $row['prefix'] ?? null;
         $url = self::mcpUrlFault(self::escapedUrl($row['url'] ?? null));
+        $name = $row['header_name'] ?? '';
         return match (true) {
             $url !== null => $url,
+            is_int($name) || is_string($name) && preg_match('/^[0-9-]{1,64}\z/', $name) === 1 => 'header',
             !self::isMcpPrefix($prefix) => 'prefix',
             in_array($prefix, $prefixes, true) => 'taken',
             default => null,

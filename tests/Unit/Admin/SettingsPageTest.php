@@ -629,6 +629,38 @@ it('says what a prefix has to be when it refuses one, on an edit and on a new se
         ->and(Schema::mcpPrefixRule())->toContain('single underscores')->toContain('not "ability"');
 });
 
+// A header name with no letter in it is refused on the page as over REST: the edit of a stored
+// server keeps the stored row, a new row is left out, and the notice says a letter is needed.
+it('refuses an MCP header name with no letter in it, on an edit and on a new server, and says why', function (): void {
+    Functions\when('add_settings_section')->justReturn(null);
+    Functions\when('add_settings_field')->justReturn(null);
+    $opts = null;
+    Functions\expect('register_setting')->once()->withArgs(function (string $group, string $option, array $o) use (&$opts): bool {
+        $opts = $o;
+        return true;
+    });
+    $stored = ['toolkits.mcp_servers' => [
+        ['id' => 'trk', 'url' => 'https://mcp.example.com/mcp', 'header_name' => 'Authorization', 'header_value' => '', 'prefix' => 'trk', 'timeout' => 30.0, 'max_bytes' => 1048576, 'approved' => []],
+    ]];
+    Functions\when('get_option')->justReturn($stored);
+    $errors = [];
+    Functions\when('add_settings_error')->alias(function (string $setting, string $code, string $message) use (&$errors): void {
+        $errors[] = [$setting, $code, $message];
+    });
+    $page = new SettingsPage(new AlpacaBot\Settings\Store([]), new ModelCatalog(new AlpacaBot\Provider\Factory(new AlpacaBot\Settings\Store([]))), new AlpacaBot\Access(new AlpacaBot\Settings\Store([])), null, new AlpacaBot\Mcp\ServerSettings(static fn(string $host, string $url): array => ['93.184.216.34']));
+    $page->register();
+    $out = ($opts['sanitize_callback'])(['toolkits.mcp_servers' => [
+        ['id' => 'trk', 'url' => 'https://mcp.example.com/mcp', 'prefix' => 'trk', 'header_name' => '123', 'header_value' => 'Bearer typed'],
+        ['url' => 'https://new.example.com/mcp', 'prefix' => 'new', 'header_name' => '-1', 'header_value' => 'Bearer typed'],
+    ]], Plugin::OPTION);
+
+    expect($out['toolkits.mcp_servers'])->toBe($stored['toolkits.mcp_servers'])
+        ->and(array_column($errors, 1))->toBe(['mcp_dropped', 'mcp_dropped'])
+        ->and($errors[0][2])->toContain('(trk) was not saved')->toContain('header name')->toContain('letter')
+        ->and($errors[1][2])->toContain('https://new.example.com/mcp was not added')->toContain('header name')->toContain('letter')
+        ->and(json_encode($errors))->not->toContain('Bearer typed');
+});
+
 // M4 (R101): a user name or password in the address is refused on the page as over REST. The edit
 // of a stored server keeps the stored row, a new row is left out, and the notice says the
 // credential goes in the header, naming the URL without it.
