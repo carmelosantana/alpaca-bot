@@ -45,10 +45,10 @@ use AlpacaBot\Toolkit\AddressRefused;
  * drops a refused new row, and says which address and why. `wp alpaca-bot settings` writes through
  * Store and gets no check at all, and nor does anything else that writes the option. Mcp\Egress
  * checks the address again whenever it builds a client, and pins the connection to what it
- * checked; in this release nothing builds one: no code calls Egress::client(), and the
- * ClientFactory the plugin constructs (for Mcp\Discovery and Mcp\Toolkits) is given no closure, so every MCP client
- * it hands out is UnavailableClient, which contacts nothing. The check is AddressCheck::resolve(),
- * which does not let the site's own host through (AddressCheck says why).
+ * checked: the ClientFactory the plugin constructs (for Mcp\Discovery and Mcp\Toolkits) builds
+ * every MCP client through it, so a row that skipped this check still meets that one before
+ * anything is sent. The check is AddressCheck::resolve(), which does not let the site's own host
+ * through (AddressCheck says why).
  *
  * @since 0.6.0
  */

@@ -119,9 +119,10 @@ final class Plugin
         $servers = new Mcp\ServerSettings();
         $this->set(Mcp\ServerSettings::class, $servers);
         $servers->register();
-        // Where every MCP client comes from. Built with no closure, so what it builds is
-        // UnavailableClient, which lists nothing and contacts nothing (ClientFactory).
-        $this->set(Mcp\ClientFactory::class, new Mcp\ClientFactory());
+        // Where every MCP client comes from: php-agents' client (Mcp\PhpAgentsClient), over an
+        // Mcp\Egress that checks each server's address when a client is built and pins the
+        // connection to it. Mcp\Discovery and Mcp\Toolkits are both handed this one.
+        $this->set(Mcp\ClientFactory::class, new Mcp\ClientFactory(null, new Mcp\Egress()));
         // A save that re-pins a drifted tool, or drops its approval, answers the drift marker for
         // it (Mcp\Drift). On `update_option_*` for the reason the catalog bust above gives: every
         // writer of the option fires it. A site's first save fires `add_option_*` instead, and

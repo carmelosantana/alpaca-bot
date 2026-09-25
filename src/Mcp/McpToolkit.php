@@ -16,12 +16,12 @@ use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Tool\ToolResult;
  * factory's.
  *
  * The client is built the first time tools() is asked, inside the same catch as the listing, and
- * every call goes through that one client. Building one can fail on its own: a builder that
- * checks the server's address before connecting refuses an address that does not resolve, with
- * a message naming the host. Built here, such a failure is a turn with no remote tools, like a
- * listing that fails, and no message of it reaches a ToolResult; and a caller that never asks
- * for tools (Registry::enabled() for the `[alpacabot_agent]` shim or an ability's permission
- * check) builds nothing.
+ * every call goes through that one client. Building one can fail on its own: the plugin's
+ * factory checks the server's address before anything is sent (Mcp\Egress), and refuses an
+ * address that does not resolve with a message naming the host. Built here, such a failure is
+ * a turn with no remote tools, like a listing that fails, and no message of it reaches a
+ * ToolResult; and a caller that never asks for tools (Registry::enabled() for the
+ * `[alpacabot_agent]` shim or an ability's permission check) builds nothing.
  *
  * The tool list is fetched once per instance and kept: on a tool turn Toolkit\FirstWins::over()
  * asks tools() before the agent runs, and when that found tools, guidelines() asks it again for

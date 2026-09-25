@@ -451,9 +451,8 @@ final class Schema
      *   apart and read back masked, so a credential goes there.
      *   Whether the *address* is public is not asked here: that is a DNS lookup, and this is a
      *   pure function. Mcp\ServerSettings asks it when the settings page or the REST route saves
-     *   a URL that is new or changed. Mcp\Egress::client() asks it again, for whatever builds a
-     *   client; nothing in this release does (no code calls it, and the ClientFactory the plugin
-     *   constructs is given no closure, so it hands out only UnavailableClient).
+     *   a URL that is new or changed. Mcp\Egress::client() asks it again whenever a client is
+     *   built, and the ClientFactory the plugin constructs builds every client through it.
      * - `prefix` matches MCP_TOOL_PREFIX, is not `ability` (AbilitiesToolkit names its tools
      *   `ability__…`), and is not already taken by an earlier row; a row failing any of that is
      *   dropped, since its tools would have no name of their own.

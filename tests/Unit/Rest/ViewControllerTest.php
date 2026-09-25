@@ -416,26 +416,20 @@ it('answers the approval list as an HTML fragment, its boxes posting under the i
         ->and($res->get_data())->toContain('name="alpaca_bot_settings[toolkits.mcp_servers][3][approved][search]" value="' . $search->fingerprint() . '" checked="checked"');
 });
 
-// R81: NOT_YET is a constant, untranslated; the page shows a translated sentence of the same
-// meaning. Anything else is a 200 carrying the notice, not an error status.
-it('answers a server that cannot be listed with the fragment\'s notice, NOT_YET as a translated sentence, keeping the approvals', function (): void {
+// A server that cannot be listed is a 200 carrying the fragment's notice, not an error status, and
+// the approvals the cell held go back with it.
+it('answers a server that cannot be listed with the fragment\'s notice, keeping the approvals', function (): void {
     Functions\when('current_user_can')->justReturn(true);
-    $translated = [];
-    Functions\when('__')->alias(static function (string $text) use (&$translated): string {
-        $translated[] = $text;
-        return $text;
-    });
     $fp = str_repeat('a', 64);
-    $res = viewControllerWithMcp(new AlpacaBot\Tests\Integration\FakeClient([], [], new AlpacaBot\Mcp\McpUnavailable(AlpacaBot\Mcp\McpUnavailable::NOT_YET)), approved: ['search' => $fp])
+    $sentence = 'The MCP server refused the credentials it was sent (HTTP 401).';
+    $res = viewControllerWithMcp(new AlpacaBot\Tests\Integration\FakeClient([], [], new AlpacaBot\Mcp\McpUnavailable($sentence)), approved: ['search' => $fp])
         ->mcpTools(restRequest('GET', '/x', ['id' => 'trk', 'index' => 0]));
-    $sentence = 'This server\'s tools cannot be listed yet: the MCP client arrives with php-agents 0.16.';
     expect($res)->toBeInstanceOf(WP_REST_Response::class)
         ->and($res->get_status())->toBe(200)
-        ->and($res->get_data())->toBe('<div class="notice notice-error inline"><p>' . $sentence . '</p></div><input type="hidden" name="alpaca_bot_settings[toolkits.mcp_servers][0][approved][search]" value="' . $fp . '">')
-        ->and($translated)->toContain($sentence);
+        ->and($res->get_data())->toBe('<div class="notice notice-error inline"><p>' . $sentence . '</p></div><input type="hidden" name="alpaca_bot_settings[toolkits.mcp_servers][0][approved][search]" value="' . $fp . '">');
 });
 
-// R81: every other message is untrusted: escaped where the notice prints it, and the header
+// R81: the message is untrusted: escaped where the notice prints it, and the header
 // value this server is sent is replaced wherever it appears, whole or as the credential after
 // its scheme word, before the message is cut to 500 characters.
 it('prints any other reason escaped, without the header value, and cut to 500 characters', function (): void {

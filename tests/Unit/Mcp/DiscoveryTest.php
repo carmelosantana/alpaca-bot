@@ -121,16 +121,20 @@ it('clears the drift marker when nothing is drifting any more', function (): voi
 });
 
 it('lets the reason a server could not be listed reach the caller, and leaves the drift marker as it was', function (): void {
-    $discovery = mcpDiscovery([], [], new McpUnavailable(McpUnavailable::NOT_YET), drift: $drift);
-    expect(fn() => $discovery->tools($discovery->server('trk')))->toThrow(McpUnavailable::class, McpUnavailable::NOT_YET);
+    $discovery = mcpDiscovery([], [], new McpUnavailable('The MCP server answered with JSON-RPC error -32601.'), drift: $drift);
+    expect(fn() => $discovery->tools($discovery->server('trk')))->toThrow(McpUnavailable::class, 'The MCP server answered with JSON-RPC error -32601.');
     expect($drift)->toBe([]);
 });
 
-it('lists through the client the factory it was handed builds, so the default factory\'s refusal is its answer', function (): void {
-    // The default factory's client is UnavailableClient, which refuses without contacting anything.
-    Functions\when('get_option')->justReturn([]);
-    $discovery = new Discovery(new Store(['toolkits.mcp_servers' => [['id' => 'trk', 'url' => 'https://mcp.example.com/mcp', 'prefix' => 'trk']]]), new ClientFactory());
-    expect(fn() => $discovery->tools($discovery->server('trk')))->toThrow(McpUnavailable::class, McpUnavailable::NOT_YET);
+// Building the client can fail before anything is listed (PhpAgentsClient::over() refuses a header
+// name that is a whole number); that reaches the caller the same way, and nothing is recorded.
+it('lets a client the factory refuses to build reach the caller, and leaves the drift marker as it was', function (): void {
+    $discovery = mcpDiscovery([], drift: $drift);
+    $refusing = new Discovery(new Store(['toolkits.mcp_servers' => [['id' => 'trk', 'url' => 'https://mcp.example.com/mcp', 'prefix' => 'trk']]]), new ClientFactory(static function (ServerConfig $server): never {
+        throw new McpUnavailable('This server was not contacted.');
+    }));
+    expect(fn() => $refusing->tools($refusing->server('trk')))->toThrow(McpUnavailable::class, 'This server was not contacted.');
+    expect($drift)->toBe([]);
 });
 
 // M-2: a name the listing repeats cannot be approved (View\Settings\McpTools offers no box), so

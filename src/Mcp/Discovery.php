@@ -32,8 +32,10 @@ use AlpacaBot\Settings\Store;
  *
  * It opens no connection itself. tools() asks the ClientFactory it was handed for a client and
  * asks that client to list the server; what the client does is the factory's. The factory the
- * plugin constructs builds UnavailableClient, which answers McpUnavailable::NOT_YET without
- * contacting anything.
+ * plugin constructs builds PhpAgentsClient, which lists the server over the network through
+ * Mcp\Egress, and throws McpUnavailable when it cannot. Building the client can fail too, and
+ * outside the listing: Egress refuses an address with AddressRefused, and that is not an
+ * McpUnavailable.
  *
  * @since 0.6.0
  */
@@ -76,6 +78,7 @@ final class Discovery
      *
      * @return list<array{definition: ToolDefinition, fingerprint: string, state: 'approved'|'changed'|'new', ticked: bool}>
      * @throws McpUnavailable when the server cannot be listed; the drift marker is left as it was
+     * @throws \AlpacaBot\Toolkit\AddressRefused when the factory's Egress refuses the address; the marker is left as it was
      */
     public function tools(#[\SensitiveParameter] ServerConfig $server): array
     {

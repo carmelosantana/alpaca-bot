@@ -122,7 +122,7 @@ it('hands the action the result as the client answered it, before SchemaTool cut
 
 it('offers nothing when the server cannot be listed, and leaves the drift marker alone', function (): void {
     $drift = ['untouched'];
-    expect(mcpToolkit(new FakeClient([], [], new McpUnavailable(McpUnavailable::NOT_YET)), ['search' => 'x'], $drift)->tools())->toBe([])
+    expect(mcpToolkit(new FakeClient([], [], new McpUnavailable('The MCP server could not be reached.')), ['search' => 'x'], $drift)->tools())->toBe([])
         ->and($drift)->toBe(['untouched']);
     // FakeClient may throw what ClientInterface does not promise; a down server is still no
     // remote tools, never a failed turn.

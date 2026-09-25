@@ -322,22 +322,20 @@ final class ViewController extends Controller
     }
 
     /**
-     * What the notice says for a server that could not be listed. McpUnavailable::NOT_YET, a
-     * constant the library's absence is spelled with, becomes a translated sentence of the same
-     * meaning. Any other message is untrusted text: a client may put a remote server's own words
-     * in it. McpTools prints it escaped. Before that, every piece of the server's header value 8
-     * characters or longer that is either the whole value or the part after its first run of
-     * whitespace (the credential of `Bearer …`) is replaced with Schema::MASK wherever it appears,
-     * and then the message is cut to REASON_CHARS characters, with an ellipsis, so a cut cannot
-     * leave the start of a replaced piece behind. A shorter piece is not looked for, since replacing it would blank out
-     * ordinary words; nor is a value that reaches the message changed (encoded, split, cut).
+     * What the notice says for a server that could not be listed: the McpUnavailable's message.
+     * PhpAgentsClient, the client the plugin's own factory builds, writes that message itself and
+     * quotes nothing a server sent; a client handed in through another builder may, so the message
+     * is still untrusted text. McpTools prints it escaped. Before that, every piece of the
+     * server's header value 8 characters or longer that is either the whole value or the part after
+     * its first run of whitespace (the credential of `Bearer …`) is replaced with Schema::MASK
+     * wherever it appears, and then the message is cut to REASON_CHARS characters, with an
+     * ellipsis, so a cut cannot leave the start of a replaced piece behind. A shorter piece is not
+     * looked for, since replacing it would blank out ordinary words; nor is a value that reaches
+     * the message changed (encoded, split, cut).
      */
     private static function reason(McpUnavailable $e, #[\SensitiveParameter] ServerConfig $server): string
     {
         $message = $e->getMessage();
-        if ($message === McpUnavailable::NOT_YET) {
-            return __('This server\'s tools cannot be listed yet: the MCP client arrives with php-agents 0.16.', 'alpaca-bot');
-        }
         $value = $server->headerValue;
         $parts = preg_split('/\s+/', $value, 2);
         $secrets = array_filter([$value, is_array($parts) ? ($parts[1] ?? '') : ''], static fn(string $s): bool => mb_strlen($s) >= 8);

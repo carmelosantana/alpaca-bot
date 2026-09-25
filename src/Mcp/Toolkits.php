@@ -32,9 +32,8 @@ use AlpacaBot\Settings\Store;
  *   per server; a row that list does not name reads as `manage_options`.
  * For every other row the header value is put back from Secrets (the row carries the mask), and
  * the toolkit is handed the ClientFactory, from which McpToolkit builds its client when its tools
- * are first asked for. This class builds no client and asks nothing of the network. The factory
- * the plugin constructs is given no closure in this release, so the client it hands out is
- * UnavailableClient, and a toolkit the plugin's instance of this class builds lists no tools.
+ * are first asked for. This class builds no client and asks nothing of the network; the factory
+ * the plugin constructs builds PhpAgentsClient, which reaches the server through Mcp\Egress.
  *
  * The toolkit is handed `$userId`, the id its row was asked for, as the user its calls are
  * announced as, so the check and the record cannot disagree about who is asking. Its drift goes

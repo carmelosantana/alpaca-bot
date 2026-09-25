@@ -3,38 +3,47 @@
 declare(strict_types=1);
 
 use AlpacaBot\Mcp\ClientFactory;
+use AlpacaBot\Mcp\Egress;
 use AlpacaBot\Mcp\McpUnavailable;
+use AlpacaBot\Mcp\PhpAgentsClient;
 use AlpacaBot\Mcp\ServerConfig;
 use AlpacaBot\Mcp\ToolDefinition;
-use AlpacaBot\Mcp\UnavailableClient;
 use AlpacaBot\Tests\Integration\FakeClient;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Enum\ToolResultStatus;
+use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Mcp\McpServer;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Tool\ToolResult;
+use AlpacaBot\Vendor\Symfony\Component\HttpClient\MockHttpClient;
+use AlpacaBot\Vendor\Symfony\Component\HttpClient\Response\MockResponse;
+use Brain\Monkey\Functions;
 
 function mcpServer(array $approved = []): ServerConfig
 {
     return new ServerConfig('tracker', 'https://mcp.example.com/mcp', 'Authorization', 'Bearer t', 'trk', approved: $approved);
 }
 
-function mcpRefusal(\Closure $call): string
-{
-    try {
-        $call();
-    } catch (McpUnavailable $e) {
-        return $e->getMessage();
-    }
-    return 'no McpUnavailable was thrown';
-}
-
-// toThrow() matches a message as a substring, so the exact sentence is asserted separately: the
-// refusal is that one sentence and nothing about the server is appended to it.
-it('builds the unavailable client until php-agents brings a real one, and says so in one sentence', function (): void {
-    $client = (new ClientFactory())->for(mcpServer());
-    expect($client)->toBeInstanceOf(UnavailableClient::class);
-    expect(fn() => $client->listTools())->toThrow(McpUnavailable::class, McpUnavailable::NOT_YET);
-    expect(fn() => $client->callTool('search', []))->toThrow(McpUnavailable::class, McpUnavailable::NOT_YET);
-    expect(mcpRefusal(fn() => $client->listTools()))->toBe('The MCP client arrives with php-agents 0.16.')
-        ->and(mcpRefusal(fn() => $client->callTool('search', [])))->toBe('The MCP client arrives with php-agents 0.16.');
+/*
+ * With no closure the factory builds php-agents' client through PhpAgentsClient::over(), over the
+ * Egress it was handed and with TransientSessions as the session store. The Egress here answers a
+ * public address and talks to a MockHttpClient, so nothing is looked up or sent.
+ */
+it('builds php-agents\' client by default, through the Egress it was handed, keeping the session in a transient', function (): void {
+    $transients = [];
+    Functions\when('get_transient')->alias(static fn(string $name): mixed => $transients[$name] ?? false);
+    Functions\when('set_transient')->alias(static function (string $name, mixed $value, int $ttl = 0) use (&$transients): bool {
+        $transients[$name] = $value;
+        return true;
+    });
+    $urls = [];
+    $mock = new MockHttpClient(static function (string $method, string $url) use (&$urls): MockResponse {
+        $urls[] = $url;
+        return new MockResponse('{"jsonrpc":"2.0","id":1,"result":{"tools":[{"name":"search","inputSchema":{"type":"object"}}]}}', ['response_headers' => ['content-type' => 'application/json']]);
+    });
+    $client = (new ClientFactory(null, new Egress(static fn(string $host, string $url): array => ['93.184.216.34'], $mock)))->for(mcpServer());
+    expect($client)->toBeInstanceOf(PhpAgentsClient::class)
+        ->and(array_map(static fn(ToolDefinition $d): string => $d->name, $client->listTools()))->toBe(['search'])
+        ->and($urls)->toBe(['https://mcp.example.com/mcp'])
+        ->and(array_keys($transients))->toBe(['alpaca_bot_mcp_session_' . md5((new McpServer(url: 'https://mcp.example.com/mcp', headers: ['Authorization' => 'Bearer t']))->sessionKey())])
+        ->and(array_values($transients))->toBe([['protocolVersion' => '2026-07-28', 'sessionId' => null]]);
 });
 
 it('builds whatever it was given instead, with the server it was asked about', function (): void {
@@ -82,4 +91,27 @@ it('keeps the server out of the trace when the closure hands back something that
     expect($thrown)->toBeInstanceOf(TypeError::class)
         ->and($frames)->toHaveCount(1)
         ->and($frames[0]['args'][0] ?? null)->toBeInstanceOf(SensitiveParameterValue::class);
+});
+
+// The default build's own frames hold the server too: the closure's and PhpAgentsClient::over()'s.
+// Egress refusing the address throws from under both, so the trace passes through each of them.
+it('keeps the server out of the default build\'s frames when building fails', function (): void {
+    $before = (string) ini_get('zend.exception_ignore_args');
+    ini_set('zend.exception_ignore_args', '0');
+    $thrown = null;
+    try {
+        (new ClientFactory(null, new Egress(static function (string $host, string $url): array {
+            throw new AlpacaBot\Toolkit\AddressRefused('refused');
+        })))->for(mcpServer());
+    } catch (AlpacaBot\Toolkit\AddressRefused $e) {
+        $thrown = $e;
+    } finally {
+        ini_set('zend.exception_ignore_args', $before);
+    }
+    $frames = array_values(array_filter($thrown?->getTrace() ?? [], static fn(array $frame): bool => ($frame['class'] ?? '') === PhpAgentsClient::class && $frame['function'] === 'over'
+        || str_starts_with($frame['function'], '{closure') && ($frame['class'] ?? '') === ClientFactory::class));
+    expect($thrown)->toBeInstanceOf(AlpacaBot\Toolkit\AddressRefused::class)
+        ->and($frames)->toHaveCount(2)
+        ->and($frames[0]['args'][0] ?? null)->toBeInstanceOf(SensitiveParameterValue::class)
+        ->and($frames[1]['args'][0] ?? null)->toBeInstanceOf(SensitiveParameterValue::class);
 });
