@@ -497,6 +497,16 @@ it('keeps an approved map of tool names to fingerprints and nothing else', funct
         ->and($rows[1]['approved'])->toBe([]);
 });
 
+// R28-5 and carry 5: the field says where a credential goes. The URL, query string and all, is
+// stored in the clear and read back (GET /settings answers it); a custom header takes the bare key,
+// since only Authorization and Proxy-Authorization have a key found behind its scheme when
+// php-agents redacts a server's error text (McpClient::redact()).
+it('tells an administrator the URL is not a secret and a custom header takes the bare key', function (): void {
+    $d = Schema::fields()['toolkits.mcp_servers']['description'];
+    expect($d)->toContain('query string')->toContain('in the clear')->toContain('GET /settings')
+        ->toContain('bare key')->toContain('Authorization')->toContain('Proxy-Authorization');
+});
+
 it('stores toolkits.mcp_servers as a list on the Tools tab, empty by default, through sanitizeMcpServers()', function (): void {
     $f = Schema::fields()['toolkits.mcp_servers'];
     expect($f['type'])->toBe('array')->and($f['section'])->toBe('toolkits')->and($f['default'])->toBe([])
