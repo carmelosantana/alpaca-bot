@@ -68,15 +68,23 @@ final class McpToolkitTest extends TestCase
         $this->assertArrayNotHasKey('mcp.trk', $this->registry($factory)->enabled($subscriber));
     }
 
-    public function test_the_plugins_registry_offers_the_server_and_its_client_lists_nothing_in_this_release(): void
+    /**
+     * The plugin's own registry offers the server through the container's ClientFactory, which
+     * builds the real client everywhere but here: bootstrap.php replaces its builder with one that
+     * refuses (TestCase::OFFLINE_MCP). A client that cannot be built is a server with no tools and
+     * no guidelines, never a failed turn, and the drift marker is left as it was.
+     */
+    public function test_the_plugins_registry_offers_the_server_and_a_client_it_cannot_build_lists_nothing(): void
     {
         $admin = $this->asAdmin();
         $this->saveServer(['search' => str_repeat('a', 64)]);
+        Drift::set('trk', ['search']);
 
         $kit = Plugin::instance()->get(Registry::class)->enabled($admin)['mcp.trk'] ?? null;
         $this->assertInstanceOf(McpToolkit::class, $kit);
         $this->assertSame([], $kit->tools());
         $this->assertSame('', $kit->guidelines());
+        $this->assertSame(['search'], Drift::get('trk'));
     }
 
     /**
@@ -96,7 +104,7 @@ final class McpToolkitTest extends TestCase
         wp_cache_delete('notoptions', 'options');
         $this->assertSame(['trk', 'trk_'], array_column(get_option(Plugin::OPTION)['toolkits.mcp_servers'], 'prefix'));
 
-        $this->assertSame(['mcp.trk'], array_keys($this->registry(new ClientFactory())->enabled($admin)));
+        $this->assertSame(['mcp.trk'], array_keys($this->registry(new ClientFactory(static fn(ServerConfig $server): FakeClient => new FakeClient()))->enabled($admin)));
     }
 
     /** @param array<string, string> $approved */

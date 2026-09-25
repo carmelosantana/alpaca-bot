@@ -45,6 +45,9 @@ use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Provider\Usage;
  */
 abstract class TestCase extends \WP_UnitTestCase
 {
+    /** What the plugin's own ClientFactory answers in this suite (bootstrap.php, the MCP guard). */
+    public const OFFLINE_MCP = 'The integration suite connects to no MCP server: hand this test a ClientFactory with a builder of its own.';
+
     public function set_up(): void
     {
         parent::set_up();

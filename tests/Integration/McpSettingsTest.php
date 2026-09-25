@@ -8,7 +8,6 @@ use AlpacaBot\Access;
 use AlpacaBot\Admin\SettingsPage;
 use AlpacaBot\Mcp\ClientFactory;
 use AlpacaBot\Mcp\Drift;
-use AlpacaBot\Mcp\McpUnavailable;
 use AlpacaBot\Mcp\Secrets;
 use AlpacaBot\Mcp\ServerSettings;
 use AlpacaBot\Mcp\ToolDefinition;
@@ -777,9 +776,11 @@ final class McpSettingsTest extends TestCase
     }
 
     /**
-     * While no client can list a server (the plugin's own ClientFactory, until php-agents brings
-     * one), Discover answers the translated sentence with a 200, and a save after it keeps every
-     * approval: the fragment carries them as the cell it replaced did.
+     * When the client cannot list a server, Discover answers its reason in the notice with a 200,
+     * and a save after it keeps every approval: the fragment carries them as the cell it replaced
+     * did. The reason here is the container's own ClientFactory refusing to build a client, as
+     * bootstrap.php makes it (TestCase::OFFLINE_MCP), which also shows the Discover route lists
+     * through that factory.
      */
     public function test_a_discovery_that_fails_leaves_every_approval_standing_through_a_save(): void
     {
@@ -791,8 +792,7 @@ final class McpSettingsTest extends TestCase
         $this->assertSame(200, $res->get_status());
         $fragment = (string) $res->get_data();
         $this->assertStringContainsString('notice-error', $fragment);
-        $this->assertStringContainsString('This server&#039;s tools cannot be listed yet: the MCP client arrives with php-agents 0.16.', $fragment);
-        $this->assertStringNotContainsString(McpUnavailable::NOT_YET, $fragment);
+        $this->assertStringContainsString(esc_html(TestCase::OFFLINE_MCP), $fragment);
         // A failed listing leaves the marker as it was.
         $this->assertSame(['search'], Drift::get('trk'));
 

@@ -48,13 +48,15 @@ tests_add_filter('muplugins_loaded', static function () use ($plugin): void {
 tests_add_filter('pre_option_upload_path', static fn(): string => '/tmp/alpaca-bot-integration/uploads');
 
 // Not reaching the network is a property of the suite rather than of each test's care
-// (Kanboard #4322). Two doors get a guard each, both here because both WPH_MODEs load this file
-// (bin/test-integration.sh): WP_Http, and the Ollama provider Factory::make() builds. Two doors
-// guarded is not every door. Factory::make() also builds WpAiClientProvider when `provider.kind`
-// selects it, and the second guard passes that one through untouched (its reason is below, and it
-// is not that its transport is covered); code that builds its own Symfony HttpClient, cURL handle
-// or stream outside Provider\Factory is reached by neither guard, and a test for such a caller has
-// to hand it a client of its own.
+// (Kanboard #4322). Three doors get a guard each, all here because both WPH_MODEs load this file
+// (bin/test-integration.sh): WP_Http, the Ollama provider Factory::make() builds, and the MCP
+// client the plugin's own Mcp\ClientFactory builds. Three doors guarded is not every door.
+// Factory::make() also builds WpAiClientProvider when `provider.kind` selects it, and the second
+// guard passes that one through untouched (its reason is below, and it is not that its transport
+// is covered); a Mcp\ClientFactory a test constructs with no builder of its own builds the real
+// client, which the third guard does not reach; and code that builds its own Symfony HttpClient,
+// cURL handle or stream outside Provider\Factory is reached by none of them, and a test for such a
+// caller has to hand it a client of its own.
 //
 // WP_Http: a request no test stubbed is refused, naming the URL. At the last priority, so a
 // test's own `pre_http_request` stub (ToolkitsTest, ShortcodesTest) answers first and this sees
@@ -90,5 +92,25 @@ tests_add_filter(
         : $provider,
     PHP_INT_MIN,
 );
+
+// The MCP client: the ClientFactory Plugin::register() puts in the container (at plugins_loaded
+// 9) builds php-agents' client over Mcp\Egress, which talks through Symfony's HttpClient, where no
+// `pre_http_request` sees it, to whatever address a stored server row names. Mcp\Toolkits holds
+// that one instance from register() on, and the view routes' Mcp\Discovery is handed it when they
+// are built, so the instance itself is changed rather than the container's entry: right after
+// register(), its builder is replaced with one that throws McpUnavailable with
+// TestCase::OFFLINE_MCP and builds nothing. McpToolkit reads that as a server with no tools, and
+// the Discover route prints it in its notice. A test that means to list a server hands in a
+// ClientFactory with a builder of its own (FakeClient), or swaps the container's entry for one, as
+// McpSettingsTest does.
+tests_add_filter('plugins_loaded', static function (): void {
+    \Closure::bind(
+        function (): void {
+            $this->build = static fn(\AlpacaBot\Mcp\ServerConfig $server): never => throw new \AlpacaBot\Mcp\McpUnavailable(\AlpacaBot\Tests\Integration\TestCase::OFFLINE_MCP);
+        },
+        \AlpacaBot\Plugin::instance()->get(\AlpacaBot\Mcp\ClientFactory::class),
+        \AlpacaBot\Mcp\ClientFactory::class,
+    )();
+}, 10);
 
 require $tests . '/includes/bootstrap.php';
