@@ -188,15 +188,20 @@ it('tells the person switching tools on what an ability call is: another plugin\
         ->toContain('longer than ' . AlpacaBot\Toolkit\SchemaTool::RESULT_CHARS . ' characters is cut');
 });
 
-// An MCP server's tools are another party's, and in this release nothing contacts one: the tab
-// says both, and does not borrow web_fetch's address rules, which differ (review R88).
-it('tells the person adding an MCP server what is offered, whose text it is, who may use it, and that no server is contacted yet in this release', function (): void {
+// An MCP server's tools are another party's, and Discover and a tool turn contact the server
+// (Task 28): the tab says what is offered and when the address is checked, and does not borrow
+// web_fetch's address rules, which differ (review R88).
+it('tells the person adding an MCP server what is offered, whose text it is, who may use it, and when its address is checked', function (): void {
     Functions\when('esc_url')->returnArg();
     $tools = helpTabContent('alpaca-bot-tools');
     // The one paragraph about MCP, so what it says is not borrowed from the abilities one.
     preg_match('~<p><strong>An MCP server.*?</p>~s', $tools, $m);
     $mcp = str_replace('&#039;', "'", $m[0] ?? '');
-    expect($mcp)->toContain('no MCP server is contacted')->toContain('php-agents 0.16')
+    expect($mcp)->not->toContain('no MCP server is contacted')->not->toContain('php-agents')
+        ->toContain('Discover tools asks the server for its tools')
+        ->toContain('checked when it is saved from this screen or over the REST API, and again each time Alpaca Bot connects to it: on Discover tools, and on a chat turn that lists its tools')
+        ->toContain('only to an address that passed, never through a proxy, and follows no redirect')
+        ->toContain('Put a credential in the header, never in the address')
         ->toContain('only the tools you tick')->toContain('prefix__tool')
         ->toContain('withheld until you approve it again')->toContain('lists twice')
         ->toContain("the server's text")->toContain('shortened and flattened exactly as the model gets it')
