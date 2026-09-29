@@ -507,6 +507,13 @@ it('tells an administrator the URL is not a secret and a custom header takes the
         ->toContain('bare key')->toContain('Authorization')->toContain('Proxy-Authorization');
 });
 
+// Task 28.4: Mcp\Egress checks the address again whenever a client is built, which is every
+// Discover and every turn that lists the server, so the save is not the only check.
+it('tells an administrator the address is checked at save and again at each connection', function (): void {
+    expect(Schema::fields()['toolkits.mcp_servers']['description'])
+        ->toContain('The address is checked when it is saved from this screen or over the REST API, and again each time Alpaca Bot connects to it');
+});
+
 it('stores toolkits.mcp_servers as a list on the Tools tab, empty by default, through sanitizeMcpServers()', function (): void {
     $f = Schema::fields()['toolkits.mcp_servers'];
     expect($f['type'])->toBe('array')->and($f['section'])->toBe('toolkits')->and($f['default'])->toBe([])
