@@ -557,6 +557,16 @@ it('says which approved tools were found changed since approval, from the drift 
         ->and($html)->not->toContain('dropped')->not->toContain('issues');
 });
 
+// A stored row with no id (one written round the schema) has no Discover to press, but its
+// approvals still ride in the cell as hidden inputs, so a save keeps them.
+it('keeps the hidden approvals of a stored row that has no id, and says to save the server first', function (): void {
+    stubMcpServerRows([]);
+    $html = (settingsFields(['toolkits.mcp_servers' => [
+        ['url' => 'https://mcp.example.com/mcp', 'prefix' => 'trk', 'approved' => ['search' => str_repeat('a', 64)]],
+    ]])['alpaca_bot_toolkits.mcp_servers']['render'])();
+    expect($html)->toContain('<div id="ab-mcp-tools-new"><input type="hidden" name="alpaca_bot_settings[toolkits.mcp_servers][0][approved][search]" value="' . str_repeat('a', 64) . '">Save the server first.</div>');
+});
+
 // The address check at save time runs in the page's sanitize callback, which is where a person is
 // there to be told. A refused new server is left out; a refused edit of a stored server keeps the
 // stored row whole, so its saved address, header value and approvals stand; everything else in
