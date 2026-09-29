@@ -82,7 +82,7 @@ final class ViewController extends Controller
     /**
      * `/view/models` shares the chat rate limit for the reason `/models` does: `refresh=1` is a
      * synchronous provider call. `/view/mcp-tools` shares it too: it lists a server through the
-     * MCP client synchronously, which is a call to a remote host once the client is a real one.
+     * MCP client synchronously, which is a call to a remote host.
      * The rest are not limited. Each works on the site's own database or
      * builds a bubble from the request, and `/view/panel` also renders the model select through
      * the catalog, which asks the provider when its cache is empty, as the chat screen's own
@@ -294,8 +294,8 @@ final class ViewController extends Controller
      * through `alpaca_bot/capability/view/mcp-tools` like every other route here, and a filter
      * decides it; this callback then asks the capability again on its own account, the way
      * SettingsController::show() does for `?reveal=1`. Listing a server hands its ServerConfig,
-     * the stored header value in it, to the ClientFactory's builder, which is how the credential
-     * reaches a remote host once the builder makes a real client, so a site that loosened the
+     * the stored header value in it, to the ClientFactory's builder, whose client sends the
+     * credential to the server's host, so a site that loosened the
      * filter for a custom role must not have handed that role this. It shares the chat bucket's
      * rate limit (routes()).
      *
