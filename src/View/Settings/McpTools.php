@@ -28,7 +28,10 @@ use AlpacaBot\View\Component;
  * that rule has it. The title goes through describe() too. Under each tool its input schema,
  * which approving pins with the rest (ToolDefinition::fingerprint()) and which reaches the model
  * neither cleaned nor capped (SchemaTool), is shown collapsed in a `<details>`, as pretty-printed
- * JSON cut at SCHEMA_CHARS characters, with a line saying so when it is cut; a schema JSON cannot
+ * JSON with every character outside ASCII written as its `\uXXXX` escape, so a zero-width
+ * character, a bidi override or a Unicode tag character, which would draw nothing or reorder what
+ * is drawn, shows as text; that JSON is cut at SCHEMA_CHARS characters, escapes counted as
+ * written, with a line saying so when it is cut; a schema JSON cannot
  * write (json_decode() makes INF of `1e999`) is a line saying it cannot be shown. The name, the
  * title, the description and the schema are the server's text, and each is printed escaped.
  *
@@ -56,7 +59,7 @@ use AlpacaBot\View\Component;
  */
 final class McpTools extends Component
 {
-    /** The most of a tool's input schema, as pretty-printed JSON, the list shows, in characters. */
+    /** The most of a tool's input schema, as pretty-printed and ASCII-escaped JSON, the list shows, in characters of that JSON. */
     public const SCHEMA_CHARS = 4000;
 
     /**
@@ -134,7 +137,7 @@ final class McpTools extends Component
      */
     private function schema(array $schema): string
     {
-        $json = wp_json_encode($schema, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+        $json = wp_json_encode($schema, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
         if ($json === false) {
             $body = $this->tag('p', [], $this->e(__('This schema holds a value JSON cannot write, such as a number too large for it, so it cannot be shown.', 'alpaca-bot')));
         } elseif (mb_strlen($json) > self::SCHEMA_CHARS) {

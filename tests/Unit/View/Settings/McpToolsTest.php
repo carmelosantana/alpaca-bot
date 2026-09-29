@@ -191,10 +191,22 @@ it('does not mark a tool for sharing a name with one the listing repeats', funct
 it('shows each tool\'s input schema collapsed, pretty-printed and escaped', function (): void {
     $tool = new ToolDefinition('search', 'Search.', ['type' => 'object', 'properties' => ['q' => ['type' => 'string', 'description' => 'a/b é']]]);
     $html = (new McpTools(0, [mcpToolRow($tool, 'new', true)]))->render();
-    $json = json_encode($tool->inputSchema, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+    $json = json_encode($tool->inputSchema, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
     expect($html)->toContain('<details class="ab-mcp-schema"><summary>Input schema</summary><pre>' . htmlspecialchars($json, ENT_QUOTES) . '</pre></details></li>')
         ->and($json)->toContain("\n    \"properties\"")
-        ->and($json)->toContain('a/b é');
+        ->and($json)->toContain('a/b \\u00e9');
+});
+
+// Review fix (Task 28.3): a character that draws nothing or reorders what is drawn -- a zero-width
+// space, a right-to-left override, a Unicode tag character -- is text the model reads and the
+// approver would not see, so every character outside ASCII is shown as its \u escape.
+it('shows every character outside ASCII in a schema as a visible \\u escape, never raw', function (): void {
+    $tool = new ToolDefinition('search', 'Search.', ['type' => 'object', 'description' => "a\u{202E}b\u{200B}c\u{E0041}d"]);
+    $html = (new McpTools(0, [mcpToolRow($tool, 'new', true)]))->render();
+    expect($html)->toContain('a\\u202eb\\u200bc\\udb40\\udc41d')
+        ->not->toContain("\u{202E}")
+        ->not->toContain("\u{200B}")
+        ->not->toContain("\u{E0041}");
 });
 
 it('renders a schema that carries markup inert', function (): void {

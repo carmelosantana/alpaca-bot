@@ -204,7 +204,7 @@ it('tells the person adding an MCP server what is offered, whose text it is, who
         // M5 (R101): the schema is the server's text too and reaches the model as sent; C3
         // (Task 28.3): approving pins it, so the list shows it, cut at McpTools::SCHEMA_CHARS.
         ->toContain("input schema carries the server's text too")->toContain('Alpaca Bot neither cleans nor caps')
-        ->toContain("pins its input schema with the rest, so the list shows each tool's schema under it, collapsed and cut at 4000 characters.")
+        ->toContain("pins its input schema with the rest, so the list shows each tool's schema under it, collapsed, with every character outside ASCII written as its \\u escape so that none can hide, and cut at 4000 characters of that text.")
         ->not->toContain('does not show')
         ->toContain("even when it is the site's own host")
         ->toContain('<code>alpaca_bot/mcp/called</code>')
