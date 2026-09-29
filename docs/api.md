@@ -553,8 +553,11 @@ Rules worth knowing before you write:
     in for every server whose URL is new or changed: a private, loopback, link-local or other
     special-purpose address, or a name that resolves to one, is refused, and the PUT answers
     `400 alpaca_bot_mcp_address` naming the URL and why, and writes nothing, the other keys of
-    the PUT included. It is the address rule `web_fetch` uses without that tool's exemptions:
-    core's own `http_request_host_is_external` listeners, which let through the site's own host,
+    the PUT included. It is checked again each time the plugin connects to the server (a
+    `GET /view/mcp-tools/{id}`, or a chat turn that lists the server's tools), however the row
+    was written, and the connection goes only to an address that passed. Both checks are the
+    address rule `web_fetch` uses without that tool's exemptions: core's own
+    `http_request_host_is_external` listeners, which let through the site's own host,
     every `allowed_redirect_hosts` host and, on multisite, every domain of the network, are not
     asked. A listener the site adds to `http_request_host_is_external` is, and returning `true`
     for a host is how a private server is let in. A connection to an MCP server never goes
