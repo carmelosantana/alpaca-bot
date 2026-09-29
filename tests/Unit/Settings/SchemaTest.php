@@ -508,20 +508,24 @@ it('keeps an approved map of tool names to fingerprints and nothing else', funct
 });
 
 // R28-5 and carry 5: the field says where a credential goes. The URL, query string and all, is
-// stored in the clear and read back (GET /settings answers it); a custom header takes the bare key,
-// since only Authorization and Proxy-Authorization have a key found behind its scheme when
-// php-agents redacts a server's error text (McpClient::redact()).
+// stored in the clear and read back (GET /settings answers it); the header value is sent as typed
+// (PhpAgentsClient::over() puts nothing in front of it), so Authorization takes its scheme and a
+// custom header the bare key. The reason is the plain one: php-agents' redaction of a server's
+// error text is no reason, since the plugin never shows the library's text (R28-5).
 it('tells an administrator the URL is not a secret and a custom header takes the bare key', function (): void {
     $d = Schema::fields()['toolkits.mcp_servers']['description'];
     expect($d)->toContain('query string')->toContain('in the clear')->toContain('GET /settings')
-        ->toContain('bare key')->toContain('Authorization')->toContain('Proxy-Authorization');
+        ->toContain('The header value is sent as typed, with nothing put in front of it: for Authorization type the scheme and the key (Bearer …), and for a header such as X-API-Key the bare key.')
+        ->not->toContain('error text');
 });
 
 // Task 28.4: Mcp\Egress checks the address again whenever a client is built, which is every
-// Discover and every turn that lists the server, so the save is not the only check.
-it('tells an administrator the address is checked at save and again at each connection', function (): void {
+// Discover and every turn that lists the server, so the save is not the only check. A turn's tool
+// calls reuse the client its listing built, so the check is not run per request (R28-11).
+it('tells an administrator the address is checked at save and again each time a connection is built', function (): void {
     expect(Schema::fields()['toolkits.mcp_servers']['description'])
-        ->toContain('The address is checked when it is saved from this screen or over the REST API, and again each time Alpaca Bot connects to it');
+        ->toContain('The address is checked when it is saved from this screen or over the REST API, and again each time Alpaca Bot builds a connection to it: on Discover tools, and on a chat turn that lists its tools.')
+        ->not->toContain('each time Alpaca Bot connects');
 });
 
 it('stores toolkits.mcp_servers as a list on the Tools tab, empty by default, through sanitizeMcpServers()', function (): void {
