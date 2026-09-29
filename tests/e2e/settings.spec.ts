@@ -3,7 +3,9 @@ import { expect, test, type Locator, type Page } from '@playwright/test';
 /**
  * A refused Discover says so in the server's approvals cell (M-3, Task 26 review). htmx swaps no
  * 4xx response, so without the Discover button's response-error handler (Admin\SettingsPage) a
- * 403 or a 429 left the button doing nothing visible.
+ * 403 or a 429 left the button doing nothing visible. A 403 says the session may have expired, a
+ * 429 says to wait, and any other error status, such as a proxy's 502, says only that Discover
+ * failed (R28-11): it is no reason to reload the page.
  *
  * Against the wp-env development site, as chat.spec.ts is, because the settings screen is a real
  * WordPress admin page with core's htmx enqueue and REST nonce; composer.spec.ts's fixture page
@@ -11,8 +13,8 @@ import { expect, test, type Locator, type Page } from '@playwright/test';
  *
  * No MCP server is contacted. The server this test saves has a public IP literal for its address,
  * so saving it looks nothing up. The 403 is core's own answer to a nonce it does not recognise,
- * given before the route's callback runs; the 429 is answered by page.route(), so that request
- * never leaves the browser. The server is removed again at the end.
+ * given before the route's callback runs; the 429 and the 502 are answered by page.route(), so
+ * those requests never leave the browser. The server is removed again at the end.
  */
 
 const ADMIN_USER = process.env.WP_ADMIN_USER ?? 'admin';
@@ -21,6 +23,7 @@ const TOOLS = '/wp-admin/admin.php?page=alpaca-bot-settings&tab=toolkits';
 const PREFIX = 'efour';
 const REFUSED = "Discover tools got no list back: this page's session may have expired. Reload the page and try again.";
 const BUSY = 'Too many requests for now. Wait a minute, then press Discover tools again.';
+const FAILED = 'Discover tools failed. Try again in a moment.';
 
 const isDiscover = (url: URL): boolean => decodeURIComponent(url.toString()).includes('/view/mcp-tools/');
 
@@ -50,7 +53,7 @@ test.afterEach(async ({ page }) => {
   await expect(row(page)).toHaveCount(0);
 });
 
-test('a Discover refused as forbidden, then as rate limited, says so in the approvals cell and keeps what the cell held', async ({ page }) => {
+test('a Discover refused as forbidden, then as rate limited, then failed another way, says so in the approvals cell and keeps what the cell held', async ({ page }) => {
   await login(page);
   await page.goto(TOOLS);
   const blank = page.locator('#ab-mcp-servers tbody tr').last();
@@ -77,6 +80,15 @@ test('a Discover refused as forbidden, then as rate limited, says so in the appr
   await discover.click();
   await expect(notice).toHaveText(BUSY);
   await expect(notice).toHaveClass(/notice-warning/);
+  await expect(cell.locator('.ab-mcp-refused')).toHaveCount(1);
+  await expect(cell).toContainText('0 tools approved.');
+
+  // A proxy that timed out waiting for a slow server: neither sentence above is true of it.
+  await page.unroute(isDiscover);
+  await page.route(isDiscover, (route) => route.fulfill({ status: 502, contentType: 'text/html', body: '<html><body>Bad Gateway</body></html>' }));
+  await discover.click();
+  await expect(notice).toHaveText(FAILED);
+  await expect(notice).toHaveClass(/notice-error/);
   await expect(cell.locator('.ab-mcp-refused')).toHaveCount(1);
   await expect(cell).toContainText('0 tools approved.');
 });
