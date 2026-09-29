@@ -849,6 +849,25 @@ final class McpSettingsTest extends TestCase
     }
 
     /**
+     * Addendum review I-1, over real core's esc_html(), which does not encode an entity already in
+     * the text again: an entity the server wrote into a schema, a title or a description shows as
+     * the letters it is written with, never as the bidi override or zero-width space it spells.
+     */
+    public function test_the_discovered_list_shows_an_entity_in_the_servers_text_as_its_letters(): void
+    {
+        $this->assertSame('a&#x202E;b', esc_html('a&#x202E;b'), 'core leaves an entity alone, which is why the list encodes & again');
+        $tool = new ToolDefinition('search', 'Find c&#8203;d.', ['type' => 'object', 'description' => 'x&#x202E;y'], [], 'Title &#x202E;t');
+        $this->useClient(static fn(): FakeClient => new FakeClient([$tool]));
+        $this->rest('PUT', '/settings', ['toolkits.mcp_servers' => [['url' => self::URL, 'prefix' => 'trk']]]);
+        $fragment = (string) $this->rest('GET', '/view/mcp-tools/trk', ['index' => 0])->get_data();
+        $this->assertStringContainsString('&quot;x&amp;#x202E;y&quot;', $fragment);
+        $this->assertStringContainsString('<strong>Title &amp;#x202E;t</strong>', $fragment);
+        $this->assertStringContainsString('Find c&amp;#8203;d.', $fragment);
+        $this->assertStringNotContainsString('&#x202E;', $fragment);
+        $this->assertStringNotContainsString('&#8203;', $fragment);
+    }
+
+    /**
      * Task 28.3, over real dispatch: a client the factory refuses to build is Discover's notice
      * with a 200, never a 500 or a WP_Error. An address Egress refuses says why in its own words,
      * which name the host; any other throwable says the plugin's sentence and nothing of its own.
