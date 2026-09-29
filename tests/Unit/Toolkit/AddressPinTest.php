@@ -10,9 +10,10 @@ use Brain\Monkey\Filters;
 // SpecialPurposeAddress, and hands back every answer that passed, for the caller to pin as many
 // of as its transport will take. web_fetch (cURL, through http_api_curl) pins them in one
 // CURLOPT_RESOLVE entry, as many as its libcurl reads from one (CurlPinTest holds that);
-// Mcp\Egress takes the first, because Symfony's `resolve` option maps a
-// host to one address. It is a class of its own rather than a method of WebFetchToolkit for that
-// reason: one rule, two transports. The lookup is injected, so nothing here touches DNS;
+// Mcp\Egress pins them through Symfony HttpClient's `resolve` option, all of them on Symfony's
+// Curl client by the same libcurl rule, and the first alone on its Native client or a transport
+// handed in (EgressTest holds that). It is a class of its own rather than a method of
+// WebFetchToolkit for that reason: one rule, whichever transport asks it. The lookup is injected, so nothing here touches DNS;
 // SpecialPurposeAddressTest walks the table itself.
 
 it('resolves a name once and returns every answer it checked, in lookup() order, IPv4 ahead of IPv6', function (): void {

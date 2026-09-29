@@ -633,8 +633,9 @@ final class Pipeline
      * this branch.) Read the old way, such a release would land a provider failure as a
      * *finished* assistant reply carrying the library's own 'Provider error: ...' text, fire
      * `alpaca_bot/chat/completed` and bill the user for it. Read this way, an unrecognised Error
-     * finish is a failure, which is the direction a wrong guess should fail in. (The pin is
-     * `~0.15.2` besides, so a minor release cannot arrive unreviewed.)
+     * finish is a failure, which is the direction a wrong guess should fail in. (composer.json
+     * pins php-agents at `~0.16.0` besides, which admits a 0.16 patch release and no 0.17, so a
+     * patch release can arrive unreviewed and a minor one cannot.)
      *
      * The announcement supplies the words when it had any, and the failure is the provider's: a
      * plain RuntimeException, which send() raises as `Provider error: ` and those words
