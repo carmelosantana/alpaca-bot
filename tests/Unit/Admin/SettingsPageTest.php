@@ -526,14 +526,18 @@ it('escapes what a stored row holds at every attribute and text node', function 
 
 // Discover is an hx-get at the approval fragment, swapped into the row's approvals cell. The
 // fragment's boxes post under the row's index, which hx-vals hands the route; the nonce rides on
-// the table's wrapper, which htmx hands down to every request inside it.
+// the table's wrapper, which htmx hands down to every request inside it. A refused request (M-3:
+// htmx swaps no 4xx) runs the button's response-error handler, which reads its two sentences
+// from the button's data attributes (tests/e2e/settings.spec.ts drives it in a browser).
 it('gives each stored server a Discover button that swaps its approval list into its row, and the blank row a disabled one', function (): void {
     stubMcpServerRows();
     $html = (settingsFields(['toolkits.mcp_servers' => [
         ['id' => 'trk', 'url' => 'https://mcp.example.com/mcp', 'prefix' => 'trk', 'approved' => ['search' => str_repeat('a', 64)]],
         ['id' => 'gh', 'url' => 'https://gh.example.com/mcp', 'prefix' => 'gh', 'approved' => []],
     ]])['alpaca_bot_toolkits.mcp_servers']['render'])();
-    $button = static fn(string $id, int $i): string => '<button type="button" class="button" hx-get="https://site.test/wp-json/alpaca-bot/v1/view/mcp-tools/' . $id . '" hx-vals="{&quot;index&quot;:' . $i . '}" hx-target="#ab-mcp-tools-' . $id . '" hx-swap="innerHTML">Discover tools</button>';
+    $button = static fn(string $id, int $i): string => '<button type="button" class="button" hx-get="https://site.test/wp-json/alpaca-bot/v1/view/mcp-tools/' . $id . '" hx-vals="{&quot;index&quot;:' . $i . '}" hx-target="#ab-mcp-tools-' . $id . '" hx-swap="innerHTML" hx-on::response-error="' . htmlspecialchars(SettingsPage::DISCOVER_REFUSED_JS, ENT_QUOTES) . '"'
+        . ' data-ab-refused="Discover tools got no list back: this page&#039;s session may have expired. Reload the page and try again."'
+        . ' data-ab-busy="Too many requests for now. Wait a minute, then press Discover tools again.">Discover tools</button>';
     expect($html)->toContain('<div class="ab-mcp-servers" id="ab-mcp-servers" hx-headers="{&quot;X-WP-Nonce&quot;:&quot;nonce-1&quot;}"><table')
         ->toContain('1 tool approved.</div>' . $button('trk', 0))
         ->toContain('0 tools approved.</div>' . $button('gh', 1))

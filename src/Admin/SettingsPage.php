@@ -76,6 +76,13 @@ use AlpacaBot\View\Settings\McpTools;
 final class SettingsPage
 {
     public const SLUG = 'alpaca-bot-settings';
+
+    /**
+     * The Discover button's `hx-on::response-error` handler (discoverButton()), run by htmx with
+     * `this` the button and `event` htmx's responseError event.
+     */
+    public const DISCOVER_REFUSED_JS = "var busy=event.detail.xhr.status===429,cell=document.querySelector(this.getAttribute('hx-target')),note=cell.querySelector('.ab-mcp-refused')||cell.insertBefore(document.createElement('div'),cell.firstChild),p=document.createElement('p');"
+        . "note.className='notice inline ab-mcp-refused notice-'+(busy?'warning':'error');p.textContent=busy?this.dataset.abBusy:this.dataset.abRefused;note.replaceChildren(p);";
     public const GROUP = 'alpaca_bot';
 
     /** The last input of the form. A post of the option that arrives without it was cut short by PHP. */
@@ -745,14 +752,30 @@ final class SettingsPage
         return McpTools::approvals($i, $approved, Drift::get($id));
     }
 
-    /** A row's Discover button: the approval fragment for a stored server, disabled on the blank row. */
+    /**
+     * A row's Discover button: the approval fragment for a stored server, disabled on the blank row.
+     *
+     * htmx swaps no 4xx response, so a Discover refused before the route answers its fragment (a
+     * 403 for a REST nonce that has expired, since this screen has no heartbeat to renew it, or a
+     * 429 from the chat bucket's rate limit) would otherwise change nothing on the page. The
+     * button's `htmx:responseError` handler, DISCOVER_REFUSED_JS, puts a notice at the top of the
+     * approvals cell instead: a warning to wait for a 429, and for any other status an error
+     * saying to reload the page. It is an `hx-on` attribute rather than a script because the
+     * settings screen loads htmx and no bundle of the plugin's (Assets::enqueue()). The two
+     * sentences are the button's `data-ab-busy` and `data-ab-refused` attributes, translated
+     * and attribute-escaped here, and the handler writes them as text. It adds one element and
+     * replaces the one an earlier refusal added, so the hidden approvals, the count and the drift
+     * note stay as they were, and a Discover that is answered swaps the notice away with the rest.
+     */
     private static function discoverButton(int $i, ?string $id): string
     {
         $label = esc_html__('Discover tools', 'alpaca-bot');
         if ($id === null) {
             return '<button type="button" class="button" disabled>' . $label . '</button>';
         }
-        return '<button type="button" class="button"' . Hx::attrs(['get' => '/mcp-tools/' . $id, 'vals' => ['index' => $i], 'target' => '#ab-mcp-tools-' . $id, 'swap' => 'innerHTML']) . '>' . $label . '</button>';
+        return '<button type="button" class="button"' . Hx::attrs(['get' => '/mcp-tools/' . $id, 'vals' => ['index' => $i], 'target' => '#ab-mcp-tools-' . $id, 'swap' => 'innerHTML', 'on::response-error' => self::DISCOVER_REFUSED_JS])
+            . ' data-ab-refused="' . esc_attr__('Discover tools got no list back: this page\'s session may have expired. Reload the page and try again.', 'alpaca-bot') . '"'
+            . ' data-ab-busy="' . esc_attr__('Too many requests for now. Wait a minute, then press Discover tools again.', 'alpaca-bot') . '">' . $label . '</button>';
     }
 
     /**
