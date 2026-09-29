@@ -756,8 +756,14 @@ final class SettingsPage
      * A row's Discover button: the approval fragment for a stored server, disabled on the blank row.
      *
      * htmx swaps no 4xx response, so a Discover refused before the route answers its fragment (a
-     * 403 for a REST nonce that has expired, since this screen has no heartbeat to renew it, or a
-     * 429 from the chat bucket's rate limit) would otherwise change nothing on the page. The
+     * 403 for a REST nonce that has expired, or a 429 from the chat bucket's rate limit) would
+     * otherwise change nothing on the page. The nonce can expire on a page left open because it
+     * is printed once, with the page, into the servers table's static `hx-headers`
+     * (Hx::formHeaders(), renderMcpServers()), and nothing renews it there. Core's heartbeat does
+     * run on this screen (wp_auth_check_load() enqueues wp-auth-check, which depends on it), but
+     * the fresh `rest_nonce` its tick carries goes to `wpApiSettings.nonce`, which htmx does not
+     * read, and Assets::heartbeat() answers only a tick that asks for `alpaca_bot_nonce`, which
+     * only the chat bundle does. The
      * button's `htmx:responseError` handler, DISCOVER_REFUSED_JS, puts a notice at the top of the
      * approvals cell instead: a warning to wait for a 429, and for any other status an error
      * saying to reload the page. It is an `hx-on` attribute rather than a script because the
