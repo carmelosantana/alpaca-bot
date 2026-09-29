@@ -30,8 +30,8 @@ use AlpacaBot\Vendor\Symfony\Component\HttpClient\HttpClient;
  * on the container's ClientFactory is untouched by this test; Egress's pinning is covered by its
  * unit tests. The sessions are the plugin's TransientSessions, and the second listing and both
  * calls go through a client built afresh over them, as the next PHP request's would be: McpClient
- * keeps a session in memory once it has one and reads the store only when it has none, so a second
- * listing through the first client would not read the transient at all.
+ * reads the store once, on its first use, and keeps what it holds after that in memory, so a
+ * second listing through the first client would not read the transient at all.
  *
  * bin/test-integration.sh does not pass these two variables: `wp-env run` takes no environment,
  * so a value would have to go on the container's command line, where `ps` shows it. Run it with

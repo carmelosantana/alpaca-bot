@@ -13,8 +13,10 @@ namespace AlpacaBot\Mcp;
  * The default build is where the server's address is checked: Egress::client() refuses a URL or
  * an address its check does not pass with AddressRefused, and PhpAgentsClient::over() refuses a
  * header name it would not send with McpUnavailable, so for() can throw either. The build sends
- * nothing; the client does, when it is asked to list or call. The factory itself reads nothing
- * from the ServerConfig and records nothing.
+ * the server nothing; the client does, when it is asked to list or call. The build does look the
+ * server's name up, since that lookup is the address check (Egress::client(), through
+ * AddressCheck::resolve()). The factory itself reads nothing from the ServerConfig and records
+ * nothing.
  *
  * for()'s parameter is a #[\SensitiveParameter], so a trace taken with zend.exception_ignore_args
  * off holds a SensitiveParameterValue in that frame rather than the server. The closure's own

@@ -38,7 +38,13 @@ it('builds php-agents\' client by default, through the Egress it was handed, kee
         $urls[] = $url;
         return new MockResponse('{"jsonrpc":"2.0","id":1,"result":{"tools":[{"name":"search","inputSchema":{"type":"object"}}]}}', ['response_headers' => ['content-type' => 'application/json']]);
     });
-    $client = (new ClientFactory(null, new Egress(static fn(string $host, string $url): array => ['93.184.216.34'], $mock)))->for(mcpServer());
+    $lookups = [];
+    $client = (new ClientFactory(null, new Egress(static function (string $host, string $url) use (&$lookups): array {
+        $lookups[] = $host;
+        return ['93.184.216.34'];
+    }, $mock)))->for(mcpServer());
+    // The build looks the server's name up (the address check) and sends the server nothing.
+    expect($lookups)->toBe(['mcp.example.com'])->and($urls)->toBe([]);
     expect($client)->toBeInstanceOf(PhpAgentsClient::class)
         ->and(array_map(static fn(ToolDefinition $d): string => $d->name, $client->listTools()))->toBe(['search'])
         ->and($urls)->toBe(['https://mcp.example.com/mcp'])

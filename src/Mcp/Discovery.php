@@ -78,7 +78,7 @@ final class Discovery
      * ones recorded through Drift::set(), each once, which clears the marker when there are none.
      *
      * A failure to build the client or to list the server is McpUnavailable, whatever was thrown,
-     * so the one caller that shows it, the Discover route, has one class to catch and never
+     * so a caller that shows it, as the Discover route does, has one class to catch and never
      * answers an error of its own. The catch is \Throwable because both halves can throw beyond
      * RuntimeException: the builder is whatever closure the factory was handed, and the default
      * one reaches McpServer's constructor and PinnedHttpClient's, each of which can throw
