@@ -236,3 +236,46 @@ it('says so when a schema cannot be written out as JSON', function (): void {
     expect($html)->toContain('<details class="ab-mcp-schema"><summary>Input schema</summary><p>This schema holds a value JSON cannot write, such as a number too large for it, so it cannot be shown.</p></details>')
         ->toContain('name="alpaca_bot_settings[toolkits.mcp_servers][0][approved][search]"');
 });
+
+// Addendum review I-1: core's esc_html() does not double-encode, so an entity already in the text
+// (`&#x202E;`, `&#8203;`) would reach the browser as one and be drawn as the character it spells:
+// a right-to-left override or a zero-width space the approver cannot see, in ASCII text that
+// wp_json_encode() and describe() leave alone and the model reads as the entity's letters. Every
+// piece of the server's text is printed with `&` encoded again, so the entity shows as typed.
+// Brain Monkey's esc_html() stand-in double-encodes, which would hide the gap, so core's
+// behaviour stands in here.
+it('shows an entity in the server\'s text as the letters it is written with, never the character it spells', function (): void {
+    Functions\when('esc_html')->alias(static fn(string $s): string => htmlspecialchars($s, ENT_QUOTES, 'UTF-8', false));
+    $tool = new ToolDefinition('search', 'Find a&#x202E;b and c&#8203;d &amp; e', ['type' => 'object', 'description' => 'x&#x202E;y&#8203;z'], [], 'Title &#x202E;t');
+    $html = (new McpTools(0, [mcpToolRow($tool, 'new', true)], '', ['gone' => str_repeat('a', 64)]))->render();
+    expect($html)->toContain('<pre>' . htmlspecialchars((string) json_encode($tool->inputSchema, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES), ENT_QUOTES, 'UTF-8', true) . '</pre>')
+        ->toContain('x&amp;#x202E;y&amp;#8203;z')
+        ->toContain('<span class="description">Find a&amp;#x202E;b and c&amp;#8203;d &amp;amp; e</span>')
+        ->toContain('<strong>Title &amp;#x202E;t</strong>')
+        ->not->toContain('&#x202E;')
+        ->not->toContain('&#8203;');
+});
+
+// The name is the server's text too, printed with the same rule, and so is a name the list says a
+// save would drop; a name that cannot be approved is still listed.
+it('shows an entity in a tool name as the letters it is written with', function (): void {
+    Functions\when('esc_html')->alias(static fn(string $s): string => htmlspecialchars($s, ENT_QUOTES, 'UTF-8', false));
+    $tool = new ToolDefinition('a&#x202E;b', 'Named.', ['type' => 'object']);
+    $html = (new McpTools(0, [mcpToolRow($tool, 'new', true)]))->render();
+    expect($html)->toContain('<code>a&amp;#x202E;b</code>')->not->toContain('&#x202E;');
+});
+
+// The same rule holds for a schema past the cap, for a stored approval's name the server no longer
+// lists, and for the drift note the error fragment carries: none of them prints an entity as one.
+it('shows an entity as its letters in a cut schema, a dropped approval and the drift note', function (): void {
+    Functions\when('esc_html')->alias(static fn(string $s): string => htmlspecialchars($s, ENT_QUOTES, 'UTF-8', false));
+    $long = new ToolDefinition('long', 'Long.', ['type' => 'object', 'description' => '&#x202E;' . str_repeat('x', 5000)]);
+    $html = (new McpTools(0, [mcpToolRow($long, 'new', true)], '', ['g&#8203;one' => str_repeat('a', 64)]))->render();
+    expect($html)->toContain('Cut at 4000 characters here')
+        ->toContain('&quot;&amp;#x202E;xxx')
+        ->toContain('<code>g&amp;#8203;one</code>')
+        ->not->toContain('&#x202E;')
+        ->not->toContain('&#8203;');
+    $error = (new McpTools(0, [], 'The server did not answer.', ['d&#x202E;rift' => str_repeat('a', 64)], '', ['d&#x202E;rift']))->render();
+    expect($error)->toContain('<code>d&amp;#x202E;rift</code>');
+});

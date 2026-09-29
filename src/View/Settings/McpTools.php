@@ -33,7 +33,12 @@ use AlpacaBot\View\Component;
  * is drawn, shows as text; that JSON is cut at SCHEMA_CHARS characters, escapes counted as
  * written, with a line saying so when it is cut; a schema JSON cannot
  * write (json_decode() makes INF of `1e999`) is a line saying it cannot be shown. The name, the
- * title, the description and the schema are the server's text, and each is printed escaped.
+ * title, the description and the schema are the server's text, and each is printed escaped with
+ * every `&` encoded again (literal()), as are the names of the gone() line and the drift note:
+ * core's esc_html() leaves an entity already in the text alone, so the browser would draw
+ * `&#x202E;` or `&#8203;` as the bidi override or zero-width space it spells, while the model
+ * reads its letters. Encoded again, an entity shows as the letters it is written with, which are
+ * what the model reads.
  *
  * A tool whose name Schema::isToolName() refuses, asked of the key the name becomes, is listed
  * with no box and a line saying its name cannot be approved: Schema::sanitizeMcpServers() would
@@ -99,7 +104,7 @@ final class McpTools extends Component
         $definition = $tool['definition'];
         $name = $definition->name;
         $title = $definition->title === null ? '' : SchemaTool::describe($definition->title);
-        $label = $this->tag('code', [], $this->e($name)) . ($title === '' ? '' : ' ' . $this->tag('strong', [], $this->e($title)));
+        $label = $this->tag('code', [], self::literal($name)) . ($title === '' ? '' : ' ' . $this->tag('strong', [], self::literal($title)));
         $notes = '';
         if ($tool['state'] === 'changed') {
             $notes .= ' ' . $this->tag('strong', [], $this->e(__('changed since approval: review', 'alpaca-bot')));
@@ -108,7 +113,7 @@ final class McpTools extends Component
             $notes .= '<br>' . $this->tag('span', ['class' => 'description'], sprintf(
                 /* translators: %s: the other tool's name, or names, e.g. search */
                 $this->e(__('Reaches the model under the same tool name as %s, so while both are ticked neither is offered.', 'alpaca-bot')),
-                implode(', ', array_map(fn(string $other): string => $this->tag('code', [], $this->e($other)), $clashes)),
+                implode(', ', array_map(fn(string $other): string => $this->tag('code', [], self::literal($other)), $clashes)),
             ));
         }
         if ($definition->destructive()) {
@@ -127,7 +132,7 @@ final class McpTools extends Component
         } else {
             $head = $label . ' ' . $this->tag('em', [], $this->e(__('This name cannot be approved, so the tool has no box.', 'alpaca-bot')));
         }
-        return $this->tag('li', [], $head . $notes . '<br>' . $this->tag('span', ['class' => 'description'], $this->e(SchemaTool::describe($definition->description))) . $this->schema($definition->inputSchema));
+        return $this->tag('li', [], $head . $notes . '<br>' . $this->tag('span', ['class' => 'description'], self::literal(SchemaTool::describe($definition->description))) . $this->schema($definition->inputSchema));
     }
 
     /**
@@ -141,14 +146,14 @@ final class McpTools extends Component
         if ($json === false) {
             $body = $this->tag('p', [], $this->e(__('This schema holds a value JSON cannot write, such as a number too large for it, so it cannot be shown.', 'alpaca-bot')));
         } elseif (mb_strlen($json) > self::SCHEMA_CHARS) {
-            $body = $this->tag('pre', [], $this->e(mb_substr($json, 0, self::SCHEMA_CHARS) . '…'))
+            $body = $this->tag('pre', [], self::literal(mb_substr($json, 0, self::SCHEMA_CHARS) . '…'))
                 . $this->tag('p', ['class' => 'description'], $this->e(sprintf(
                     /* translators: %d: how many characters of an MCP tool's input schema the approval list shows */
                     __('Cut at %d characters here; the model is handed the whole schema.', 'alpaca-bot'),
                     self::SCHEMA_CHARS,
                 )));
         } else {
-            $body = $this->tag('pre', [], $this->e($json));
+            $body = $this->tag('pre', [], self::literal($json));
         }
         return $this->tag('details', ['class' => 'ab-mcp-schema'], $this->tag('summary', [], $this->e(__('Input schema', 'alpaca-bot'))) . $body);
     }
@@ -198,7 +203,7 @@ final class McpTools extends Component
         $noted = array_values(array_filter($drifted, static fn(string $tool): bool => array_key_exists($tool, $approved)));
         if ($noted !== []) {
             $out .= '<p class="description"><strong>' . esc_html__('changed since approval: review', 'alpaca-bot') . '</strong> '
-                . implode(', ', array_map(static fn(string $tool): string => '<code>' . esc_html($tool) . '</code>', $noted)) . '</p>';
+                . implode(', ', array_map(static fn(string $tool): string => '<code>' . self::literal($tool) . '</code>', $noted)) . '</p>';
         }
         return $out;
     }
@@ -209,7 +214,7 @@ final class McpTools extends Component
         $names = [];
         foreach (array_keys($this->approved) as $name) {
             if (!in_array((string) $name, $listed, true)) {
-                $names[] = $this->tag('code', [], $this->e((string) $name));
+                $names[] = $this->tag('code', [], self::literal((string) $name));
             }
         }
         if ($names === []) {
@@ -232,6 +237,17 @@ final class McpTools extends Component
             }
         }
         return $out;
+    }
+
+    /**
+     * The server's text as HTML that shows it as written: escaped with every `&` encoded again.
+     * Core's esc_html() leaves an entity that is already in the text alone, so `&#x202E;` would
+     * reach the browser as an entity and be drawn as the right-to-left override it spells, while
+     * the model reads its eight letters; encoded again, it shows as those eight letters.
+     */
+    private static function literal(string $s): string
+    {
+        return htmlspecialchars($s, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8', true);
     }
 
     private function field(string $tool): string
