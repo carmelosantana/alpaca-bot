@@ -153,7 +153,11 @@ final class Schema
             'toolkits.enabled' => ['type' => 'checkbox-list', 'default' => ['web_fetch', 'summarize', 'draft_post'], 'section' => 'toolkits', 'label' => __('Enabled tools', 'alpaca-bot'), 'description' => __('What the assistant may do besides answer. A tool that is off is not offered to the model at all.', 'alpaca-bot'), 'options' => ['web_fetch' => __('Fetch a web page the user names', 'alpaca-bot'), 'summarize' => __('Summarize text', 'alpaca-bot'), 'draft_post' => __('Draft a post or page (never publishes)', 'alpaca-bot'), 'abilities' => __('Call the site\'s WordPress abilities you tick', 'alpaca-bot')]],
             'toolkits.user_agent' => ['type' => 'string', 'default' => 'AlpacaBot/' . Plugin::VERSION . ' (+https://github.com/carmelosantana/alpaca-bot)', 'section' => 'toolkits', 'label' => __('User agent for fetch tools', 'alpaca-bot'), 'description' => __('Sent with every request web_fetch makes. The default names the installed version, but every save of the settings stores this field with the rest, so after the first save it keeps what it held then and a later version\'s default does not replace it. Empty it to send the installed version\'s default.', 'alpaca-bot')],
             'toolkits.abilities' => ['type' => 'array', 'default' => [], 'section' => 'toolkits', 'label' => __('Abilities the model may call', 'alpaca-bot'), 'description' => __('The WordPress abilities that WordPress and other plugins register on this site. Each one you tick becomes a tool of the abilities tool, which is offered only while it is on under Enabled tools, and only to users its Access row admits. Two ticked abilities that would reach the model under the same tool name are marked, and neither is offered. A call runs as the user whose turn it is, through the ability\'s own permission check. Alpaca Bot\'s own abilities are never offered.', 'alpaca-bot'), 'sanitize' => [self::class, 'sanitizeAbilities']],
-            'toolkits.mcp_servers' => ['type' => 'array', 'default' => [], 'section' => 'toolkits', 'label' => __('MCP servers', 'alpaca-bot'), 'description' => __('Remote MCP servers, and the tools of each you approve for the model. The address must be https, with no user name or password in it: a credential goes in the header, never in the address. The address, its query string included, is stored in the clear and read back by this screen and by GET /settings, so it is no place for a secret. The header name needs a letter in it. A header other than Authorization or Proxy-Authorization, such as X-API-Key, takes the bare key, with no scheme such as Bearer in front of it: when the MCP client hides a key from a server\'s error text, it finds one behind a scheme only in those two. The address is checked when it is saved from this screen or over the REST API, and again each time Alpaca Bot connects to it, and a private or other special-purpose address is refused, even when it is the site\'s own host. Moving a server to another host or port clears its header value, so it is never sent to an address it was not set for; type it again. A connection to an MCP server never goes through a proxy, neither one set for WordPress nor one set in the server\'s environment, so a site whose outbound traffic has to use a proxy cannot reach one. The header value is kept in an option of its own that WordPress does not load on every page, and this screen only shows whether one is set.', 'alpaca-bot')],
+            'toolkits.mcp_servers' => ['type' => 'array', 'default' => [], 'section' => 'toolkits', 'label' => __('MCP servers', 'alpaca-bot'), 'description' => sprintf(
+                /* translators: %1$s: the rule a header name has to meet (Schema::mcpHeaderNameRule()) */
+                __('Remote MCP servers, and the tools of each you approve for the model. The address must be https, with no user name or password in it: a credential goes in the header, never in the address. The address, its query string included, is stored in the clear and read back by this screen and by GET /settings, so it is no place for a secret. The header name has to be %1$s. A header other than Authorization or Proxy-Authorization, such as X-API-Key, takes the bare key, with no scheme such as Bearer in front of it: when the MCP client hides a key from a server\'s error text, it finds one behind a scheme only in those two. The address is checked when it is saved from this screen or over the REST API, and again each time Alpaca Bot connects to it, and a private or other special-purpose address is refused, even when it is the site\'s own host. Moving a server to another host or port clears its header value, so it is never sent to an address it was not set for; type it again. A connection to an MCP server never goes through a proxy, neither one set for WordPress nor one set in the server\'s environment, so a site whose outbound traffic has to use a proxy cannot reach one. The header value is kept in an option of its own that WordPress does not load on every page, and this screen only shows whether one is set.', 'alpaca-bot'),
+                self::mcpHeaderNameRule(),
+            )],
             'access.chat' => self::access('chat', __('Chat', 'alpaca-bot'), __('Who may open the chat screen and use the chat REST routes. A tool needs its own row as well as this one.', 'alpaca-bot')),
             'access.tool.web_fetch' => self::access('tool.web_fetch', __('Tool: fetch a web page', 'alpaca-bot'), __('Who may run a turn that can fetch a page, and who may use [alpacabot_agent], which runs the same tool on the shortcode\'s behalf. It governs the next fetch, not the last one: a shortcode answer already cached on a post stands until its cache expires. The tool makes this server send an outbound request and hands the reply back; the Tools help tab says what that grants.', 'alpaca-bot')),
             'access.tool.summarize' => self::access('tool.summarize', __('Tool: summarize', 'alpaca-bot'), __('Who may run a turn that can summarize text through the model.', 'alpaca-bot')),
@@ -427,6 +431,13 @@ final class Schema
         return __('1 to 16 lowercase letters and digits, starting with a letter, with single underscores allowed between them, and not "ability"', 'alpaca-bot');
     }
 
+    /** The header name rule in words (mcpRowFault()'s `header`), for the field and every screen and reply that refuses a name. */
+    public static function mcpHeaderNameRule(): string
+    {
+        /* translators: the rule an MCP server's header name has to meet; A-Z and a-z are the letters it may use */
+        return __('1 to 64 letters (A-Z, a-z), digits and hyphens, with a letter among them', 'alpaca-bot');
+    }
+
     /** Whether `$prefix` is one a server may name its tools under: MCP_TOOL_PREFIX, and not RESERVED_PREFIX. */
     public static function isMcpPrefix(mixed $prefix): bool
     {
@@ -470,11 +481,16 @@ final class Schema
      *   given one of those ids, even one this same write removes. Keeping ids before making any
      *   is what stops a new row listed first from taking an existing server's id. Either way a
      *   new row cannot take another server's Access entry or secret.
-     * - `header_name` is `[A-Za-z0-9-]{1,64}` with a letter in it, or ''. A row whose name has no
-     *   letter (an int, or a string of digits and hyphens: `123`, `-1`, `0`) is dropped: PHP makes
-     *   a whole number written plainly an int array key, and php-agents' header map would then
-     *   send the value in the name's place (Mcp\PhpAgentsClient::over() refuses such a name too,
-     *   for a row written round this). Any other name the pattern does not admit reads as ''.
+     * - `header_name` is `[A-Za-z0-9-]{1,64}` with a letter in it, or '' (a missing or null name
+     *   reads as ''). A row with any other name is dropped, and droppedMcpRows() names it
+     *   `header`, so a save refuses it rather than keep the server with no header. A name with no
+     *   letter (an int, or a string of digits and hyphens: `123`, `-1`, `0`) is the case the rule
+     *   exists for: PHP makes a whole number written plainly an int array key, and php-agents'
+     *   header map would then send the value in the name's place (Mcp\PhpAgentsClient::over()
+     *   refuses such a name too, for a row written round this). A name outside the alphabet
+     *   (`X_Key`, `Bad Header`, `+1`), one over 64 characters, and one that is not a string are
+     *   refused the same way (R28-11): read as '', the server was saved with no header and its
+     *   401 blamed a credential that was never sent.
      * - `header_value` follows the secret rule (the class docblock): '' clears, MASK keeps, any
      *   other string is the new value with CR, LF and NUL removed, so no value can end the header
      *   early or cut it; anything that is not a string reads as MASK.
@@ -507,12 +523,13 @@ final class Schema
             $asked[] = $row['id'] ?? null;
             $timeout = is_numeric($row['timeout'] ?? null) ? (float) $row['timeout'] : 30.0;
             $maxBytes = is_numeric($row['max_bytes'] ?? null) ? (int) $row['max_bytes'] : 1048576;
+            /** @var string $name mcpRowFault() passed it: '' or a name the rule admits */
             $name = $row['header_name'] ?? '';
             $value = $row['header_value'] ?? null;
             $rows[] = [
                 'id' => '',
                 'url' => $url,
-                'header_name' => is_string($name) && preg_match('/^[A-Za-z0-9-]{1,64}\z/', $name) === 1 ? $name : '',
+                'header_name' => $name,
                 'header_value' => is_string($value) && $value !== self::MASK ? str_replace(["\r", "\n", "\0"], '', $value) : self::MASK,
                 'prefix' => $prefix,
                 'timeout' => max(1.0, min(120.0, $timeout)),
@@ -559,7 +576,7 @@ final class Schema
     /**
      * Each row of `$raw` that sanitizeMcpServers() leaves out, by its key in `$raw`, with why:
      * `url` (not https with a host), `userinfo` (https with a host, and a user name or password
-     * too), `header` (a header name with no letter in it), `prefix` (not MCP_TOOL_PREFIX, or
+     * too), `header` (a header name other than '' that mcpHeaderNameRule() does not admit), `prefix` (not MCP_TOOL_PREFIX, or
      * `ability`) or `taken` (an earlier row that is kept has it). A row that is not an array, or
      * whose `remove` is ticked,
      * is not listed, since leaving it out is what it asks for. Both functions ask mcpRowFault(),
@@ -602,7 +619,7 @@ final class Schema
         $name = $row['header_name'] ?? '';
         return match (true) {
             $url !== null => $url,
-            is_int($name) || (is_string($name) && preg_match('/^[0-9-]{1,64}\z/', $name) === 1) => 'header',
+            $name !== '' && !(is_string($name) && preg_match('/^(?=[0-9-]*[A-Za-z])[A-Za-z0-9-]{1,64}\z/', $name) === 1) => 'header',
             !self::isMcpPrefix($prefix) => 'prefix',
             in_array($prefix, $prefixes, true) => 'taken',
             default => null,

@@ -670,6 +670,35 @@ final class McpSettingsTest extends TestCase
     }
 
     /**
+     * R28-11, over real core: a header name outside `[A-Za-z0-9-]` is refused as the all-digit one
+     * is, over REST and on the page, and both say the rule, alphabet and all, rather than save the
+     * server with no header. Neither answers the header value back.
+     */
+    public function test_a_header_name_outside_the_alphabet_is_refused_over_rest_and_on_the_page_and_the_rule_is_said(): void
+    {
+        $before = get_option(Plugin::OPTION, []);
+        foreach (['X_Key', 'Bad Header', '+1'] as $name) {
+            $res = $this->rest('PUT', '/settings', ['toolkits.mcp_servers' => [['url' => self::URL, 'prefix' => 'trk', 'header_name' => $name, 'header_value' => self::SECRET]]]);
+            $this->assertSame(400, $res->get_status(), $name);
+            $this->assertSame('alpaca_bot_mcp_row', $res->get_data()['code'], $name);
+            $this->assertStringContainsString(Schema::mcpHeaderNameRule(), $res->get_data()['data']['rows'][0]['reason'], $name);
+            $this->assertStringNotContainsString(self::SECRET, (string) wp_json_encode($res->get_data()), $name);
+            $this->assertSame($before, get_option(Plugin::OPTION, []), $name);
+        }
+
+        $posted = self::formPost($this->page('toolkits'));
+        $posted['toolkits.mcp_servers'][0] = ['url' => self::URL, 'prefix' => 'trk', 'header_name' => 'X_Key', 'header_value' => self::SECRET];
+        $this->save($posted);
+        $this->assertSame([], get_option(Plugin::OPTION)['toolkits.mcp_servers']);
+        $errors = get_settings_errors(Plugin::OPTION);
+        $this->assertSame(['mcp_dropped'], array_column($errors, 'code'));
+        $this->assertStringContainsString(self::URL . ' was not added', $errors[0]['message']);
+        $this->assertStringContainsString(esc_html(Schema::mcpHeaderNameRule()), $errors[0]['message']);
+        $this->assertStringNotContainsString(self::SECRET, (string) wp_json_encode($errors));
+        $this->assertSame([], Secrets::all());
+    }
+
+    /**
      * R90: a prefix that ends in `_`, holds `__`, or is the abilities' own is refused over REST, the
      * rule is said, nothing is written, and the Tools tab's input carries the same rule as a pattern.
      */

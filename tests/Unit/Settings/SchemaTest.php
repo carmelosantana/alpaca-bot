@@ -356,21 +356,31 @@ it('drops an mcp server whose URL carries a user name or password, and names the
 // an array key of a whole number written plainly an int (`123`, `-1`, `0`), and php-agents' header
 // map would then send the value as the header's name; `-0`, `0123` and a number past PHP_INT_MAX
 // stay string keys, but they are refused all the same, by the one rule the notice can state. A
-// JSON number is refused as the string of its digits is. A name the `[A-Za-z0-9-]{1,64}` rule
-// does not admit at all (`+1`, `Bad Header`) is not refused: it reads as '', as before.
-it('drops an mcp server whose header name has no letter in it, and names the fault', function (): void {
-    $names = ['123', '-1', '0', '-0', '0123', '99999999999999999999', '---', 123, -1];
-    $raw = array_map(static fn(int|string $name, int $i): array => ['url' => 'https://a' . $i . '.example.com/mcp', 'prefix' => 'p' . $i, 'header_name' => $name], $names, array_keys($names));
+// JSON number is refused as the string of its digits is. R28-11: a name the `[A-Za-z0-9-]{1,64}`
+// rule does not admit at all (`+1`, `Bad Header`, `X_Key`, a name over 64 characters, one with a
+// line break) is refused the same way, rather than read as '' and the server saved with no header.
+it('drops an mcp server whose header name has no letter in it, or is outside the rule, and names the fault', function (): void {
+    $names = ['123', '-1', '0', '-0', '0123', '99999999999999999999', '---', 123, -1, '+1', 'Bad Header', 'X_Key', "X-Key\n", str_repeat('a', 65), ['X-Key'], 1.5, true];
+    $raw = array_map(static fn(mixed $name, int $i): array => ['url' => 'https://a' . $i . '.example.com/mcp', 'prefix' => 'p' . $i, 'header_name' => $name], $names, array_keys($names));
     $kept = [
         ['url' => 'https://k1.example.com/mcp', 'prefix' => 'k1', 'header_name' => 'X-1'],
         ['url' => 'https://k2.example.com/mcp', 'prefix' => 'k2', 'header_name' => '0123a'],
-        ['url' => 'https://k3.example.com/mcp', 'prefix' => 'k3', 'header_name' => '+1'],
+        ['url' => 'https://k3.example.com/mcp', 'prefix' => 'k3', 'header_name' => str_repeat('a', 64)],
         ['url' => 'https://k4.example.com/mcp', 'prefix' => 'k4', 'header_name' => ''],
+        ['url' => 'https://k5.example.com/mcp', 'prefix' => 'k5', 'header_name' => null],
+        ['url' => 'https://k6.example.com/mcp', 'prefix' => 'k6'],
     ];
     expect(Schema::droppedMcpRows($raw))->toBe(array_fill(0, count($names), 'header'))
         ->and(Schema::sanitizeMcpServers($raw))->toBe([])
-        ->and(array_column(Schema::sanitizeMcpServers($kept), 'header_name'))->toBe(['X-1', '0123a', '', ''])
+        ->and(array_column(Schema::sanitizeMcpServers($kept), 'header_name'))->toBe(['X-1', '0123a', str_repeat('a', 64), '', '', ''])
         ->and(Schema::droppedMcpRows($kept))->toBe([]);
+});
+
+// R28-11: a refusal says the whole rule, so an administrator whose `X_Key` was refused learns the
+// alphabet, not only that a letter is needed; the field's own text says it before any save.
+it('states the header name rule, alphabet and all, and the field says it', function (): void {
+    expect(Schema::mcpHeaderNameRule())->toContain('1 to 64')->toContain('A-Z')->toContain('a-z')->toContain('digits')->toContain('hyphens')->toContain('a letter among them')
+        ->and(Schema::fields()['toolkits.mcp_servers']['description'])->toContain('The header name has to be ' . Schema::mcpHeaderNameRule() . '.');
 });
 
 // The model knows an MCP tool as ToolName::fit('<prefix>__<name>'). A prefix with no `__` in it and
@@ -478,12 +488,12 @@ it('applies the secret rule to a header value, and lets no value end the header 
         ['url' => 'https://b.example.com/mcp', 'prefix' => 'b', 'header_value' => ''],
         ['url' => 'https://c.example.com/mcp', 'prefix' => 'c', 'header_value' => null],
         ['url' => 'https://d.example.com/mcp', 'prefix' => 'd', 'header_value' => "Bearer t\r\nX-Evil: 1"],
-        ['url' => 'https://e.example.com/mcp', 'prefix' => 'e', 'header_name' => 'Bad Header'],
-        ['url' => 'https://f.example.com/mcp', 'prefix' => 'f', 'header_value' => "Bearer\0t", 'header_name' => "X-Key\n"],
+        ['url' => 'https://e.example.com/mcp', 'prefix' => 'e', 'header_name' => 'X-Key'],
+        ['url' => 'https://f.example.com/mcp', 'prefix' => 'f', 'header_value' => "Bearer\0t", 'header_name' => 'Authorization'],
         ['url' => 'https://g.example.com/mcp', 'prefix' => 'g', 'header_value' => ['x']],
     ]);
     expect(array_column($rows, 'header_value'))->toBe([Schema::MASK, '', Schema::MASK, 'Bearer tX-Evil: 1', Schema::MASK, 'Bearert', Schema::MASK])
-        ->and(array_column($rows, 'header_name'))->toBe(['', '', '', '', '', '', '']);
+        ->and(array_column($rows, 'header_name'))->toBe(['', '', '', '', 'X-Key', 'Authorization', '']);
 });
 
 it('keeps an approved map of tool names to fingerprints and nothing else', function (): void {

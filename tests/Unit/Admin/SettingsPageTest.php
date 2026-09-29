@@ -643,9 +643,10 @@ it('says what a prefix has to be when it refuses one, on an edit and on a new se
         ->and(Schema::mcpPrefixRule())->toContain('single underscores')->toContain('not "ability"');
 });
 
-// A header name with no letter in it is refused on the page as over REST: the edit of a stored
-// server keeps the stored row, a new row is left out, and the notice says a letter is needed.
-it('refuses an MCP header name with no letter in it, on an edit and on a new server, and says why', function (): void {
+// A header name with no letter in it, or outside `[A-Za-z0-9-]{1,64}` (R28-11), is refused on the
+// page as over REST: the edit of a stored server keeps the stored row, a new row is left out, and
+// the notice states the rule, alphabet and all.
+it('refuses an MCP header name with no letter in it or outside the rule, on an edit and on a new server, and says why', function (): void {
     Functions\when('add_settings_section')->justReturn(null);
     Functions\when('add_settings_field')->justReturn(null);
     $opts = null;
@@ -666,12 +667,15 @@ it('refuses an MCP header name with no letter in it, on an edit and on a new ser
     $out = ($opts['sanitize_callback'])(['toolkits.mcp_servers' => [
         ['id' => 'trk', 'url' => 'https://mcp.example.com/mcp', 'prefix' => 'trk', 'header_name' => '123', 'header_value' => 'Bearer typed'],
         ['url' => 'https://new.example.com/mcp', 'prefix' => 'new', 'header_name' => '-1', 'header_value' => 'Bearer typed'],
+        ['url' => 'https://under.example.com/mcp', 'prefix' => 'und', 'header_name' => 'X_Key', 'header_value' => 'Bearer typed'],
     ]], Plugin::OPTION);
 
+    $rule = 'its header name has to be ' . esc_html(Schema::mcpHeaderNameRule()) . '.';
     expect($out['toolkits.mcp_servers'])->toBe($stored['toolkits.mcp_servers'])
-        ->and(array_column($errors, 1))->toBe(['mcp_dropped', 'mcp_dropped'])
-        ->and($errors[0][2])->toContain('(trk) was not saved')->toContain('header name')->toContain('letter')
-        ->and($errors[1][2])->toContain('https://new.example.com/mcp was not added')->toContain('header name')->toContain('letter')
+        ->and(array_column($errors, 1))->toBe(['mcp_dropped', 'mcp_dropped', 'mcp_dropped'])
+        ->and($errors[0][2])->toContain('(trk) was not saved')->toContain($rule)
+        ->and($errors[1][2])->toContain('https://new.example.com/mcp was not added')->toContain($rule)
+        ->and($errors[2][2])->toContain('https://under.example.com/mcp was not added')->toContain($rule)
         ->and(json_encode($errors))->not->toContain('Bearer typed');
 });
 

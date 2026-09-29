@@ -447,19 +447,20 @@ it('refuses a PUT whose MCP URL carries a credential, says to use the header, an
     'a new row with a token for a user name' => [['url' => 'https://tok3n@new.example.com/mcp?x=1', 'prefix' => 'nn'], 1, null, 'https://new.example.com/mcp?x=1'],
 ]);
 
-// A header name with no letter in it is refused as any row the schema cannot keep is, with a
-// reason of its own; the header value is not repeated.
-it('refuses a PUT whose MCP header name has no letter in it, and says a letter is needed', function (string $name): void {
+// A header name with no letter in it, or outside `[A-Za-z0-9-]{1,64}` (R28-11), is refused as any
+// row the schema cannot keep is, with a reason of its own that states the rule; the header value
+// is not repeated.
+it('refuses a PUT whose MCP header name has no letter in it or is outside the rule, and states the rule', function (string $name): void {
     $controller = new SettingsController(new Store(), new Mcp\ServerSettings(static fn(string $host, string $url): array => throw new RuntimeException('no lookup was expected')));
     $response = $controller->update(restRequest('PUT', '/settings', ['toolkits.mcp_servers' => [['url' => 'https://num.example.com/mcp', 'prefix' => 'nn', 'header_name' => $name, 'header_value' => 'Bearer typed']]]));
     expect($response)->toBeInstanceOf(WP_Error::class)
         ->and($response->get_error_code())->toBe('alpaca_bot_mcp_row')
         ->and($response->get_error_data()['status'])->toBe(400)
         ->and($response->get_error_data()['rows'][0])->toMatchArray(['index' => 0, 'id' => null, 'url' => 'https://num.example.com/mcp'])
-        ->and($response->get_error_data()['rows'][0]['reason'])->toContain('header name')->toContain('letter')
+        ->and($response->get_error_data()['rows'][0]['reason'])->toBe('the header name has to be ' . AlpacaBot\Settings\Schema::mcpHeaderNameRule() . '.')
         ->and(json_encode([$response->get_error_message(), $response->get_error_data()]))->not->toContain('Bearer typed')
         ->and($this->written)->toBeNull();
-})->with(['123', '-1', '0', '-0', '99999999999999999999']);
+})->with(['123', '-1', '0', '-0', '99999999999999999999', 'X_Key', 'Bad Header', '+1']);
 
 // A row refused for another reason is named without its userinfo too: the reason is the URL's.
 it('names a refused http URL without the password it carried', function (): void {

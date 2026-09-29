@@ -573,10 +573,11 @@ Rules worth knowing before you write:
     and keep them; any other row without one is a new server, given an id made from its prefix,
     never one a stored server has.
   - `header_name` and `header_value` are one static header sent with every request, typically
-    `Authorization` and `Bearer …`. The name is up to 64 of `[A-Za-z0-9-]` with a letter among
-    them. One of those characters with no letter (`123`, `-1`), or a JSON number, is refused
-    (below): PHP reads `123` as a number, and the value would be sent in the name's place. Any
-    other name reads as `""`. The value has the
+    `Authorization` and `Bearer …`. The name is `""` (no header) or up to 64 of `[A-Za-z0-9-]`
+    with a letter among them. Any other name is refused (below): one of those characters with no
+    letter (`123`, `-1`), or a JSON number, because PHP reads `123` as a number and the value
+    would be sent in the name's place; and a name outside that alphabet or over 64 characters
+    (`X_Key`, `Bad Header`, `+1`), which would otherwise be saved as no header at all. The value has the
     key's three spellings (`""` clears it, `"••••"` keeps what is stored, any other string
     replaces it) with CR, LF and NUL removed,
     except that `"••••"` keeps nothing for a new server, which has nothing stored, or for a
@@ -593,7 +594,7 @@ Rules worth knowing before you write:
     approved; anything else is dropped.
 
   A row the list cannot keep (a URL that is not `https` with a host, a URL with a user name or
-  password in it, a header name with no letter in it, a prefix the rule refuses, or a prefix an
+  password in it, a header name the rule above refuses, a prefix the rule refuses, or a prefix an
   earlier row of the PUT already has)
   is refused rather than dropped when it names a stored server's `id` or is a new row with a
   URL: the PUT answers `400 alpaca_bot_mcp_row` and writes nothing, the other keys included. A
