@@ -42,9 +42,10 @@ use AlpacaBot\View\Component;
  * (SettingsPage), so the list decides the row's approvals on the next save. `$approved`, the
  * row's stored map, is how the fragment says what that costs: an approved tool the server no
  * longer lists is named, since saving drops its approval. On an error, when the server could not
- * be listed, the fragment is the error notice and one hidden input per stored approval, so a save
- * after a failed look keeps every approval as a save that never looked does. An empty list is an
- * info notice.
+ * be listed, the fragment is the error notice followed by what the cell held, drawn by
+ * approvals() as SettingsPage draws the cell: a hidden input per stored approval, so a save
+ * after a failed look keeps every approval as a save that never looked does, how many there
+ * are, and the drift note for those `$drifted` names. An empty list is an info notice.
  *
  * @since 0.6.0
  */
@@ -55,13 +56,14 @@ final class McpTools extends Component
      * @param string                                                                                   $error    why the server could not be listed, untrusted text; '' when it was
      * @param array<array-key, mixed>                                                                  $approved the row's stored `approved` map, tool name => fingerprint
      * @param string                                                                                   $prefix   the server's tool-name prefix, which the model's names for its tools start with
+     * @param list<string>                                                                             $drifted  the server's drift marker (Mcp\Drift::get()), which the error fragment's drift note reads
      */
-    public function __construct(private int $index, private array $tools, private string $error = '', private array $approved = [], private string $prefix = '') {}
+    public function __construct(private int $index, private array $tools, private string $error = '', private array $approved = [], private string $prefix = '', private array $drifted = []) {}
 
     public function render(): string
     {
         if ($this->error !== '') {
-            return (new Notice('error', $this->error))->render() . $this->kept();
+            return (new Notice('error', $this->error))->render() . self::approvals($this->index, $this->approved, $this->drifted);
         }
         $listed = array_map(static fn(array $tool): string => $tool['definition']->name, $this->tools);
         $counts = array_count_values($listed);
@@ -144,14 +146,25 @@ final class McpTools extends Component
         return $out;
     }
 
-    /** One hidden input per stored approval, as SettingsPage draws them: the error fragment's carry-over. */
-    private function kept(): string
+    /**
+     * A stored server's approvals cell as it is before any Discover: a hidden input per approved
+     * tool, posting under row `$index`, how many there are, and, when the drift marker names tools
+     * the row approves, a line saying they changed since approval, in the marker's order.
+     * SettingsPage draws the cell with it, and the error fragment carries it over.
+     *
+     * @param array<array-key, mixed> $approved the row's stored `approved` map, tool name => fingerprint
+     * @param list<string>            $drifted  the server's drift marker
+     */
+    public static function approvals(int $index, array $approved, array $drifted): string
     {
-        $out = '';
-        foreach ($this->approved as $name => $fingerprint) {
-            if (is_string($name) && is_string($fingerprint)) {
-                $out .= $this->tag('input', ['type' => 'hidden', 'name' => $this->field($name), 'value' => $fingerprint]);
-            }
+        $out = self::kept($index, $approved);
+        $count = count(array_filter($approved, 'is_scalar'));
+        /* translators: %d: how many of a server's tools are approved */
+        $out .= esc_html(sprintf(_n('%d tool approved.', '%d tools approved.', $count, 'alpaca-bot'), $count));
+        $noted = array_values(array_filter($drifted, static fn(string $tool): bool => array_key_exists($tool, $approved)));
+        if ($noted !== []) {
+            $out .= '<p class="description"><strong>' . esc_html__('changed since approval: review', 'alpaca-bot') . '</strong> '
+                . implode(', ', array_map(static fn(string $tool): string => '<code>' . esc_html($tool) . '</code>', $noted)) . '</p>';
         }
         return $out;
     }
@@ -171,8 +184,29 @@ final class McpTools extends Component
         return $this->tag('p', ['class' => 'description'], $this->e(__('No longer listed by the server, so saving drops its approval:', 'alpaca-bot')) . ' ' . implode(', ', $names));
     }
 
+    /**
+     * One hidden input per approval whose fingerprint is a scalar, posting under row `$index`.
+     *
+     * @param array<array-key, mixed> $approved tool name => fingerprint
+     */
+    public static function kept(int $index, array $approved): string
+    {
+        $out = '';
+        foreach ($approved as $tool => $fingerprint) {
+            if (is_scalar($fingerprint)) {
+                $out .= '<input type="hidden" name="' . esc_attr(self::fieldName($index, (string) $tool)) . '" value="' . esc_attr((string) $fingerprint) . '">';
+            }
+        }
+        return $out;
+    }
+
     private function field(string $tool): string
     {
-        return Plugin::OPTION . '[toolkits.mcp_servers][' . $this->index . '][approved][' . $tool . ']';
+        return self::fieldName($this->index, $tool);
+    }
+
+    private static function fieldName(int $index, string $tool): string
+    {
+        return Plugin::OPTION . '[toolkits.mcp_servers][' . $index . '][approved][' . $tool . ']';
     }
 }

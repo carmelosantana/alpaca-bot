@@ -135,14 +135,17 @@ it('says so when the server lists no tools', function (): void {
     expect((new McpTools(0, []))->render())->toBe('<div class="notice notice-info inline"><p>This server lists no tools.</p></div>');
 });
 
-// On an error the fragment is a notice, and the approvals stored for the row ride along as hidden
-// inputs: the swap replaces the ones the page drew, and a save after a failed look must carry
-// them as a save that never looked does.
-it('renders an error as a core inline notice, carrying the stored approvals as hidden inputs and nothing else', function (): void {
+// On an error the fragment is a notice, and what the cell held rides along: the approvals stored
+// for the row as hidden inputs (the swap replaces the ones the page drew, and a save after a
+// failed look must carry them as a save that never looked does), their count, and the drift note
+// for the approved names the marker holds (M-5). No tool listed before the error is drawn.
+it('renders an error as a core inline notice, carrying the cell as it was and nothing else', function (): void {
     $search = new ToolDefinition('search', 'Search.', ['type' => 'object']);
-    $html = (new McpTools(1, [mcpToolRow($search, 'new', true)], 'The server did not answer.', ['search' => str_repeat('a', 64)]))->render();
+    $html = (new McpTools(1, [mcpToolRow($search, 'new', true)], 'The server did not answer.', ['search' => str_repeat('a', 64), 'write' => str_repeat('b', 64)], '', ['gone', 'write']))->render();
     expect($html)->toBe('<div class="notice notice-error inline"><p>The server did not answer.</p></div>'
-        . '<input type="hidden" name="alpaca_bot_settings[toolkits.mcp_servers][1][approved][search]" value="' . str_repeat('a', 64) . '">');
+        . '<input type="hidden" name="alpaca_bot_settings[toolkits.mcp_servers][1][approved][search]" value="' . str_repeat('a', 64) . '">'
+        . '<input type="hidden" name="alpaca_bot_settings[toolkits.mcp_servers][1][approved][write]" value="' . str_repeat('b', 64) . '">'
+        . '2 tools approved.<p class="description"><strong>changed since approval: review</strong> <code>write</code></p>');
 });
 
 // R81: an error message is untrusted text, a remote server's words included.

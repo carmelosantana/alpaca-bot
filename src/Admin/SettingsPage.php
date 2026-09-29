@@ -17,6 +17,7 @@ use AlpacaBot\Shortcodes\Chat as ChatShortcode;
 use AlpacaBot\Toolkit\AbilitiesToolkit;
 use AlpacaBot\Toolkit\SchemaTool;
 use AlpacaBot\View\Hx;
+use AlpacaBot\View\Settings\McpTools;
 
 /**
  * The Settings API page for `alpaca_bot_settings`: one setting, one group (`alpaca_bot`), a
@@ -654,8 +655,8 @@ final class SettingsPage
      * Beside the cell, a stored server's Discover button is an hx-get at `GET
      * /view/mcp-tools/<id>` with the row's index, whose fragment (View\Settings\McpTools)
      * replaces the cell's contents with a box per tool the stored server lists, posting under the
-     * same names, or, when the server cannot be listed, with the reason and the approvals as they
-     * were; ticking a box and saving is the approval, and a box left clear drops one. It lists
+     * same names, or, when the server cannot be listed, with the reason and the cell as it was
+     * (its hidden inputs, count and drift note); ticking a box and saving is the approval, and a box left clear drops one. It lists
      * the server as saved, not as the row's fields are edited. The blank row's button is disabled.
      * The table's wrapper carries the REST nonce in `hx-headers`, which htmx hands down to the
      * requests of the elements inside it, so the fragment request authenticates as the chat
@@ -731,30 +732,17 @@ final class SettingsPage
     }
 
     /**
-     * A server row's approvals cell: a hidden input per approved tool, how many there are, and
-     * which of them the drift marker names, in the marker's order.
+     * A server row's approvals cell: View\Settings\McpTools::approvals() over the row's approvals
+     * and its drift marker, which the Discover fragment's error notice carries over too. A row with
+     * no id, the blank row among them, keeps its hidden inputs and says to save the server first.
      */
     private static function serverApprovals(int $i, ?string $id, mixed $approved): string
     {
-        $out = '';
-        $count = 0;
-        foreach (is_array($approved) ? $approved : [] as $tool => $fingerprint) {
-            if (is_scalar($fingerprint)) {
-                $out .= '<input type="hidden" name="' . esc_attr(Plugin::OPTION . '[toolkits.mcp_servers][' . $i . '][approved][' . $tool . ']') . '" value="' . esc_attr((string) $fingerprint) . '">';
-                ++$count;
-            }
-        }
+        $approved = is_array($approved) ? $approved : [];
         if ($id === null) {
-            return $out . esc_html__('Save the server first.', 'alpaca-bot');
+            return McpTools::kept($i, $approved) . esc_html__('Save the server first.', 'alpaca-bot');
         }
-        /* translators: %d: how many of a server's tools are approved */
-        $out .= esc_html(sprintf(_n('%d tool approved.', '%d tools approved.', $count, 'alpaca-bot'), $count));
-        $drifted = array_values(array_filter(Drift::get($id), static fn(string $tool): bool => is_array($approved) && array_key_exists($tool, $approved)));
-        if ($drifted !== []) {
-            $out .= '<p class="description"><strong>' . esc_html__('changed since approval: review', 'alpaca-bot') . '</strong> '
-                . implode(', ', array_map(static fn(string $tool): string => '<code>' . esc_html($tool) . '</code>', $drifted)) . '</p>';
-        }
-        return $out;
+        return McpTools::approvals($i, $approved, Drift::get($id));
     }
 
     /** A row's Discover button: the approval fragment for a stored server, disabled on the blank row. */

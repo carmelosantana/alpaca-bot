@@ -341,6 +341,7 @@ function viewControllerWithMcp(AlpacaBot\Tests\Integration\FakeClient $client, s
     Functions\when('get_option')->justReturn(['trk' => $secret]);
     Functions\when('set_transient')->justReturn(true);
     Functions\when('delete_transient')->justReturn(true);
+    Functions\when('get_transient')->justReturn(false);
     Functions\when('wp_strip_all_tags')->alias('strip_tags');
     $store = new Store(['models.default' => 'llama3.2', 'toolkits.mcp_servers' => [[
         'id' => 'trk', 'url' => 'https://mcp.example.com/mcp', 'header_name' => 'Authorization',
@@ -426,7 +427,19 @@ it('answers a server that cannot be listed with the fragment\'s notice, keeping 
         ->mcpTools(restRequest('GET', '/x', ['id' => 'trk', 'index' => 0]));
     expect($res)->toBeInstanceOf(WP_REST_Response::class)
         ->and($res->get_status())->toBe(200)
-        ->and($res->get_data())->toBe('<div class="notice notice-error inline"><p>' . $sentence . '</p></div><input type="hidden" name="alpaca_bot_settings[toolkits.mcp_servers][0][approved][search]" value="' . $fp . '">');
+        ->and($res->get_data())->toBe('<div class="notice notice-error inline"><p>' . $sentence . '</p></div><input type="hidden" name="alpaca_bot_settings[toolkits.mcp_servers][0][approved][search]" value="' . $fp . '">1 tool approved.');
+});
+
+// M-5 (Task 26 review): a failed Discover replaces the approvals cell, so the fragment has to say
+// what the cell said: how many tools are approved, and which of them the drift marker names.
+it('keeps the approval count and the drift note in the notice of a server that cannot be listed', function (): void {
+    Functions\when('current_user_can')->justReturn(true);
+    $c = viewControllerWithMcp(new AlpacaBot\Tests\Integration\FakeClient([], [], new AlpacaBot\Mcp\McpUnavailable('The MCP request failed.')), approved: ['search' => str_repeat('a', 64), 'write' => str_repeat('b', 64)]);
+    Functions\when('get_transient')->alias(static fn(string $key): mixed => $key === 'alpaca_bot_mcp_drift_trk' ? ['search', 'unapproved'] : false);
+    $html = (string) $c->mcpTools(restRequest('GET', '/x', ['id' => 'trk', 'index' => 0]))->get_data();
+    expect($html)->toContain('2 tools approved.')
+        ->toContain('<p class="description"><strong>changed since approval: review</strong> <code>search</code></p>')
+        ->not->toContain('unapproved');
 });
 
 // Task 28.3: a client the factory refuses to build is the notice with a 200 too, never an error

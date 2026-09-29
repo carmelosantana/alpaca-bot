@@ -10,6 +10,7 @@ use AlpacaBot\Chat\UserPrefs;
 use AlpacaBot\Context\CurrentScreenSource;
 use AlpacaBot\Errors;
 use AlpacaBot\Mcp\Discovery;
+use AlpacaBot\Mcp\Drift;
 use AlpacaBot\Mcp\McpUnavailable;
 use AlpacaBot\Mcp\ServerConfig;
 use AlpacaBot\Provider\ModelCatalog;
@@ -320,7 +321,7 @@ final class ViewController extends Controller
             $tools = [];
             $error = self::reason($e, $server);
         }
-        return self::html((new McpTools(max(0, (int) $request->get_param('index')), $tools, $error, $server->approved, $server->prefix))->render());
+        return self::html((new McpTools(max(0, (int) $request->get_param('index')), $tools, $error, $server->approved, $server->prefix, $error === '' ? [] : Drift::get($server->id)))->render());
     }
 
     /**

@@ -822,8 +822,11 @@ final class McpSettingsTest extends TestCase
         $fragment = (string) $res->get_data();
         $this->assertStringContainsString('notice-error', $fragment);
         $this->assertStringContainsString(esc_html(TestCase::OFFLINE_MCP), $fragment);
-        // A failed listing leaves the marker as it was.
+        // A failed listing leaves the marker as it was, and the fragment still says what the
+        // cell it replaces said (M-5): the count and the drift note.
         $this->assertSame(['search'], Drift::get('trk'));
+        $this->assertStringContainsString('2 tools approved.', $fragment);
+        $this->assertStringContainsString('<strong>changed since approval: review</strong> <code>search</code>', $fragment);
 
         $this->save(self::formPost(self::swap($this->page('toolkits'), $fragment)));
         $this->assertSame($approved, get_option(Plugin::OPTION)['toolkits.mcp_servers'][0]['approved']);
