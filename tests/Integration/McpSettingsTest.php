@@ -834,6 +834,21 @@ final class McpSettingsTest extends TestCase
     }
 
     /**
+     * C3 (Task 28.3), over real core's escaping: the approval list shows each tool's input
+     * schema, and a schema that carries markup renders it as text.
+     */
+    public function test_the_discovered_list_shows_each_input_schema_escaped(): void
+    {
+        $tool = new ToolDefinition('search', 'Search.', ['type' => 'object', 'description' => '</pre></details><script>alert(1)</script>']);
+        $this->useClient(static fn(): FakeClient => new FakeClient([$tool]));
+        $this->rest('PUT', '/settings', ['toolkits.mcp_servers' => [['url' => self::URL, 'prefix' => 'trk']]]);
+        $fragment = (string) $this->rest('GET', '/view/mcp-tools/trk', ['index' => 0])->get_data();
+        $this->assertStringContainsString('<details class="ab-mcp-schema"><summary>Input schema</summary><pre>{', $fragment);
+        $this->assertStringContainsString('&lt;/pre&gt;&lt;/details&gt;&lt;script&gt;alert(1)&lt;/script&gt;', $fragment);
+        $this->assertStringNotContainsString('<script', $fragment);
+    }
+
+    /**
      * Task 28.3, over real dispatch: a client the factory refuses to build is Discover's notice
      * with a 200, never a 500 or a WP_Error. An address Egress refuses says why in its own words,
      * which name the host; any other throwable says the plugin's sentence and nothing of its own.

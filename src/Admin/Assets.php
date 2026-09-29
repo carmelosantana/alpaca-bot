@@ -85,8 +85,10 @@ final class Assets
      * The MCP servers table (SettingsPage::renderMcpServers()) is the same kind of table, a
      * `widefat` nested in a Settings API row, and its wrapper, `div.ab-mcp-servers`, gets the
      * first two of these rules: the wrapper sized by the row and scrolling, and the cells made
-     * cells again with widefat's padding. The rest are about the overrides table's own columns
-     * and are scoped to it.
+     * cells again with widefat's padding. One more rule is its own: a tool's input schema in the
+     * approval list (View\Settings\McpTools) wraps inside its cell rather than widening the table
+     * to its longest line, and scrolls past 20em. The rest are about the overrides table's own
+     * columns and are scoped to it.
      *
      * Inline on core's `forms` handle rather than in a stylesheet of the plugin's: the settings
      * page loads no plugin stylesheet, the chat shell's is another screen's stylesheet, and a
@@ -102,6 +104,7 @@ final class Assets
         .form-table .ab-overrides select { width: auto; }
         .form-table .ab-mcp-servers { overflow-x: auto; contain: inline-size; }
         .form-table .ab-mcp-servers th, .form-table .ab-mcp-servers td { display: table-cell; width: auto; padding: 8px 10px; vertical-align: middle; }
+        .form-table .ab-mcp-schema pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 20em; overflow: auto; }
         CSS;
 
     public function enqueue(string $hook): void

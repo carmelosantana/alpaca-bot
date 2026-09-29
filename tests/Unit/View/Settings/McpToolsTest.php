@@ -184,3 +184,43 @@ it('does not mark a tool for sharing a name with one the listing repeats', funct
     expect(AlpacaBot\Toolkit\ToolName::fit('trk__' . $twin->name))->toBe(AlpacaBot\Toolkit\ToolName::fit('trk__' . $bad->name))
         ->and((new McpTools(0, [mcpToolRow($bad, 'new', true), mcpToolRow($twin, 'new', true)], '', [], 'trk'))->render())->not->toContain('same tool name');
 });
+
+// C3 (final review M5): approving a tool pins its input schema, which reaches the model as the
+// server sent it, so the list shows it: collapsed, pretty-printed, escaped, and cut at
+// McpTools::SCHEMA_CHARS characters.
+it('shows each tool\'s input schema collapsed, pretty-printed and escaped', function (): void {
+    $tool = new ToolDefinition('search', 'Search.', ['type' => 'object', 'properties' => ['q' => ['type' => 'string', 'description' => 'a/b é']]]);
+    $html = (new McpTools(0, [mcpToolRow($tool, 'new', true)]))->render();
+    $json = json_encode($tool->inputSchema, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+    expect($html)->toContain('<details class="ab-mcp-schema"><summary>Input schema</summary><pre>' . htmlspecialchars($json, ENT_QUOTES) . '</pre></details></li>')
+        ->and($json)->toContain("\n    \"properties\"")
+        ->and($json)->toContain('a/b é');
+});
+
+it('renders a schema that carries markup inert', function (): void {
+    $tool = new ToolDefinition('search', 'Search.', ['type' => 'object', 'description' => '</pre></details><script>alert(1)</script>']);
+    $html = (new McpTools(0, [mcpToolRow($tool, 'new', true)]))->render();
+    expect($html)->not->toContain('<script')
+        ->not->toContain('</pre></details><script')
+        ->toContain('&lt;/pre&gt;&lt;/details&gt;&lt;script&gt;alert(1)&lt;/script&gt;');
+});
+
+it('cuts a schema longer than the cap, and says so', function (): void {
+    expect(McpTools::SCHEMA_CHARS)->toBe(4000);
+    $tool = new ToolDefinition('search', 'Search.', ['type' => 'object', 'description' => str_repeat('é', 5000)]);
+    $html = (new McpTools(0, [mcpToolRow($tool, 'new', true)]))->render();
+    preg_match('#<pre>(.*)</pre>#s', $html, $m);
+    $fits = new ToolDefinition('fits', 'Fits.', ['type' => 'object', 'description' => str_repeat('x', 3000)]);
+    expect(mb_strlen(htmlspecialchars_decode($m[1], ENT_QUOTES)))->toBe(4001)
+        ->and(mb_substr(htmlspecialchars_decode($m[1], ENT_QUOTES), -1))->toBe('…')
+        ->and($html)->toContain('Cut at 4000 characters here; the model is handed the whole schema.')
+        ->and((new McpTools(0, [mcpToolRow($fits, 'new', true)]))->render())->not->toContain('Cut at');
+});
+
+// json_decode() makes INF of 1e999, which JSON cannot write back: the tool is still listed.
+it('says so when a schema cannot be written out as JSON', function (): void {
+    $tool = new ToolDefinition('search', 'Search.', ['type' => 'object', 'maximum' => INF]);
+    $html = (new McpTools(0, [mcpToolRow($tool, 'new', true)]))->render();
+    expect($html)->toContain('<details class="ab-mcp-schema"><summary>Input schema</summary><p>This schema holds a value JSON cannot write, such as a number too large for it, so it cannot be shown.</p></details>')
+        ->toContain('name="alpaca_bot_settings[toolkits.mcp_servers][0][approved][search]"');
+});

@@ -16,8 +16,9 @@ use AlpacaBot\Toolkit\AddressRefused;
  *
  * The fingerprint an administrator ticks is the fingerprint of the definition the list was built
  * from (View\Settings\McpTools posts it as the box's value), so approving is approving that
- * definition and nothing else. The list shows the tool's name, title and description, not its
- * input schema, which the fingerprint covers too: the schema is pinned unseen. A changed tool
+ * definition and nothing else. The list shows the tool's name, title, description and input
+ * schema, the schema cut at McpTools::SCHEMA_CHARS characters, though the fingerprint covers all
+ * of it. A changed tool
  * starts unticked with its new fingerprint in the box, so approving it again is a deliberate
  * act, and it re-pins the tool. A new tool starts
  * ticked unless its `destructiveHint` annotation is exactly `true` (ToolDefinition::destructive()):

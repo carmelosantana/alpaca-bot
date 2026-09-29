@@ -25,8 +25,12 @@ use AlpacaBot\View\Component;
  * whether the server calls it destructive, and its description through SchemaTool::describe(),
  * the plugin's rule for a tool description another party wrote (AbilitiesToolkit hands the model
  * its abilities' descriptions through the same function), so what is shown is cleaned and cut as
- * that rule has it. The title goes through describe() too. The name, the title and the
- * description are the server's text, and each is printed escaped.
+ * that rule has it. The title goes through describe() too. Under each tool its input schema,
+ * which approving pins with the rest (ToolDefinition::fingerprint()) and which reaches the model
+ * neither cleaned nor capped (SchemaTool), is shown collapsed in a `<details>`, as pretty-printed
+ * JSON cut at SCHEMA_CHARS characters, with a line saying so when it is cut; a schema JSON cannot
+ * write (json_decode() makes INF of `1e999`) is a line saying it cannot be shown. The name, the
+ * title, the description and the schema are the server's text, and each is printed escaped.
  *
  * A tool whose name Schema::isToolName() refuses, asked of the key the name becomes, is listed
  * with no box and a line saying its name cannot be approved: Schema::sanitizeMcpServers() would
@@ -51,6 +55,9 @@ use AlpacaBot\View\Component;
  */
 final class McpTools extends Component
 {
+    /** The most of a tool's input schema, as pretty-printed JSON, the list shows, in characters. */
+    public const SCHEMA_CHARS = 4000;
+
     /**
      * @param list<array{definition: ToolDefinition, fingerprint: string, state: string, ticked: bool}> $tools    Discovery::tools()
      * @param string                                                                                   $error    why the server could not be listed, untrusted text; '' when it was
@@ -116,7 +123,30 @@ final class McpTools extends Component
         } else {
             $head = $label . ' ' . $this->tag('em', [], $this->e(__('This name cannot be approved, so the tool has no box.', 'alpaca-bot')));
         }
-        return $this->tag('li', [], $head . $notes . '<br>' . $this->tag('span', ['class' => 'description'], $this->e(SchemaTool::describe($definition->description))));
+        return $this->tag('li', [], $head . $notes . '<br>' . $this->tag('span', ['class' => 'description'], $this->e(SchemaTool::describe($definition->description))) . $this->schema($definition->inputSchema));
+    }
+
+    /**
+     * A tool's input schema, collapsed: the class docblock.
+     *
+     * @param array<array-key, mixed> $schema
+     */
+    private function schema(array $schema): string
+    {
+        $json = wp_json_encode($schema, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+        if ($json === false) {
+            $body = $this->tag('p', [], $this->e(__('This schema holds a value JSON cannot write, such as a number too large for it, so it cannot be shown.', 'alpaca-bot')));
+        } elseif (mb_strlen($json) > self::SCHEMA_CHARS) {
+            $body = $this->tag('pre', [], $this->e(mb_substr($json, 0, self::SCHEMA_CHARS) . '…'))
+                . $this->tag('p', ['class' => 'description'], $this->e(sprintf(
+                    /* translators: %d: how many characters of an MCP tool's input schema the approval list shows */
+                    __('Cut at %d characters here; the model is handed the whole schema.', 'alpaca-bot'),
+                    self::SCHEMA_CHARS,
+                )));
+        } else {
+            $body = $this->tag('pre', [], $this->e($json));
+        }
+        return $this->tag('details', ['class' => 'ab-mcp-schema'], $this->tag('summary', [], $this->e(__('Input schema', 'alpaca-bot'))) . $body);
     }
 
     /**

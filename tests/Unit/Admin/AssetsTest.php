@@ -67,7 +67,10 @@ it('adds the overrides table rules inline to core forms stylesheet on the settin
         // The MCP servers table is the same nested widefat: the wrapper scrolls and the cells are
         // cells again, and none of the overrides table's column rules reach it.
         ->toContain('.form-table .ab-mcp-servers { overflow-x: auto; contain: inline-size; }')
-        ->toContain('.form-table .ab-mcp-servers th, .form-table .ab-mcp-servers td { display: table-cell; width: auto; padding: 8px 10px; vertical-align: middle; }');
+        ->toContain('.form-table .ab-mcp-servers th, .form-table .ab-mcp-servers td { display: table-cell; width: auto; padding: 8px 10px; vertical-align: middle; }')
+        // A tool's input schema (View\Settings\McpTools) wraps in its cell rather than widening
+        // the table to its longest line, and scrolls past 20em.
+        ->toContain('.form-table .ab-mcp-schema pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 20em; overflow: auto; }');
 
     // A locale that translates "Alpaca Bot" derives another id; the rules follow it.
     Functions\when('get_plugin_page_hookname')->alias(static fn(string $page, string $parent): string => 'robot-alpaca_page_' . $page);
