@@ -298,9 +298,11 @@ final class ViewController extends Controller
      * filter for a custom role must not have handed that role this. It shares the chat bucket's
      * rate limit (routes()).
      *
-     * A server that cannot be listed is the fragment's own notice with a 200 rather than an error
-     * status: the administrator asked a question, and "this server did not answer, and here is
-     * what it said" is the answer. reason() says what the notice carries.
+     * A server that cannot be listed, or whose client cannot be built, is the fragment's own
+     * notice with a 200 rather than an error status: the administrator asked a question, and
+     * "this server was not listed, and here is why" is the answer. Discovery::tools() hands every
+     * such failure over as McpUnavailable, whatever was thrown, so that is the one class caught
+     * here. reason() says what the notice carries.
      */
     public function mcpTools(\WP_REST_Request $request): \WP_REST_Response|\WP_Error
     {
@@ -323,9 +325,14 @@ final class ViewController extends Controller
 
     /**
      * What the notice says for a server that could not be listed: the McpUnavailable's message.
-     * PhpAgentsClient, the client the plugin's own factory builds, writes that message itself and
-     * quotes nothing a server sent; a client handed in through another builder may, so the message
-     * is still untrusted text. McpTools prints it escaped. Before that, every piece of the
+     * Through the factory the plugin builds, that message is always the plugin's own sentence:
+     * PhpAgentsClient's, carrying at most an HTTP status, a JSON-RPC code or the header name the
+     * administrator gave; AddressRefused's, which Discovery::tools() keeps, naming the host and,
+     * when an address was refused, that address; or Discovery's own. None of them quotes a
+     * server's words. A ClientFactory a site builds itself, put in the container in the plugin's
+     * place (Plugin::set()) or under a Discovery of a ViewController the site hands in through
+     * `alpaca_bot/rest/controllers`, can put any text there, a remote server's included, so the
+     * message is still treated as untrusted text. McpTools prints it escaped. Before that, every piece of the
      * server's header value 8 characters or longer that is either the whole value or the part after
      * its first run of whitespace (the credential of `Bearer …`) is replaced with Schema::MASK
      * wherever it appears, and then the message is cut to REASON_CHARS characters, with an

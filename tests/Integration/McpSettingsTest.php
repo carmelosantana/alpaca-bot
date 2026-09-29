@@ -9,12 +9,14 @@ use AlpacaBot\Admin\SettingsPage;
 use AlpacaBot\Mcp\ClientFactory;
 use AlpacaBot\Mcp\Drift;
 use AlpacaBot\Mcp\Secrets;
+use AlpacaBot\Mcp\ServerConfig;
 use AlpacaBot\Mcp\ServerSettings;
 use AlpacaBot\Mcp\ToolDefinition;
 use AlpacaBot\Plugin;
 use AlpacaBot\Provider\ModelCatalog;
 use AlpacaBot\Settings\Schema;
 use AlpacaBot\Settings\Store;
+use AlpacaBot\Toolkit\AddressRefused;
 
 /**
  * `toolkits.mcp_servers` over real core: the REST route, the settings page as options.php saves
@@ -826,6 +828,37 @@ final class McpSettingsTest extends TestCase
         $this->save(self::formPost(self::swap($this->page('toolkits'), $fragment)));
         $this->assertSame($approved, get_option(Plugin::OPTION)['toolkits.mcp_servers'][0]['approved']);
         $this->assertSame(['search'], Drift::get('trk'));
+    }
+
+    /**
+     * Task 28.3, over real dispatch: a client the factory refuses to build is Discover's notice
+     * with a 200, never a 500 or a WP_Error. An address Egress refuses says why in its own words,
+     * which name the host; any other throwable says the plugin's sentence and nothing of its own.
+     * Neither carries the header value the builder was handed.
+     */
+    public function test_a_client_build_that_throws_is_the_notice_with_a_200(): void
+    {
+        $this->rest('PUT', '/settings', ['toolkits.mcp_servers' => [['url' => self::URL, 'prefix' => 'trk', 'header_name' => 'Authorization', 'header_value' => self::SECRET]]]);
+        $cases = [
+            'AddressRefused' => [new AddressRefused('93.184.216.34 resolves to 10.0.0.7, a private, local or other special-purpose address.'), '93.184.216.34 resolves to 10.0.0.7, a private, local or other special-purpose address.'],
+            'RuntimeException' => [new \RuntimeException('LIBRARYWORDS ' . self::SECRET), 'The MCP client failed in a way this plugin does not recognise, so the server was not listed.'],
+        ];
+        foreach ($cases as $label => [$thrown, $sentence]) {
+            $seen = [];
+            $this->useClient(static function (ServerConfig $server) use ($thrown, &$seen): never {
+                $seen[] = $server->headerValue;
+                throw $thrown;
+            });
+            $res = $this->rest('GET', '/view/mcp-tools/trk', ['index' => 0]);
+            $this->assertSame(200, $res->get_status(), $label . ': ' . print_r($res->get_data(), true));
+            $this->assertSame('1', $res->get_headers()['X-Alpaca-Bot-View'], $label);
+            $fragment = (string) $res->get_data();
+            $this->assertStringStartsWith('<div class="notice notice-error inline"><p>' . esc_html($sentence) . '</p></div>', $fragment, $label);
+            $this->assertSame([self::SECRET], $seen, $label . ': the builder was handed the stored value');
+            $this->assertStringNotContainsString(self::SECRET, $fragment, $label);
+            $this->assertStringNotContainsString('int-secret', $fragment, $label);
+            $this->assertStringNotContainsString('LIBRARYWORDS', $fragment, $label);
+        }
     }
 
     /**

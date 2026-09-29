@@ -66,12 +66,15 @@ it('finds no server for an id the schema would not admit, or for a row it cannot
         ['id' => 'Trk', 'url' => 'https://mcp.example.com/mcp', 'header_value' => '', 'prefix' => 'up'],
         ['id' => 'obj', 'url' => new stdClass(), 'header_value' => '', 'prefix' => 'obj'],
         ['id' => 'ok', 'url' => 'https://mcp.example.com/mcp', 'header_value' => '', 'prefix' => 'ok'],
+        // Secrets::resolve() runs before the catch, and reads a value that is not a string as none.
+        ['id' => 'hv', 'url' => 'https://mcp.example.com/mcp', 'header_value' => new stdClass(), 'prefix' => 'hv'],
     ]]);
     $discovery = new Discovery($store, new ClientFactory());
     expect($discovery->server('1trk'))->toBeNull()
         ->and($discovery->server('Trk'))->toBeNull()
         ->and($discovery->server('obj'))->toBeNull()
-        ->and($discovery->server('ok')?->id)->toBe('ok');
+        ->and($discovery->server('ok')?->id)->toBe('ok')
+        ->and($discovery->server('hv')?->headerValue)->toBe('');
 });
 
 it('marks each tool approved, changed or new, and leaves a destructive new tool unticked', function (): void {
@@ -136,6 +139,47 @@ it('lets a client the factory refuses to build reach the caller, and leaves the 
     expect(fn() => $refusing->tools($refusing->server('trk')))->toThrow(McpUnavailable::class, 'This server was not contacted.');
     expect($drift)->toBe([]);
 });
+
+// Task 28.3: whatever else building or listing throws reaches the caller as McpUnavailable, so the
+// Discover route has one failure to catch. AddressRefused's message is the plugin's own (Egress,
+// AddressPin) and is kept; any other throwable's text is not the plugin's and is replaced.
+it('turns an address the factory refuses into McpUnavailable with the refusal\'s own message, and leaves the drift marker as it was', function (): void {
+    $discovery = mcpDiscovery([], drift: $drift);
+    $refused = new AlpacaBot\Toolkit\AddressRefused('mcp.example.com resolves to 10.0.0.7, a private, local or other special-purpose address.');
+    $refusing = new Discovery(new Store(['toolkits.mcp_servers' => [['id' => 'trk', 'url' => 'https://mcp.example.com/mcp', 'prefix' => 'trk']]]), new ClientFactory(static function (ServerConfig $server) use ($refused): never {
+        throw $refused;
+    }));
+    try {
+        $refusing->tools($refusing->server('trk'));
+        $thrown = null;
+    } catch (Throwable $e) {
+        $thrown = $e;
+    }
+    expect($thrown)->toBeInstanceOf(McpUnavailable::class)
+        ->and($thrown?->getMessage())->toBe($refused->getMessage())
+        ->and($thrown?->getPrevious())->toBe($refused)
+        ->and($drift)->toBe([]);
+});
+
+it('turns any other throwable from the build or the listing into McpUnavailable with the plugin\'s sentence, none of its own text', function (Closure $build): void {
+    $discovery = mcpDiscovery([], drift: $drift);
+    $failing = new Discovery(new Store(['toolkits.mcp_servers' => [['id' => 'trk', 'url' => 'https://mcp.example.com/mcp', 'prefix' => 'trk']]]), new ClientFactory($build));
+    try {
+        $failing->tools($failing->server('trk'));
+        $thrown = null;
+    } catch (Throwable $e) {
+        $thrown = $e;
+    }
+    expect($thrown)->toBeInstanceOf(McpUnavailable::class)
+        ->and($thrown?->getMessage())->toBe('The MCP client failed in a way this plugin does not recognise, so the server was not listed.')
+        ->and($thrown?->getMessage())->not->toContain('LIBRARYWORDS')
+        ->and($drift)->toBe([]);
+})->with([
+    'a RuntimeException from the build' => [static fn(ServerConfig $s): never => throw new RuntimeException('LIBRARYWORDS https://mcp.example.com/mcp?token=x')],
+    'an InvalidArgumentException from the build' => [static fn(ServerConfig $s): never => throw new InvalidArgumentException('LIBRARYWORDS')],
+    'a TypeError from the build' => [static fn(ServerConfig $s): never => throw new TypeError('LIBRARYWORDS')],
+    'a LogicException from the listing' => [static fn(ServerConfig $s): FakeClient => new FakeClient([], [], new LogicException('LIBRARYWORDS'))],
+]);
 
 // M-2: a name the listing repeats cannot be approved (View\Settings\McpTools offers no box), so
 // no copy starts ticked. Each copy keeps the state its own fingerprint gives it, and the name goes

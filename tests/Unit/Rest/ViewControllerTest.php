@@ -429,6 +429,29 @@ it('answers a server that cannot be listed with the fragment\'s notice, keeping 
         ->and($res->get_data())->toBe('<div class="notice notice-error inline"><p>' . $sentence . '</p></div><input type="hidden" name="alpaca_bot_settings[toolkits.mcp_servers][0][approved][search]" value="' . $fp . '">');
 });
 
+// Task 28.3: a client the factory refuses to build is the notice with a 200 too, never an error
+// out of the route: an address Egress refuses says why in its own words, which name the host,
+// and anything else says the plugin's sentence, none of what was thrown.
+it('answers a refused or failed client build with the fragment\'s notice and a 200', function (Throwable $thrown, string $notice): void {
+    Functions\when('current_user_can')->justReturn(true);
+    viewControllerWithMcp(new AlpacaBot\Tests\Integration\FakeClient());
+    $store = new Store(['models.default' => 'llama3.2', 'toolkits.mcp_servers' => [[
+        'id' => 'trk', 'url' => 'https://mcp.example.com/mcp', 'header_name' => 'Authorization',
+        'header_value' => AlpacaBot\Settings\Schema::MASK, 'prefix' => 'trk', 'approved' => [],
+    ]]]);
+    $discovery = new AlpacaBot\Mcp\Discovery($store, new AlpacaBot\Mcp\ClientFactory(static fn(): never => throw $thrown));
+    $res = (new ViewController(new ConversationStore($store), $store, new ModelCatalog(new Factory($store)), new Markdown(), new UserPrefs(), $discovery))
+        ->mcpTools(restRequest('GET', '/x', ['id' => 'trk', 'index' => 0]));
+    expect($res)->toBeInstanceOf(WP_REST_Response::class)
+        ->and($res->get_status())->toBe(200)
+        ->and((string) $res->get_data())->toStartWith('<div class="notice notice-error inline"><p>' . $notice . '</p></div>')
+        ->not->toContain('LIBRARYWORDS')
+        ->not->toContain('tok-secret-123');
+})->with([
+    'AddressRefused' => [new AlpacaBot\Toolkit\AddressRefused('mcp.example.com does not resolve, or its lookup failed.'), 'mcp.example.com does not resolve, or its lookup failed.'],
+    'a plain RuntimeException' => [new RuntimeException('LIBRARYWORDS Bearer tok-secret-123'), 'The MCP client failed in a way this plugin does not recognise, so the server was not listed.'],
+]);
+
 // Carry 4: what the notice prints is the McpUnavailable's own message and nothing it chains. The
 // adapter keeps the library's exception as `previous`, and a JSON-RPC error there carries the
 // server's words and its `data`, unredacted by design.

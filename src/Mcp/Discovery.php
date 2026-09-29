@@ -6,6 +6,7 @@ namespace AlpacaBot\Mcp;
 
 use AlpacaBot\Settings\Schema;
 use AlpacaBot\Settings\Store;
+use AlpacaBot\Toolkit\AddressRefused;
 
 /**
  * What an administrator is shown before approving a server's tools: each tool the server lists,
@@ -34,8 +35,9 @@ use AlpacaBot\Settings\Store;
  * asks that client to list the server; what the client does is the factory's. The factory the
  * plugin constructs builds PhpAgentsClient, which lists the server over the network through
  * Mcp\Egress, and throws McpUnavailable when it cannot. Building the client can fail too, and
- * outside the listing: Egress refuses an address with AddressRefused, and that is not an
- * McpUnavailable.
+ * outside the listing: Egress refuses an address with AddressRefused, which is not an
+ * McpUnavailable. tools() hands its caller McpUnavailable for either, and for anything else
+ * either throws (tools() says which message each carries).
  *
  * @since 0.6.0
  */
@@ -76,15 +78,40 @@ final class Discovery
      * One row per tool the server lists, in the order it lists them, and the names of the changed
      * ones recorded through Drift::set(), each once, which clears the marker when there are none.
      *
+     * A failure to build the client or to list the server is McpUnavailable, whatever was thrown,
+     * so the one caller that shows it, the Discover route, has one class to catch and never
+     * answers an error of its own. The catch is \Throwable because both halves can throw beyond
+     * RuntimeException: the builder is whatever closure the factory was handed, and the default
+     * one reaches McpServer's constructor, which throws \InvalidArgumentException, and
+     * PinnedHttpClient's, which does too; PhpAgentsClient turns only RuntimeException into
+     * McpUnavailable, and php-agents' McpException docblock names a TypeError and an Error its
+     * client can raise besides. What the message says:
+     *
+     * - An McpUnavailable is handed on as it is.
+     * - An AddressRefused keeps its message, which is the plugin's own sentence (Egress,
+     *   AddressPin) naming the host and, when a lookup was made, the address it answered with,
+     *   written for the administrator who typed the URL (AddressRefused's docblock).
+     * - Anything else gets the plugin's sentence and none of its own text, which is not the
+     *   plugin's and could quote the URL, its query string included (Ruling R28-5).
+     *
+     * Each keeps what was thrown as `previous`.
+     *
      * @return list<array{definition: ToolDefinition, fingerprint: string, state: 'approved'|'changed'|'new', ticked: bool}>
-     * @throws McpUnavailable when the server cannot be listed; the drift marker is left as it was
-     * @throws \AlpacaBot\Toolkit\AddressRefused when the factory's Egress refuses the address; the marker is left as it was
+     * @throws McpUnavailable when the client cannot be built or the server cannot be listed; the drift marker is left as it was
      */
     public function tools(#[\SensitiveParameter] ServerConfig $server): array
     {
         $rows = [];
         $changed = [];
-        $listed = $this->clients->for($server)->listTools();
+        try {
+            $listed = $this->clients->for($server)->listTools();
+        } catch (McpUnavailable $e) {
+            throw $e;
+        } catch (AddressRefused $e) {
+            throw new McpUnavailable($e->getMessage(), 0, $e);
+        } catch (\Throwable $e) {
+            throw new McpUnavailable(__('The MCP client failed in a way this plugin does not recognise, so the server was not listed.', 'alpaca-bot'), 0, $e);
+        }
         $counts = array_count_values(array_map(static fn(ToolDefinition $d): string => $d->name, $listed));
         foreach ($listed as $definition) {
             $fingerprint = $definition->fingerprint();
