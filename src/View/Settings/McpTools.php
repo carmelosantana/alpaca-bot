@@ -49,7 +49,8 @@ use AlpacaBot\View\Component;
  * be listed, the fragment is the error notice followed by what the cell held, drawn by
  * approvals() as SettingsPage draws the cell: a hidden input per stored approval, so a save
  * after a failed look keeps every approval as a save that never looked does, how many there
- * are, and the drift note for those `$drifted` names. An empty list is an info notice.
+ * are, and the drift note for the approved tools `$drifted` names. An empty list is an info
+ * notice.
  *
  * @since 0.6.0
  */

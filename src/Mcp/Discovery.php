@@ -18,10 +18,8 @@ use AlpacaBot\Toolkit\AddressRefused;
  * from (View\Settings\McpTools posts it as the box's value), so approving is approving that
  * definition and nothing else. The list shows the tool's name, title, description and input
  * schema, the schema cut at McpTools::SCHEMA_CHARS characters, though the fingerprint covers all
- * of it. A changed tool
- * starts unticked with its new fingerprint in the box, so approving it again is a deliberate
- * act, and it re-pins the tool. A new tool starts
- * ticked unless its `destructiveHint` annotation is exactly `true` (ToolDefinition::destructive()):
+ * of it. A changed tool starts unticked with its new fingerprint in the box, so approving it
+ * again is a deliberate act, and it re-pins the tool. A new tool starts ticked unless its `destructiveHint` annotation is exactly `true` (ToolDefinition::destructive()):
  * the annotation is the server's own claim, which the MCP specification says to treat as
  * untrusted, and here it only decides which way a box starts. A new tool without the annotation,
  * or with any other value in it, starts ticked.
@@ -83,19 +81,19 @@ final class Discovery
      * so the one caller that shows it, the Discover route, has one class to catch and never
      * answers an error of its own. The catch is \Throwable because both halves can throw beyond
      * RuntimeException: the builder is whatever closure the factory was handed, and the default
-     * one reaches McpServer's constructor, which throws \InvalidArgumentException, and
-     * PinnedHttpClient's, which does too; PhpAgentsClient turns only RuntimeException into
-     * McpUnavailable, and php-agents' McpException docblock names a TypeError and an Error its
-     * client can raise besides. What the message says:
+     * one reaches McpServer's constructor and PinnedHttpClient's, each of which can throw
+     * \InvalidArgumentException; PhpAgentsClient turns only RuntimeException into McpUnavailable,
+     * and php-agents' McpException docblock names a TypeError and an Error its client can raise
+     * besides. What the message says:
      *
      * - An McpUnavailable is handed on as it is.
-     * - An AddressRefused keeps its message, which is the plugin's own sentence (Egress,
-     *   AddressPin) naming the host and, when a lookup was made, the address it answered with,
-     *   written for the administrator who typed the URL (AddressRefused's docblock).
+     * - An AddressRefused's message is kept. It is the plugin's own sentence, written for the
+     *   administrator who typed the URL (AddressRefused's docblock): Egress's or AddressPin's,
+     *   naming at most the host and an address it refuses.
      * - Anything else gets the plugin's sentence and none of its own text, which is not the
-     *   plugin's and could quote the URL, its query string included (Ruling R28-5).
+     *   plugin's and could quote the URL, its query string included.
      *
-     * Each keeps what was thrown as `previous`.
+     * The two it builds keep what was thrown as `previous`.
      *
      * @return list<array{definition: ToolDefinition, fingerprint: string, state: 'approved'|'changed'|'new', ticked: bool}>
      * @throws McpUnavailable when the client cannot be built or the server cannot be listed; the drift marker is left as it was

@@ -328,18 +328,18 @@ final class ViewController extends Controller
      * What the notice says for a server that could not be listed: the McpUnavailable's message.
      * Through the factory the plugin builds, that message is always the plugin's own sentence:
      * PhpAgentsClient's, carrying at most an HTTP status, a JSON-RPC code or the header name the
-     * administrator gave; AddressRefused's, which Discovery::tools() keeps, naming the host and,
-     * when an address was refused, that address; or Discovery's own. None of them quotes a
-     * server's words. A ClientFactory a site builds itself, put in the container in the plugin's
-     * place (Plugin::set()) or under a Discovery of a ViewController the site hands in through
-     * `alpaca_bot/rest/controllers`, can put any text there, a remote server's included, so the
-     * message is still treated as untrusted text. McpTools prints it escaped. Before that, every piece of the
-     * server's header value 8 characters or longer that is either the whole value or the part after
-     * its first run of whitespace (the credential of `Bearer …`) is replaced with Schema::MASK
-     * wherever it appears, and then the message is cut to REASON_CHARS characters, with an
-     * ellipsis, so a cut cannot leave the start of a replaced piece behind. A shorter piece is not
-     * looked for, since replacing it would blank out ordinary words; nor is a value that reaches
-     * the message changed (encoded, split, cut).
+     * administrator gave; AddressRefused's, which Discovery::tools() keeps (Egress's or
+     * AddressPin's, naming at most the host and an address it refuses); or Discovery's own. None
+     * of them quotes a server's words. A ClientFactory a site builds itself, put in the container
+     * in the plugin's place (Plugin::set()) or under a Discovery of a ViewController the site hands
+     * in through `alpaca_bot/rest/controllers`, can put any text there, a remote server's included,
+     * so the message is still treated as untrusted text. McpTools prints it escaped. Before that,
+     * every piece of the server's header value 8 characters or longer that is either the whole
+     * value or the part after its first run of whitespace (the credential of `Bearer …`) is
+     * replaced with Schema::MASK wherever it appears, and then the message is cut to REASON_CHARS
+     * characters, with an ellipsis, so a cut cannot leave the start of a replaced piece behind. A
+     * shorter piece is not looked for, since replacing it would blank out ordinary words; nor is a
+     * value that reaches the message changed (encoded, split, cut).
      */
     private static function reason(McpUnavailable $e, #[\SensitiveParameter] ServerConfig $server): string
     {
