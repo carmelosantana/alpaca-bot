@@ -25,7 +25,8 @@ use AlpacaBot\Settings\Store;
  * guard passes through as built -- what keeps that one off the wire is the fake model
  * WpAiClientTest registers with core -- a Mcp\ClientFactory a test constructs with no builder
  * builds the real client, and code building its own Symfony HttpClient, cURL handle or stream
- * outside Provider\Factory is reached by none of them and has to be handed a client by its test.
+ * outside Provider\Factory is reached by none of them and has to be handed a client by its test
+ * (McpClientLiveTest builds a real one on purpose, and skips unless ALPACA_BOT_MCP_URL is set).
  */
 final class HermeticTest extends TestCase
 {

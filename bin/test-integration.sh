@@ -8,13 +8,16 @@
 # and the same tests/Integration/wp-tests-config.php, so a pass here means the same thing in both.
 #
 # The suite needs no network beyond the database, and refuses one: tests/Integration/bootstrap.php
-# turns down any WP_Http request a test did not stub, and swaps a configured Ollama provider for
-# one whose chat, stream, structured and models calls throw, so a pass here is the same on a
-# runner with no provider and no DNS. Those two are the doors it guards, which is not every door
-# the plugin has: Factory::make() also builds WpAiClientProvider, and that one is passed through as
-# built -- what keeps it off the wire is the fake model WpAiClientTest registers with core, not a
-# guard. A caller that builds its own HTTP client is outside both guards too, and takes one from
-# its test instead (Kanboard #4322).
+# turns down any WP_Http request a test did not stub, swaps a configured Ollama provider for
+# one whose chat, stream, structured and models calls throw, and gives the plugin's own MCP client
+# factory a builder that refuses, so a pass here is the same on a runner with no provider and no
+# DNS. Those three are the doors it guards, which is not every door the plugin has:
+# Factory::make() also builds WpAiClientProvider, and that one is passed through as built -- what
+# keeps it off the wire is the fake model WpAiClientTest registers with core, not a guard. A
+# caller that builds its own HTTP client is outside the guards too, and takes one from its test
+# instead (Kanboard #4322). McpClientLiveTest builds a real one on purpose, to reach a real MCP
+# server, and skips unless ALPACA_BOT_MCP_URL is set, which this script never passes into the
+# container (the test's docblock says how to run it).
 #
 # The suite's PHPUnit 9.6 lives in tools/integration (its composer.json says why it is not the
 # root's PHPUnit 13) and is installed here, on the host, on every run, as the root `prefix`

@@ -56,7 +56,8 @@ tests_add_filter('pre_option_upload_path', static fn(): string => '/tmp/alpaca-b
 // is covered); a Mcp\ClientFactory a test constructs with no builder of its own builds the real
 // client, which the third guard does not reach; and code that builds its own Symfony HttpClient,
 // cURL handle or stream outside Provider\Factory is reached by none of them, and a test for such a
-// caller has to hand it a client of its own.
+// caller has to hand it a client of its own. McpClientLiveTest builds a real one on purpose, to
+// reach a real MCP server, and skips unless ALPACA_BOT_MCP_URL is set, which nothing here sets.
 //
 // WP_Http: a request no test stubbed is refused, naming the URL. At the last priority, so a
 // test's own `pre_http_request` stub (ToolkitsTest, ShortcodesTest) answers first and this sees
