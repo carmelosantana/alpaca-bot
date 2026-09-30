@@ -144,9 +144,12 @@ it is no longer applied, and the schema route asks `settings/read` with the rest
 These filters are not only called to authorise a request. The **Settings › Access** tab (section 7)
 asks some of them to show under a row whether code has moved it: `alpaca_bot/capability/settings`
 and `alpaca_bot/capability/settings/read` or `…/write` with a `GET` or `PUT /settings` request,
-and `alpaca_bot/capability/chat` with a `POST /chat` request. The tab builds those requests
-itself; no client sent them and they authorise nothing, so a filter that logs or counts what it
-is handed sees them too.
+and, for the Chat row, the key of every route that follows that row, once per key, with a request
+of the verb and path of the key's first route (`POST /chat`, `GET /chat/{id}/stream` with the
+placeholder as written, `GET /conversations`, and so on). The routes are read off the controllers
+`alpaca_bot/rest/controllers` returns, so the tab applies that filter too. The tab builds those
+requests itself; no client sent them and they authorise nothing, so a filter that logs or counts
+what it is handed sees them too.
 
 ```php
 // Let Authors chat and read their own history, but keep settings to administrators.
@@ -1035,9 +1038,10 @@ sidebar, whose chat does not load.
 ## 8. Adding routes
 
 `alpaca_bot/rest/controllers` receives the plugin's `Rest\Controller` instances on
-`rest_api_init`. Append a subclass to register routes in the same namespace with the same
-permission callback, capability filters and (with `'rate_limit' => true`) the same limiter;
-anything that is not a `Rest\Controller` is dropped.
+`rest_api_init`, and when **Settings › Access** lists the routes that follow the Chat row. Append
+a subclass to register routes in the same namespace with the same permission callback,
+capability filters and (with `'rate_limit' => true`) the same limiter; anything that is not a
+`Rest\Controller` is dropped.
 
 ```php
 add_filter('alpaca_bot/rest/controllers', static function (array $controllers): array {
