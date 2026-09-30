@@ -35,6 +35,17 @@
 # with a dot as well: `WP_MULTISITE=1 WP_TESTS_DOMAIN=example.org`. CI runs the uninstall group
 # this way once (.github/workflows/ci.yml), because its network test skips on a single site.
 #
+# WP_NO_CURL=1 runs PHP with `-d disable_functions=curl_init,curl_exec`, the configuration shared
+# hosts ship, so Requests' Transport\Curl::test() answers false through its own function_exists()
+# check, WordPress would send requests through Fsockopen, and web_fetch must refuse (Kanboard
+# #4484). disable_functions rather than a PHP without ext-curl: both containers' PHP has cURL
+# compiled in, not loaded from a shared .so, so there is no extension to leave out, and disabling
+# the two functions is what those hosts do anyway (extension_loaded('curl') stays true there
+# too). Only the php running phpunit gets the flag; core's install.php subprocess does not need
+# it. The tests that need it are the no-curl group, which skips without it; tests that need a
+# fetch to go through skip with it. Only 0, 1 or unset is accepted, like WP_MULTISITE. CI runs
+# the group this way once (.github/workflows/ci.yml).
+#
 # --- harness mode -------------------------------------------------------------------------
 # The site is WPH_SITE (default alpaca10, the 0.5 harness site; never alpacabot, which mounts the
 # 0.4 release). Its compose file bind-mounts this checkout at $PLUGIN and puts the cli service on
@@ -83,6 +94,18 @@ if [[ ! "$MULTISITE" =~ ^[01]?$ ]]; then
     exit 1
 fi
 
+# Held to 0, 1 or unset like WP_MULTISITE. Only a fixed flag, never the value itself, reaches
+# either container's command line.
+NO_CURL="${WP_NO_CURL:-}"
+if [[ ! "$NO_CURL" =~ ^[01]?$ ]]; then
+    echo "bin/test-integration.sh: WP_NO_CURL '$NO_CURL' must be 0, 1 or unset" >&2
+    exit 1
+fi
+PHP_FLAGS=()
+if [ "$NO_CURL" = "1" ]; then
+    PHP_FLAGS=(-d 'disable_functions=curl_init,curl_exec')
+fi
+
 # The domain is spliced into the single-quoted `sh -c` payload in wp-env mode, exactly like the
 # database name, so it gets the same treatment: a value carrying a quote would close that quoting
 # and run in the container. Both are developer-set, not untrusted input -- checking one and not
@@ -108,9 +131,14 @@ if [ "$MODE" = "wp-env" ]; then
     for arg in "$@"; do
         ARGS="$ARGS '${arg//\'/\'\\\'\'}'"
     done
+    # The php flags go through the same quoting, though they are fixed strings of this script's.
+    PHP_ARGS=""
+    for arg in ${PHP_FLAGS[@]+"${PHP_FLAGS[@]}"}; do
+        PHP_ARGS="$PHP_ARGS '${arg//\'/\'\\\'\'}'"
+    done
     exec pnpm exec wp-env run tests-cli --env-cwd="wp-content/plugins/$SLUG" -- \
         sh -c "WP_TESTS_DB_NAME='$DB_NAME' WP_TESTS_DOMAIN='$DOMAIN' WP_MULTISITE='$MULTISITE' \
-            php tools/integration/vendor/bin/phpunit -c phpunit.integration.xml$ARGS"
+            php$PHP_ARGS tools/integration/vendor/bin/phpunit -c phpunit.integration.xml$ARGS"
 fi
 
 if [ "$MODE" != "harness" ]; then
@@ -135,4 +163,4 @@ docker compose -f "$COMPOSE" exec -T -e DB_NAME="$DB_NAME" db sh -c \
 
 docker compose -f "$COMPOSE" run --rm -T -w "$PLUGIN" \
     -e WP_TESTS_DB_NAME="$DB_NAME" -e WP_TESTS_DOMAIN="$DOMAIN" -e WP_MULTISITE="$MULTISITE" \
-    cli php tools/integration/vendor/bin/phpunit -c phpunit.integration.xml "$@"
+    cli php ${PHP_FLAGS[@]+"${PHP_FLAGS[@]}"} tools/integration/vendor/bin/phpunit -c phpunit.integration.xml "$@"
