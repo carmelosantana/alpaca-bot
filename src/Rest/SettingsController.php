@@ -35,7 +35,8 @@ use AlpacaBot\Settings\Store;
  * Mcp\ServerSettings leaves only MASK or '' there on each update_option() of the option once the
  * plugin has registered its filter, so masked() is for a row that reached the option any other
  * way. `?reveal=1` on the GET answers the raw secrets
- * instead of the mask: the provider key from the option, and each header value from
+ * instead of the mask: the provider key from its own option (Settings\ProviderKey::resolve(), which
+ * also reads a plaintext key a row not yet migrated still carries), and each header value from
  * Mcp\Secrets. Only the flag is on the URL, and the secrets are in the body. A PUT never
  * reveals, whatever its body says.
  *

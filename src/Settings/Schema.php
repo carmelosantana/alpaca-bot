@@ -17,8 +17,11 @@ use AlpacaBot\Toolkit\AbilitiesToolkit;
  * SECRETS are the fields whose stored value must never be shown back or lost by accident
  * (today the provider API key). They read out as MASK wherever they are shown, and a write that
  * carries MASK back means "keep what is stored"; sanitize() owns that rule so every writer of the
- * option (the REST route, the Settings API's sanitize callback, Store) resolves it the same way
- * and none can store the literal mask as the key. "Keep" holds only while the key's URL keeps its
+ * option (the REST route, the Settings API's sanitize callback, Store) resolves it the same way.
+ * The key itself is kept out of this option, in Settings\ProviderKey's, which takes it out on
+ * every update_option() and leaves MASK or '' in the row; MASK in the row is that class's mark
+ * for "a key is kept", never a key, since ProviderKey::resolve() never answers it as one. "Keep"
+ * holds only while the key's URL keeps its
  * origin: a write that moves `provider.base_url` to another scheme, host or port clears the key
  * unless it sends a new one (providerKeyClearedByMove()), so no write that goes through sanitize()
  * can hand the key to a server it was not set for.
@@ -204,7 +207,8 @@ final class Schema
      *
      * `$current` is also where a SECRETS field keeps its value from: a secret sent as MASK, or as
      * anything that is not a string, resolves to `$current`'s value (secret()), and so does one
-     * left out. The provider key is the exception: when providerKeyClearedByMove() says the write
+     * left out; MASK over a `$current` that holds none stays MASK (secret() says why). The
+     * provider key is the exception: when providerKeyClearedByMove() says the write
      * moves `provider.base_url` to another scheme, host or port and sends no new key, the key is
      * cleared instead of kept, whichever way the write said "keep". There is no
      * default for it on purpose. `[]` would turn an echoed mask into a cleared key, and reading
@@ -244,7 +248,8 @@ final class Schema
 
     /**
      * Whether this write clears the stored provider API key because it moves `provider.base_url`
-     * to another origin (#4539): true when `$current` holds a key (a non-empty string), `$input`
+     * to another origin (#4539): true when `$current` holds a key (a non-empty string: MASK, for a
+     * key Settings\ProviderKey keeps, or a plaintext key a row not yet migrated carries), `$input`
      * sends `provider.base_url`, the URL sanitizeUrl() would store from it has another scheme,
      * host or port than `$current`'s (Origin::moved(); the default when `$current` has none), and
      * `$input` sends no new key with it. A new key is a string other than '' and MASK; MASK, a

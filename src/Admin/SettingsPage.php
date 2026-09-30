@@ -39,7 +39,8 @@ use AlpacaBot\View\Settings\McpTools;
  *
  * The sanitize callback is a closure, not `[Schema::class, 'sanitize']`: core calls it with the
  * option *name* second, and Schema::sanitize() wants the stored array there so a secret posted
- * back as Schema::MASK resolves to the stored key. Handing core the method itself would be a
+ * back as Schema::MASK resolves to what the row holds for it: MASK for a kept key, which
+ * Settings\ProviderKey then keeps. Handing core the method itself would be a
  * TypeError on every save; the closure reads the option and passes it. What it reads is the raw
  * stored row (get_option()), not Store's memo: the memo may be from earlier in the request, and
  * a sanitize callback should compare against what is in the database at the moment of the write.

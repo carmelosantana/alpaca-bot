@@ -339,6 +339,8 @@ final class ChatCommand
             $this->store->set($key, $value);
         }
         $stored = $this->store->get($key);
+        // The row carries the mask for a kept provider key; asked for by name, the key itself is
+        // printed, from its own option (Settings\ProviderKey).
         $stored = match ($key) {
             'toolkits.mcp_servers' => Schema::maskedServers($stored),
             'provider.api_key' => ProviderKey::resolve($stored),
