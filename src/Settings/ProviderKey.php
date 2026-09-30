@@ -78,8 +78,9 @@ final class ProviderKey
      * Schema::providerKeyClearedByMove(), for a writer that says so: true only when that answers
      * true and `$current`'s key resolves to one, so a row that says MASK with no key held names no
      * cleared key. The settings page asks this before it writes, and the REST route,
-     * `wp alpaca-bot settings` and Cli\RawOptionWrite ask it through Settings\Writer::write(). Schema::sanitize() asks Schema's own, which reads no option, and clears the
-     * MASK all the same; with nothing held that stores what beforeSave() would have stored anyway.
+     * `wp alpaca-bot settings` and Cli\RawOptionWrite ask it through Settings\Writer::write().
+     * Schema::sanitize() asks Schema's own, which reads no option, and clears the MASK all the
+     * same; with nothing held that stores what beforeSave() would have stored anyway.
      * The option is read only on a move over a row that says MASK.
      *
      * @param array<string, mixed> $input   what the write sends

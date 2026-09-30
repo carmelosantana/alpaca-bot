@@ -167,8 +167,9 @@ final class ServerSettings
      * The check a writer that stores nothing on a refusal runs before it writes
      * `toolkits.mcp_servers`: the REST route (Rest\SettingsController::update()),
      * `wp alpaca-bot settings` (Cli\ChatCommand::settings()) and a raw `wp option update|patch|add`
-     * of the option (Cli\RawOptionWrite), each through Settings\Writer::write(). `$posted` is the list as the writer
-     * was handed it and `$stored` the stored `toolkits.mcp_servers`. Two refusals, in this order:
+     * of the option (Cli\RawOptionWrite), each through Settings\Writer::write(). `$posted` is the
+     * list as the writer was handed it and `$stored` the stored `toolkits.mcp_servers`. Two
+     * refusals, in this order:
      * - `alpaca_bot_mcp_row`: a row the schema would drop (Schema::droppedMcpRows()) that names a
      *   stored server's id, or that is new and has a URL (droppedRows()). The message names each
      *   such row, by its URL without any user name or password, or as `row N` when it has none,
