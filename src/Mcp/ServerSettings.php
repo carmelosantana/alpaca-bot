@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace AlpacaBot\Mcp;
 
 use AlpacaBot\Plugin;
+use AlpacaBot\Settings\Origin;
 use AlpacaBot\Settings\Schema;
 use AlpacaBot\Toolkit\AddressRefused;
 
@@ -27,9 +28,9 @@ use AlpacaBot\Toolkit\AddressRefused;
  * - a server is new when the stored list has no row with its id, and a new server's MASK keeps
  *   nothing, so a row that does not bring a stored server's id cannot pick up that server's value
  *   (Schema::sanitize() never gives a row without an id one the stored list holds);
- * - a stored server whose URL now has another scheme, host or port (moved()) keeps nothing
- *   either. The `settings.write` row can be lowered below `manage_options`, and a user who
- *   may write the settings but not reveal them could otherwise post a stored id, a URL of their
+ * - a stored server whose URL now has another scheme, host or port (Settings\Origin::moved())
+ *   keeps nothing either. The `settings.write` row can be lowered below `manage_options`, and a
+ *   user who may write the settings but not reveal them could otherwise post a stored id, a URL of their
  *   own and the mask, and have the stored token sent to their host. A path is not part of it, so
  *   an administrator moving an endpoint on the same host keeps the value; moving host means
  *   typing it again. clearedByMove() names the servers this is about to happen to, for a writer
@@ -259,7 +260,7 @@ final class ServerSettings
                 continue;
             }
             $posted = $row['header_value'] ?? '';
-            if (($posted === Schema::MASK || !is_string($posted)) && self::moved($urls[$row['id']], is_string($row['url'] ?? null) ? $row['url'] : '')) {
+            if (($posted === Schema::MASK || !is_string($posted)) && Origin::moved($urls[$row['id']], is_string($row['url'] ?? null) ? $row['url'] : '')) {
                 $out[] = $row['id'];
             }
         }
@@ -316,29 +317,6 @@ final class ServerSettings
             }
         }
         return $urls;
-    }
-
-    /**
-     * Whether `$to` is another origin than `$from`: scheme, host or port. Scheme and host are
-     * compared lowercase and the host without the dots a name may end in, as Egress reads it; a
-     * port left out is the scheme's own (443 for https, 80 for http), so `:443` written out is
-     * the same origin. A URL that does not parse has no origin, and is another one.
-     */
-    private static function moved(string $from, string $to): bool
-    {
-        return self::origin($from) === null || self::origin($from) !== self::origin($to);
-    }
-
-    /** `scheme://host:port` of `$url`, normalised as moved() says, or null when it has no scheme or host. */
-    private static function origin(string $url): ?string
-    {
-        $scheme = strtolower((string) wp_parse_url($url, PHP_URL_SCHEME));
-        $host = strtolower(trim((string) wp_parse_url($url, PHP_URL_HOST), '.'));
-        if ($scheme === '' || $host === '') {
-            return null;
-        }
-        $port = wp_parse_url($url, PHP_URL_PORT);
-        return $scheme . '://' . $host . ':' . (is_int($port) ? $port : ($scheme === 'https' ? 443 : 80));
     }
 
     /**
