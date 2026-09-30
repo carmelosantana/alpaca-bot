@@ -263,12 +263,15 @@ final class AbilitiesTest extends TestCase
      * "execute any ability" ability, shaped like the MCP Adapter's `mcp-adapter/execute-ability`
      * (it runs wp_get_ability($name)->execute($input) and hands back what that answers), and
      * the model calls it for a test ability the allowlist leaves out (with a cache in front of it that
-     * would short-circuit it), for alpaca-bot/chat and for
-     * alpaca-bot/summarize. Core would let the caller run all three, but none of their callbacks
-     * runs: core's `wp_pre_execute_ability` answers the toolkit's refusal first, so
-     * `wp_before_execute_ability` never fires for them, the refusal is what the model reads back,
-     * and the outer turn completes: one conversation, one receipt, one turn's worth of provider
-     * calls. Afterwards, outside the toolkit, both abilities run as they always did.
+     * would short-circuit it on 7.1), for alpaca-bot/chat and for
+     * alpaca-bot/summarize. Core would let the caller run all three, but on every version none of
+     * their callbacks runs and the outer turn completes: one conversation, one receipt, one turn's
+     * worth of provider calls. What the model reads back depends on the core. On 7.1 core's
+     * `wp_pre_execute_ability` answers the toolkit's refusal first, so `wp_before_execute_ability`
+     * never fires for them and the refusal is what the model reads. Before 7.1 there is no such
+     * filter: `wp_before_execute_ability` fires for each of them, the guard throws there, and the
+     * model reads the tool's fixed failure text (SchemaTool::failed()). Afterwards, outside the
+     * toolkit, both abilities run as they always did.
      */
     public function test_an_execute_any_ability_tool_runs_nothing_the_allowlist_leaves_out_and_the_turn_completes(): void
     {
@@ -305,7 +308,7 @@ final class AbilitiesTest extends TestCase
             $before[] = $name;
         };
         add_action('wp_before_execute_ability', $listen);
-        // A cache in front of the secret ability, at a late priority of its own: the toolkit's
+        // A cache in front of the secret ability, at a late priority of its own: on 7.1 the toolkit's
         // refusal still has the last word, so the cached answer does not reach the model either.
         $cache = static fn(mixed $pre, string $name): mixed => $name === 'alpaca-bot-test/secret' ? 'the cached secret' : $pre;
         add_filter('wp_pre_execute_ability', $cache, 1000, 2);
@@ -372,18 +375,28 @@ final class AbilitiesTest extends TestCase
 
             $response = $this->rest('POST', '/chat', ['message' => 'Use the tool.']);
             $this->assertSame(200, $response->get_status(), (string) wp_json_encode($response->get_data()));
-            $refusals = array_map(
-                static fn(string $name): string => 'The ' . $name . ' ability was not run: an ability run from a chat may only run the abilities ticked under Settings › Tools.',
-                ['alpaca-bot-test/secret', 'alpaca-bot/chat', 'alpaca-bot/summarize'],
-            );
+            $nested = ['alpaca-bot-test/secret', 'alpaca-bot/chat', 'alpaca-bot/summarize'];
+            // WP_Filter_Sentinel is `wp_pre_execute_ability`'s default, and both are new in 7.1
+            // (7.1 class-wp-ability.php:785-809), as the sibling test in AbilitiesToolkitTest checks.
+            if (class_exists('WP_Filter_Sentinel')) {
+                $refusals = array_map(
+                    static fn(string $name): string => 'The ' . $name . ' ability was not run: an ability run from a chat may only run the abilities ticked under Settings › Tools.',
+                    $nested,
+                );
+                // Only the allowlisted ability got as far as core's before-execute action: the refused ones were answered by the pre filter first.
+                $heard = array_fill(0, 3, 'alpaca-bot-test/execute-ability');
+            } else {
+                $refusals = array_fill(0, 3, 'The ' . $tool . ' tool failed before it could answer.');
+                // With no pre filter every nested call reaches the before-execute action, where this listener (hooked first) hears it before the guard throws.
+                $heard = array_merge(...array_map(static fn(string $name): array => ['alpaca-bot-test/execute-ability', $name], $nested));
+            }
             // A tool turn: the model was offered the test ability, and asked the provider twice, not a third time for a nested turn.
             $this->assertCount(2, $calls);
             $this->assertContains($tool, array_map(static fn(object $t): string => $t->name(), $calls[0]['tools']));
             $results = array_values(array_filter(array_map(static fn(object $m): string => (string) $m->content(), $calls[1]['messages']), static fn(string $c): bool => in_array($c, $refusals, true)));
             $this->assertSame($refusals, $results, 'each nested call reads its refusal back');
             $this->assertSame(0, $secretRuns, 'the ability the allowlist leaves out never ran');
-            // Only the allowlisted ability got as far as core's before-execute action: the refused ones were answered by the pre filter first.
-            $this->assertSame(array_fill(0, 3, 'alpaca-bot-test/execute-ability'), $before);
+            $this->assertSame($heard, $before);
             $data = $response->get_data();
             $this->assertSame('Done.', $data['message']['content']);
             // The reply's meta is an object on the wire; read it as a client would.
