@@ -76,9 +76,10 @@ final class Errors
 
     /**
      * 409 for an ability asked to start a turn while one is already running in the request
-     * (Chat\Pipeline::running()): the ability was reached from inside a turn, through an
-     * "execute any ability" tool the turn was offered, and a turn does not start another
-     * (Kanboard #4538). Conflict rather than 400: the input is fine and the same call made
+     * (Chat\Pipeline::running()): the ability was reached from inside a turn, through a tool the
+     * turn was offered that runs abilities, and a turn does not start another (Kanboard #4538).
+     * The abilities toolkit refuses `alpaca-bot/*` itself before this is asked (AbilitiesToolkit);
+     * a tool from a toolkit a site adds is not held to that. Conflict rather than 400: the input is fine and the same call made
      * outside a turn runs. Reached through a tool, the message is the tool's result the model
      * reads, so it tells the model what to do instead.
      *

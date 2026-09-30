@@ -189,8 +189,9 @@ it('tells the person switching tools on what an ability call is: another plugin\
         ->toContain('Contributors and up by default for <code>web_fetch</code>, <code>summarize</code> and <code>draft_post</code>')
         ->toContain('Administrators for the abilities tool')
         ->not->toContain('All three')->not->toContain('three ship')
-        // The allowlist bounds only direct calls (review I2): an ability that runs others is named as the way round it.
-        ->toContain('decides only what the model may call directly')->toContain('runs other abilities')
+        // The allowlist also bounds what a ticked ability runs (Kanboard #4538), and the tab says what differs before 7.1 and what it does not reach.
+        ->toContain('also bounds what a ticked ability runs')->toContain('run any ability')->toContain('Before WordPress 7.1')
+        ->toContain('is not bounded by the list')->not->toContain('decides only what the model may call directly')
         ->not->toContain('cannot call the plugin')
         // The schema's own text (review N2): what Alpaca Bot does with it, not what a provider does.
         ->toContain('Alpaca Bot neither cleans nor caps')->not->toContain('as the plugin registered it')

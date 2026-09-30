@@ -127,8 +127,9 @@ final class Pipeline
      * (complete() and every consumer go through it) until that turn has ended, whether it was
      * drained, refused, thrown or abandoned, and counted, so a turn started inside another (the
      * summarize tool's) ending does not end the outer one. Abilities\Register asks it before it
-     * starts a turn of its own, which is what keeps a turn from starting another through an
-     * "execute any ability" tool (Kanboard #4538). It is the instance's count, and one instance
+     * starts a turn of its own, which is what keeps a turn from starting another through any
+     * tool that runs abilities (Kanboard #4538); the abilities toolkit refuses `alpaca-bot/*`
+     * before this is asked. It is the instance's count, and one instance
      * serves the request: Plugin::register() hands every consumer the container's.
      */
     public function running(): bool

@@ -141,11 +141,13 @@ use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Enum\ToolResultStatus;
  * a second thing to forget. The cost is the adapter's v0.5.0, whose default server does not
  * list these abilities. Being
  * public to the adapter is also what lets its own `mcp-adapter/execute-ability` run these three
- * (v0.6.1 McpAbilityHelperTrait::check_ability_mcp_exposure()), so where an administrator has
- * allowlisted that ability under Settings › Tools, a turn offered it can reach them through it:
- * AbilitiesToolkit::excluded() keeps `alpaca-bot/*` out of the model's direct offer only.
+ * (v0.6.1 McpAbilityHelperTrait::check_ability_mcp_exposure()). Where an administrator has
+ * allowlisted that ability under Settings › Tools, a turn offered it does not reach these three
+ * through it: while AbilitiesToolkit executes an ability, any ability that one runs through
+ * execute() is refused unless the allowlist names it, and it never names `alpaca-bot/*`
+ * (AbilitiesToolkit's docblock says how on each WordPress version, and what that does not reach).
  *
- * Re-entry (Kanboard #4538). What such a turn cannot do is start another turn. chat and
+ * Re-entry (Kanboard #4538). Whatever reaches them, a turn does not start another turn. chat and
  * summarize ask Chat\Pipeline::running() first and, while any turn is running in the request,
  * answer Errors::turnRunning() (409) instead, after the permission checks and before the
  * limiter, so the refused call is not counted and nothing is stored or metered for it. Those two

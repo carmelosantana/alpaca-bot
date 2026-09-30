@@ -361,13 +361,14 @@ it('summarize and draft-post run whatever alpaca_bot/toolkits put under the id, 
         ->and($h->writes)->toBe([]);
 });
 
-// Kanboard #4538. A turn offered an "execute any ability" ability (the MCP Adapter's
-// `mcp-adapter/execute-ability`, ticked under Settings › Tools) can reach alpaca-bot/chat
-// through it, although AbilitiesToolkit never offers alpaca-bot/* directly. Here the turn's
-// model calls `acme/run-ability`, a WP_Ability double that runs whichever of the Register's
-// callbacks it is named, as the adapter's runs wp_get_ability($name)->execute(); the tool
-// reaches the model through the real AbilitiesToolkit, as it would on a site. The integration
-// suite runs the same shape over core's registry (tests/Integration/AbilitiesTest.php).
+// Kanboard #4538. On a site, AbilitiesToolkit refuses alpaca-bot/* when an "execute any ability"
+// ability it runs asks for it, before core reaches the callback (AbilitiesToolkitTest, and over
+// core's registry tests/Integration/AbilitiesTest.php). The doubles here fire none of core's
+// hooks, so the call reaches the Register's callback, as it would through a tool the guard does
+// not cover (one from a toolkit a site adds), and this pins what the callback does then. The
+// turn's model calls `acme/run-ability`, a WP_Ability double that runs whichever of the
+// Register's callbacks it is named, as the adapter's runs wp_get_ability($name)->execute(); the
+// tool reaches the model through the real AbilitiesToolkit.
 dataset('abilities that start a turn', [
     'chat' => ['alpaca-bot/chat', ['message' => 'Ask yourself again.'], fn(array $out): mixed => $out['reply']],
     'summarize' => ['alpaca-bot/summarize', ['text' => 'Some long text.'], fn(array $out): mixed => $out['summary']],
