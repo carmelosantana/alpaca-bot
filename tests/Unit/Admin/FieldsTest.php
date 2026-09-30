@@ -83,18 +83,56 @@ it('runs every attribute and text node through the escapers', function (): void 
 
 // Every field on a tab that is not shown still has to be posted, or the sanitize callback
 // (which rebuilds the whole option) would reset it to its default: the old first-save bug.
-it('carries a field as a hidden input: booleans as 0/1, arrays nested, secrets masked, non-scalars dropped', function (): void {
+it('carries a field as a hidden input: booleans as 0/1, arrays nested, secrets masked, non-scalar leaves dropped', function (): void {
     expect(Fields::hidden('models.temperature', 0.7))->toBe('<input type="hidden" name="alpaca_bot_settings[models.temperature]" value="0.7">');
     expect(Fields::hidden('chat.spellcheck', true))->toContain('value="1"');
     expect(Fields::hidden('chat.spellcheck', false))->toContain('value="0"');
     expect(Fields::hidden('provider.api_key', 'sk-real-key'))->toContain('value="' . Schema::MASK . '"')->not->toContain('sk-real-key');
     expect(Fields::hidden('provider.api_key', ''))->toContain('value=""');
-    $over = Fields::hidden('models.overrides', ['llama3' => ['temperature' => 0.2, 'system' => 'be brief', 'junk' => ['x']], 'bad' => 'scalar']);
+    $over = Fields::hidden('models.overrides', ['llama3' => ['temperature' => 0.2, 'system' => 'be brief', 'junk' => ['x' => null, 'y' => new stdClass()]], 'bad' => 'scalar']);
     expect($over)->toContain('name="alpaca_bot_settings[models.overrides][llama3][temperature]" value="0.2"')
         ->toContain('name="alpaca_bot_settings[models.overrides][llama3][system]" value="be brief"')
+        // Any depth is walked; a leaf that is not a scalar is dropped rather than printed as "Array".
         ->not->toContain('[junk]')
-        ->not->toContain('[bad]');
+        ->not->toContain('Array')
+        // A scalar is carried wherever it sits; Schema::sanitizeOverrides() drops it on the way back.
+        ->toContain('name="alpaca_bot_settings[models.overrides][bad]" value="scalar"');
     expect(Fields::hidden('models.overrides', []))->toBe('');
+});
+
+// The carry-over is what keeps an approval alive when another tab is saved: a server row's
+// `approved` map is one level deeper than anything 0.5 stored, and a walk that stopped at the
+// second level would clear every approval on every save of another tab.
+it('carries a server row\'s approved map, which is one level deeper than anything 0.5 stored', function (): void {
+    $html = Fields::hidden('toolkits.mcp_servers', [[
+        'id' => 'trk', 'url' => 'https://mcp.example.com/mcp', 'prefix' => 'trk', 'timeout' => 30.0,
+        'approved' => ['search' => str_repeat('a', 64), 'list' => str_repeat('b', 64)],
+    ], [
+        'id' => 'gh', 'url' => 'https://gh.example.com/mcp', 'prefix' => 'gh', 'approved' => [],
+    ]]);
+    expect($html)->toContain('name="alpaca_bot_settings[toolkits.mcp_servers][0][id]" value="trk"')
+        ->toContain('name="alpaca_bot_settings[toolkits.mcp_servers][0][timeout]" value="30"')
+        ->toContain('name="alpaca_bot_settings[toolkits.mcp_servers][0][approved][search]" value="' . str_repeat('a', 64) . '"')
+        ->toContain('name="alpaca_bot_settings[toolkits.mcp_servers][0][approved][list]" value="' . str_repeat('b', 64) . '"')
+        ->toContain('name="alpaca_bot_settings[toolkits.mcp_servers][1][id]" value="gh"')
+        // An empty map posts nothing, which reads back as no approvals: what it was.
+        ->not->toContain('[1][approved]');
+});
+
+// A row in the option carries the mask or '', but a row that reached the option some other way
+// may hold the value itself, and this is an HTML attribute: it is masked here whatever it holds.
+it('never carries a server\'s header value, only the mask or nothing', function (): void {
+    $html = Fields::hidden('toolkits.mcp_servers', [
+        ['id' => 'a', 'header_value' => 'Bearer raw-secret'],
+        ['id' => 'b', 'header_value' => Schema::MASK],
+        ['id' => 'c', 'header_value' => ''],
+        ['id' => 'd', 'header_value' => ['Bearer nested-secret']],
+    ]);
+    expect($html)->not->toContain('raw-secret')->not->toContain('nested-secret')
+        ->toContain('name="alpaca_bot_settings[toolkits.mcp_servers][0][header_value]" value="' . Schema::MASK . '"')
+        ->toContain('name="alpaca_bot_settings[toolkits.mcp_servers][1][header_value]" value="' . Schema::MASK . '"')
+        ->toContain('name="alpaca_bot_settings[toolkits.mcp_servers][2][header_value]" value=""')
+        ->toContain('name="alpaca_bot_settings[toolkits.mcp_servers][3][header_value]" value=""');
 });
 
 /**

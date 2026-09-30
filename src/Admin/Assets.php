@@ -13,8 +13,12 @@ use AlpacaBot\Plugin;
  * stylesheet, and the media library for the image picker. `alpacaBot` is the bundle's settings
  * object: the REST root (rest_url(), so it is right under either permalink form), the REST
  * nonce it signs requests with, the largest image the site takes (maxImageBytes()), and the
- * strings it shows. The settings page gets none of that, only OVERRIDES_CSS inline on a core
- * handle; every other admin screen gets nothing.
+ * strings it shows. The settings page gets htmx alone of that, for the Tools tab's Discover
+ * button, and OVERRIDES_CSS inline on a core handle; every other admin screen gets nothing from
+ * enqueue(). Admin\Drawer enqueues a loader
+ * of its own there, for the screens and the users its docblock names, and borrows settings() and
+ * mount() from here, so the bundle it adds on the drawer's first open reads what it reads on the
+ * chat screen.
  *
  * The files are build outputs (`pnpm build`) and gitignored, enqueued by URL as any asset is:
  * a checkout that has not built them gets a 404 for each, and the screen still renders. Under
@@ -33,6 +37,9 @@ final class Assets
 
     /** htmx as package.json pins it, exactly (AssetsTest holds the two equal). */
     public const HTMX_VERSION = '2.0.10';
+
+    /** htmx's script handle. Core prints its tag with the id `alpaca-bot-htmx-js`, which mount() hands the loader. */
+    private const HTMX_HANDLE = 'alpaca-bot-htmx';
 
     /**
      * The rules for the per-model overrides table (SettingsPage::renderOverrides()), a `widefat`
@@ -55,16 +62,33 @@ final class Assets
      * rule changes the `th` and only restates the `td`. And the wrapper scrolls sideways where
      * the table is wider than the row.
      *
-     * That scrolling is only possible under 782px, core's breakpoint, where the row is blocks and
-     * the wrapper can be sized by the row rather than by the table (`contain: inline-size`; the
-     * block `td` still sits in an anonymous table cell, whose minimum is its content's, so
-     * without that the table widens the whole page instead). The system prompt keeps its desktop
-     * width there, since core's narrow-screen `width: 100%` on a text input inside an auto-width
-     * cell collapses it to about 74px. Above the breakpoint the row is a table cell, which cannot be
-     * narrower than the table it holds: at 1440px the six columns fit; on a laptop with the menu
-     * open they widen the page, as they always did. Sizing the wrapper by the row there too
-     * would fix that at the cost of a scrollbar at 1440px, where the label column would reclaim
-     * the 200px the table now takes from it.
+     * It can, because it is sized by the row rather than by the table (`contain: inline-size`). A
+     * table cell's minimum is its content's, so without that the nested table's minimum was the
+     * row's, and the page's. widefat's own `word-wrap: break-word` (common.css) does not lower a
+     * minimum, so a model id, which breaks only where line breaking allows (after most hyphens),
+     * held its column at its longest unbreakable run, and the system prompt held 25em: at 1280px
+     * with the menu expanded the page was 1343px wide (Kanboard #4348). Under 782px, core's
+     * breakpoint, the row's cells are blocks, but the block `td` still sits in an anonymous
+     * table cell, so the same holds there.
+     *
+     * The table's own minimum still decides when the wrapper scrolls, so the cells give width
+     * back first. A model id breaks where it has to (`overflow-wrap: anywhere`, which unlike
+     * `break-word` lowers the column's minimum) but its column keeps 9em; the system prompt
+     * fills a column that asks for 35% of the table and shrinks to 12em, a floor that also keeps
+     * core's narrow-screen `width: 100%` from collapsing the field in an auto-width cell. The
+     * same `width: 100%` shrank the Tools select to 40px and clipped "Model default" (Kanboard
+     * #4363), so the select is `width: auto`: sized by its options, it holds its column at its
+     * label's width. With the menu expanded the columns fit at 1280px and 1440px; at 960px,
+     * where core folds the menu, and under 782px they scroll inside the wrapper. The label
+     * column keeps its 200px, which the table used to take from it.
+     *
+     * The MCP servers table (SettingsPage::renderMcpServers()) is the same kind of table, a
+     * `widefat` nested in a Settings API row, and its wrapper, `div.ab-mcp-servers`, gets the
+     * first two of these rules: the wrapper sized by the row and scrolling, and the cells made
+     * cells again with widefat's padding. One more rule is its own: a tool's input schema in the
+     * approval list (View\Settings\McpTools) wraps inside its cell rather than widening the table
+     * to its longest line, and scrolls past 20em. The rest are about the overrides table's own
+     * columns and are scoped to it.
      *
      * Inline on core's `forms` handle rather than in a stylesheet of the plugin's: the settings
      * page loads no plugin stylesheet, the chat shell's is another screen's stylesheet, and a
@@ -72,16 +96,26 @@ final class Assets
      * in a checkout that has not run `pnpm build`.
      */
     private const OVERRIDES_CSS = <<<'CSS'
-        .form-table .ab-overrides { overflow-x: auto; }
+        .form-table .ab-overrides { overflow-x: auto; contain: inline-size; }
         .form-table .ab-overrides th, .form-table .ab-overrides td { display: table-cell; width: auto; padding: 8px 10px; vertical-align: middle; }
-        .form-table .ab-overrides .regular-text { min-width: 25em; }
-        @media screen and (max-width: 782px) { .form-table .ab-overrides { contain: inline-size; } }
+        .form-table .ab-overrides tbody th { overflow-wrap: anywhere; min-width: 9em; }
+        .form-table .ab-overrides th.ab-overrides__system { width: 35%; }
+        .form-table .ab-overrides .regular-text { width: 100%; min-width: 12em; }
+        .form-table .ab-overrides select { width: auto; }
+        .form-table .ab-mcp-servers { overflow-x: auto; contain: inline-size; }
+        .form-table .ab-mcp-servers th, .form-table .ab-mcp-servers td { display: table-cell; width: auto; padding: 8px 10px; vertical-align: middle; }
+        .form-table .ab-mcp-schema pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 20em; overflow: auto; }
         CSS;
 
     public function enqueue(string $hook): void
     {
         if ($hook === SettingsPage::screen()) {
             wp_add_inline_style('forms', self::OVERRIDES_CSS);
+            // The Tools tab's Discover button is an hx-get at the MCP approval fragment
+            // (SettingsPage::renderMcpServers()); htmx is already shipped and pinned, under the
+            // handle the chat screen uses, whose tag id mount() hands the drawer's loader, so the
+            // loader on this screen finds it rather than adding a second copy (resources/ts/mount.ts).
+            self::enqueueHtmx();
             return;
         }
         if ($hook !== self::HOOK) {
@@ -112,8 +146,8 @@ final class Assets
      * views, plupload, the modal templates in wp_footer), and the picker it opens queries the
      * library as the viewer, which core refuses to a user without `upload_files`: an editor's
      * Contributor would load all of it for an empty modal. So it is loaded for a viewer who can
-     * upload, and the composer's image button is inert for one who cannot (chat.ts's
-     * pickImage() returns when `wp.media` is absent).
+     * upload, and the composer's image button is inert for one who cannot (`pickImage()` in
+     * `resources/ts/boot.ts` returns when `wp.media` is absent).
      */
     public function enqueueFront(): void
     {
@@ -141,10 +175,30 @@ final class Assets
     /** htmx, the bundle, the stylesheet and the bundle's settings: the class docblock. */
     private function enqueueChat(): void
     {
-        wp_enqueue_script('alpaca-bot-htmx', plugins_url('assets/js/htmx.min.js', ALPACA_BOT_FILE), [], self::HTMX_VERSION, true);
-        wp_enqueue_script('alpaca-bot-chat', plugins_url('assets/js/chat.js', ALPACA_BOT_FILE), ['alpaca-bot-htmx', 'heartbeat'], self::version('assets/js/chat.js'), true);
+        self::enqueueHtmx();
+        wp_enqueue_script('alpaca-bot-chat', plugins_url('assets/js/chat.js', ALPACA_BOT_FILE), [self::HTMX_HANDLE, 'heartbeat'], self::version('assets/js/chat.js'), true);
         wp_enqueue_style('alpaca-bot', plugins_url('assets/css/alpaca-bot.css', ALPACA_BOT_FILE), [], self::version('assets/css/alpaca-bot.css'));
-        wp_localize_script('alpaca-bot-chat', 'alpacaBot', [
+        wp_localize_script('alpaca-bot-chat', 'alpacaBot', $this->settings());
+    }
+
+    /** htmx, in the footer, at the version package.json pins. */
+    private static function enqueueHtmx(): void
+    {
+        wp_enqueue_script(self::HTMX_HANDLE, plugins_url('assets/js/htmx.min.js', ALPACA_BOT_FILE), [], self::HTMX_VERSION, true);
+    }
+
+    /**
+     * The chat bundle's settings object, `alpacaBot`: the REST root (rest_url(), so it is right
+     * under either permalink form), the nonce it signs with, the largest image the site takes, and
+     * the strings it shows. Public because this class is not the only one that hands it over:
+     * Admin\Drawer localises the same object on its loader, so a bundle added to the page later
+     * reads exactly what it reads on the chat screen.
+     *
+     * @return array<string, mixed>
+     */
+    public function settings(): array
+    {
+        return [
             'rest' => rest_url('alpaca-bot/v1'),
             'nonce' => wp_create_nonce('wp_rest'),
             'maxImageBytes' => self::maxImageBytes(),
@@ -165,9 +219,40 @@ final class Assets
                 /* translators: {size} and {max} are filled in by the browser with figures such as "7 MB". */
                 'imagesTooLarge' => __('Those images total {size}; this site takes up to {max} per message. Attach fewer or smaller images.', 'alpaca-bot'),
                 'thinking' => __('Thinking…', 'alpaca-bot'),
+                'callingTool' => __('Calling a tool…', 'alpaca-bot'),
             ],
             'offline' => __('You are offline. Messages will send once the connection is back.', 'alpaca-bot'),
-        ]);
+        ];
+    }
+
+    /**
+     * What a loader needs to put the chat into a page that did not enqueue it (`alpacaBotMount`,
+     * resources/ts/mount.ts): the fragment route, the route the drawer's state goes to, the three
+     * files, each with the version query its enqueue would have given it, so a rebuild busts the
+     * browser cache the same way, the id core prints on htmx's tag, by which the loader knows a
+     * page that enqueued htmx itself (the settings screen does), the chat's name, for a host that
+     * titles the panel it puts the chat in, and the line shown when the fragment does not arrive.
+     *
+     * @return array<string, string>
+     */
+    public function mount(): array
+    {
+        return [
+            'panel' => rest_url('alpaca-bot/v1/view/panel'),
+            'prefs' => rest_url('alpaca-bot/v1/view/drawer'),
+            'htmx' => self::versioned('assets/js/htmx.min.js', self::HTMX_VERSION),
+            'htmxId' => self::HTMX_HANDLE . '-js',
+            'chat' => self::versioned('assets/js/chat.js', self::version('assets/js/chat.js')),
+            'css' => self::versioned('assets/css/alpaca-bot.css', self::version('assets/css/alpaca-bot.css')),
+            'title' => __('Alpaca Bot', 'alpaca-bot'),
+            'failed' => __('The chat could not be loaded. Reload the page and try again.', 'alpaca-bot'),
+        ];
+    }
+
+    /** A plugin file's URL with `?ver=`, as core's script loader writes an enqueued file's. */
+    private static function versioned(string $relative, string $version): string
+    {
+        return plugins_url($relative, ALPACA_BOT_FILE) . '?ver=' . rawurlencode($version);
     }
 
     /**

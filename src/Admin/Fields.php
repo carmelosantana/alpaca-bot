@@ -13,7 +13,8 @@ use AlpacaBot\Settings\Schema;
  * `register_setting()` sanitize callback receives the whole option as one array.
  *
  * A secret (Schema::SECRETS) is never written into the page: the control and the hidden carry
- * over both show Schema::MASK when a value is stored and '' when not. Schema::sanitize() reads
+ * over both show Schema::MASK when a value is stored and '' when not. An MCP server's header
+ * value gets the same treatment in the carry-over of `toolkits.mcp_servers`. Schema::sanitize() reads
  * the mask back as "keep what is stored", so a form saved without touching the key keeps it,
  * and a form saved with the field emptied clears it. The rule is applied here, at the one
  * place a value turns into markup, so no caller can print the key by forgetting to mask it.
@@ -40,11 +41,17 @@ final class Fields
         return 'ab-' . str_replace('.', '-', $key);
     }
 
-    /** @param Field $f */
-    public static function render(string $key, array $f, mixed $value): string
+    /**
+     * `$name` is the name the control posts under when it is not the key's own (name()): an entry
+     * of a map field, such as one server's row of `access.mcp`, which posts as
+     * `alpaca_bot_settings[access.mcp][<server id>]`.
+     *
+     * @param Field $f
+     */
+    public static function render(string $key, array $f, mixed $value, ?string $name = null): string
     {
         $value = self::display($key, $value);
-        $name = esc_attr(self::name($key));
+        $name = esc_attr($name ?? self::name($key));
         $id = esc_attr(self::id($key));
         $desc = isset($f['description']) ? '<p class="description">' . esc_html((string) $f['description']) . '</p>' : '';
         $desc .= self::override($key);
@@ -84,7 +91,10 @@ final class Fields
                     $desc,
                 );
             case 'array':
-                // A map has no single control; SettingsPage renders `models.overrides` as a table.
+                // An array field has no single control. SettingsPage renders each one itself
+                // (`models.overrides` and `toolkits.mcp_servers` as tables, `toolkits.abilities`
+                // as a list of boxes) or gives it none (`access.mcp`), and never hands one to
+                // this method.
                 return '';
             case 'checkbox-list':
                 // One box per option under the same `[]` name, and ahead of them a hidden ''
@@ -131,37 +141,42 @@ final class Fields
 
     /**
      * The hidden inputs that post a field the page is not showing, so a save from one tab
-     * carries every other tab's values unchanged: the sanitize callback rebuilds the whole
-     * option from what is posted, and a field it does not hear about goes back to its default
-     * (the old first-save bug). Booleans post as 0/1, the way the visible checkbox does; a map
-     * (`models.overrides`) posts one input per leaf, `[key][model][field]`, and anything that is
-     * not a scalar at that depth is dropped rather than printed as "Array"; a list
-     * (`toolkits.enabled`) posts one input per item under `[key][]`, the way the checked boxes
-     * would, and an empty list posts nothing, which keeps the stored [] just the same.
+     * carries every other tab's values unchanged. A field a post leaves out is not lost either:
+     * Schema::sanitize() takes the stored value for any key the post does not name, and only a
+     * key with nothing stored falls back to its default. So a map that must not be replaced by
+     * what can be printed of it here (`access.mcp`) is left out rather than carried
+     * (SettingsPage::render()).
+     *
+     * Booleans post as 0/1, the way the visible checkbox does. An array is walked to any depth,
+     * one input per scalar leaf: a map posts `[key][k]` per level (`models.overrides` as
+     * `[key][model][field]`, a server row's approvals as `[key][row][approved][tool]`), and a
+     * scalar in a list posts under `[]`, the way the checked boxes of `toolkits.enabled` would. A
+     * leaf that is not a scalar is dropped rather than printed as "Array", and an empty array
+     * posts nothing, which keeps the stored [] just the same.
      */
     public static function hidden(string $key, mixed $value): string
     {
         $value = self::display($key, $value);
-        if (is_array($value)) {
-            $out = '';
-            foreach ($value as $k => $v) {
-                if (is_scalar($v) && array_is_list($value)) {
-                    $out .= self::hiddenInput(self::name($key) . '[]', self::scalar($v));
-                    continue;
-                }
-                if (!is_array($v)) {
-                    continue;
-                }
-                foreach ($v as $kk => $vv) {
-                    if (!is_scalar($vv)) {
-                        continue;
-                    }
-                    $out .= self::hiddenInput(Plugin::OPTION . '[' . $key . '][' . $k . '][' . $kk . ']', self::scalar($vv));
-                }
+        return is_array($value) ? self::hiddenTree(self::name($key), $value) : self::hiddenInput(self::name($key), self::scalar($value));
+    }
+
+    /**
+     * The inputs for `$value` under `$name`, one per scalar leaf (hidden() says how each level is named).
+     *
+     * @param array<array-key, mixed> $value
+     */
+    private static function hiddenTree(string $name, array $value): string
+    {
+        $out = '';
+        $list = array_is_list($value);
+        foreach ($value as $k => $v) {
+            if (is_array($v)) {
+                $out .= self::hiddenTree($name . '[' . $k . ']', $v);
+            } elseif (is_scalar($v)) {
+                $out .= self::hiddenInput($name . ($list ? '[]' : '[' . $k . ']'), self::scalar($v));
             }
-            return $out;
         }
-        return self::hiddenInput(self::name($key), self::scalar($value));
+        return $out;
     }
 
     /**
@@ -189,13 +204,13 @@ final class Fields
         ) . '</strong></p>';
     }
 
-    /** What the page shows for a value: the mask for a stored secret, the value for anything else. */
+    /** What the page shows for a value: the mask for a stored secret, the MCP server rows with their header values masked (Schema::maskedServers()), the value for anything else. */
     private static function display(string $key, mixed $value): mixed
     {
         if (in_array($key, Schema::SECRETS, true)) {
             return is_string($value) && $value !== '' ? Schema::MASK : '';
         }
-        return $value;
+        return $key === 'toolkits.mcp_servers' ? Schema::maskedServers($value) : $value;
     }
 
     private static function hiddenInput(string $name, string $value): string

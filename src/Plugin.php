@@ -9,9 +9,21 @@ use AlpacaBot\Settings\Store;
 
 final class Plugin
 {
-    public const VERSION = '0.5.0';
+    public const VERSION = '0.6.0';
     public const OPTION = 'alpaca_bot_settings';
     public const TEXT_DOMAIN = 'alpaca-bot';
+
+    /**
+     * An extra argument the plugin's two post types are registered with, which core keeps as a
+     * property of the WP_Post_Type: true only when no other code had registered the name before
+     * the plugin did. `chat_history` and `chat_log` are not prefixed, so uninstall.php reads it
+     * (`wp plugin uninstall --deactivate` loads the plugin first) to tell a name only this plugin
+     * registered from one another loaded plugin also uses, in either order, and leaves the posts
+     * of the second. When the other plugin registered first, the plugin's registration still
+     * replaces its arguments for the request, as register_post_type() always does; only the mark
+     * differs. uninstall.php loads no class, so it names the value itself.
+     */
+    public const POST_TYPE_MARK = 'alpaca_bot_owned';
 
     private static ?self $instance = null;
 
@@ -43,6 +55,9 @@ final class Plugin
     {
         $store = new Store();
         $this->set(Store::class, $store);
+        // One Access for the request, over the same Store: it holds nothing else, and sharing the
+        // Store is what keeps the settings option at one read however many rows are asked.
+        $this->set(Access::class, new Access($store));
         $factory = new Provider\Factory($store, new Provider\WpAi\CoreClient());
         $this->set(Provider\Factory::class, $factory);
         $this->set(Provider\ModelCatalog::class, new Provider\ModelCatalog($factory));
@@ -97,6 +112,23 @@ final class Plugin
         add_action('add_option_' . self::OPTION, function (): void {
             delete_transient(Provider\ModelCatalog::TRANSIENT);
         });
+        // An MCP server's header value is taken out of its row on every update_option() of the
+        // option, whoever calls it (Mcp\ServerSettings says why that is a filter, and what
+        // add_option() on its own does instead). The settings page and
+        // the REST route are handed this instance for the address check they run before a write.
+        $servers = new Mcp\ServerSettings();
+        $this->set(Mcp\ServerSettings::class, $servers);
+        $servers->register();
+        // Where every MCP client comes from: php-agents' client (Mcp\PhpAgentsClient), over an
+        // Mcp\Egress that checks each server's address when a client is built and pins the
+        // connection to the addresses that passed. Mcp\Discovery and Mcp\Toolkits are both
+        // handed this one.
+        $this->set(Mcp\ClientFactory::class, new Mcp\ClientFactory(null, new Mcp\Egress()));
+        // A save that re-pins a drifted tool, or drops its approval, answers the drift marker for
+        // it (Mcp\Drift). On `update_option_*` for the reason the catalog bust above gives: every
+        // writer of the option fires it. A site's first save fires `add_option_*` instead, and
+        // there is no stored pin for it to have changed.
+        add_action('update_option_' . self::OPTION, [Mcp\Drift::class, 'afterSave'], 10, 2);
         $conversations = new Chat\ConversationStore($store);
         $this->set(Chat\ConversationStore::class, $conversations);
         add_action('init', [$conversations, 'registerPostType']);
@@ -120,12 +152,17 @@ final class Plugin
         // The registry is built empty before the pipeline and filled after it: the pipeline asks
         // the registry what a turn may run, and the summarize toolkit runs its inner turn through
         // the pipeline, so one of the two has to exist before the other is complete. Nothing is
-        // read from the registry until a turn runs, well after plugins_loaded.
-        $registry = new Toolkit\Registry($store);
+        // read from the registry until a turn runs, well after plugins_loaded. It is handed the
+        // container's Access rather than making one: enabled() holds each toolkit to its row, and
+        // sharing the instance is what keeps that on the one memoised read of the settings option.
+        // The MCP servers reach it through Mcp\Toolkits over the same Store and Access, and the
+        // container's ClientFactory, the seam Mcp\Discovery lists servers through as well.
+        $registry = new Toolkit\Registry($store, $this->get(Access::class), new Mcp\Toolkits($store, $this->get(Access::class), $this->get(Mcp\ClientFactory::class)));
         $this->set(Chat\Pipeline::class, new Chat\Pipeline($store, $factory, $this->get(Provider\ModelCatalog::class), $conversations, $meter, $caps, $collector, $prefs, $registry));
-        // The built-in toolkits, under the ids Schema's `toolkits.enabled` options name. The two
-        // that act as a user take get_current_user_id as a closure and ask it when a tool runs,
-        // never here. Not because the id is unreadable here -- this runs on plugins_loaded:9,
+        // The built-in toolkits, under the ids Schema's `toolkits.enabled` options name. The ones
+        // that act as a user (summarize, draft_post and abilities) take get_current_user_id as a
+        // closure and ask it when a tool runs, never here. Not because the id is unreadable
+        // here -- this runs on plugins_loaded:9,
         // and core has loaded pluggable.php and registered all three `determine_current_user`
         // filters before `plugins_loaded` fires (WP 7.1 wp-settings.php:612 and :154 against the
         // do_action at :630; default-filters.php:520-522), so a cookie request would resolve
@@ -143,6 +180,8 @@ final class Plugin
         $registry->register('summarize', $summarize);
         $draftPost = new Toolkit\DraftPostToolkit(get_current_user_id(...));
         $registry->register('draft_post', $draftPost);
+        $abilitiesKit = new Toolkit\AbilitiesToolkit($store, get_current_user_id(...));
+        $registry->register(Toolkit\AbilitiesToolkit::ID, $abilitiesKit);
         $this->set(Toolkit\Registry::class, $registry);
         // The abilities, on core's two hooks and no other (Abilities\Register says why there is
         // no init fallback), the category's hook first because core fires it first and refuses
@@ -174,26 +213,38 @@ final class Plugin
         // are built, and it would decide wrong where is_admin() is false at plugins_loaded but a
         // test (wp-phpunit sets no screen until a test does) later fires the actions itself.
         // options.php, which every save posts to, is wp-admin and fires admin_init as any screen.
-        $settingsPage = new Admin\SettingsPage($store, $this->get(Provider\ModelCatalog::class));
+        $settingsPage = new Admin\SettingsPage($store, $this->get(Provider\ModelCatalog::class), $this->get(Access::class), null, $servers);
         $this->set(Admin\SettingsPage::class, $settingsPage);
         add_action('admin_init', [$settingsPage, 'register']);
         $chatScreen = new Admin\ChatScreen($store, $this->get(Provider\ModelCatalog::class), $conversations, $prefs);
         $this->set(Admin\ChatScreen::class, $chatScreen);
-        $menu = new Admin\Menu($settingsPage, [$chatScreen, 'render']);
+        $menu = new Admin\Menu($settingsPage, [$chatScreen, 'render'], $this->get(Access::class));
         add_action('admin_menu', [$menu, 'register']);
         // Assets::enqueue() gates on the hook suffix itself, so this listens on every admin
-        // screen and acts on two (the chat screen's assets; the settings page's inline rules).
+        // screen and acts on two: the chat screen's assets; the settings page's inline rules and
+        // htmx, for the Tools tab's Discover button.
         // The heartbeat answer runs on admin-ajax, where no enqueue hook fires, so it is hooked here.
         $assets = new Admin\Assets();
         add_action('admin_enqueue_scripts', [$assets, 'enqueue']);
         add_filter('heartbeat_received', [$assets, 'heartbeat'], 10, 2);
         // The help tabs of the chat screen and the settings page; HelpTabs gates on the screen id.
         add_action('current_screen', [new Admin\HelpTabs(), 'add']);
+        // The chat on the other admin screens: a launcher and an empty drawer, and the chat itself
+        // only once it is opened (Admin\Drawer says which screens, who, and what it costs a screen).
+        $drawer = new Admin\Drawer($this->get(Access::class), $prefs, $assets);
+        $this->set(Admin\Drawer::class, $drawer);
+        add_action('admin_enqueue_scripts', [$drawer, 'enqueue']);
+        add_action('admin_footer', [$drawer, 'footer']);
+        // And on a block editor screen, where there is no drawer, the editor's own sidebar.
+        add_action('enqueue_block_editor_assets', [$drawer, 'enqueueEditor']);
+        // Site Health's direct test for web_fetch: whether it can run pinned here (Admin\SiteHealth).
+        // Hooked unconditionally: core applies the filter only on its own screen and cron run.
+        add_filter('site_status_tests', [new Admin\SiteHealth($store), 'register']);
         // The two shortcodes, registered now rather than on init: `$shortcode_tags` exists from
         // shortcodes.php's load, and a shortcode registered on plugins_loaded is there for
         // whatever renders content first. The shim runs the same web_fetch instance the
         // registry holds, so the two fetch under one guard and one user agent.
-        $shortcode = new Shortcodes\Chat($store, $this->get(Provider\ModelCatalog::class), $conversations, $prefs, $this->get(Chat\Pipeline::class), new View\Markdown(), $assets);
+        $shortcode = new Shortcodes\Chat($store, $this->get(Provider\ModelCatalog::class), $conversations, $prefs, $this->get(Chat\Pipeline::class), new View\Markdown(), $assets, $this->get(Access::class));
         $this->set(Shortcodes\Chat::class, $shortcode);
         $shortcode->register();
         $shim = new Shortcodes\AgentShim($shortcode, $this->get(Chat\Pipeline::class), $registry);
@@ -225,7 +276,12 @@ final class Plugin
      * the controllers are built then too: they hold the container's services, which all exist by
      * plugins_loaded, but building them only for a REST request keeps every other request free
      * of them. Anything that is not a Controller is dropped rather than left to fatal inside
-     * register().
+     * register(). Every controller that survives is handed the container's Access, a third
+     * party's included, so a route registered *through this filter* may declare
+     * Rest\Controller::CHAT and resolve to the Chat row this site saved. A controller registered
+     * outside it — built and register()ed on rest_api_init by hand — is never handed one, and its
+     * CHAT routes resolve to Access::defaults() instead, the shipped `edit_posts`, whatever the
+     * site saved.
      *
      * @return list<Rest\Controller>
      */
@@ -234,8 +290,9 @@ final class Plugin
         /**
          * Filters the REST controllers registered under `alpaca-bot/v1`, on `rest_api_init`. Append
          * a Rest\Controller subclass to get the namespace, the `alpaca_bot/capability/{route}`
-         * permission filters and the rate limit without writing them, or drop one of the plugin's
-         * to unregister its routes (each controller's docblock says what a site loses with it).
+         * permission filters and the rate limit without writing them, and the Chat row for a route
+         * that declares `Controller::CHAT` — or drop one of the plugin's to unregister its routes
+         * (each controller's docblock says what a site loses with it).
          * Anything that is not a Controller is dropped rather than left to fatal inside register().
          *
          * @since 0.5.0
@@ -247,14 +304,19 @@ final class Plugin
             new Rest\StreamController($this->get(Chat\Pipeline::class), $this->get(Store::class)),
             new Rest\ConversationsController($this->get(Chat\ConversationStore::class), $this->get(Store::class)),
             new Rest\ModelsController($this->get(Provider\ModelCatalog::class), $this->get(Store::class)),
-            new Rest\SettingsController($this->get(Store::class)),
+            new Rest\SettingsController($this->get(Store::class), $this->get(Mcp\ServerSettings::class)),
             new Rest\UsageController($this->get(Chat\UsageMeter::class), $this->get(Store::class)),
-            new Rest\ViewController($this->get(Chat\ConversationStore::class), $this->get(Store::class), $this->get(Provider\ModelCatalog::class), new View\Markdown(), $this->get(Chat\UserPrefs::class)),
+            new Rest\ViewController($this->get(Chat\ConversationStore::class), $this->get(Store::class), $this->get(Provider\ModelCatalog::class), new View\Markdown(), $this->get(Chat\UserPrefs::class), new Mcp\Discovery($this->get(Store::class), $this->get(Mcp\ClientFactory::class))),
         ]);
-        return array_values(array_filter(
+        $access = $this->get(Access::class);
+        $controllers = array_values(array_filter(
             is_array($controllers) ? $controllers : [],
             static fn(mixed $controller): bool => $controller instanceof Rest\Controller,
         ));
+        foreach ($controllers as $controller) {
+            $controller->useAccess($access);
+        }
+        return $controllers;
     }
 
     public function set(string $id, object $service): void

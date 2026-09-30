@@ -20,8 +20,9 @@ interface ContextSourceInterface
      * someone). A source must answer capability questions about that user (`user_can($userId,
      * ...)`), never about the current one.
      *
-     * `$request` is whatever the client sent alongside the message (e.g. `['screen' => 'post',
-     * 'post_id' => 12]`): untrusted input. A source decides for itself what the user may see.
+     * `$request` is whatever the client sent alongside the message (e.g. `['post_id' => 12,
+     * 'screen' => ['id' => 'post', 'title' => 'Edit Post']]`): untrusted input. A source decides
+     * for itself what the user may see.
      *
      * @param array<string, mixed> $request
      * @return Context[]

@@ -24,11 +24,19 @@ use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Enum\ToolResultStatus;
  * The fetch is the toolkit's tool run directly, not a tool turn: an ephemeral turn runs no
  * tools (Pipeline's docblock), and here the URL is the author's, not the model's, so nothing
  * is lost by not letting the model choose it. The toolkit is the one the registry enables for
- * the viewer (Toolkit\Registry::enabled(): the `toolkits.enabled` setting, then the
- * `alpaca_bot/toolkits` filter), so an administrator who switches web_fetch off in Settings ›
- * Tools has switched off this fetch too: the setting's words are what the assistant may do,
- * and an outbound request from the server on a page's say-so is not exempt from them. The
- * shortcode then shows the editor a notice naming the setting, and caches nothing.
+ * the viewer (Toolkit\Registry::enabled(): the `toolkits.enabled` setting, then the viewer's
+ * `tool.web_fetch` row in Settings › Access, then the `alpaca_bot/toolkits` filter), so an
+ * administrator who switches web_fetch off in Settings › Tools has switched off this fetch too:
+ * the setting's words are what the assistant may do, and an outbound request from the server on
+ * a page's say-so is not exempt from them. An editor whose row does not reach the tool is held
+ * the same way, and for the same reason: the fetch is the tool, so it is the tool's gates. The
+ * shortcode then shows the editor a notice naming both screens, and caches nothing.
+ *
+ * Both gates decide the *next* fetch and not the last one. Shortcodes\Chat::answer() returns a
+ * cached answer before this closure runs at all, so page text fetched while the tool was on, and
+ * while the viewer's row admitted them, stays on the post until its `cache` expires (an hour by
+ * default, 365 days at most). Switching the tool off has always worked that way; the row is no
+ * different, and neither is a retraction.
  *
  * What the hint says is deliberately not `[alpacabot prompt="Summarize {url}"]`: that turn
  * runs no tools either, so the model would be handed a URL it cannot open and answer from
@@ -92,18 +100,21 @@ final class AgentShim
     /**
      * The page's text through the web_fetch tool the registry enables for this viewer. Its
      * refusal (an address that is not public, a page that is not text, an HTTP error) and the
-     * tool being switched off are thrown as the caller's mistake, the arm of
-     * Rest\Errors::fromPipeline() that shows the message: the URL is the author's and the
-     * tool's words are written for them, and the setting is the administrator's to name.
+     * tool not being on offer to this viewer — switched off, or held back by their
+     * `tool.web_fetch` row — are thrown as the caller's mistake, the arm of
+     * Errors::fromPipeline() that shows the message: the URL is the author's and the
+     * tool's words are written for them, and both screens are the administrator's to name. The
+     * two are not told apart here, and the message says so rather than naming one: enabled()
+     * hands back an absence, not a reason.
      *
-     * @throws \InvalidArgumentException with the tool's own message, or the setting's name
+     * @throws \InvalidArgumentException with the tool's own message, or the two screens' names
      * @throws \RuntimeException when the enabled toolkit has no web_fetch tool, which is a plugin bug
      */
     private function fetch(int $userId, string $url): string
     {
         $toolkit = $this->toolkits->enabled($userId)['web_fetch'] ?? null;
         if ($toolkit === null) {
-            throw new \InvalidArgumentException(__('The web_fetch tool is switched off in Settings › Tools, so [alpacabot_agent] fetches nothing.', 'alpaca-bot'));
+            throw new \InvalidArgumentException(__('The web_fetch tool is not available here: it is switched off in Settings › Tools, or Settings › Access keeps it from your role, so [alpacabot_agent] fetches nothing.', 'alpaca-bot'));
         }
         $tool = Registry::tool($toolkit, 'web_fetch');
         if ($tool === null) {

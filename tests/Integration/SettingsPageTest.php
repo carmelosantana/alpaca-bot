@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace AlpacaBot\Tests\Integration;
 
+use AlpacaBot\Access;
 use AlpacaBot\Admin\Menu;
 use AlpacaBot\Admin\SettingsPage;
 use AlpacaBot\Plugin;
@@ -45,6 +46,10 @@ final class SettingsPageTest extends TestCase
         unset($_GET['tab']);
         $_POST = [];
         $GLOBALS['wp_settings_errors'] = [];
+        // Settings fields live in a process global core's rollback does not touch, and a page
+        // registered by one test (renderAccessPage()) would leave its MCP rows for the next to
+        // render. set_up() registers the plugin's own again.
+        $GLOBALS['wp_settings_fields'] = [];
         parent::tear_down();
     }
 
@@ -157,10 +162,18 @@ final class SettingsPageTest extends TestCase
         $store = Plugin::instance()->get(Store::class);
         $store->replace(array_merge(Schema::defaults(), [
             'provider.api_key' => 'sk-secret-integration',
-            'provider.base_url' => 'http://ollama.internal:11434/v1',
+            'provider.base_url' => 'http://ollama.invalid:11434/v1',
             'models.default' => 'qwen3-vl:2b',
             'models.temperature' => 0.3,
             'models.overrides' => ['qwen3-vl:2b' => ['num_ctx' => 4096, 'system' => 'Be brief & kind']],
+            // A map the carry-over leaves out (SettingsPage::render()): it is absent from the post,
+            // Schema::sanitize() keeps what is stored, and the round trip below is what proves
+            // it. Seeded non-empty on purpose -- with an empty map the assertion passes whatever
+            // the carry-over does, and what would be lost is access-control data. Its server is
+            // listed, since an entry for one that is not is dropped on every write.
+            'access.mcp' => ['github' => 'read'],
+            // Carried to any depth, its approvals included, and its header value as the mask.
+            'toolkits.mcp_servers' => [['url' => 'https://93.184.216.34/mcp', 'prefix' => 'github', 'header_value' => 'Bearer tab-secret-integration', 'approved' => ['search' => str_repeat('c', 64)]]],
             // Posted by a textarea as CRLF; stored as LF, and carried through a hidden input unchanged.
             'chat.system_prompt' => "You are terse.\r\nAnswer in one line.",
             'chat.spellcheck' => false,
@@ -168,6 +181,9 @@ final class SettingsPageTest extends TestCase
         ]));
         $before = get_option('alpaca_bot_settings');
         $this->assertSame('sk-secret-integration', $before['provider.api_key']);
+        $this->assertSame(['github' => 'read'], $before['access.mcp']);
+        $this->assertSame(['search' => str_repeat('c', 64)], $before['toolkits.mcp_servers'][0]['approved']);
+        $this->assertSame(Schema::MASK, $before['toolkits.mcp_servers'][0]['header_value']);
         $this->assertSame("You are terse.\nAnswer in one line.", $before['chat.system_prompt']);
 
         $_GET['tab'] = 'chat';
@@ -177,12 +193,13 @@ final class SettingsPageTest extends TestCase
         $html = (string) ob_get_clean();
 
         $this->assertStringNotContainsString('sk-secret-integration', $html);
+        $this->assertStringNotContainsString('tab-secret-integration', $html);
         $this->assertStringContainsString('<textarea id="ab-chat-welcome" name="alpaca_bot_settings[chat.welcome]"', $html);
         $this->assertMatchesRegularExpression('/name=[\'"]option_page[\'"] value=[\'"]alpaca_bot[\'"]/', $html);
         $this->assertStringContainsString('name="_wpnonce"', $html);
         $this->assertSame(count(Schema::sections()), preg_match_all('/class="nav-tab( nav-tab-active)?"/', $html));
 
-        $posted = self::postedFrom($html);
+        $posted = self::formPost($html);
         $this->assertSame(Schema::MASK, $posted['provider.api_key']);
         $this->assertSame('How can I help?', $posted['chat.welcome']);
         $posted['chat.welcome'] = 'Hello from the Chat tab';
@@ -194,6 +211,209 @@ final class SettingsPageTest extends TestCase
         $this->assertTrue($after['chat.spellcheck']);
         unset($before['chat.welcome'], $after['chat.welcome'], $before['chat.spellcheck'], $after['chat.spellcheck']);
         $this->assertSame($before, $after);
+    }
+
+    /**
+     * The Access tab arrives with the section: SettingsPage builds a tab per Schema section and a
+     * control per field, `access.mcp` aside, so a row added to Schema is a select on this screen
+     * with nothing else written. Asserted by rendering it rather than by counting tabs, because an
+     * empty tab counts the same as a working one. `access.mcp` gets no row of its own, empty or
+     * otherwise: with no MCP server there are exactly the declared rows' selects and nothing else.
+     */
+    public function test_the_access_tab_renders_a_control_for_every_row(): void
+    {
+        $_GET['tab'] = 'access';
+        set_current_screen('alpaca-bot_page_alpaca-bot-settings');
+        ob_start();
+        $page = Plugin::instance()->get(SettingsPage::class);
+        $page->render();
+        $html = (string) ob_get_clean();
+
+        $this->assertSame('access', $page->activeTab());
+        foreach (array_keys(Access::defaults()) as $row) {
+            $this->assertStringContainsString('<select id="ab-access-' . str_replace('.', '-', $row) . '"', $html, $row);
+        }
+        $this->assertSame(count(Access::defaults()), preg_match_all('/<select id="ab-access-/', $html));
+        $this->assertStringContainsString('value="edit_posts" selected', $html);
+        $this->assertStringNotContainsString('>' . Schema::fields()['access.mcp']['label'] . '<', $html);
+        // A PHP notice from a field the page cannot render would be printed into this markup.
+        $this->assertStringNotContainsString('Notice:', $html);
+        $this->assertStringNotContainsString('Warning:', $html);
+    }
+
+    /**
+     * A page over its own Store and Access, registered in place of the plugin's, rendering `$tab`.
+     *
+     * Fresh objects because the plugin's Store memoises the option for the whole process, and a
+     * test here writes the option round it (update_option(), or the table itself). The plugin's
+     * registration is taken down first, so one sanitize callback runs per save, as on a real
+     * site.
+     */
+    private function renderAccessPage(string $tab): string
+    {
+        unregister_setting(SettingsPage::GROUP, Plugin::OPTION);
+        $store = new Store();
+        $page = new SettingsPage($store, Plugin::instance()->get(\AlpacaBot\Provider\ModelCatalog::class), new Access($store));
+        $page->register();
+        $_GET['tab'] = $tab;
+        set_current_screen('alpaca-bot_page_alpaca-bot-settings');
+        ob_start();
+        $page->render();
+        return (string) ob_get_clean();
+    }
+
+    /** `$raw` written to the option's row directly, round every filter, as a hand edit of the table would; the option caches are dropped so the next read sees it. */
+    private static function writeRaw(array $raw): void
+    {
+        global $wpdb;
+        $wpdb->update($wpdb->options, ['option_value' => maybe_serialize($raw)], ['option_name' => Plugin::OPTION]);
+        wp_cache_delete('alloptions', 'options');
+        wp_cache_delete(Plugin::OPTION, 'options');
+    }
+
+    /** What the form posts, saved as options.php saves it: update_option(), through the registered sanitize callback. */
+    private static function save(array $posted): void
+    {
+        $_POST = [Plugin::OPTION => $posted, SettingsPage::END_MARKER => '1'];
+        update_option(Plugin::OPTION, $posted);
+    }
+
+    /**
+     * R63: an MCP row saves. `access.mcp` is one map field, and Schema::sanitize() keeps only the
+     * keys fields() declares, so a row posted under a key of its own (`access.mcp.docs`) would be
+     * dropped on save while the page went on showing a select that looked settable. The row is
+     * saved here by picking an option in the rendered select and posting the form as a browser
+     * would, through the registered sanitize callback, and read back through Access: whatever
+     * name the select carries is what is proved. Then another tab is saved and the row survives
+     * it.
+     *
+     * R74: an entry for a server the list does not have is not carried by the Access tab and does
+     * not survive its save. It is put in the row by hand here, since every write through
+     * update_option() drops it (Mcp\ServerSettings::beforeSave()).
+     */
+    public function test_an_mcp_row_saved_on_the_access_tab_reaches_access_survives_another_tab_and_an_unlisted_entry_does_not(): void
+    {
+        Plugin::instance()->get(Store::class)->replace(['toolkits.mcp_servers' => [['id' => 'docs', 'url' => 'https://93.184.216.34/mcp', 'prefix' => 'docs']]]);
+        $raw = get_option(Plugin::OPTION);
+        $raw['access.mcp'] = ['gone' => 'edit_posts'];
+        self::writeRaw($raw);
+        $fresh = static fn(): Access => new Access(new Store());
+        $this->assertSame('manage_options', $fresh()->stored('mcp.docs'), 'a server nobody has chosen for is an administrator\'s');
+        $this->assertSame('edit_posts', $fresh()->stored('mcp.gone'));
+
+        $html = $this->renderAccessPage('access');
+        $this->assertStringContainsString('MCP server: docs', $html);
+        $this->assertStringNotContainsString('[access.mcp][gone]', $html);
+        self::save(self::postedFrom(self::choose($html, 'ab-access-mcp-docs', 'publish_posts')));
+
+        $this->assertSame('publish_posts', $fresh()->stored('mcp.docs'));
+        $this->assertSame('manage_options', $fresh()->stored('mcp.gone'), 'an entry whose server is not listed does not survive a save');
+        $this->assertSame(['docs' => 'publish_posts'], get_option(Plugin::OPTION)['access.mcp']);
+
+        $posted = self::formPost($this->renderAccessPage('chat'));
+        $posted['chat.welcome'] = 'Saved from the Chat tab';
+        self::save($posted);
+
+        $this->assertSame('Saved from the Chat tab', get_option(Plugin::OPTION)['chat.welcome']);
+        $this->assertSame('publish_posts', $fresh()->stored('mcp.docs'));
+    }
+
+    /**
+     * A save from another tab must keep the access.mcp map, sanitized again, whatever the stored
+     * map holds, rather than replace it with what the page could print of it. Here a hand edit
+     * left one entry holding an array, written to the row directly: update_option() in this test
+     * would run the sanitize callback set_up() registered, which drops such an entry. Were the map
+     * carried like other fields, Fields::hidden() would post that entry alone, the post would
+     * replace the map, and Schema::sanitizeAccessMcp() would store []: every server back to
+     * administrators only.
+     */
+    public function test_saving_another_tab_keeps_the_access_mcp_map_even_with_a_hand_edited_entry_in_it(): void
+    {
+        $raw = get_option(Plugin::OPTION);
+        $raw['toolkits.mcp_servers'] = [['id' => 'docs', 'url' => 'https://93.184.216.34/mcp', 'header_name' => '', 'header_value' => '', 'prefix' => 'docs', 'timeout' => 30.0, 'max_bytes' => 1048576, 'approved' => []]];
+        $raw['access.mcp'] = ['docs' => 'read', 'bad' => ['x' => 'read']];
+        self::writeRaw($raw);
+        $this->assertSame(['docs' => 'read', 'bad' => ['x' => 'read']], get_option(Plugin::OPTION)['access.mcp']);
+
+        $html = $this->renderAccessPage('chat');
+        $this->assertStringNotContainsString('alpaca_bot_settings[access.mcp]', $html);
+        $posted = self::formPost($html);
+        $posted['chat.welcome'] = 'Saved from the Chat tab';
+        self::save($posted);
+
+        $this->assertSame('Saved from the Chat tab', get_option(Plugin::OPTION)['chat.welcome']);
+        // The readable entry is kept; the one holding an array is dropped, as any save drops it.
+        $this->assertSame(['docs' => 'read'], get_option(Plugin::OPTION)['access.mcp']);
+    }
+
+    /**
+     * Merge point 5, over real core hooks: a listener registered for its row's arguments is
+     * asked with them from this page, and one that cannot be called with them (core raises an
+     * ArgumentCountError when it declares more than its row fires with) is reported as set in
+     * code without a figure, rather than taking the page down. The Chat row is asked of both its
+     * surfaces, each through its own hook, and the note says which one moved.
+     */
+    public function test_the_access_tab_asks_each_filter_with_its_rows_arguments_and_survives_one_that_cannot_be_called(): void
+    {
+        $admin = get_current_user_id();
+        add_filter('alpaca_bot/capability/tool/web_fetch', static fn(string $cap, int $userId): string => $userId === $admin ? 'manage_options' : $cap, 10, 2);
+        add_filter('alpaca_bot/capability/shortcode', static fn(string $cap, int $postId, string $tag): string => $tag === 'alpacabot' ? 'edit_others_posts' : $cap, 10, 3);
+        add_filter('alpaca_bot/capability/settings/write', static fn(string $cap, \WP_REST_Request $request): string => $request->get_method() === 'PUT' ? 'edit_others_posts' : $cap, 10, 2);
+        add_filter('alpaca_bot/capability/chat', static fn(string $cap, \WP_REST_Request $request): string => $request->get_route() === '/alpaca-bot/v1/chat' ? 'read' : $cap, 10, 2);
+        // Declares one argument more than its row fires with.
+        add_filter('alpaca_bot/capability/tool/summarize', static fn(string $cap, int $userId, string $extra): string => 'read', 10, 3);
+
+        // Access::overridden() leaves a line in the debug log when resolving a row throws; the
+        // page asks it first so that a row flipping to "set in code" is never silent there.
+        $log = (string) tempnam(sys_get_temp_dir(), 'ab-access-log');
+        $previous = ini_set('error_log', $log);
+        try {
+            $html = $this->renderAccessPage('access');
+            $logged = (string) file_get_contents($log);
+        } finally {
+            ini_set('error_log', (string) $previous);
+            unlink($log);
+        }
+        $this->assertStringContainsString('resolving the tool.summarize access row threw', $logged);
+        $row = static function (string $id) use ($html): string {
+            preg_match('#<tr[^>]*>(?:(?!<tr).)*id="' . preg_quote($id, '#') . '".*?</tr>#s', $html, $m);
+            return $m[0] ?? '';
+        };
+
+        $this->assertStringContainsString('<strong>Set in code</strong>: a filter changes this to Administrators (<code>manage_options</code>).', $row('ab-access-tool-web_fetch'));
+        $this->assertStringContainsString('a filter changes this to Editors and up (<code>edit_others_posts</code>).', $row('ab-access-shortcode'));
+        $this->assertStringContainsString('a filter changes this to Editors and up (<code>edit_others_posts</code>).', $row('ab-access-settings-write'));
+        $this->assertStringContainsString('<strong>Set in code</strong>: a filter decides this, and asking it from this page failed', $row('ab-access-tool-summarize'));
+        $this->assertStringContainsString('<select id="ab-access-tool-summarize"', $row('ab-access-tool-summarize'));
+        $chat = $row('ab-access-chat');
+        $this->assertStringContainsString('for the chat REST route (<code>POST /chat</code>): a filter changes this to Any logged-in user (<code>read</code>).', $chat);
+        $this->assertStringNotContainsString('for the chat screen', $chat);
+        $this->assertStringNotContainsString('Set in code', $row('ab-access-tool-draft_post'));
+        $this->assertStringContainsString('<input type="submit"', $html, 'the page rendered to its end');
+    }
+
+    /**
+     * A server id reaches the page through core's do_settings_fields(), which prints a field's
+     * title as it is given. Only an id Schema::isMcpId() admits gets a row, the rule every stored
+     * id and every access.mcp key is held to (R73), so each hostile id below, written into the
+     * row by hand, gets none: `x]"<y` would post as `x`, `lf\nx` as `lf\r\nx`, `x\n` as `x\r\n`,
+     * and `12` as an int key.
+     */
+    public function test_a_hostile_mcp_server_id_gets_no_access_row(): void
+    {
+        $raw = get_option(Plugin::OPTION);
+        $raw['toolkits.mcp_servers'] = [['id' => 'a"<b>c'], ['id' => 'x]"<y'], ['id' => "lf\nx"], ['id' => '12'], ['id' => "x\n"], ['id' => 'docs_2']];
+        self::writeRaw($raw);
+        $html = $this->renderAccessPage('access');
+
+        $this->assertStringNotContainsString('<b>', $html);
+        $this->assertStringNotContainsString('<y', $html);
+        $this->assertStringNotContainsString('[access.mcp][a', $html);
+        $this->assertStringNotContainsString('[access.mcp][x', $html);
+        $this->assertStringNotContainsString('[access.mcp][lf', $html);
+        $this->assertStringNotContainsString('[access.mcp][12]', $html);
+        $this->assertSame(1, substr_count($html, 'MCP server: '));
+        $this->assertStringContainsString('name="alpaca_bot_settings[access.mcp][docs_2]"', $html);
     }
 
     /**
@@ -295,8 +515,25 @@ final class SettingsPageTest extends TestCase
     }
 
     /**
+     * `$html` with the select whose id is `$id` set to `$value`, as a person picking that option
+     * would leave it: what the form then posts is under whatever name the select carries, so a
+     * test that saves through this proves the name as well as the value.
+     */
+    private static function choose(string $html, string $id, string $value): string
+    {
+        $found = preg_match('#(<select id="' . preg_quote($id, '#') . '"[^>]*>)(.*?)(</select>)#s', $html, $select);
+        self::assertSame(1, $found, "no select #{$id}");
+        // Core's selected() quotes with ' and the page's own tables with ": either is the one to clear.
+        $options = str_replace([' selected="selected"', " selected='selected'"], '', $select[2]);
+        $options = str_replace('<option value="' . $value . '">', '<option value="' . $value . '" selected="selected">', $options);
+        self::assertStringContainsString('<option value="' . $value . '" selected="selected">', $options, "no option {$value} in #{$id}");
+        return str_replace($select[0], $select[1] . $options . $select[3], $html);
+    }
+
+    /**
      * The form fields as a browser would post them: visible controls and hidden carry-overs
-     * alike, `alpaca_bot_settings[a.b]` and `alpaca_bot_settings[a.b][m][f]` names unpacked.
+     * alike, `alpaca_bot_settings[a.b]`, `alpaca_bot_settings[a.b][id]` and
+     * `alpaca_bot_settings[a.b][m][f]` names unpacked.
      *
      * @return array<string, mixed>
      */
@@ -313,7 +550,7 @@ final class SettingsPageTest extends TestCase
             if ($tag[1] === 'textarea') {
                 $value = substr($tag[3] ?? '', 0, -strlen('</textarea>'));
             } elseif ($tag[1] === 'select') {
-                preg_match('/<option value="([^"]*)" selected="selected"/', $tag[3] ?? '', $sel);
+                preg_match('/<option value="([^"]*)" selected=["\']selected["\']/', $tag[3] ?? '', $sel);
                 $value = $sel[1] ?? '';
             } else {
                 preg_match('/value="([^"]*)"/', $tag[2], $val);
@@ -329,6 +566,9 @@ final class SettingsPageTest extends TestCase
             } elseif (count($path) === 2 && $path[1] === '') {
                 // `[key][]`: PHP appends, so a checkbox list posts as a list.
                 $posted[$path[0]][] = $value;
+            } elseif (count($path) === 2) {
+                // `[key][id]`: a flat map, the access.mcp rows.
+                $posted[$path[0]][$path[1]] = $value;
             } else {
                 $posted[$path[0]] = $value;
             }

@@ -11,6 +11,7 @@ use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Message\SystemMessage;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Message\UserMessage;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Provider\Response;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Provider\Usage;
+use Brain\Monkey\Filters;
 use Brain\Monkey\Functions;
 
 // The 0.4 `[alpacabot_agent]` shim over the same harness as ChatTest (shortcodeChat() and
@@ -36,7 +37,7 @@ function agentShim(object $h): AgentShim
     // The registry the shim reads: the fetch toolkit under its id, gated by the harness's
     // `toolkits.enabled` (the schema default lists it; a test about the setting says otherwise).
     $registry = new Registry($h->store);
-    $registry->register('web_fetch', new WebFetchToolkit($h->store, static fn(string $host): array => ['93.184.216.34']));
+    $registry->register('web_fetch', new WebFetchToolkit($h->store, static fn(string $host): array => ['93.184.216.34'], static fn(bool $https): bool => true));
     return new AgentShim(shortcodeChat($h, 7), $h->pipeline, $registry);
 }
 
@@ -127,6 +128,23 @@ it('does not fetch while the administrator has web_fetch switched off in Setting
     Functions\expect('wp_http_validate_url')->never();
     $html = $shim->render(['name' => 'get', 'url' => 'https://example.test/a'], null, 'alpacabot_agent');
     expect($html)->toContain('class="alpaca-bot-notice"')->toContain('switched off')
+        ->and($h->stored)->toBe([]);
+});
+
+it('does not fetch for a viewer who fails the web_fetch row, and says so without naming the setting as the only cause', function (): void {
+    $h = pipelineWith(null);
+    $shim = agentShim($h);
+    shortcodeViewer(3);
+    Functions\when('home_url')->justReturn('https://site.test/');
+    Functions\when('_doing_it_wrong')->justReturn();
+    // Both, as the switched-off sibling below has both: the refusal has to land before the URL
+    // is ever validated, and the RED run for this test reached wp_http_validate_url(), so that
+    // is the assertion that proves the floor stopped it rather than a later guard.
+    Functions\expect('wp_safe_remote_get')->never();
+    Functions\expect('wp_http_validate_url')->never();
+    Filters\expectApplied('alpaca_bot/capability/tool/web_fetch')->once()->with('edit_posts', 3)->andReturn('manage_options');
+    $html = $shim->render(['name' => 'get', 'url' => 'https://example.test/a'], null, 'alpacabot_agent');
+    expect($html)->toContain('class="alpaca-bot-notice"')->toContain('Settings › Access')
         ->and($h->stored)->toBe([]);
 });
 

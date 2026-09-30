@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use AlpacaBot\Provider\Factory;
 use AlpacaBot\Provider\ModelCatalog;
+use AlpacaBot\Rest\Controller;
 use AlpacaBot\Rest\ModelsController;
 use AlpacaBot\Settings\Schema;
 use AlpacaBot\Settings\Store;
@@ -29,7 +30,7 @@ beforeEach(function (): void {
 it('declares one route for editors with a boolean refresh switch, rate limited with the chat routes', function (): void {
     $routes = $this->controller->routes();
     expect($routes)->toHaveCount(1)
-        ->and($routes[0])->toMatchArray(['path' => '/models', 'methods' => 'GET', 'capability' => 'edit_posts', 'rate_limit' => true])
+        ->and($routes[0])->toMatchArray(['path' => '/models', 'methods' => 'GET', 'capability' => Controller::CHAT, 'rate_limit' => true])
         ->and($routes[0]['args'])->toBe(['refresh' => ['type' => 'boolean', 'default' => false]]);
 });
 

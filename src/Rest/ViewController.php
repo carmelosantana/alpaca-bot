@@ -7,8 +7,16 @@ namespace AlpacaBot\Rest;
 use AlpacaBot\Chat\ConversationStore;
 use AlpacaBot\Chat\Message;
 use AlpacaBot\Chat\UserPrefs;
+use AlpacaBot\Context\CurrentScreenSource;
+use AlpacaBot\Errors;
+use AlpacaBot\Mcp\Discovery;
+use AlpacaBot\Mcp\Drift;
+use AlpacaBot\Mcp\McpUnavailable;
+use AlpacaBot\Mcp\ServerConfig;
 use AlpacaBot\Provider\ModelCatalog;
+use AlpacaBot\Settings\Schema;
 use AlpacaBot\Settings\Store;
+use AlpacaBot\View\Chat\Drawer;
 use AlpacaBot\View\Chat\HistorySelect;
 use AlpacaBot\View\Chat\MessageBubble;
 use AlpacaBot\View\Chat\MessageList;
@@ -16,13 +24,17 @@ use AlpacaBot\View\Chat\ModelSelect;
 use AlpacaBot\View\Chat\Notice;
 use AlpacaBot\View\Chat\Participants;
 use AlpacaBot\View\Markdown;
+use AlpacaBot\View\Settings\McpTools;
 
 /**
  * The `/view/*` routes: the chat screen's fragments, rendered server-side by the same components
- * the screen is built from, for htmx (the selects) and chat.ts (the bubbles) to swap in. Each
- * answers `text/html`, not JSON, and is for the screen: a client that wants data reads the JSON
- * routes. Every route is `edit_posts`, as the screen and the chat routes are, under its own
- * `alpaca_bot/capability/view/{name}` filter.
+ * the screen is built from, for htmx (the selects) and chat.ts (the bubbles) to swap in, the
+ * whole chat for the admin-wide drawer and the block editor's sidebar (`/view/panel`), and one
+ * MCP server's approval list for the settings page (`/view/mcp-tools`). Each answers
+ * `text/html`, not JSON, and is for those: a client that wants data reads the JSON routes. Every
+ * route but `/view/mcp-tools` takes the Chat row of Settings › Access (`edit_posts` by default),
+ * as the screen and the chat routes do; `/view/mcp-tools` is `manage_options`, and asks for it
+ * again itself (mcpTools()). Each is under its own `alpaca_bot/capability/view/{name}` filter.
  *
  * - `GET /view/messages/{id}`: the transcript (#ab-messages) of one of the user's conversations;
  *   404 for anyone else's, as `/conversations/{id}` answers.
@@ -38,6 +50,15 @@ use AlpacaBot\View\Markdown;
  *   the streamed text, its receipt counting the `tool_calls` the done frame carried; a user
  *   turn with its `images` (data URLs) is the optimistic bubble chat.ts shows while the turn
  *   runs.
+ * - `GET /view/panel?conversation_id=&post_id=&screen_id=&screen_title=`: the whole chat as one
+ *   fragment (View\Chat\Drawer) for the admin-wide drawer and the block editor's sidebar, on one
+ *   of the user's conversations or a new chat, as the chat screen answers `?conversation=`, with
+ *   the post and the screen as the composer's context chips.
+ * - `POST /view/drawer {open, conversation_id}`: stores what the admin-wide drawer shows
+ *   (Admin\Drawer) and answers an empty fragment.
+ * - `GET /view/mcp-tools/{id}?index=`: a stored MCP server's tools as the settings form's
+ *   approval list (View\Settings\McpTools), declared only when the controller was handed a
+ *   Mcp\Discovery, which Plugin::controllers() does.
  *
  * Core renders a callback's return as JSON, so a callback answers a WP_REST_Response whose data
  * is the HTML string and whose `X-Alpaca-Bot-View: 1` header marks it; serve(), on
@@ -52,23 +73,31 @@ final class ViewController extends Controller
 
     private const ROLES = ['user', 'assistant'];
 
-    public function __construct(private ConversationStore $conversations, private Store $store, private ModelCatalog $catalog, private Markdown $markdown, private UserPrefs $prefs) {}
+    /** The longest reason a server could not be listed that the fragment prints, in characters. */
+    private const REASON_CHARS = 500;
+
+    /** `$discovery` is optional, so a controller built without one (a test, a site's own) keeps every other route. */
+    public function __construct(private ConversationStore $conversations, private Store $store, private ModelCatalog $catalog, private Markdown $markdown, private UserPrefs $prefs, private ?Discovery $discovery = null) {}
 
     /**
      * `/view/models` shares the chat rate limit for the reason `/models` does: `refresh=1` is a
-     * synchronous provider call. The rest are reads of the site's own database, or a bubble
-     * built from the request, and are not limited.
+     * synchronous provider call. `/view/mcp-tools` shares it too: it lists a server through the
+     * MCP client synchronously, which is a call to a remote host.
+     * The rest are not limited. Each works on the site's own database or
+     * builds a bubble from the request, and `/view/panel` also renders the model select through
+     * the catalog, which asks the provider when its cache is empty, as the chat screen's own
+     * render does; that screen is not rate limited either.
      */
     public function routes(): array
     {
         $role = ['type' => 'string', 'enum' => self::ROLES];
         return [
-            ['path' => '/view/messages/(?P<id>\d+)', 'methods' => 'GET', 'callback' => [$this, 'messages'], 'capability' => 'edit_posts'],
-            ['path' => '/view/history', 'methods' => 'GET', 'callback' => [$this, 'history'], 'capability' => 'edit_posts', 'args' => ['conversation_id' => ['type' => 'integer', 'default' => 0, 'minimum' => 0]]],
-            ['path' => '/view/models', 'methods' => 'GET', 'callback' => [$this, 'models'], 'capability' => 'edit_posts', 'rate_limit' => true, 'args' => ['refresh' => ['type' => 'boolean', 'default' => false]]],
-            ['path' => '/view/default-model', 'methods' => 'POST', 'callback' => [$this, 'defaultModel'], 'capability' => 'edit_posts', 'args' => ['model' => ['type' => 'string', 'required' => true]]],
-            ['path' => '/view/bubble', 'methods' => 'GET', 'callback' => [$this, 'streamingBubble'], 'capability' => 'edit_posts', 'args' => ['role' => $role + ['default' => 'assistant'], 'streaming' => ['type' => 'boolean', 'default' => false]]],
-            ['path' => '/view/bubble', 'methods' => 'POST', 'callback' => [$this, 'bubble'], 'capability' => 'edit_posts', 'args' => [
+            ['path' => '/view/messages/(?P<id>\d+)', 'methods' => 'GET', 'callback' => [$this, 'messages'], 'capability' => self::CHAT],
+            ['path' => '/view/history', 'methods' => 'GET', 'callback' => [$this, 'history'], 'capability' => self::CHAT, 'args' => ['conversation_id' => ['type' => 'integer', 'default' => 0, 'minimum' => 0]]],
+            ['path' => '/view/models', 'methods' => 'GET', 'callback' => [$this, 'models'], 'capability' => self::CHAT, 'rate_limit' => true, 'args' => ['refresh' => ['type' => 'boolean', 'default' => false]]],
+            ['path' => '/view/default-model', 'methods' => 'POST', 'callback' => [$this, 'defaultModel'], 'capability' => self::CHAT, 'args' => ['model' => ['type' => 'string', 'required' => true]]],
+            ['path' => '/view/bubble', 'methods' => 'GET', 'callback' => [$this, 'streamingBubble'], 'capability' => self::CHAT, 'args' => ['role' => $role + ['default' => 'assistant'], 'streaming' => ['type' => 'boolean', 'default' => false]]],
+            ['path' => '/view/bubble', 'methods' => 'POST', 'callback' => [$this, 'bubble'], 'capability' => self::CHAT, 'args' => [
                 'role' => $role + ['required' => true],
                 'content' => ['type' => 'string', 'default' => ''],
                 'model' => ['type' => 'string', 'default' => ''],
@@ -77,6 +106,19 @@ final class ViewController extends Controller
                 'images' => ['type' => 'array', 'items' => ['type' => 'string'], 'default' => []],
                 'tool_calls' => ['type' => 'array', 'items' => ['type' => 'object'], 'default' => []],
             ]],
+            ['path' => '/view/panel', 'methods' => 'GET', 'callback' => [$this, 'panel'], 'capability' => self::CHAT, 'args' => [
+                'conversation_id' => ['type' => 'integer', 'default' => 0, 'minimum' => 0],
+                'post_id' => ['type' => 'integer', 'default' => 0, 'minimum' => 0],
+                'screen_id' => ['type' => 'string', 'default' => ''],
+                'screen_title' => ['type' => 'string', 'default' => ''],
+            ]],
+            ['path' => '/view/drawer', 'methods' => 'POST', 'callback' => [$this, 'drawer'], 'capability' => self::CHAT, 'args' => [
+                'open' => ['type' => 'boolean'],
+                'conversation_id' => ['type' => 'integer', 'minimum' => 0],
+            ]],
+            ...($this->discovery === null ? [] : [
+                ['path' => '/view/mcp-tools/(?P<id>' . Schema::MCP_ID_PATTERN . ')', 'methods' => 'GET', 'callback' => [$this, 'mcpTools'], 'capability' => 'manage_options', 'rate_limit' => true, 'args' => ['index' => ['type' => 'integer', 'default' => 0, 'minimum' => 0]]],
+            ]),
         ];
     }
 
@@ -168,7 +210,7 @@ final class ViewController extends Controller
      * core's validation), the content is the bubble's to escape or render, and the receipt
      * reads usage and duration_ms exactly as it does off a stored reply. `images` are passed as
      * strings; MessageBubble decides which are data URLs it will render. `tool_calls` are the
-     * records the reply's meta carries (Pipeline: `{name, arguments, result_excerpt, ok}`),
+     * records the reply's meta carries (Pipeline: `{name, arguments, result_excerpt, ok, result_bytes}`),
      * kept as posted, records only: the receipt counts them, and nothing here reads inside one.
      */
     public function bubble(\WP_REST_Request $request): \WP_REST_Response|\WP_Error
@@ -188,6 +230,125 @@ final class ViewController extends Controller
             ['duration_ms' => max(0, (int) $request->get_param('duration_ms')), 'tool_calls' => array_values(array_filter((array) $request->get_param('tool_calls'), 'is_array'))],
         );
         return $this->renderBubble($message, false);
+    }
+
+    /**
+     * The whole chat as one fragment, built as Admin\ChatScreen builds the chat screen:
+     * `conversation_id` opens one of the user's own, and anyone else's, or a missing one, is a
+     * new chat rather than an error, as `?conversation=` is on the screen; the history is the
+     * user's, `chat.history_limit` deep; the model is the user's effective one (UserPrefs).
+     * `post_id` becomes the composer's post chip when the user may edit the post (Shell asks);
+     * `screen_id` and `screen_title` become its screen chip, cleaned by
+     * Context\CurrentScreenSource::screenFrom(), the function that cleans them again on the turn,
+     * so the chip holds what the turn will make of it. Either chip is only what the turn sends:
+     * the source decides per turn, for the turn's user, what reaches the model.
+     */
+    public function panel(\WP_REST_Request $request): \WP_REST_Response
+    {
+        $userId = $this->userId();
+        $wanted = max(0, (int) $request->get_param('conversation_id'));
+        $conversation = $wanted > 0 ? $this->conversations->load($wanted, $userId) : null;
+        $history = $this->conversations->listFor($userId, max(1, (int) $this->store->get('chat.history_limit')));
+        $drawer = new Drawer(
+            $this->store,
+            $this->catalog,
+            $conversation,
+            $history,
+            max(0, (int) $request->get_param('post_id')),
+            $this->prefs->modelFor($userId, $this->catalog, $this->store),
+            null,
+            CurrentScreenSource::screenFrom(['id' => (string) $request->get_param('screen_id'), 'title' => (string) $request->get_param('screen_title')]),
+        );
+        return self::html($drawer->render());
+    }
+
+    /**
+     * Stores what the drawer shows (Admin\Drawer): whether it is open, the conversation in it, or
+     * both. A parameter the request leaves out is left alone, and neither argument has a default,
+     * so an absent one reads as null: the two are written by different events (a launcher press,
+     * a turn starting), and a write of one must not reset the other.
+     *
+     * The conversation id is stored as sent. Whether it is the user's is decided where it is read:
+     * `GET /view/panel` loads it through ConversationStore::load(), which answers null for anyone
+     * else's, so an id that is not theirs opens as a new chat. There is nothing to swap in, so the
+     * answer is an empty fragment.
+     */
+    public function drawer(\WP_REST_Request $request): \WP_REST_Response
+    {
+        $userId = $this->userId();
+        if ($request->get_param('open') !== null) {
+            $this->prefs->setDrawerOpen($userId, (bool) $request->get_param('open'));
+        }
+        if ($request->get_param('conversation_id') !== null) {
+            $this->prefs->setDrawerConversation($userId, (int) $request->get_param('conversation_id'));
+        }
+        return self::html('');
+    }
+
+    /**
+     * `GET /view/mcp-tools/{id}?index=`: the server's tools as the approval list of the settings
+     * form, swapped in by htmx under that server's row (`index` is the row's index, which is what
+     * the checkboxes have to post under).
+     *
+     * `manage_options` is asked twice, and the second time is the point. The route's own gate goes
+     * through `alpaca_bot/capability/view/mcp-tools` like every other route here, and a filter
+     * decides it; this callback then asks the capability again on its own account, the way
+     * SettingsController::show() does for `?reveal=1`. Listing a server hands its ServerConfig,
+     * the stored header value in it, to the ClientFactory's builder, whose client sends the
+     * credential to the server's host, so a site that loosened the
+     * filter for a custom role must not have handed that role this. It shares the chat bucket's
+     * rate limit (routes()).
+     *
+     * A server that cannot be listed, or whose client cannot be built, is the fragment's own
+     * notice with a 200 rather than an error status: the administrator asked a question, and
+     * "this server was not listed, and here is why" is the answer. Discovery::tools() hands every
+     * such failure over as McpUnavailable, whatever was thrown, so that is the one class caught
+     * here. reason() says what the notice carries.
+     */
+    public function mcpTools(\WP_REST_Request $request): \WP_REST_Response|\WP_Error
+    {
+        if ($this->discovery === null || !current_user_can('manage_options')) {
+            return Errors::forbidden();
+        }
+        $server = $this->discovery->server((string) $request->get_param('id'));
+        if ($server === null) {
+            return Errors::notFound(__('MCP server', 'alpaca-bot'));
+        }
+        try {
+            $tools = $this->discovery->tools($server);
+            $error = '';
+        } catch (McpUnavailable $e) {
+            $tools = [];
+            $error = self::reason($e, $server);
+        }
+        return self::html((new McpTools(max(0, (int) $request->get_param('index')), $tools, $error, $server->approved, $server->prefix, $error === '' ? [] : Drift::get($server->id)))->render());
+    }
+
+    /**
+     * What the notice says for a server that could not be listed: the McpUnavailable's message.
+     * Through the factory the plugin builds, that message is always the plugin's own sentence:
+     * PhpAgentsClient's, carrying at most an HTTP status, a JSON-RPC code or the header name the
+     * administrator gave; AddressRefused's, which Discovery::tools() keeps (Egress's or
+     * AddressPin's, naming at most the host and an address it refuses); or Discovery's own. None
+     * of them quotes a server's words. A ClientFactory a site builds itself, put in the container
+     * in the plugin's place (Plugin::set()) or under a Discovery of a ViewController the site hands
+     * in through `alpaca_bot/rest/controllers`, can put any text there, a remote server's included,
+     * so the message is still treated as untrusted text. McpTools prints it escaped. Before that,
+     * every piece of the server's header value 8 characters or longer that is either the whole
+     * value or the part after its first run of whitespace (the credential of `Bearer …`) is
+     * replaced with Schema::MASK wherever it appears, and then the message is cut to REASON_CHARS
+     * characters, with an ellipsis, so a cut cannot leave the start of a replaced piece behind. A
+     * shorter piece is not looked for, since replacing it would blank out ordinary words; nor is a
+     * value that reaches the message changed (encoded, split, cut).
+     */
+    private static function reason(McpUnavailable $e, #[\SensitiveParameter] ServerConfig $server): string
+    {
+        $message = $e->getMessage();
+        $value = $server->headerValue;
+        $parts = preg_split('/\s+/', $value, 2);
+        $secrets = array_filter([$value, is_array($parts) ? ($parts[1] ?? '') : ''], static fn(string $s): bool => mb_strlen($s) >= 8);
+        $message = str_replace($secrets, Schema::MASK, $message);
+        return mb_strlen($message) > self::REASON_CHARS ? mb_substr($message, 0, self::REASON_CHARS) . '…' : $message;
     }
 
     /**

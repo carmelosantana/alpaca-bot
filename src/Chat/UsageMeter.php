@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace AlpacaBot\Chat;
 
+use AlpacaBot\Plugin;
 use AlpacaBot\Settings\Store;
 
 /**
@@ -16,7 +17,8 @@ use AlpacaBot\Settings\Store;
  *
  * `privacy.usage_log` decides what the row *says*, never whether it exists: with the toggle
  * off the row is numbers only (no model, no conversation id), and it still counts toward the
- * caps. A privacy toggle that switched off a cost control would fail permissive. The row keeps
+ * caps. The numbers are the token counts, the duration and the total size of the turn's tool
+ * results in bytes (`tool_result_bytes`), which says how much came back and nothing about what. A privacy toggle that switched off a cost control would fail permissive. The row keeps
  * its author either way, because the per-user cap needs it — so "usage log off" still leaves a
  * per-user trail of token counts and timings; settings copy should say so plainly.
  *
@@ -61,6 +63,8 @@ final class UsageMeter
             // Receipts are only ever written here, never from an editor screen or REST.
             'capabilities' => ['create_posts' => 'do_not_allow'],
             'map_meta_cap' => true,
+            // Tells uninstall.php the plugin found the name free (Plugin::POST_TYPE_MARK).
+            Plugin::POST_TYPE_MARK => !post_type_exists(self::POST_TYPE),
         ]);
     }
 
@@ -69,7 +73,7 @@ final class UsageMeter
      * fires `alpaca_bot/usage/recorded` with the receipt array.
      *
      * With `privacy.usage_log` off the row carries the numbers only: `model` is '' and
-     * `conversation_id` is 0. The action still carries the full receipt — it fires in-process
+     * `conversation_id` is 0. `$toolResultBytes` is one of the numbers, stored either way. The action still carries the full receipt — it fires in-process
      * and stores nothing; a listener that persists it is the site owner's choice.
      *
      * A `$userId` below 1 is not written as `post_author`: WordPress treats 0 as unset and
@@ -77,16 +81,18 @@ final class UsageMeter
      * site's cache is updated for such a row — the user it may land under is not known here.
      *
      * Negative counts (a provider reporting -1 for "unknown") are stored as 0 so they can never
-     * lower a month total.
+     * lower a month total; a negative duration or size is stored as 0 too.
      *
+     * @param int $toolResultBytes the sum of the turn's tool call records' `result_bytes` (Chat\AgentStreamObserver), 0 for a turn that ran no tool
      * @return int post id, or 0 when the insert failed
      */
-    public function record(int $userId, string $model, int $promptTokens, int $completionTokens, int $durationMs, int $conversationId = 0): int
+    public function record(int $userId, string $model, int $promptTokens, int $completionTokens, int $durationMs, int $conversationId = 0, int $toolResultBytes = 0): int
     {
         $now = (int) current_time('timestamp', true);
         $promptTokens = max(0, $promptTokens);
         $completionTokens = max(0, $completionTokens);
         $durationMs = max(0, $durationMs);
+        $toolResultBytes = max(0, $toolResultBytes);
         $total = $promptTokens + $completionTokens;
         $detailed = (bool) $this->store->get('privacy.usage_log');
         $post = [
@@ -99,6 +105,7 @@ final class UsageMeter
                 'completion_tokens' => $completionTokens,
                 'total_tokens' => $total,
                 'duration_ms' => $durationMs,
+                'tool_result_bytes' => $toolResultBytes,
                 'conversation_id' => $detailed ? $conversationId : 0,
             ],
         ];
@@ -126,6 +133,7 @@ final class UsageMeter
             'completion_tokens' => $completionTokens,
             'total_tokens' => $total,
             'duration_ms' => $durationMs,
+            'tool_result_bytes' => $toolResultBytes,
             'conversation_id' => $conversationId,
             'log_id' => $logId,
             'created' => $now,
@@ -139,7 +147,7 @@ final class UsageMeter
          * receipt row's post id, 0 when the insert failed.
          *
          * @since 0.5.0
-         * @param array<string, int|string> $receipt `user_id`, `model`, `prompt_tokens`, `completion_tokens`, `total_tokens`, `duration_ms`, `conversation_id`, `log_id`, `created` (a UTC timestamp)
+         * @param array<string, int|string> $receipt `user_id`, `model`, `prompt_tokens`, `completion_tokens`, `total_tokens`, `duration_ms`, `tool_result_bytes` (the total size in bytes of the turn's tool results), `conversation_id`, `log_id`, `created` (a UTC timestamp)
          */
         do_action('alpaca_bot/usage/recorded', $receipt);
         return $logId;

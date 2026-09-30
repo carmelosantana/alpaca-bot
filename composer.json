@@ -11,7 +11,7 @@
     ],
     "require": {
         "php": "^8.4",
-        "carmelosantana/php-agents": "~0.15.2",
+        "carmelosantana/php-agents": "~0.16.0",
         "league/commonmark": "^2.10"
     },
     "require-dev": {
@@ -51,7 +51,8 @@
             "constant_prefix": "ALPACA_BOT_VENDOR_",
             "packages": [
                 "carmelosantana/php-agents",
-                "league/commonmark"
+                "league/commonmark",
+                "symfony/http-client"
             ],
             "delete_vendor_packages": false,
             "exclude_from_prefix": {
@@ -72,7 +73,7 @@
         ],
         "test": "pest --colors=always",
         "test:integration": "bash bin/test-integration.sh",
-        "analyse": "phpstan analyse --memory-limit=1G",
+        "analyse": "phpstan analyse --memory-limit=1536M",
         "lint": "phpcs",
         "lint:fix": "phpcbf",
         "docs:hooks": "@php bin/hooks-doc.php",

@@ -11,10 +11,13 @@
  * taking the docblock there covers `$x = (bool) apply_filters(...)`, `return apply_filters(...)`
  * and `max(1, (int) apply_filters(...))` alike.
  *
- * Two of the plugin's hooks are not spelled at an `apply_filters` call at all: the REST
- * permission callbacks (`alpaca_bot/capability/{route}`, Rest\Controller) and the admin menu
- * (`alpaca_bot/admin/menu_capability`, Admin\Menu) hand their names to Capability::filtered(),
- * which applies the filter and reduces the result to a capability name. So `Capability::filtered(`
+ * Four of the plugin's hooks are not spelled at an `apply_filters` call at all: the REST
+ * permission callbacks (`alpaca_bot/capability/{route}`, Rest\RouteCapability for
+ * Rest\Controller), the admin menu (`alpaca_bot/admin/menu_capability`, Admin\Menu), the
+ * Settings › Access rows (`alpaca_bot/capability/{hook}`, Access) and the one 0.5 key the two
+ * settings rows still run first (`alpaca_bot/capability/settings`, Access) hand their names to
+ * Capability::filtered(), which applies the filter and reduces the result to a capability name.
+ * So `Capability::filtered(`
  * is treated as a filter call site, its first argument the hook, and the `apply_filters($hook, ...)`
  * inside the body of Capability::filtered() itself, the one place a hook name is legitimately a
  * variable, is the only non-literal name the scanner skips: that method, in that file, not the
@@ -525,28 +528,33 @@ final class HooksDoc
             '',
             '## Before you loosen a capability filter',
             '',
-            'Read this once before using `alpaca_bot/capability/{route}` or',
-            '`alpaca_bot/admin/menu_capability` to open something up. Both honour any capability name,',
+            'Read this once before using `alpaca_bot/capability/{route}`,',
+            '`alpaca_bot/admin/menu_capability` or a Settings › Access row\'s',
+            '`alpaca_bot/capability/{hook}` to open something up. All honour any capability name,',
             '`read` (every Subscriber) and `exist` (every visitor, logged out included) among them, and',
             'that is deliberate: it is how a site builds a subscriber-facing or public chat.',
             '',
-            'What is easy to miss is that **opening `chat` or `chat/stream` to a role opens every enabled',
-            'tool to that role as well.** `Toolkit\Registry::enabled()` picks a turn\'s toolkits from the',
-            '`toolkits.enabled` setting and the `alpaca_bot/toolkits` filter and has no capability check',
-            'of its own, so nothing sits between "may chat" and "may call the tools that are switched',
-            'on" — including `web_fetch`, which makes the web server send an outbound HTTP request and',
-            'hands the reply back as text. Only `draft_post` re-checks a capability and refuses a role',
-            'that lacks it. Use `alpaca_bot/toolkits` with `user_can( $user_id, … )` to take a tool away',
-            'from the users a loosened route admits. A capability floor inside `enabled()` is a later',
-            '0.x release; the operator-facing version of all this, including the egress policy that',
-            'mitigates `web_fetch`, is under "Tools, and what they let the model reach" in the README.',
+            'What used to be easy to miss was that opening `chat` or `chat/stream` to a role opened',
+            'every enabled tool to it. It no longer does. `Toolkit\Registry::enabled()` offers a',
+            'turn only the toolkits whose Settings › Access row the turn\'s user passes',
+            '(`alpaca_bot/capability/tool/{id}`: `edit_posts` by default for `web_fetch`, `summarize`',
+            'and `draft_post`, `manage_options` for `abilities`), before `alpaca_bot/toolkits` runs, so',
+            'a role admitted only to converse gets no tools until a row admits it. Know what a row',
+            'grants before you lower one: `web_fetch` makes the web server send an outbound HTTP',
+            'request and hands the reply back as text, `draft_post` re-checks `edit_posts`/`edit_pages`',
+            'on its own account, and `abilities` runs each ability an administrator ticked as the',
+            'turn\'s user, under that ability\'s own permission check. `alpaca_bot/toolkits` still runs',
+            'last, with the user id, so a toolkit a site adds in code is that site\'s to gate. The',
+            'operator-facing version is under "Tools, and what they let the model reach" in the README.',
             '',
-            '`alpaca_bot/capability/settings` is the other one worth a second look: one key covers both',
-            'verbs on `/settings`, so admitting a role to the read also admits it to the write, and',
-            '`provider.base_url` is a settable field. Tighten per request off the `WP_REST_Request` the',
-            'filter is handed (`$request->get_method()`). The `?reveal=1` parameter, which answers with',
-            'the provider API key in cleartext, asks `manage_options` on its own account and is not',
-            'reachable through this filter.',
+            '`alpaca_bot/capability/settings` is the other one worth a second look. It is 0.5\'s one key',
+            'over both verbs on `/settings`, and it is still applied — as the *default* the newer',
+            '`alpaca_bot/capability/settings/read` and `alpaca_bot/capability/settings/write` receive,',
+            'over the Settings › Access rows of the same names. So admitting a role through the old key',
+            'still admits it to the write; name `…/settings/write` to take that back.',
+            '`alpaca_bot/capability/settings/schema` is no longer applied: the schema route asks',
+            '`…/settings/read`. The `?reveal=1` parameter, which answers with the provider API key in',
+            'cleartext, asks `manage_options` on its own account and is not reachable through any of them.',
         ];
         if ($order !== null) {
             $lines[] = '';

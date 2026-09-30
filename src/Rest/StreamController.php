@@ -6,6 +6,7 @@ namespace AlpacaBot\Rest;
 
 use AlpacaBot\Chat\Conversation;
 use AlpacaBot\Chat\Pipeline;
+use AlpacaBot\Errors;
 use AlpacaBot\Settings\Store;
 
 /**
@@ -16,10 +17,11 @@ use AlpacaBot\Settings\Store;
  * Events, in order: `start` `{conversation_id, model}` once the pipeline has the conversation
  * (created on the spot for a ticket that named 0, which is why the id is sent here rather than
  * only at the end: a client that shows a link to the conversation needs it before the text);
- * `delta` `{text, reasoning}` per fragment; then either `done`, whose data is exactly the body
- * a direct `POST /chat` answers with, or `error`, whose data is exactly the body a JSON route's
- * WP_Error would render as (`{code, message, data}`), so a client has one error shape for both
- * paths. After `done` or `error` the connection closes.
+ * `delta` `{text, reasoning, held}` per fragment, `held` saying the text is a faked tool call's
+ * markup (Chat\FakedToolCallStream) and still sent whole; then either `done`, whose data is
+ * exactly the body a direct `POST /chat` answers with, or `error`, whose data is exactly the
+ * body a JSON route's WP_Error would render as (`{code, message, data}`), so a client has one
+ * error shape for both paths. After `done` or `error` the connection closes.
  *
  * The turn does not run inside the route callback. Core renders a callback's return value as
  * JSON once the callback is over, so handle() only redeems the ticket, keeps it here against
@@ -75,7 +77,7 @@ final class StreamController extends Controller
             'path' => '/chat/(?P<id>\d+)/stream',
             'methods' => 'GET',
             'callback' => [$this, 'handle'],
-            'capability' => 'edit_posts',
+            'capability' => self::CHAT,
             'args' => ['token' => ['type' => 'string', 'required' => true]],
         ]];
     }
@@ -146,7 +148,7 @@ final class StreamController extends Controller
         }
         $claim = $this->budget->claim($userId);
         if ($claim['slot'] === null) {
-            $response = rest_convert_error_to_response(Errors::tooMany($claim['retry_after']));
+            $response = rest_convert_error_to_response(Errors::streamConcurrency($claim['limit'], $claim['retry_after']));
             $response->header('Retry-After', (string) $claim['retry_after']);
             return $response;
         }
@@ -253,7 +255,7 @@ final class StreamController extends Controller
         try {
             $turn = $this->pipeline->send((int) ($ticket['user_id'] ?? 0), (string) ($ticket['message'] ?? ''), (array) ($ticket['options'] ?? []));
             foreach ($turn as $delta) {
-                $write(Sse::frame('delta', ['text' => $delta->text, 'reasoning' => $delta->reasoning]));
+                $write(Sse::frame('delta', ['text' => $delta->text, 'reasoning' => $delta->reasoning, 'held' => $delta->held]));
                 if ($aborted()) {
                     return;
                 }

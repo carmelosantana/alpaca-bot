@@ -137,7 +137,7 @@ final class ShortcodesTest extends TestCase
     public function test_a_failed_turn_shows_the_fixed_provider_message_and_not_the_endpoint(): void
     {
         // Review I1: the provider's own text quotes its endpoint, and the page went to every
-        // edit_posts viewer; Rest\Errors::provider() already says that text is the log's.
+        // edit_posts viewer; Errors::provider() already says that text is the log's.
         //
         // The endpoint is under `.invalid`, the TLD RFC 6761 reserves for names that can never
         // resolve, and the run's error_log goes to a file of this test's own. Both are about the

@@ -147,7 +147,7 @@ jobs:
       # `wp plugin check` at 0.5.0; the figure is illustrative and nothing asserts it).
       # phpcs.xml.dist excludes the same sniff, with the same argument, and the argument was
       # checked against the code rather than assumed: every consumer of an exception message in
-      # src/ is one of `WP_Error` (Rest\Errors, which the REST server JSON-encodes),
+      # src/ is one of `WP_Error` (AlpacaBot\Errors, which the REST server JSON-encodes),
       # `WP_CLI::error()` on a terminal (Cli\ChatCommand), `error_log()` behind WP_DEBUG, or
       # View\Chat\Notice, which runs its text through esc_html() when it builds the markup
       # (View\Component::e). `grep -rn 'getMessage()' src/` is the whole list; nothing echoes one.

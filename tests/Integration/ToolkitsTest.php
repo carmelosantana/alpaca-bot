@@ -28,13 +28,36 @@ final class ToolkitsTest extends TestCase
     {
         $admin = $this->asAdmin();
         $registry = Plugin::instance()->get(Registry::class);
-        $this->assertSame(['web_fetch', 'summarize', 'draft_post'], $registry->ids());
+        $this->assertSame(['web_fetch', 'summarize', 'draft_post', 'abilities'], $registry->ids());
+        // abilities is registered and left off by the default list.
         $this->assertSame(['web_fetch', 'summarize', 'draft_post'], array_keys($registry->enabled($admin)));
 
         $this->assertSame(200, $this->rest('PUT', '/settings', ['toolkits.enabled' => ['draft_post', 'bogus']])->get_status());
         $this->assertSame(['draft_post'], get_option('alpaca_bot_settings')['toolkits.enabled']);
         $this->assertSame(['draft_post'], array_keys($registry->enabled($admin)));
         $this->assertInstanceOf(DraftPostToolkit::class, $registry->enabled($admin)['draft_post']);
+    }
+
+    public function test_a_tool_is_offered_only_to_users_who_pass_its_access_row_and_a_row_filter_can_open_it(): void
+    {
+        $registry = Plugin::instance()->get(Registry::class);
+        $subscriber = self::factory()->user->create(['role' => 'subscriber']);
+        $editor = self::factory()->user->create(['role' => 'editor']);
+        // A Contributor is the floor of "may chat" on a default site (core grants edit_posts), so
+        // it is the role that proves the floor changed nothing there, not merely the editor.
+        $contributor = self::factory()->user->create(['role' => 'contributor']);
+
+        // A default site is unchanged for every role that could always chat, and closed for the
+        // role a site would only have admitted by opening a capability filter.
+        $this->assertSame(['web_fetch', 'summarize', 'draft_post'], array_keys($registry->enabled($editor)));
+        $this->assertSame(['web_fetch', 'summarize', 'draft_post'], array_keys($registry->enabled($contributor)));
+        $this->assertSame([], $registry->enabled($subscriber));
+
+        Plugin::instance()->get(Store::class)->set('access.tool.web_fetch', 'manage_options');
+        $this->assertSame(['summarize', 'draft_post'], array_keys($registry->enabled($editor)));
+
+        add_filter('alpaca_bot/capability/tool/summarize', static fn(): string => 'read');
+        $this->assertSame(['summarize'], array_keys($registry->enabled($subscriber)));
     }
 
     public function test_the_settings_page_renders_one_checkbox_per_toolkit_and_a_save_with_none_checked_stores_none(): void
@@ -51,6 +74,7 @@ final class ToolkitsTest extends TestCase
         foreach (['web_fetch', 'summarize', 'draft_post'] as $id) {
             $this->assertMatchesRegularExpression('/<input type="checkbox"[^>]*name="alpaca_bot_settings\[toolkits\.enabled\]\[\]" value="' . $id . '"[^>]*checked/', $html, $id);
         }
+        $this->assertMatchesRegularExpression('/<input type="checkbox"[^>]*name="alpaca_bot_settings\[toolkits\.enabled\]\[\]" value="abilities">/', $html);
         // The sentinel ahead of the boxes, so "none checked" is posted at all.
         $this->assertMatchesRegularExpression('/<input type="hidden" name="alpaca_bot_settings\[toolkits\.enabled\]\[\]" value="">.*<input type="checkbox"/s', $html);
 
@@ -180,5 +204,55 @@ final class ToolkitsTest extends TestCase
         $this->assertSame(5, $seen['args']['timeout']);
         $this->assertSame(1048576, $seen['args']['limit_response_size']);
         $this->assertTrue($seen['args']['reject_unsafe_urls']);
+        $this->assertSame(0, $seen['args']['redirection']);
+    }
+
+    /**
+     * A relative Location is resolved against the hop it came from by core's
+     * WP_Http::make_absolute_url() (class-wp-http.php:973), which the unit suite does not load,
+     * and followed by the tool itself, with the HTTP API's own redirects off on both requests.
+     * Both hops are the site's own host, the one host the tool neither looks up nor pins
+     * (WebFetchToolkit::pin()), so `pre_http_request` can serve both without DNS.
+     */
+    public function test_web_fetch_follows_a_relative_redirect_itself_with_the_http_apis_redirects_off(): void
+    {
+        $seen = [];
+        add_filter('pre_http_request', static function (mixed $pre, array $args, string $url) use (&$seen): array {
+            $seen[] = ['url' => $url, 'redirection' => $args['redirection']];
+            if (count($seen) === 1) {
+                return ['headers' => ['location' => '/moved/here/'], 'body' => '', 'response' => ['code' => 301, 'message' => 'Moved Permanently'], 'cookies' => [], 'filename' => null];
+            }
+            return ['headers' => ['content-type' => 'text/plain'], 'body' => 'arrived', 'response' => ['code' => 200, 'message' => 'OK'], 'cookies' => [], 'filename' => null];
+        }, 10, 3);
+        $tool = (new WebFetchToolkit(Plugin::instance()->get(Store::class)))->tools()[0];
+        $res = $tool->execute(['url' => home_url('/old/')]);
+        $this->assertSame(ToolResultStatus::Success, $res->status, $res->content);
+        $this->assertSame('arrived', $res->content);
+        $this->assertSame([
+            ['url' => home_url('/old/'), 'redirection' => 0],
+            ['url' => home_url('/moved/here/'), 'redirection' => 0],
+        ], $seen);
+    }
+
+    /**
+     * The transport question against real Requests, and the Site Health test as core would
+     * collect it: the harness and wp-env containers both have cURL with SSL and no
+     * WP_PROXY_HOST, so the test registered through `site_status_tests` answers good.
+     */
+    public function test_site_health_reports_that_web_fetch_can_run_pinned_here(): void
+    {
+        $this->assertTrue(WebFetchToolkit::curlCarries(true));
+        // Not a restatement of curlCarries()'s own expression: Requests' own selector is asked,
+        // through reflection because it is protected (Requests.php:225), so what is pinned is
+        // that the plugin's answer is the transport Requests would actually pick for an https
+        // request here -- the agreement the refusal's correctness rests on.
+        $selector = new \ReflectionMethod(\WpOrg\Requests\Requests::class, 'get_transport_class');
+        $selector->setAccessible(true);
+        $chosen = $selector->invoke(null, [\WpOrg\Requests\Capability::SSL => true]);
+        $this->assertSame($chosen === \WpOrg\Requests\Transport\Curl::class, WebFetchToolkit::curlCarries(true), $chosen);
+        $tests = apply_filters('site_status_tests', ['direct' => [], 'async' => []]);
+        $this->assertArrayHasKey(\AlpacaBot\Admin\SiteHealth::TEST, $tests['direct']);
+        $result = call_user_func($tests['direct'][\AlpacaBot\Admin\SiteHealth::TEST]['test']);
+        $this->assertSame('good', $result['status'], $result['label']);
     }
 }

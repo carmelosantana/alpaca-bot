@@ -7,6 +7,7 @@ namespace AlpacaBot\Rest;
 use AlpacaBot\Chat\Pipeline;
 use AlpacaBot\Chat\Result;
 use AlpacaBot\Context\Context;
+use AlpacaBot\Errors;
 
 /**
  * `POST /chat`: one turn through the Pipeline as the current user.
@@ -45,7 +46,7 @@ final class ChatController extends Controller
             'path' => '/chat',
             'methods' => 'POST',
             'callback' => [$this, 'create'],
-            'capability' => 'edit_posts',
+            'capability' => self::CHAT,
             'rate_limit' => true,
             'args' => [
                 'message' => ['type' => 'string', 'required' => false, 'default' => ''],

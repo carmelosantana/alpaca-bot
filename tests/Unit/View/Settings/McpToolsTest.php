@@ -1,0 +1,281 @@
+<?php
+
+declare(strict_types=1);
+
+use AlpacaBot\Mcp\ToolDefinition;
+use AlpacaBot\Toolkit\SchemaTool;
+use AlpacaBot\View\Settings\McpTools;
+use Brain\Monkey\Functions;
+
+// The approval list Discovery's rows become, swapped by htmx into a server's row of the settings
+// form. It posts under that row's own index, so ticking a box and saving the form is the
+// approval, and what a box posts is the fingerprint of the definition shown beside it.
+// stubEscapeFunctions() (tests/Pest.php) makes esc_html()/esc_attr() htmlspecialchars().
+
+beforeEach(function (): void {
+    Functions\when('wp_strip_all_tags')->alias(static fn(string $s): string => strip_tags((string) preg_replace('@<(script|style)[^>]*?>.*?</\1>@si', '', $s)));
+});
+
+/** @return array{definition: ToolDefinition, fingerprint: string, state: string, ticked: bool} */
+function mcpToolRow(ToolDefinition $definition, string $state, bool $ticked): array
+{
+    return ['definition' => $definition, 'fingerprint' => $definition->fingerprint(), 'state' => $state, 'ticked' => $ticked];
+}
+
+it('names each box under the row\'s own index and the tool, with the fingerprint as its value, checked as the row says', function (): void {
+    $search = new ToolDefinition('search', 'Search.', ['type' => 'object'], [], 'Search the tracker');
+    $write = new ToolDefinition('write', 'Write.', ['type' => 'object'], ['destructiveHint' => true]);
+    $html = (new McpTools(2, [mcpToolRow($search, 'approved', true), mcpToolRow($write, 'new', false)]))->render();
+    $n = 'alpaca_bot_settings[toolkits.mcp_servers][2][approved]';
+    expect($html)->toContain('<input type="checkbox" name="' . $n . '[search]" value="' . $search->fingerprint() . '" checked="checked">')
+        ->toContain('<input type="checkbox" name="' . $n . '[write]" value="' . $write->fingerprint() . '">')
+        ->toContain('<code>search</code>')
+        ->toContain('<strong>Search the tracker</strong>')
+        ->and(substr_count($html, 'type="checkbox"'))->toBe(2)
+        ->and(substr_count($html, 'checked="checked"'))->toBe(1)
+        ->and(substr_count($html, '<li>'))->toBe(2)
+        ->and($html)->not->toContain('[1][approved]')
+        ->not->toContain('type="hidden"');
+});
+
+it('says a changed tool has changed since approval, and leaves a tool that has not changed unmarked', function (): void {
+    $report = new ToolDefinition('report', 'Report, differently now.', ['type' => 'object']);
+    $search = new ToolDefinition('search', 'Search.', ['type' => 'object']);
+    $changed = (new McpTools(0, [mcpToolRow($report, 'changed', false)]))->render();
+    $same = (new McpTools(0, [mcpToolRow($search, 'approved', true), mcpToolRow($report, 'new', true)]))->render();
+    expect($changed)->toContain('changed since approval: review')
+        ->and($same)->not->toContain('changed since approval');
+});
+
+it('says a destructive tool\'s warning is the server\'s own claim, and warns about no other tool', function (): void {
+    $write = new ToolDefinition('write', 'Write.', ['type' => 'object'], ['destructiveHint' => true]);
+    $plain = new ToolDefinition('plain', 'Plain.', ['type' => 'object'], ['destructiveHint' => 'yes']);
+    expect((new McpTools(0, [mcpToolRow($write, 'new', false)]))->render())->toContain('Destructive, by the server&#039;s own account: a claim this site cannot check.')
+        ->and((new McpTools(0, [mcpToolRow($plain, 'new', true)]))->render())->not->toContain('Destructive');
+});
+
+// describe() strips tags, so the escape is seen on what survives it: `&`, `"` and a bare `<`.
+it('shows the description through SchemaTool::describe(), and escapes what describe() leaves', function (): void {
+    $long = str_repeat('word ', 100);
+    $tool = new ToolDefinition('search', "# Heading\n<b>Bold</b>\n\nline two <img src=x onerror=alert(1)>", ['type' => 'object']);
+    $bare = new ToolDefinition('compare', 'Tom & "Jerry" when a < b', ['type' => 'object']);
+    expect((new McpTools(0, [mcpToolRow($bare, 'new', true)]))->render())->toContain('<span class="description">Tom &amp; &quot;Jerry&quot; when a &lt; b</span>');
+    $cut = new ToolDefinition('long', $long, ['type' => 'object']);
+    $html = (new McpTools(0, [mcpToolRow($tool, 'new', true), mcpToolRow($cut, 'new', true)]))->render();
+    expect($html)->toContain('<span class="description">' . SchemaTool::describe($tool->description) . '</span>')
+        ->toContain('<span class="description">Heading Bold line two</span>')
+        ->toContain('<span class="description">' . SchemaTool::describe($long) . '</span>')
+        ->toContain('…</span>')
+        ->not->toContain('<img')
+        ->not->toContain('<b>');
+});
+
+// The title is the server's words too, and printed with the same rule: tags stripped by
+// describe(), and what survives it escaped.
+it('prints a title stripped of tags and escaped', function (): void {
+    $tool = new ToolDefinition('search', 'Search.', ['type' => 'object'], [], '<script>alert(1)</script>Find & "go" < now');
+    $html = (new McpTools(0, [mcpToolRow($tool, 'new', true)]))->render();
+    expect($html)->not->toContain('<script')->toContain('<strong>Find &amp; &quot;go&quot; &lt; now</strong>');
+});
+
+// I-1: a name is the server's text, and one that cannot be approved is still printed. It is
+// escaped, not stripped, so what the server sent is what the administrator reads.
+it('prints a hostile tool name as inert text', function (): void {
+    $img = new ToolDefinition('<img src=x onerror=alert(1)>', 'Hostile.', ['type' => 'object']);
+    $quote = new ToolDefinition('a" onmouseover="alert(2)', 'Quoted.', ['type' => 'object']);
+    $html = (new McpTools(0, [mcpToolRow($img, 'new', true), mcpToolRow($quote, 'new', true)]))->render();
+    expect($html)->not->toContain('<img')
+        ->not->toContain('" onmouseover="')
+        ->toContain('<code>&lt;img src=x onerror=alert(1)&gt;</code>')
+        ->toContain('<code>a&quot; onmouseover=&quot;alert(2)</code>')
+        ->and(substr_count($html, 'type="checkbox"'))->toBe(0);
+});
+
+// M-2: MCP makes a tool's name unique on its server, so a listing that repeats one is a server
+// misbehaving. One box per copy would post under one name and keep whichever tick came last, so
+// no copy gets a box, each says why, and every other tool is offered as usual.
+it('offers no box for a name the listing repeats, on any copy, and says so on each', function (): void {
+    $first = new ToolDefinition('search', 'Search.', ['type' => 'object']);
+    $second = new ToolDefinition('search', 'Search, the other one.', ['type' => 'object']);
+    $plain = new ToolDefinition('plain', 'Plain.', ['type' => 'object']);
+    $html = (new McpTools(0, [mcpToolRow($first, 'approved', false), mcpToolRow($second, 'changed', false), mcpToolRow($plain, 'new', true)]))->render();
+    expect(substr_count($html, 'type="checkbox"'))->toBe(1)
+        ->and($html)->toContain('name="alpaca_bot_settings[toolkits.mcp_servers][0][approved][plain]"')
+        ->not->toContain('[approved][search]')
+        ->and(substr_count($html, 'The server lists this name more than once, so no copy has a box; saving drops the name&#039;s approval, if it has one.'))->toBe(2)
+        // Each copy keeps its own state: the one that differs from the pin still says so.
+        ->and(substr_count($html, 'changed since approval: review'))->toBe(1);
+});
+
+// Schema::sanitizeMcpServers() keeps an approval only under a name of [A-Za-z0-9_.-]{1,128} that
+// PHP left a string key; a box whose tick a save would silently drop is worse than no box and a
+// line saying why.
+it('offers no box for a name a save could not keep, and says so', function (): void {
+    $spaced = new ToolDefinition('bad name', 'Spaced.', ['type' => 'object']);
+    $number = new ToolDefinition('123', 'A number.', ['type' => 'object']);
+    $long = new ToolDefinition(str_repeat('a', 129), 'Long.', ['type' => 'object']);
+    $zero = new ToolDefinition('0123', 'Leading zero: PHP keeps it a string.', ['type' => 'object']);
+    $longest = new ToolDefinition(str_repeat('b', 128), 'The longest name kept.', ['type' => 'object']);
+    $html = (new McpTools(0, [mcpToolRow($spaced, 'new', true), mcpToolRow($number, 'new', true), mcpToolRow($long, 'new', true), mcpToolRow($zero, 'new', true), mcpToolRow($longest, 'new', true)]))->render();
+    expect(substr_count($html, 'type="checkbox"'))->toBe(2)
+        ->and($html)->toContain('name="alpaca_bot_settings[toolkits.mcp_servers][0][approved][0123]"')
+        ->and($html)->toContain('name="alpaca_bot_settings[toolkits.mcp_servers][0][approved][' . str_repeat('b', 128) . ']"')
+        ->and(substr_count($html, 'This name cannot be approved, so the tool has no box.'))->toBe(3)
+        ->and($html)->toContain('<code>bad name</code>')->toContain('<code>123</code>');
+});
+
+it('names an approved tool the server no longer lists, since saving drops its approval', function (): void {
+    $search = new ToolDefinition('search', 'Search.', ['type' => 'object']);
+    $html = (new McpTools(0, [mcpToolRow($search, 'approved', true)], '', ['search' => $search->fingerprint(), 'gone' => str_repeat('a', 64), 'went<x>' => str_repeat('b', 64)]))->render();
+    expect($html)->toContain('No longer listed by the server, so saving drops its approval: <code>gone</code>, <code>went&lt;x&gt;</code>')
+        ->and((new McpTools(0, [mcpToolRow($search, 'approved', true)], '', ['search' => $search->fingerprint()]))->render())->not->toContain('No longer listed');
+});
+
+it('says so when the server lists no tools', function (): void {
+    expect((new McpTools(0, []))->render())->toBe('<div class="notice notice-info inline"><p>This server lists no tools.</p></div>');
+});
+
+// On an error the fragment is a notice, and what the cell held rides along: the approvals stored
+// for the row as hidden inputs (the swap replaces the ones the page drew, and a save after a
+// failed look must carry them as a save that never looked does), their count, and the drift note
+// for the approved names the marker holds (M-5). No tool listed before the error is drawn.
+it('renders an error as a core inline notice, carrying the cell as it was and nothing else', function (): void {
+    $search = new ToolDefinition('search', 'Search.', ['type' => 'object']);
+    $html = (new McpTools(1, [mcpToolRow($search, 'new', true)], 'The server did not answer.', ['search' => str_repeat('a', 64), 'write' => str_repeat('b', 64)], '', ['gone', 'write']))->render();
+    expect($html)->toBe('<div class="notice notice-error inline"><p>The server did not answer.</p></div>'
+        . '<input type="hidden" name="alpaca_bot_settings[toolkits.mcp_servers][1][approved][search]" value="' . str_repeat('a', 64) . '">'
+        . '<input type="hidden" name="alpaca_bot_settings[toolkits.mcp_servers][1][approved][write]" value="' . str_repeat('b', 64) . '">'
+        . '2 tools approved.<p class="description"><strong>changed since approval: review</strong> <code>write</code></p>');
+});
+
+// R81: an error message is untrusted text, a remote server's words included.
+it('renders an error message that carries markup inert', function (): void {
+    $html = (new McpTools(0, [], '<script>alert(1)</script><img src=x onerror=alert(2)>'))->render();
+    expect($html)->not->toContain('<script')->not->toContain('<img')
+        ->toContain('&lt;script&gt;alert(1)&lt;/script&gt;');
+});
+
+// M-7: two of a server's tools that ToolName::fit() gives one name are both withheld from the model
+// while both are approved (McpToolkit), so the list says so beside each, as the abilities list does.
+it('marks two tools that would reach the model under one name, naming the other, and leaves the rest alone', function (): void {
+    $long = new ToolDefinition(str_repeat('x', 100), 'Long.', ['type' => 'object']);
+    $short = new ToolDefinition(substr(AlpacaBot\Toolkit\ToolName::fit('trk__' . $long->name), strlen('trk__')), 'Short.', ['type' => 'object']);
+    $other = new ToolDefinition('fetch', 'Fetch.', ['type' => 'object']);
+    $html = (new McpTools(0, [mcpToolRow($long, 'new', true), mcpToolRow($short, 'new', true), mcpToolRow($other, 'new', true)], '', [], 'trk'))->render();
+    $items = explode('<li>', $html);
+    $said = 'Reaches the model under the same tool name as %s, so while both are ticked neither is offered.';
+    expect($items[1])->toContain(sprintf($said, '<code>' . $short->name . '</code>'))
+        ->and($items[2])->toContain(sprintf($said, '<code>' . $long->name . '</code>'))
+        ->and($items[3])->not->toContain('same tool name')
+        // Still a box each: the mark says what ticking both does, and nothing is left out silently.
+        ->and(substr_count($html, 'type="checkbox"'))->toBe(3);
+});
+
+// A name the listing repeats is never offered, so a tool that would share its fitted name is not
+// held back by it, and is not marked.
+it('does not mark a tool for sharing a name with one the listing repeats', function (): void {
+    $long = new ToolDefinition(str_repeat('x', 100), 'Long.', ['type' => 'object']);
+    $short = new ToolDefinition(substr(AlpacaBot\Toolkit\ToolName::fit('trk__' . $long->name), strlen('trk__')), 'Short.', ['type' => 'object']);
+    $html = (new McpTools(0, [mcpToolRow($long, 'new', true), mcpToolRow($long, 'new', true), mcpToolRow($short, 'new', true)], '', [], 'trk'))->render();
+    expect($html)->not->toContain('same tool name');
+    // Nor for one whose name cannot be approved at all (a space is outside the approval rule).
+    $bad = new ToolDefinition('q q', 'Spaced.', ['type' => 'object']);
+    $twin = new ToolDefinition(substr(AlpacaBot\Toolkit\ToolName::fit('trk__' . $bad->name), strlen('trk__')), 'Twin.', ['type' => 'object']);
+    expect(AlpacaBot\Toolkit\ToolName::fit('trk__' . $twin->name))->toBe(AlpacaBot\Toolkit\ToolName::fit('trk__' . $bad->name))
+        ->and((new McpTools(0, [mcpToolRow($bad, 'new', true), mcpToolRow($twin, 'new', true)], '', [], 'trk'))->render())->not->toContain('same tool name');
+});
+
+// C3 (final review M5): approving a tool pins its input schema, which reaches the model as the
+// server sent it, so the list shows it: collapsed, pretty-printed, escaped, and cut at
+// McpTools::SCHEMA_CHARS characters.
+it('shows each tool\'s input schema collapsed, pretty-printed and escaped', function (): void {
+    $tool = new ToolDefinition('search', 'Search.', ['type' => 'object', 'properties' => ['q' => ['type' => 'string', 'description' => 'a/b é']]]);
+    $html = (new McpTools(0, [mcpToolRow($tool, 'new', true)]))->render();
+    $json = json_encode($tool->inputSchema, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+    expect($html)->toContain('<details class="ab-mcp-schema"><summary>Input schema</summary><pre>' . htmlspecialchars($json, ENT_QUOTES) . '</pre></details></li>')
+        ->and($json)->toContain("\n    \"properties\"")
+        ->and($json)->toContain('a/b \\u00e9');
+});
+
+// Review fix (Task 28.3): a character that draws nothing or reorders what is drawn -- a zero-width
+// space, a right-to-left override, a Unicode tag character -- is text the model reads and the
+// approver would not see, so every character outside ASCII is shown as its \u escape.
+it('shows every character outside ASCII in a schema as a visible \\u escape, never raw', function (): void {
+    $tool = new ToolDefinition('search', 'Search.', ['type' => 'object', 'description' => "a\u{202E}b\u{200B}c\u{E0041}d"]);
+    $html = (new McpTools(0, [mcpToolRow($tool, 'new', true)]))->render();
+    expect($html)->toContain('a\\u202eb\\u200bc\\udb40\\udc41d')
+        ->not->toContain("\u{202E}")
+        ->not->toContain("\u{200B}")
+        ->not->toContain("\u{E0041}");
+});
+
+it('renders a schema that carries markup inert', function (): void {
+    $tool = new ToolDefinition('search', 'Search.', ['type' => 'object', 'description' => '</pre></details><script>alert(1)</script>']);
+    $html = (new McpTools(0, [mcpToolRow($tool, 'new', true)]))->render();
+    expect($html)->not->toContain('<script')
+        ->not->toContain('</pre></details><script')
+        ->toContain('&lt;/pre&gt;&lt;/details&gt;&lt;script&gt;alert(1)&lt;/script&gt;');
+});
+
+it('cuts a schema longer than the cap, and says so', function (): void {
+    expect(McpTools::SCHEMA_CHARS)->toBe(4000);
+    $tool = new ToolDefinition('search', 'Search.', ['type' => 'object', 'description' => str_repeat('é', 5000)]);
+    $html = (new McpTools(0, [mcpToolRow($tool, 'new', true)]))->render();
+    preg_match('#<pre>(.*)</pre>#s', $html, $m);
+    $fits = new ToolDefinition('fits', 'Fits.', ['type' => 'object', 'description' => str_repeat('x', 3000)]);
+    expect(mb_strlen(htmlspecialchars_decode($m[1], ENT_QUOTES)))->toBe(4001)
+        ->and(mb_substr(htmlspecialchars_decode($m[1], ENT_QUOTES), -1))->toBe('…')
+        ->and($html)->toContain('Cut at 4000 characters here; the model is handed the whole schema.')
+        ->and((new McpTools(0, [mcpToolRow($fits, 'new', true)]))->render())->not->toContain('Cut at');
+});
+
+// json_decode() makes INF of 1e999, which JSON cannot write back: the tool is still listed.
+it('says so when a schema cannot be written out as JSON', function (): void {
+    $tool = new ToolDefinition('search', 'Search.', ['type' => 'object', 'maximum' => INF]);
+    $html = (new McpTools(0, [mcpToolRow($tool, 'new', true)]))->render();
+    expect($html)->toContain('<details class="ab-mcp-schema"><summary>Input schema</summary><p>This schema holds a value JSON cannot write, such as a number too large for it, so it cannot be shown.</p></details>')
+        ->toContain('name="alpaca_bot_settings[toolkits.mcp_servers][0][approved][search]"');
+});
+
+// Addendum review I-1: core's esc_html() does not double-encode, so an entity already in the text
+// (`&#x202E;`, `&#8203;`) would reach the browser as one and be drawn as the character it spells:
+// a right-to-left override or a zero-width space the approver cannot see, in ASCII text that
+// wp_json_encode() and describe() leave alone and the model reads as the entity's letters. Every
+// piece of the server's text is printed with `&` encoded again, so the entity shows as typed.
+// Brain Monkey's esc_html() stand-in double-encodes, which would hide the gap, so core's
+// behaviour stands in here.
+it('shows an entity in the server\'s text as the letters it is written with, never the character it spells', function (): void {
+    Functions\when('esc_html')->alias(static fn(string $s): string => htmlspecialchars($s, ENT_QUOTES, 'UTF-8', false));
+    $tool = new ToolDefinition('search', 'Find a&#x202E;b and c&#8203;d &amp; e', ['type' => 'object', 'description' => 'x&#x202E;y&#8203;z'], [], 'Title &#x202E;t');
+    $html = (new McpTools(0, [mcpToolRow($tool, 'new', true)], '', ['gone' => str_repeat('a', 64)]))->render();
+    expect($html)->toContain('<pre>' . htmlspecialchars((string) json_encode($tool->inputSchema, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES), ENT_QUOTES, 'UTF-8', true) . '</pre>')
+        ->toContain('x&amp;#x202E;y&amp;#8203;z')
+        ->toContain('<span class="description">Find a&amp;#x202E;b and c&amp;#8203;d &amp;amp; e</span>')
+        ->toContain('<strong>Title &amp;#x202E;t</strong>')
+        ->not->toContain('&#x202E;')
+        ->not->toContain('&#8203;');
+});
+
+// The name is the server's text too, printed with the same rule, and so is a name the list says a
+// save would drop; a name that cannot be approved is still listed.
+it('shows an entity in a tool name as the letters it is written with', function (): void {
+    Functions\when('esc_html')->alias(static fn(string $s): string => htmlspecialchars($s, ENT_QUOTES, 'UTF-8', false));
+    $tool = new ToolDefinition('a&#x202E;b', 'Named.', ['type' => 'object']);
+    $html = (new McpTools(0, [mcpToolRow($tool, 'new', true)]))->render();
+    expect($html)->toContain('<code>a&amp;#x202E;b</code>')->not->toContain('&#x202E;');
+});
+
+// The same rule holds for a schema past the cap, for a stored approval's name the server no longer
+// lists, and for the drift note the error fragment carries: none of them prints an entity as one.
+it('shows an entity as its letters in a cut schema, a dropped approval and the drift note', function (): void {
+    Functions\when('esc_html')->alias(static fn(string $s): string => htmlspecialchars($s, ENT_QUOTES, 'UTF-8', false));
+    $long = new ToolDefinition('long', 'Long.', ['type' => 'object', 'description' => '&#x202E;' . str_repeat('x', 5000)]);
+    $html = (new McpTools(0, [mcpToolRow($long, 'new', true)], '', ['g&#8203;one' => str_repeat('a', 64)]))->render();
+    expect($html)->toContain('Cut at 4000 characters here')
+        ->toContain('&quot;&amp;#x202E;xxx')
+        ->toContain('<code>g&amp;#8203;one</code>')
+        ->not->toContain('&#x202E;')
+        ->not->toContain('&#8203;');
+    $error = (new McpTools(0, [], 'The server did not answer.', ['d&#x202E;rift' => str_repeat('a', 64)], '', ['d&#x202E;rift']))->render();
+    expect($error)->toContain('<code>d&amp;#x202E;rift</code>');
+});

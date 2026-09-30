@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace AlpacaBot\Rest;
 
+use AlpacaBot\Errors;
 use AlpacaBot\Provider\Model;
 use AlpacaBot\Provider\ModelCatalog;
 use AlpacaBot\Settings\Store;
@@ -19,10 +20,13 @@ use AlpacaBot\Settings\Store;
  * (Chat\Pipeline::toolkitsFor()), so it is laid over the flag here too, and a model somebody
  * forced tools off on does not list as tool-capable. It is not a promise about a turn:
  * toolkitsFor() returns [] before it ever reads the override when the user whose turn it is has
- * no toolkit enabled, and enablement is resolved per user (Toolkit\Registry::enabled(), through
- * `alpaca_bot/toolkits`). This route is not short of a user — it requires `edit_posts`, so there
- * always is one — but the controller is constructed with a ModelCatalog and a Store and never
- * asks the toolkit registry at all, so the row it prints cannot reflect enablement for anybody:
+ * no toolkit enabled, and enablement is resolved per user (Toolkit\Registry::enabled(): the
+ * setting, each tool's Access row for that user, each MCP server's row for that user, then
+ * `alpaca_bot/toolkits`). This route is not
+ * short of a user on a site that has not opened it: it requires the Chat row (`edit_posts` by
+ * default), so there is one — but the controller is constructed with a ModelCatalog and a Store
+ * and never asks the toolkit registry at all, so the row it prints cannot reflect enablement for
+ * anybody:
  * `tools: true` here can describe a turn that runs plain. The overlay is on the response only —
  * the Model objects, the request memo and the five-minute transient behind them all keep the
  * provider's own answer, which is what an inherit row still has to be able to read. `vision` and
@@ -55,7 +59,7 @@ final class ModelsController extends Controller
             'path' => '/models',
             'methods' => 'GET',
             'callback' => [$this, 'index'],
-            'capability' => 'edit_posts',
+            'capability' => self::CHAT,
             'rate_limit' => true,
             'args' => ['refresh' => ['type' => 'boolean', 'default' => false]],
         ]];

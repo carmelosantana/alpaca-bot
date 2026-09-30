@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace AlpacaBot\Chat;
 
+use AlpacaBot\Plugin;
 use AlpacaBot\Settings\Store;
 
 /**
@@ -87,6 +88,8 @@ final class ConversationStore
             // Conversations are only ever created here, never from an editor screen or REST.
             'capabilities' => ['create_posts' => 'do_not_allow'],
             'map_meta_cap' => true,
+            // Tells uninstall.php the plugin found the name free (Plugin::POST_TYPE_MARK).
+            Plugin::POST_TYPE_MARK => !post_type_exists(self::POST_TYPE),
         ]);
     }
 

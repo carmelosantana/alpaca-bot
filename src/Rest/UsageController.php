@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace AlpacaBot\Rest;
 
 use AlpacaBot\Chat\UsageMeter;
+use AlpacaBot\Errors;
 use AlpacaBot\Settings\Store;
 
 /**
@@ -32,7 +33,7 @@ final class UsageController extends Controller
             'path' => '/usage',
             'methods' => 'GET',
             'callback' => [$this, 'show'],
-            'capability' => 'edit_posts',
+            'capability' => self::CHAT,
             'args' => ['user' => ['type' => 'string', 'default' => 'me', 'enum' => ['me', 'all']]],
         ]];
     }

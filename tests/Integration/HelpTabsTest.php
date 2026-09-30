@@ -16,7 +16,7 @@ use AlpacaBot\Admin\SettingsPage;
  * The screen ids come from core, over a menu registered here, never read back out of HelpTabs.
  * Feeding HelpTabs' own list into set_current_screen() asserts the plugin's answer against
  * itself and passes whatever it says — which is what this file did until 0.5.0, while the
- * settings page was losing all four of its tabs on every locale that translates "Alpaca Bot".
+ * settings page was losing every one of its tabs on every locale that translates "Alpaca Bot".
  *
  * @group admin
  */
@@ -66,7 +66,8 @@ final class HelpTabsTest extends TestCase
         (new Menu(new SettingsPage(
             \AlpacaBot\Plugin::instance()->get(\AlpacaBot\Settings\Store::class),
             \AlpacaBot\Plugin::instance()->get(\AlpacaBot\Provider\ModelCatalog::class),
-        ), $renderer))->register();
+            \AlpacaBot\Plugin::instance()->get(\AlpacaBot\Access::class),
+        ), $renderer, \AlpacaBot\Plugin::instance()->get(\AlpacaBot\Access::class)))->register();
 
         return [
             get_plugin_page_hookname(Menu::SLUG, ''),
@@ -74,14 +75,15 @@ final class HelpTabsTest extends TestCase
         ];
     }
 
-    public function test_the_chat_screen_and_the_settings_page_get_four_tabs_and_the_dashboard_none(): void
+    public function test_the_chat_screen_and_the_settings_page_get_every_tab_and_the_dashboard_none(): void
     {
         $this->asAdmin();
         foreach ($this->registerMenu() as $id) {
             set_current_screen($id);
             $tabs = get_current_screen()->get_help_tabs();
-            $this->assertSame(['alpaca-bot-chat', 'alpaca-bot-shortcodes', 'alpaca-bot-tools', 'alpaca-bot-support'], array_keys($tabs), $id);
+            $this->assertSame(['alpaca-bot-chat', 'alpaca-bot-shortcodes', 'alpaca-bot-tools', 'alpaca-bot-access', 'alpaca-bot-support'], array_keys($tabs), $id);
             $this->assertStringContainsString('[alpacabot]', $tabs['alpaca-bot-shortcodes']['content']);
+            $this->assertStringContainsString('Set in code', $tabs['alpaca-bot-access']['content']);
             $this->assertStringContainsString('egress policy', $tabs['alpaca-bot-tools']['content']);
         }
         set_current_screen('dashboard');
@@ -109,7 +111,7 @@ final class HelpTabsTest extends TestCase
 
         set_current_screen($settings);
         $this->assertSame(
-            ['alpaca-bot-chat', 'alpaca-bot-shortcodes', 'alpaca-bot-tools', 'alpaca-bot-support'],
+            ['alpaca-bot-chat', 'alpaca-bot-shortcodes', 'alpaca-bot-tools', 'alpaca-bot-access', 'alpaca-bot-support'],
             array_keys(get_current_screen()->get_help_tabs()),
             $settings,
         );

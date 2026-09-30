@@ -241,7 +241,7 @@ final class CoreClient implements Client
      * `[0]` would do if it ever did: a PHP warning and then an \Error, which is not an
      * \Exception, so it would pass generate()'s `catch (\Exception)` above untouched, break
      * Client::generate()'s documented `@throws \RuntimeException`, and reach a caller that
-     * maps a failed turn by class (Rest\Errors::fromPipeline()) as something with no arm for
+     * maps a failed turn by class (Errors::fromPipeline()) as something with no arm for
      * it. Refused, it is the same RuntimeException every other failure on this path is.
      *
      * @return WpAiReply

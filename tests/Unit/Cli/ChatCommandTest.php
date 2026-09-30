@@ -466,6 +466,23 @@ it('masks the API key in the whole dump but prints it when asked for by name', f
         ->and($c->out)->toBe("\"sk-secret\"\n");
 });
 
+// An MCP server's header value is not in the option at all (Mcp\ServerSettings keeps it in an
+// option of its own and leaves the mask in the row), so the dump and a read by name show the row
+// as it is stored. A row that reached the option with the value in it, some other way, is masked
+// all the same: the dump ends up in CI logs, and this command offers no way to reveal one.
+it('masks every MCP server\'s header value, in the dump and read by name', function (): void {
+    $rows = [['id' => 'raw', 'url' => 'https://mcp.example.com/mcp', 'header_name' => 'X-Key', 'header_value' => 'Bearer raw-secret', 'prefix' => 'raw', 'timeout' => 30.0, 'max_bytes' => 1048576, 'approved' => []]];
+    $h = pipelineWith(null, ['toolkits.mcp_servers' => $rows]);
+    $c = cliCommand($h);
+
+    $c->command->settings([], []);
+    $c->command->settings(['toolkits.mcp_servers'], []);
+
+    expect($c->errors)->toBe([])
+        ->and($c->out)->not->toContain('raw-secret')
+        ->and(substr_count($c->out, json_encode(Schema::MASK)))->toBe(2);
+});
+
 it('reads one setting as JSON', function (): void {
     $h = pipelineWith(null);
     $c = cliCommand($h);
@@ -494,9 +511,13 @@ it('takes an array setting as JSON', function (): void {
 
     $c->command->settings(['models.overrides', '{"llama3.2":{"temperature":"0.2"}}'], []);
     $c->command->settings(['models.overrides', 'not json'], []);
+    $c->command->settings(['toolkits.abilities', '["core/get-site-info","alpaca-bot/chat"]'], []);
+    $c->command->settings(['toolkits.abilities', 'core/get-site-info'], []);
 
-    expect($c->out)->toBe("{\"llama3.2\":{\"temperature\":0.2}}\n")
-        ->and($c->errors)->toBe(['models.overrides takes a JSON object.']);
+    expect($c->out)->toBe("{\"llama3.2\":{\"temperature\":0.2}}\n[\"core/get-site-info\"]\n")
+        ->and($c->errors)->toBe(['models.overrides takes a JSON object.', 'toolkits.abilities takes a JSON list.']);
+    $c->command->settings(['access.mcp', 'nope'], []);
+    expect($c->errors[2])->toBe('access.mcp takes a JSON object.');
 });
 
 it('refuses a key the schema does not know', function (): void {

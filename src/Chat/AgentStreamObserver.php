@@ -16,7 +16,10 @@ use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Tool\ToolResult;
  * The vendored AbstractAgent reports through SplObserver, and its notify() calls update($this)
  * with one argument, leaving the event name and payload on the agent (lastEvent(),
  * lastEventData()); both live on AbstractAgent, not on SplSubject, so anything else is ignored.
- * Events read: `agent.text_delta` and `agent.reasoning` (a string each) become Deltas;
+ * Events read: `agent.text_delta` and `agent.reasoning` (a string each) become Deltas; text
+ * deltas go through a FakedToolCallStream on the way to the queue, which flags the pieces that
+ * are a faked tool call's markup (`held`) and keeps back the few bytes of a marker split across
+ * two deltas; `flush()` and `takeUnsent()` are the two ways those come back out.
  * `agent.iteration` (an int) marks where a paragraph break goes (separated()); `agent.tool_call`
  * (a ToolCall) opens a record and queues an empty Delta, the heartbeat (below);
  * `agent.tool_result` (a ToolResult) closes the record; `agent.error` (a string) is kept as
@@ -42,16 +45,23 @@ use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Tool\ToolResult;
  * is queued and left for drain() after run() returns: suspending a fiber the pipeline is not
  * resuming would leave it hanging, and suspending outside any fiber is a FiberError.
  *
- * A tool call record is `{name, arguments, result_excerpt, ok}`, paired to its result by the
- * result's callId, else to the oldest unanswered call (a provider that sends no ids, or the
- * same id twice, still gets one record per call). `ok` is Success; Error and Timeout are not.
+ * A tool call record is `{name, arguments, result_excerpt, ok, result_bytes}`, paired to its
+ * result by the result's callId, else to the oldest unanswered call (a provider that sends no
+ * ids, or the same id twice, still gets one record per call). `ok` is Success; Error and Timeout
+ * are not. `result_bytes` is the size in bytes of the whole result the agent handed back, not of
+ * the excerpt, and 0 for a call never answered. The agent keeps a result in the turn's
+ * conversation and sends it with each later request of the turn (AbstractAgent::run()), where the
+ * prompt tokens count it without saying how much of them it was; the excerpt is cut for storage,
+ * so this number is the one record of that size, and the usage receipt sums it
+ * (`tool_result_bytes`, Chat\UsageMeter).
  * Every record is stored on the assistant turn for the life of the conversation and counts
  * against the transcript's packet budget (ConversationStore::save()), so every part of it the
  * model chose is bounded, in characters, with an ellipsis where a cut was made: the result to
  * RESULT_CHARS, the tool's name to NAME_CHARS, each string argument to ARGUMENT_CHARS, and the
  * arguments record as a whole to ARGUMENTS_CHARS over its keys and values at every depth
- * (boundedArguments()). A record is therefore never larger than the sum of those three
- * ceilings plus its marks, whatever the model put in the call — the name included, which was
+ * (boundedArguments()). `ok` and `result_bytes` are a bool and an int, not text. A record is
+ * therefore never larger than the sum of those three ceilings plus its marks, its keys and those
+ * two scalars, whatever the model put in the call — the name included, which was
  * unbounded until 0.5.0 and stored whole (a 50,000-character name measured at 51,274 chars on
  * the record). The full result was for the model and is gone with the run; the arguments are
  * what ran, and the per-string bound keeps a URL or a title whole while a drafted post's body,
@@ -118,14 +128,18 @@ final class AgentStreamObserver implements \SplObserver
     /** @var list<array{id: string, name: string, arguments: array<string, mixed>}> calls announced and not yet answered, oldest first */
     private array $pending = [];
 
-    /** @var list<array{name: string, arguments: array<string, mixed>, result_excerpt: string, ok: bool}> */
+    /** @var list<array{name: string, arguments: array<string, mixed>, result_excerpt: string, ok: bool, result_bytes: int}> */
     private array $toolCalls = [];
 
     private ?string $error = null;
 
+    /** Says which streamed bytes are a faked tool call's markup (Kanboard #4329); the class docblock's event list says where it sits. */
+    private FakedToolCallStream $faked;
+
     public function __construct()
     {
         $this->deltas = new \SplQueue();
+        $this->faked = new FakedToolCallStream();
     }
 
     /**
@@ -155,7 +169,13 @@ final class AgentStreamObserver implements \SplObserver
                     $this->breakPending = false;
                 }
                 $this->streamedText .= $text;
-                $this->push(new Delta($text));
+                // One delta in, one or more out: a piece that is a faked call's markup is flagged
+                // rather than withheld, and a few bytes that might be the start of a marker are
+                // kept until the next delta (or flush()) settles it. A delta that is nothing but
+                // those few bytes therefore queues nothing at all, and so suspends nothing.
+                foreach ($this->faked->feed($text) as [$piece, $held]) {
+                    $this->push(new Delta($piece, '', $held));
+                }
                 break;
             case 'agent.reasoning':
                 $this->push(new Delta('', is_string($data) ? $data : ''));
@@ -165,8 +185,10 @@ final class AgentStreamObserver implements \SplObserver
                     $this->pending[] = ['id' => $data->id, 'name' => self::bounded($data->name, self::NAME_CHARS), 'arguments' => self::boundedArguments($data->arguments)];
                     // The heartbeat: an empty delta, so the pipeline yields (and a streaming
                     // transport writes) something before the tool runs. The event fires before
-                    // any tool of the iteration executes, which is the moment that matters.
-                    $this->push(new Delta(''));
+                    // any tool of the iteration executes, which is the moment that matters. It
+                    // carries the hold state so a screen that is hiding a faked call's markup
+                    // keeps saying so across it.
+                    $this->push(new Delta('', '', $this->faked->open()));
                 }
                 break;
             case 'agent.tool_result':
@@ -195,17 +217,40 @@ final class AgentStreamObserver implements \SplObserver
     }
 
     /**
+     * Queues the bytes FakedToolCallStream was still deciding about, for a run that has ended:
+     * the pipeline calls this after the agent returns, before its last drain, so they reach the
+     * client in their place and in the stored reply. Nothing suspends here: push() suspends only
+     * inside the streamed fiber, and this is called after that fiber has terminated.
+     */
+    public function flush(): void
+    {
+        foreach ($this->faked->flush() as [$text, $held]) {
+            $this->push(new Delta($text, '', $held));
+        }
+    }
+
+    /**
+     * The same bytes for a run nobody will drain again — the consumer walked away, or the turn
+     * threw — handed back as text rather than as a delta, so send() can put them on the partial
+     * reply it stores. Once: a second call has nothing.
+     */
+    public function takeUnsent(): string
+    {
+        return implode('', array_column($this->faked->flush(), 0));
+    }
+
+    /**
      * Every tool call heard, in the order their results arrived; a call still unanswered (the
      * run was cut off, or cancelled, before its result) is listed last as not ok with nothing
-     * to show, so the record still says it was made.
+     * to show and 0 bytes, so the record still says it was made.
      *
-     * @return list<array{name: string, arguments: array<string, mixed>, result_excerpt: string, ok: bool}>
+     * @return list<array{name: string, arguments: array<string, mixed>, result_excerpt: string, ok: bool, result_bytes: int}>
      */
     public function toolCalls(): array
     {
         $out = $this->toolCalls;
         foreach ($this->pending as $call) {
-            $out[] = ['name' => $call['name'], 'arguments' => $call['arguments'], 'result_excerpt' => '', 'ok' => false];
+            $out[] = ['name' => $call['name'], 'arguments' => $call['arguments'], 'result_excerpt' => '', 'ok' => false, 'result_bytes' => 0];
         }
         return $out;
     }
@@ -272,6 +317,7 @@ final class AgentStreamObserver implements \SplObserver
             'arguments' => $call['arguments'],
             'result_excerpt' => self::bounded($result->content, self::RESULT_CHARS),
             'ok' => $result->status === ToolResultStatus::Success,
+            'result_bytes' => strlen($result->content),
         ];
     }
 

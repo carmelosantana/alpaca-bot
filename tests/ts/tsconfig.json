@@ -1,0 +1,15 @@
+{
+  // The node:test unit tests, type-checked with `pnpm typecheck` alongside resources/ts and
+  // tests/e2e. `pnpm test` runs them through Node's type stripping, which checks no types, and
+  // the root config includes only resources/ts, so without this project nothing checks them. The
+  // resources/ts modules they import are checked here too, as the tests see them: with Node's
+  // globals beside the DOM lib this inherits from the root. happy-dom's own .d.ts arrive through
+  // env.ts's import. `types: ["node"]` is for node:test and node:assert: @types/node would reach
+  // the program anyway through @types/ws, which happy-dom's WebSocket declarations import, but
+  // only by accident of happy-dom's internals; naming it here makes the dependency direct.
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "types": ["node"]
+  },
+  "include": ["**/*.ts"]
+}

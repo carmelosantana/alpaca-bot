@@ -4,11 +4,13 @@ declare(strict_types=1);
 
 use AlpacaBot\Abilities\Register;
 use AlpacaBot\Chat\ConversationStore;
+use AlpacaBot\Toolkit\AbilitiesToolkit;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Enum\ProviderFinishReason;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Provider\Response;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Provider\Usage;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Tool\Parameter\StringParameter;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Tool\Tool;
+use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Tool\ToolCall;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Contract\ToolkitInterface;
 use Brain\Monkey\Filters;
 use Brain\Monkey\Functions;
@@ -45,7 +47,8 @@ it('defines the three abilities, in order, with the shapes a client is told to e
             // Nothing a client sends besides the named keys reaches a callback: an unknown key is a 400, not ignored.
             ->and($def['input_schema']['additionalProperties'])->toBeFalse()
             ->and($def['output_schema']['type'])->toBe('object')
-            ->and($def['meta'])->toBe(['show_in_rest' => true, 'public' => true, 'annotations' => ['readonly' => false, 'destructive' => false, 'idempotent' => false]], $id);
+            // Only chat is destructive: its save rewrites a conversation's excerpt, and fit() drops stored images and messages past the packet budget (the class docblock).
+            ->and($def['meta'])->toBe(['show_in_rest' => true, 'public' => true, 'annotations' => ['readonly' => false, 'destructive' => $id === 'alpaca-bot/chat', 'idempotent' => false]], $id);
     }
     $chat = $defs['alpaca-bot/chat']['input_schema'];
     expect(array_keys($chat['properties']))->toBe(['message', 'conversation_id', 'model'])
@@ -356,4 +359,82 @@ it('summarize and draft-post run whatever alpaca_bot/toolkits put under the id, 
         ->and($swapped->calls)->toBe([['summarize', ['text' => 'Long.', 'length' => 'short']], ['draft_post', ['title' => 't', 'content' => 'c']]])
         // The plugin's own toolkits never ran: no turn, no insert.
         ->and($h->writes)->toBe([]);
+});
+
+// Kanboard #4538. A turn offered an "execute any ability" ability (the MCP Adapter's
+// `mcp-adapter/execute-ability`, ticked under Settings › Tools) can reach alpaca-bot/chat
+// through it, although AbilitiesToolkit never offers alpaca-bot/* directly. Here the turn's
+// model calls `acme/run-ability`, a WP_Ability double that runs whichever of the Register's
+// callbacks it is named, as the adapter's runs wp_get_ability($name)->execute(); the tool
+// reaches the model through the real AbilitiesToolkit, as it would on a site. The integration
+// suite runs the same shape over core's registry (tests/Integration/AbilitiesTest.php).
+dataset('abilities that start a turn', [
+    'chat' => ['alpaca-bot/chat', ['message' => 'Ask yourself again.'], fn(array $out): mixed => $out['reply']],
+    'summarize' => ['alpaca-bot/summarize', ['text' => 'Some long text.'], fn(array $out): mixed => $out['summary']],
+]);
+
+it('refuses to start a turn inside a running one: the refusal is the nested call\'s tool result, the outer turn completes, and a top-level call afterwards runs', function (string $id, array $input, \Closure $answer): void {
+    $runAny = AbilitiesToolkit::toolName('acme/run-ability');
+    $provider = agentProvider([
+        [new Response('', ProviderFinishReason::ToolUse, [new ToolCall('c1', $runAny, ['ability' => $id, 'input' => $input])], usage: new Usage(3, 1, 4))],
+        [new Response('Done.', ProviderFinishReason::Stop), new Response('', ProviderFinishReason::Stop, usage: new Usage(4, 2, 6))],
+        // The top-level call after the turn: one more stream, its own turn.
+        [new Response('Top level.', ProviderFinishReason::Stop), new Response('', ProviderFinishReason::Stop, usage: new Usage(1, 1, 2))],
+    ], $calls);
+    $register = null;
+    $raw = [];
+    $ability = siteAbility('acme/run-ability', ['type' => 'object', 'properties' => ['ability' => ['type' => 'string'], 'input' => ['type' => 'object']]]);
+    $ability->shouldReceive('execute')->andReturnUsing(static function (array $in) use (&$register, &$raw): mixed {
+        $raw[] = $out = ($register->definitions()[$in['ability']]['execute_callback'])($in['input']);
+        return $out;
+    });
+    $kit = abilitiesToolkit(['acme/run-ability' => $ability], ['acme/run-ability']);
+    $h = pipelineWith($provider, [], [], [['id' => 'llama3.2', 'tools' => true]], null, registryWith([AbilitiesToolkit::ID => $kit]), turns: 2);
+    $register = abilitiesRegister($h);
+    abilitiesCountHits($h);
+    $limiter = 'alpaca_bot_rl_chat_3_' . gmdate('YmdHi', 1_725_000_000);
+
+    $result = $h->pipeline->complete(3, 'Use the tool.');
+
+    $refusal = 'A chat turn is already running, and Alpaca Bot does not start another one inside it. Answer in the turn that is running instead.';
+    expect($raw)->toHaveCount(1)
+        ->and($raw[0])->toBeInstanceOf(WP_Error::class)
+        ->and($raw[0]->get_error_code())->toBe('alpaca_bot_turn_running')
+        ->and($raw[0]->get_error_data())->toBe(['status' => 409])
+        // What the model read back, and what the transcript records of the call.
+        ->and($calls[1]['messages'][3]->content())->toBe($refusal)
+        ->and($result->reply->meta['tool_calls'][0])->toMatchArray(['name' => $runAny, 'ok' => false, 'result_excerpt' => $refusal])
+        // The outer turn finished as any turn does: its answer, one conversation, one receipt.
+        // A nested turn would have been a third stream() and a second filtered provider,
+        // which agentProvider() and pipelineWith() both fail on, and a second receipt.
+        ->and($result->reply->content)->toBe('Done.')
+        ->and($h->pipeline->running())->toBeFalse()
+        // Refused before the limiter: the refused call spent none of the minute's allowance.
+        ->and($h->transients)->not->toHaveKey($limiter)
+        ->and(array_values(array_map(static fn(array $w): string => $w[1], array_filter($h->writes, static fn(array $w): bool => $w[0] === 'wp_insert_post'))))->toBe(['chat_history', 'chat_log']);
+
+    // No turn is running any more, so the same ability called at the top level runs.
+    $out = ($register->definitions()[$id]['execute_callback'])($input);
+    expect($out)->toBeArray()
+        ->and($answer($out))->toBe('Top level.')
+        ->and($h->transients[$limiter])->toBe(1);
+})->with('abilities that start a turn');
+
+it('draft-post starts no turn and is not refused inside one', function (): void {
+    // A turn is running: an ephemeral one, advanced into its provider stream and held there.
+    $h = pipelineWith(pipelineProvider([new Response('x', ProviderFinishReason::Stop)]));
+    $gen = $h->pipeline->send(3, 'Hi', ['ephemeral' => true]);
+    $gen->current();
+    expect($h->pipeline->running())->toBeTrue();
+    abilitiesCaps(['edit_posts']);
+    Functions\when('is_user_logged_in')->justReturn(true);
+    Functions\when('wp_kses_post')->returnArg();
+    Functions\when('get_edit_post_link')->alias(static fn(int $id): string => "/wp-admin/post.php?post={$id}&action=edit");
+    Functions\when('is_wp_error')->alias(static fn(mixed $v): bool => $v instanceof WP_Error);
+    Functions\when('wp_insert_post')->justReturn(77);
+    $out = (abilitiesRegister($h)->definitions()['alpaca-bot/draft-post']['execute_callback'])(['title' => 't', 'content' => 'c']);
+    expect($out)->toBe(['id' => 77, 'edit_url' => '/wp-admin/post.php?post=77&action=edit']);
+    foreach ($gen as $_) {
+    }
+    expect($h->pipeline->running())->toBeFalse();
 });

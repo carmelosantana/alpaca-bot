@@ -155,14 +155,48 @@ function freshProcess(string $script, array $args): string
 
 /**
  * Admin\SettingsPageTest: a page over a pre-seeded Store and a catalog that is never asked
- * (do_settings_sections() is stubbed there, so the overrides table never renders).
+ * (do_settings_sections() is stubbed there, so the overrides table never renders). `$exists`
+ * stands in for function_exists(), as abilitiesRegister()'s does; null is the real one.
  *
  * @param array<string, mixed> $settings
+ * @param (callable(string): bool)|null $exists
  */
-function settingsPage(array $settings = []): AlpacaBot\Admin\SettingsPage
+function settingsPage(array $settings = [], ?callable $exists = null): AlpacaBot\Admin\SettingsPage
 {
     $store = new Store($settings);
-    return new AlpacaBot\Admin\SettingsPage($store, new ModelCatalog(new Factory($store)));
+    return new AlpacaBot\Admin\SettingsPage($store, new ModelCatalog(new Factory($store)), new AlpacaBot\Access($store), $exists);
+}
+
+/** core's selected() with $echo false: the attribute when the two values match as strings, else ''. */
+function stubSelected(): void
+{
+    Functions\when('selected')->alias(fn($a, $b, $e = true): string => (string) $a === (string) $b ? ' selected="selected"' : '');
+}
+
+/**
+ * Admin\SettingsPageTest: register()'s settings fields over a page seeded with `$settings`, as
+ * field id => [the title core would print, a closure returning what the field's callback prints].
+ * The field callback is how the page renders one row, so this is how the Access tab is read
+ * without core's do_settings_sections().
+ *
+ * @param array<string, mixed> $settings
+ * @param (callable(string): bool)|null $exists passed to settingsPage()
+ * @return array<string, array{title: string, render: Closure(): string}>
+ */
+function settingsFields(array $settings = [], ?callable $exists = null): array
+{
+    $fields = [];
+    Functions\when('register_setting')->justReturn(null);
+    Functions\when('add_settings_section')->justReturn(null);
+    Functions\when('add_settings_field')->alias(function (string $id, string $title, callable $render) use (&$fields): void {
+        $fields[$id] = ['title' => $title, 'render' => static function () use ($render): string {
+            ob_start();
+            $render();
+            return (string) ob_get_clean();
+        }];
+    });
+    settingsPage($settings, $exists)->register();
+    return $fields;
 }
 
 /**
@@ -555,6 +589,15 @@ function echoToolkit(string $name, string $guidelines = 'Use it.', ?callable $ca
  */
 function registryWith(array $toolkits): AlpacaBot\Toolkit\Registry
 {
+    // enabled() asks each toolkit's Access row now, so this helper has to answer user_can(). A
+    // when() rather than an expect(): every caller of this helper is about the turn, not about who
+    // may run it, and no test that reaches it expects user_can() itself -- the suite's only
+    // Functions\expect('user_can') sites are CurrentScreenSourceTest and DraftPostToolkitTest,
+    // neither of which builds a registry. A caller that does care about the answer stubs it again
+    // after this returns (AgentShimTest passes the helper's registry to pipelineWith() and then
+    // calls shortcodeViewer(), whose map is the one that decides), and Brain Monkey takes the
+    // later one.
+    Functions\when('user_can')->justReturn(true);
     $registry = new AlpacaBot\Toolkit\Registry(new Store(['toolkits.enabled' => array_keys($toolkits)]));
     foreach ($toolkits as $id => $toolkit) {
         $registry->register($id, $toolkit);
@@ -625,7 +668,8 @@ function cliUsers(array $existing = [3], int $current = 0): void
 
 /**
  * View\Chat\ComponentsTest: a Shell over a one-model catalog (served from the transient), the
- * given conversation and history, user 3 "Carmelo", and the given sprite path.
+ * given conversation and history, user 3 "Carmelo", the given sprite path, and `$postId` as the
+ * post being edited, which the user may edit and whose stored title is "Post {id}".
  *
  * @param list<array{id: int, title: string, created: int}> $history
  */
@@ -636,6 +680,10 @@ function chatShell(?AlpacaBot\Chat\Conversation $conversation, array $history, ?
     Functions\when('get_avatar_url')->justReturn('/u.png');
     Functions\when('plugins_url')->alias(fn(string $p) => '/plugins/alpaca-bot/' . $p);
     Functions\when('admin_url')->alias(fn(string $p) => '/wp-admin/' . $p);
+    // The post chip: the user may edit every post, and post N is titled "Post N".
+    Functions\when('current_user_can')->justReturn(true);
+    Functions\when('get_post')->alias(static fn(int $id): object => (object) ['ID' => $id, 'post_title' => "Post {$id}", 'post_status' => 'draft']);
+    Functions\when('wp_strip_all_tags')->alias(static fn(string $s): string => trim(strip_tags($s)));
     $store = new Store(['models.default' => 'llama3.2', 'chat.history_limit' => 15]);
     return new AlpacaBot\View\Chat\Shell($store, new ModelCatalog(new Factory($store)), $conversation, $history, $postId, $sprite);
 }
@@ -646,8 +694,10 @@ function chatShell(?AlpacaBot\Chat\Conversation $conversation, array $history, ?
  * stubbed: the post being rendered is `$postId` (get_the_ID()), shortcode_atts() is core's
  * merge (the pairs' keys only), and the transients are the harness's own `$h->transients`, so
  * set_transient() writes where get_transient() reads and a test can seed a cache entry or read
- * what was written. Every transient read is recorded in `$h->reads` and every write in
- * `$h->stored` as [key, value, ttl], for the tests about the cache, except the rate limiter's
+ * what was written. The Access the shortcode asks its row of reads that same Store, so a test
+ * seeds the row through pipelineWith()'s settings. Every transient read is recorded in
+ * `$h->reads` and every write in `$h->stored` as [key, value, ttl], for the tests about the
+ * cache, except the rate limiter's
  * counter (`alpaca_bot_rl_*`), which goes to `$h->limited` as [key, count] so a test about the
  * cache reads the cache alone and a test about the limiter reads its hits. wp_kses() is the
  * strip_tags stand-in MarkdownTest uses, so the markdown path keeps its allowed tags and drops
@@ -686,12 +736,15 @@ function shortcodeChat(object $h, int $postId = 7): AlpacaBot\Shortcodes\Chat
     Functions\when('wp_enqueue_style')->alias(static function (string $handle, string $src = '', array $deps = [], mixed $ver = false) use ($h): void {
         $h->styles[] = [$handle, $src];
     });
-    return new AlpacaBot\Shortcodes\Chat($h->store, $h->catalog, new ConversationStore($h->store), new AlpacaBot\Chat\UserPrefs(), $h->pipeline, new AlpacaBot\View\Markdown(), new AlpacaBot\Admin\Assets());
+    return new AlpacaBot\Shortcodes\Chat($h->store, $h->catalog, new ConversationStore($h->store), new AlpacaBot\Chat\UserPrefs(), $h->pipeline, new AlpacaBot\View\Markdown(), new AlpacaBot\Admin\Assets(), new AlpacaBot\Access($h->store));
 }
 
 /**
  * Shortcodes tests: the viewer of the page. `$id` 0 is a visitor (is_user_logged_in() false);
- * a logged-in viewer holds exactly `$caps`.
+ * a logged-in viewer holds exactly `$caps`. Both questions are answered from that one list:
+ * current_user_can(), which the shortcodes ask, and user_can() of the viewer's id, which
+ * Toolkit\Registry::enabled() asks through the shim -- so the two cannot disagree about a
+ * viewer the test has just described.
  *
  * @param list<string> $caps
  */
@@ -700,6 +753,7 @@ function shortcodeViewer(int $id, array $caps = ['edit_posts']): void
     Functions\when('is_user_logged_in')->justReturn($id > 0);
     Functions\when('get_current_user_id')->justReturn($id);
     Functions\when('current_user_can')->alias(static fn(string $cap): bool => $id > 0 && in_array($cap, $caps, true));
+    Functions\when('user_can')->alias(static fn(int $user, string $cap): bool => $id > 0 && $user === $id && in_array($cap, $caps, true));
 }
 
 /**
@@ -722,4 +776,138 @@ function abilitiesRegister(object $h, array $enabled = ['summarize', 'draft_post
     $draft = new AlpacaBot\Toolkit\DraftPostToolkit($user);
     $registry->register('draft_post', $draft);
     return new AlpacaBot\Abilities\Register($h->pipeline, $registry, $user, $exists);
+}
+
+/**
+ * EgressTest and the MCP tests after it: a server row as ServerConfig::fromSettings() builds it,
+ * with the three fields the egress client reads settable.
+ */
+function mcpServerConfig(string $url = 'https://mcp.example.test/mcp', float $timeout = 12.5, int $maxBytes = 1024): AlpacaBot\Mcp\ServerConfig
+{
+    return AlpacaBot\Mcp\ServerConfig::fromSettings(['id' => 'example', 'url' => $url, 'header_name' => 'Authorization', 'header_value' => 'Bearer t', 'prefix' => 'ex', 'timeout' => $timeout, 'max_bytes' => $maxBytes, 'approved' => []]);
+}
+
+/**
+ * FakedToolCallStreamTest: `$chunks` fed through one stream, flushed at the end, with adjacent
+ * pieces of the same flag joined — what a consumer sees whatever the provider's chunking was.
+ *
+ * @param list<string> $chunks
+ * @return list<array{0: string, 1: bool}>
+ */
+function fakedStream(array $chunks): array
+{
+    $stream = new AlpacaBot\Chat\FakedToolCallStream();
+    $out = [];
+    foreach ([...array_map(static fn(string $chunk): array => [$chunk], $chunks), []] as $call) {
+        foreach ($call === [] ? $stream->flush() : $stream->feed($call[0]) as [$text, $held]) {
+            $last = count($out) - 1;
+            if ($last >= 0 && $out[$last][1] === $held) {
+                $out[$last][0] .= $text;
+                continue;
+            }
+            $out[] = [$text, $held];
+        }
+    }
+    return $out;
+}
+
+/**
+ * DrawerTest: the admin-wide drawer over a Store of `$settings`, with a real Access, UserPrefs and
+ * Assets (all three final), so a test says what the site's settings are and stubs only WordPress.
+ *
+ * @param array<string, mixed> $settings
+ */
+function adminDrawer(array $settings = []): AlpacaBot\Admin\Drawer
+{
+    $store = new Store($settings);
+    return new AlpacaBot\Admin\Drawer(new AlpacaBot\Access($store), new AlpacaBot\Chat\UserPrefs(), new AlpacaBot\Admin\Assets());
+}
+
+/**
+ * wp_strip_all_tags() as core's does it to a string (WP 7.1 formatting.php:5628-5635): script and
+ * style elements dropped with their content, strip_tags() over the rest, runs of line breaks,
+ * tabs and spaces made one space on request, trimmed. SchemaTool::describe() calls it, and a
+ * stand-in that did less would pass a test core would fail.
+ */
+function stubStripAllTags(): void
+{
+    Functions\when('wp_strip_all_tags')->alias(static function (string $text, bool $removeBreaks = false): string {
+        $text = strip_tags((string) preg_replace('@<(script|style)[^>]*?>.*?</\\1>@si', '', $text));
+        if ($removeBreaks) {
+            $text = (string) preg_replace('/[\r\n\t ]+/', ' ', $text);
+        }
+        return trim($text);
+    });
+}
+
+/**
+ * AbilitiesToolkitTest and SettingsPageTest: a WP_Ability double. WP_Ability is a core class the
+ * unit suite does not load, so Mockery declares it, as HelpTabsTest does WP_Screen. execute()
+ * records its input and the user current when it ran in $GLOBALS['abAbilityRuns'], so a test can
+ * see which user an ability ran as.
+ *
+ * @param array<string, mixed> $schema
+ * @param array<string, mixed> $meta
+ */
+function siteAbility(string $name, array $schema = ['type' => 'object', 'properties' => ['fields' => ['type' => 'array']]], mixed $result = ['ok' => true], string $description = 'Returns site information.', array $meta = []): Mockery\MockInterface
+{
+    $ability = Mockery::mock('WP_Ability');
+    $ability->shouldReceive('get_name')->andReturn($name);
+    $ability->shouldReceive('get_label')->andReturn('Label of ' . $name)->byDefault();
+    $ability->shouldReceive('get_description')->andReturn($description);
+    $ability->shouldReceive('get_input_schema')->andReturn($schema);
+    $ability->shouldReceive('get_meta_item')->andReturnUsing(static fn(string $key, mixed $default = null): mixed => $meta[$key] ?? $default);
+    $ability->shouldReceive('execute')->andReturnUsing(static function (mixed $input = null) use ($result): mixed {
+        $GLOBALS['abAbilityRuns'][] = ['input' => $input, 'as' => get_current_user_id()];
+        return $result;
+    })->byDefault();
+    return $ability;
+}
+
+/**
+ * Core's abilities registry, as far as the plugin asks it: wp_has_ability(), wp_get_ability() and
+ * wp_get_abilities() answer from $GLOBALS['abAbilities'], name => WP_Ability double, so a test can
+ * unregister one mid-test by unsetting it. wp_get_ability() on a name that is not there does what
+ * core's does, less the notice: it records the name in $GLOBALS['abAbilityNotFound'] (core fires
+ * _doing_it_wrong() there) and answers null. wp_get_abilities() leaves out the names in
+ * `$unlisted`, as a site's `wp_get_abilities_item_include` filter would (WP 7.1), while the other
+ * two still answer for them.
+ *
+ * @param array<string, Mockery\MockInterface> $abilities
+ * @param list<string> $unlisted
+ */
+function abilitiesRegistry(array $abilities, array $unlisted = []): void
+{
+    stubStripAllTags();
+    $GLOBALS['abAbilities'] = $abilities;
+    $GLOBALS['abAbilityNotFound'] = [];
+    Functions\when('wp_has_ability')->alias(static fn(string $name): bool => isset($GLOBALS['abAbilities'][$name]));
+    Functions\when('wp_get_ability')->alias(static function (string $name): ?object {
+        if (!isset($GLOBALS['abAbilities'][$name])) {
+            $GLOBALS['abAbilityNotFound'][] = $name;
+            return null;
+        }
+        return $GLOBALS['abAbilities'][$name];
+    });
+    Functions\when('wp_get_abilities')->alias(static fn(): array => array_diff_key($GLOBALS['abAbilities'], array_flip($unlisted)));
+}
+
+/**
+ * AbilitiesToolkitTest: the toolkit over `$abilities` as the site's registry and `$allowed` as the
+ * stored allowlist. The acting user is `$userId` and the logged-in user starts as 1 (cliUsers()),
+ * so a test can see the toolkit make the turn's user current for the call and hand the request
+ * back afterwards. `$api` false is a WordPress with no Abilities API. The 7.1-only schema preparer
+ * is reported absent, so a schema goes as registered; the branch that uses it is exercised against
+ * real core in tests/Integration/AbilitiesToolkitTest.php.
+ *
+ * @param array<string, Mockery\MockInterface> $abilities
+ * @param list<mixed> $allowed
+ * @param list<string> $unlisted passed to abilitiesRegistry()
+ */
+function abilitiesToolkit(array $abilities, array $allowed, bool $api = true, int $userId = 3, array $unlisted = []): AlpacaBot\Toolkit\AbilitiesToolkit
+{
+    $GLOBALS['abAbilityRuns'] = [];
+    abilitiesRegistry($abilities, $unlisted);
+    cliUsers([1, 3], 1);
+    return new AlpacaBot\Toolkit\AbilitiesToolkit(new Store(['toolkits.abilities' => $allowed]), static fn(): int => $userId, static fn(string $fn): bool => $api && $fn !== 'wp_prepare_json_schema_for_client');
 }

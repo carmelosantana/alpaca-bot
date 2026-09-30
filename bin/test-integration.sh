@@ -7,6 +7,18 @@
 # is the suite itself: the same phpunit.integration.xml, the same tests/Integration/bootstrap.php
 # and the same tests/Integration/wp-tests-config.php, so a pass here means the same thing in both.
 #
+# The suite needs no network beyond the database, and refuses one: tests/Integration/bootstrap.php
+# turns down any WP_Http request a test did not stub, swaps a configured Ollama provider for
+# one whose chat, stream, structured and models calls throw, and gives the plugin's own MCP client
+# factory a builder that refuses, so a pass here is the same on a runner with no provider and no
+# DNS. Those three are the doors it guards, which is not every door the plugin has:
+# Factory::make() also builds WpAiClientProvider, and that one is passed through as built -- what
+# keeps it off the wire is the fake model WpAiClientTest registers with core, not a guard. A
+# caller that builds its own HTTP client is outside the guards too, and takes one from its test
+# instead (Kanboard #4322). McpClientLiveTest builds a real one on purpose, to reach a real MCP
+# server, and skips unless ALPACA_BOT_MCP_URL is set, which this script never passes into the
+# container (the test's docblock says how to run it).
+#
 # The suite's PHPUnit 9.6 lives in tools/integration (its composer.json says why it is not the
 # root's PHPUnit 13) and is installed here, on the host, on every run, as the root `prefix`
 # script installs tools/strauss: a no-op when vendor matches the lock, and the only way a lock
@@ -16,6 +28,12 @@
 # (phpunit.integration.xml).
 #
 # Arguments are passed to phpunit: `composer test:integration -- --filter Smoke`.
+#
+# WP_MULTISITE=1 runs the suite on a network: core's test bootstrap reads it and installs the
+# test database as one. It is passed into the container in both modes, and only 0, 1 or unset is
+# accepted. A network install refuses the default admin@localhost, so wp-env mode needs a domain
+# with a dot as well: `WP_MULTISITE=1 WP_TESTS_DOMAIN=example.org`. CI runs the uninstall group
+# this way once (.github/workflows/ci.yml), because its network test skips on a single site.
 #
 # --- harness mode -------------------------------------------------------------------------
 # The site is WPH_SITE (default alpaca10, the 0.5 harness site; never alpacabot, which mounts the
@@ -57,6 +75,14 @@ if [[ ! "$DB_NAME" =~ ^[A-Za-z0-9_-]+$ ]]; then
     exit 1
 fi
 
+# Spliced into the container's command line like the database name above and the domain below,
+# so held to the values core reads: '1' is a network, and '0' or unset is a single site.
+MULTISITE="${WP_MULTISITE:-}"
+if [[ ! "$MULTISITE" =~ ^[01]?$ ]]; then
+    echo "bin/test-integration.sh: WP_MULTISITE '$MULTISITE' must be 0, 1 or unset" >&2
+    exit 1
+fi
+
 # The domain is spliced into the single-quoted `sh -c` payload in wp-env mode, exactly like the
 # database name, so it gets the same treatment: a value carrying a quote would close that quoting
 # and run in the container. Both are developer-set, not untrusted input -- checking one and not
@@ -83,7 +109,7 @@ if [ "$MODE" = "wp-env" ]; then
         ARGS="$ARGS '${arg//\'/\'\\\'\'}'"
     done
     exec pnpm exec wp-env run tests-cli --env-cwd="wp-content/plugins/$SLUG" -- \
-        sh -c "WP_TESTS_DB_NAME='$DB_NAME' WP_TESTS_DOMAIN='$DOMAIN' \
+        sh -c "WP_TESTS_DB_NAME='$DB_NAME' WP_TESTS_DOMAIN='$DOMAIN' WP_MULTISITE='$MULTISITE' \
             php tools/integration/vendor/bin/phpunit -c phpunit.integration.xml$ARGS"
 fi
 
@@ -108,5 +134,5 @@ docker compose -f "$COMPOSE" exec -T -e DB_NAME="$DB_NAME" db sh -c \
     'mariadb -uroot -p"$MARIADB_ROOT_PASSWORD" -e "CREATE DATABASE IF NOT EXISTS \`$DB_NAME\`; GRANT ALL ON \`$DB_NAME\`.* TO \"$MARIADB_USER\"@\"%\";"'
 
 docker compose -f "$COMPOSE" run --rm -T -w "$PLUGIN" \
-    -e WP_TESTS_DB_NAME="$DB_NAME" -e WP_TESTS_DOMAIN="$DOMAIN" \
+    -e WP_TESTS_DB_NAME="$DB_NAME" -e WP_TESTS_DOMAIN="$DOMAIN" -e WP_MULTISITE="$MULTISITE" \
     cli php tools/integration/vendor/bin/phpunit -c phpunit.integration.xml "$@"

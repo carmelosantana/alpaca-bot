@@ -5,8 +5,8 @@ declare(strict_types=1);
 namespace AlpacaBot\Abilities;
 
 use AlpacaBot\Chat\Pipeline;
-use AlpacaBot\Rest\Errors;
-use AlpacaBot\Rest\RateLimit;
+use AlpacaBot\Errors;
+use AlpacaBot\RateLimit;
 use AlpacaBot\Toolkit\DraftPostToolkit;
 use AlpacaBot\Toolkit\Registry;
 use AlpacaBot\Toolkit\SummarizeToolkit;
@@ -41,21 +41,35 @@ use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Enum\ToolResultStatus;
  * registration is not a request), and the capability is asked about that id, user_can(),
  * for the reason DraftPostToolkit gives: the same id authors the draft and owns the
  * conversation, so the check and the act cannot disagree. Chat and summarize need
- * `edit_posts`, the capability every other surface that spends (the REST routes, the
- * shortcode, the chat screen) asks for; a draft needs the post type's own capability, from
- * DraftPostToolkit::TYPES, which is what the editor asks before showing a New button. The
- * capabilities are not filterable here: core's `wp_ability_permission_result` filter exists
- * for exactly that, with the ability name and the input in hand, and a second seam would be
- * one more place a `__return_true` could open a surface that costs money. Every execute
- * callback asks the capability (and the toolkit switch, below) again itself, before it runs
- * anything: core's execute() always runs check_permissions first and exposes no way round it,
- * but a third-party adapter, or a site's own `ability_class`, may hand the callback a call the
- * permission callback never saw, and a callback that is only safe when something else checked
- * first is not defensible on its own. A refusal there is the WP_Error the REST routes' own
- * permission callback answers (Errors::forbidden(): `rest_forbidden`, 403 or 401).
+ * `edit_posts`. It is what the REST chat routes and the chat screen ask by default, through
+ * the Chat row of Settings › Access, and what `[alpacabot]` and `[alpacabot_agent]` ask by
+ * default, through the Shortcodes row; these two abilities ask it through no row: the
+ * capability is written here. WP-CLI's `wp alpaca-bot chat` asks no capability, since whoever
+ * runs WP-CLI already has the site. A draft needs the post type's own capability, from
+ * DraftPostToolkit::TYPES, which is what the editor asks before showing a New button.
+ * Summarize and draft-post also answer to their tool's Settings › Access row, through the
+ * Tools setting below; it is asked only once the capability has been granted, so it can
+ * narrow who may call them and cannot widen it.
+ *
+ * The capabilities are not filterable here. From WordPress 7.1 core has a filter of its own
+ * over every ability's answer, `wp_ability_permission_result` (7.1 class-wp-ability.php:652,
+ * inside check_permissions()), with the ability's name and the input in hand: a listener that
+ * returns false or a WP_Error refuses wherever core's check_permissions() runs, and one that
+ * returns true opens nothing here, because every execute callback asks the capability again
+ * (below). WordPress 6.9 and 7.0 have no such filter. A seam of the plugin's own was not
+ * added: it would be one more place a `__return_true` could open a surface that costs money.
+ *
+ * Every execute callback asks the capability (and the toolkit switch, below) again itself,
+ * before it runs anything. Core's execute() runs check_permissions() before it calls the
+ * callback, at 6.9, 7.0 and 7.1 alike, but from 7.1 what check_permissions() answers is the
+ * filter's word rather than ours, and a third-party adapter, or a site's own `ability_class`,
+ * may hand the callback a call the permission callback never saw; a callback that is only safe
+ * when something else checked first is not defensible on its own. A refusal there is the
+ * WP_Error the REST routes' own permission callback answers (Errors::forbidden():
+ * `rest_forbidden`, 403 or 401).
  *
  * The rate limit. Chat and summarize spend tokens, and so does `POST /alpaca-bot/v1/chat`,
- * which is limited by Rest\RateLimit at thirty a minute per user. The abilities reach the
+ * which is limited by RateLimit at thirty a minute per user. The abilities reach the
  * pipeline through core's run route and every MCP client without that route's wrapper, so
  * the two execute callbacks record the same hit themselves: the same limiter, the same `chat`
  * bucket (one person on two surfaces is one person, as Rest\Controller says of two routes) and
@@ -69,34 +83,36 @@ use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Enum\ToolResultStatus;
  * limited, as the REST routes that write a post are not.
  *
  * The Tools setting. An ability whose toolkit is switched off (`toolkits.enabled`) stays
- * registered and refuses in its permission callback, with a WP_Error that says which switch,
- * evaluated on every call through Registry::enabled() for the calling user so the
- * `alpaca_bot/toolkits` filter counts too. And what enabled() hands back under the id is what
- * runs, not an instance held here: a site that swaps `summarize` or `draft_post` through the
- * filter swaps it for the model and the ability alike, and never has the two answer with
- * different implementations. Unregistering was rejected: registration happens
- * once, on a hook that fires before any particular caller is known, so it would freeze one
- * moment's setting and one user's filter answer for the whole process (a test run, a
- * long-lived worker), and a client would see a 404 it cannot tell from a typo. The cost of
- * staying registered is a listed tool that then refuses, and **what the caller is told depends
- * on the path**. On `wp-abilities/v1/run` the reason survives: core's run controller calls
- * check_permissions() from its own REST permission callback and returns the WP_Error, restamping
- * its status (403 for a logged-in user, 401 for a visitor) — WP 7.1
+ * registered and refuses in its permission callback, with a WP_Error that names the tool and
+ * says it is switched off on the site or kept from the caller's role by Settings › Access,
+ * evaluated on every call through Registry::enabled() for the calling user so the tool's
+ * Settings › Access row and the `alpaca_bot/toolkits` filter both count too. And what enabled()
+ * hands back under the id is what runs, not an instance held here: a site that swaps
+ * `summarize` or `draft_post` through the filter swaps it for the model and the ability alike,
+ * and never has the two answer with different implementations. Unregistering was rejected:
+ * registration happens once, on a hook that fires before any particular caller is known, so it
+ * would freeze one moment's setting and one user's filter answer for the whole process (a test
+ * run, a long-lived worker), and a client would see a 404 it cannot tell from a typo. The cost
+ * of staying registered is a listed tool that then refuses, and **what the caller is told
+ * depends on the path**. On `wp-abilities/v1/run` the reason survives: core's run controller
+ * calls check_permissions() from its own REST permission callback and returns the WP_Error,
+ * restamping its status (403 for a logged-in user, 401 for a visitor) — WP 7.1
  * class-wp-rest-abilities-v1-run-controller.php:172-176, inside check_ability_permissions(),
- * the callback registered at :66. Through WP_Ability::execute(), which is
- * the MCP and WP-AI-Client path, core withholds the message deliberately ("Don't leak the
- * permission check error to someone without the correct perms"): it answers a fixed
+ * the callback registered at :66. Through WP_Ability::execute(), which is the MCP and
+ * WP-AI-Client path, core withholds the message deliberately ("Don't leak the permission check
+ * error to someone without the correct perms"): it answers a fixed
  * `ability_invalid_permissions` and hands our text to _doing_it_wrong() instead, so on a
- * WP_DEBUG site every call to a switched-off tool also writes a "doing it wrong" notice —
- * WP 7.1 class-wp-ability.php:824-839, the same code at WP 7.0 :619-632. Returning `false`
- * instead of a WP_Error would silence that notice, and was rejected: it takes the reason off the
- * one path that can carry it, which is the path an operator asking "why does summarize refuse"
- * is on, and the notice is core's own decision about a permission callback that explains
- * itself. AbilitiesTest holds both halves. Chat is not gated by the
- * setting: it is not a toolkit, and what its turn may run is the pipeline's own decision
- * through the same registry.
+ * WP_DEBUG site every call to a switched-off tool also writes a "doing it wrong" notice — WP
+ * 7.1 class-wp-ability.php:824-839, and WP 7.0 :619-634, where the one difference is that 7.0
+ * also wraps the ability's name in esc_html() inside the message (:633). Returning `false`
+ * instead of a WP_Error would silence that notice, and was rejected: it takes the reason off
+ * the one path that can carry it, which is the path an operator asking "why does summarize
+ * refuse" is on, and the notice is core's own decision about a permission callback that
+ * explains itself. AbilitiesTest holds both halves. Chat is not gated by the setting: it is not
+ * a toolkit, and what its turn may run is the pipeline's own decision through the same
+ * registry.
  *
- * Refusals keep their codes. A pipeline throw is mapped by Rest\Errors::fromPipeline() to the
+ * Refusals keep their codes. A pipeline throw is mapped by Errors::fromPipeline() to the
  * WP_Error the `/alpaca-bot/v1/chat` route answers (402 for a spent cap, 400 for the caller's
  * mistake, 502 for the provider), so one turn told two ways refuses the same way. That is why
  * summarize calls SummarizeToolkit::summarize() itself, when the toolkit under the id is the
@@ -110,11 +126,72 @@ use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Enum\ToolResultStatus;
  *
  * Input. Every schema says `additionalProperties: false`, so a key that is not named is a 400
  * from core before any callback runs, and no key a client sends can reach the pipeline as an
- * option: the options are built here, from the named keys, and nothing else. `meta.public` is
- * true as well as `show_in_rest`: `public` (7.1) is what the MCP Adapter keys on; an ability
- * without it is registered, listed by REST, and invisible to MCP. The annotations are honest:
- * none of the three is read-only or idempotent (a turn spends tokens and a draft is a new
- * post), and none is destructive.
+ * option: the options are built here, from the named keys, and nothing else.
+ *
+ * `meta.public` is true as well as `show_in_rest`, and the two are set separately because core
+ * joined them only in 7.1: there `public` must be a bool (7.1 class-wp-ability.php:346),
+ * defaults to false (:371, from :37) and is what `show_in_rest` falls back to when that is not
+ * given (:370), while 6.9 and 7.0 pass `meta` through wp_parse_args() (7.0 :325-332), keep a
+ * `public` key they do not know, and default `show_in_rest` to false (7.0 :330). The MCP
+ * Adapter reads the flag itself: at its v0.6.0 and v0.6.1, McpAbilityExposure::is_meta_public()
+ * takes an explicit `meta.mcp.public` first and falls back to `public === true`, so under that
+ * adapter these abilities are exposed through its default server whether or not core knows
+ * the key; its v0.5.0 counted only `meta.mcp.public`. `meta.mcp.public` is not set, so
+ * `public` decides: the adapter reads it from v0.6.0 and core from 7.1, and a second flag is
+ * a second thing to forget. The cost is the adapter's v0.5.0, whose default server does not
+ * list these abilities. Being
+ * public to the adapter is also what lets its own `mcp-adapter/execute-ability` run these three
+ * (v0.6.1 McpAbilityHelperTrait::check_ability_mcp_exposure()), so where an administrator has
+ * allowlisted that ability under Settings › Tools, a turn offered it can reach them through it:
+ * AbilitiesToolkit::excluded() keeps `alpaca-bot/*` out of the model's direct offer only.
+ *
+ * Re-entry (Kanboard #4538). What such a turn cannot do is start another turn. chat and
+ * summarize ask Chat\Pipeline::running() first and, while any turn is running in the request,
+ * answer Errors::turnRunning() (409) instead, after the permission checks and before the
+ * limiter, so the refused call is not counted and nothing is stored or metered for it. Those two
+ * because they are the two that start a pipeline turn, chat a stored one and summarize the
+ * summarize toolkit's ephemeral one; draft-post starts none (DraftPostToolkit inserts a post and
+ * never calls the pipeline) and runs inside a turn as it does outside one. The count is the
+ * pipeline's, not the ability's, so it holds for a turn started from any surface, and it asks
+ * nothing about how the ability was reached. The model's own `summarize` tool is not an ability,
+ * calls the pipeline directly, and is not refused. A top-level call, with no turn running, runs
+ * as it always did.
+ *
+ * The annotations are hints, which is what core calls them (7.1 class-wp-ability.php:163),
+ * and on one road they also choose an HTTP method: core's run route asks GET of a
+ * `readonly` ability, DELETE of one that is both `destructive` and `idempotent`, and POST of
+ * any other (WP_REST_Abilities_V1_Run_Controller::validate_request_method(), :110-116 at 6.9,
+ * 7.0 and 7.1). None of the three is `readonly` or `idempotent`, so all three are POST there,
+ * chat's `destructive` included. Core defines `destructive` against "only additive updates"
+ * (7.1 :166-167), and each value below is what the ability's own code does to stored data.
+ *
+ * - `alpaca-bot/chat` is `destructive`. A finished turn adds messages and a usage receipt,
+ *   but it stores the conversation through ConversationStore::save(), which rewrites the
+ *   conversation post's excerpt from the last message, and its title while that is empty or
+ *   the default, and whose fit() drops, from a transcript past storageBudget(), turns' images,
+ *   oldest first, each only where evicting them makes room, and then, once no eviction would,
+ *   whole messages, oldest first. Not `readonly`, since it writes all of that, and not
+ *   `idempotent`: a second identical call is a second turn, spent again.
+ * - `alpaca-bot/summarize` is not `destructive`. Its turn is ephemeral, so Chat\Pipeline
+ *   stores no conversation and runs no tool for it. Besides a usage receipt it writes only
+ *   caches and counters: it adds one to the per-minute rate-limit count; it adds the
+ *   receipt's tokens to the cached month totals or, where a cached total cannot be read or
+ *   the receipt failed to insert, deletes that entry so that UsageMeter::monthSummary()
+ *   recounts it from the receipts; and where a cached month total the cap check reads, or
+ *   the cached model list, is missing or cannot be read, it writes a fresh one in its place
+ *   (the model list only when the provider lists a model that ModelCatalog does not filter
+ *   out as an embedding model). Not `readonly` or `idempotent`: a call that finishes records
+ *   a receipt, and a second identical one spends again. That is the plugin's own toolkit;
+ *   one a site swaps in under `summarize` does what it does.
+ * - `alpaca-bot/draft-post` is not `destructive`: the plugin's own toolkit inserts a new
+ *   draft post and makes no other write of its own. Not `readonly`, since it inserts, and not
+ *   `idempotent`: a second call inserts a second draft. One a site swaps in under
+ *   `draft_post` does what it does, since draft() runs whatever toolkit is enabled under
+ *   that id.
+ *
+ * A chat turn also runs the tools its user is offered, and an ability an administrator
+ * allowlisted under Settings › Tools may be destructive; these annotations do not describe
+ * that. Setting `readonly` to get a GET would be a lie that costs money.
  *
  * `label` and `description` are translated: they are shown to people in admin surfaces and
  * client tool lists, unlike the toolkits' model-facing descriptions, which are English by
@@ -213,12 +290,13 @@ final class Register
                     'receipt' => ['type' => 'object', 'description' => __('The usage receipt: model, tokens, duration.', 'alpaca-bot')],
                 ],
                 ['conversation_id', 'reply', 'receipt'],
+                true,
                 fn(mixed $input = null): bool => $this->can('edit_posts'),
                 fn(mixed $input = null): array|\WP_Error => $this->chat(is_array($input) ? $input : []),
             ),
             self::SUMMARIZE => $this->ability(
                 __('Summarize', 'alpaca-bot'),
-                __('Condense a piece of text with the site\'s model. Nothing is stored; the tokens count against the caller\'s monthly usage.', 'alpaca-bot'),
+                __('Condense a piece of text with the site\'s model. Neither the text nor the summary is stored; the tokens count against the caller\'s monthly usage.', 'alpaca-bot'),
                 [
                     'text' => ['type' => 'string', 'minLength' => 1, 'description' => __('The text to summarize.', 'alpaca-bot')],
                     'length' => ['type' => 'string', 'enum' => ['short', 'medium', 'long'], 'description' => __('How long the summary should be; medium is the default.', 'alpaca-bot')],
@@ -226,6 +304,7 @@ final class Register
                 ['text'],
                 ['summary' => ['type' => 'string', 'description' => __('The summary.', 'alpaca-bot')]],
                 ['summary'],
+                false,
                 fn(mixed $input = null): bool|\WP_Error => $this->can('edit_posts') ? $this->gate('summarize') : false,
                 fn(mixed $input = null): array|\WP_Error => $this->summarize(is_array($input) ? $input : []),
             ),
@@ -243,6 +322,7 @@ final class Register
                     'edit_url' => ['type' => 'string', 'description' => __('Where to review it in the editor.', 'alpaca-bot')],
                 ],
                 ['id', 'edit_url'],
+                false,
                 fn(mixed $input = null): bool|\WP_Error => $this->canDraft(is_array($input) ? $input : []),
                 fn(mixed $input = null): array|\WP_Error => $this->draft(is_array($input) ? $input : []),
             ),
@@ -256,9 +336,10 @@ final class Register
      * @param list<string> $required which of them are required
      * @param array<string, array<string, mixed>> $output the output properties
      * @param list<string> $produced which of them are always there
+     * @param bool $destructive the `destructive` annotation (the class docblock says why each is what it is)
      * @return array<string, mixed>
      */
-    private function ability(string $label, string $description, array $input, array $required, array $output, array $produced, \Closure $permission, \Closure $execute): array
+    private function ability(string $label, string $description, array $input, array $required, array $output, array $produced, bool $destructive, \Closure $permission, \Closure $execute): array
     {
         return [
             'label' => $label,
@@ -271,7 +352,7 @@ final class Register
             'meta' => [
                 'show_in_rest' => true,
                 'public' => true,
-                'annotations' => ['readonly' => false, 'destructive' => false, 'idempotent' => false],
+                'annotations' => ['readonly' => false, 'destructive' => $destructive, 'idempotent' => false],
             ],
         ];
     }
@@ -314,7 +395,8 @@ final class Register
 
     /**
      * The toolkit under `$id` for the acting user, as Registry::enabled() hands it out (the
-     * setting, then the `alpaca_bot/toolkits` filter), or the refusal that names the switch.
+     * setting, the tool's Access row for this user, then the `alpaca_bot/toolkits` filter), or
+     * the refusal that names both things an administrator can change.
      */
     private function toolkit(string $id): ToolkitInterface|\WP_Error
     {
@@ -325,9 +407,19 @@ final class Register
         return new \WP_Error(
             'alpaca_bot_toolkit_disabled',
             /* translators: %s: the tool's id, e.g. summarize */
-            sprintf(__('The %s tool is switched off on this site. An administrator can enable it under Alpaca Bot > Settings > Tools.', 'alpaca-bot'), $id),
+            sprintf(__('The %s tool is not available to you: it is switched off on this site, or Settings › Access keeps it from your role. An administrator can change either under Alpaca Bot > Settings.', 'alpaca-bot'), $id),
             ['status' => 403],
         );
+    }
+
+    /**
+     * True while no turn is running in this request; else the refusal. Asked by the two
+     * abilities that start a turn, before the limiter is hit, so a refused call costs nothing
+     * (the class docblock says why the two).
+     */
+    private function idle(): true|\WP_Error
+    {
+        return $this->pipeline->running() ? Errors::turnRunning() : true;
     }
 
     /**
@@ -351,6 +443,10 @@ final class Register
     {
         if (!$this->can('edit_posts')) {
             return Errors::forbidden();
+        }
+        $idle = $this->idle();
+        if ($idle instanceof \WP_Error) {
+            return $idle;
         }
         $limit = $this->limit();
         if ($limit instanceof \WP_Error) {
@@ -385,6 +481,10 @@ final class Register
         $toolkit = $this->toolkit('summarize');
         if ($toolkit instanceof \WP_Error) {
             return $toolkit;
+        }
+        $idle = $this->idle();
+        if ($idle instanceof \WP_Error) {
+            return $idle;
         }
         $limit = $this->limit();
         if ($limit instanceof \WP_Error) {

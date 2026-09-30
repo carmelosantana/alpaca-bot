@@ -216,7 +216,7 @@ it('only maps onto keys that exist in the schema', function (): void {
 it('makes legacy chat_history rows private and recovers a missing owner from the first message role', function (): void {
     $stored = ['alpaca_bot_api_url' => 'http://localhost:11434'];
     migrate04Options($stored);
-    Functions\expect('get_posts')->once()->withArgs(fn(array $q): bool => $q['post_type'] === 'chat_history' && $q['post_status'] === 'publish' && $q['numberposts'] === 100 && $q['orderby'] === 'ID' && $q['order'] === 'ASC' && !isset($q['fields']))
+    Functions\expect('get_posts')->once()->withArgs(fn(array $q): bool => $q['post_type'] === 'chat_history' && $q['post_status'] === 'publish' && $q['numberposts'] === 100 && $q['orderby'] === 'ID' && $q['order'] === 'ASC' && !isset($q['fields']) && !isset($q['post__in']))
         ->andReturn([migrate04LegacyRow(10), migrate04LegacyRow(11), migrate04LegacyRow(12), migrate04LegacyRow(13, '3')]);
     // Only an unowned row has its transcript read.
     Functions\expect('get_post_meta')->once()->with(10, 'messages', true)->andReturn([['model' => 'm', 'message' => ['role' => 7, 'content' => 'q']], ['model' => 'm', 'message' => ['role' => 'assistant', 'content' => 'a']]]);
@@ -227,6 +227,9 @@ it('makes legacy chat_history rows private and recovers a missing owner from the
     Functions\expect('wp_update_post')->once()->with(['ID' => 11, 'post_status' => 'private'])->andReturn(11);
     Functions\expect('wp_update_post')->once()->with(['ID' => 12, 'post_status' => 'private'])->andReturn(12);
     Functions\expect('wp_update_post')->once()->with(['ID' => 13, 'post_status' => 'private'])->andReturn(13);
+    // Every row moved, so the count query finds none still in publish and nothing is counted.
+    Functions\expect('get_posts')->once()->withArgs(fn(array $q): bool => ($q['post__in'] ?? null) === [10, 11, 12, 13])->andReturn([]);
+    Functions\expect('update_post_meta')->never();
     (new Migrate04(new Store()))->run();
     expect($stored[Migrate04::FLAG])->toBe('1')->and($stored[Migrate04::FLAG_CONVERSATIONS])->toBe('1');
 });
@@ -238,9 +241,10 @@ it('migrates conversations in bounded batches across requests without re-running
     $stored = ['alpaca_bot_api_url' => 'http://localhost:11434', 'alpaca_bot_default_model' => 'llama3.2'];
     migrate04Options($stored);
     Functions\when('get_post_meta')->justReturn('');
-    Functions\expect('get_posts')->twice()->withArgs(fn(array $q): bool => $q['post_status'] === 'publish' && $q['numberposts'] === 100)
+    Functions\expect('get_posts')->twice()->withArgs(fn(array $q): bool => $q['post_status'] === 'publish' && $q['numberposts'] === 100 && !isset($q['post__in']))
         ->andReturn(array_map(fn(int $id): object => migrate04LegacyRow($id, '3'), range(1, 100)), [migrate04LegacyRow(101, '3'), migrate04LegacyRow(102, '3')]);
     Functions\expect('wp_update_post')->times(102)->withArgs(fn(array $p): bool => $p['post_status'] === 'private')->andReturn(1);
+    Functions\expect('get_posts')->twice()->withArgs(fn(array $q): bool => isset($q['post__in']))->andReturn([]);
 
     // Request 1: options moved and flagged at once; a full batch, so the conversation pass is still pending.
     $m = new Migrate04(new Store());
@@ -260,6 +264,44 @@ it('migrates conversations in bounded batches across requests without re-running
     expect($stored[Migrate04::FLAG_CONVERSATIONS])->toBe('1')
         ->and($stored['alpaca_bot_settings']['models.default'])->toBe('mistral')
         ->and((new Migrate04(new Store()))->needed())->toBeFalse();
+});
+
+// Kanboard #4335: a row another plugin keeps in `publish` is counted after each batch it
+// survives, and the batch query stops asking for it at MAX_ATTEMPTS. The rows are still their
+// own cursor; a row at the cap leaves the result set the way a flipped one does.
+it('counts a failed try on every row a batch left in publish, and asks only for rows under the cap', function (): void {
+    $stored = [Migrate04::FLAG => '1', Migrate04::FLAG_RETENTION => '1', Migrate04::FLAG_AUTOLOAD => '1'];
+    migrate04Options($stored);
+    $meta = [11 => [Migrate04::META_ATTEMPTS => '2']];
+    Functions\when('get_post_meta')->alias(static function (int $id, string $key = '', bool $single = false) use (&$meta): mixed {
+        return $meta[$id][$key] ?? '';
+    });
+    // countFailures() primes the counts in one query before reading them. The real thing fills
+    // WordPress's meta cache from a database this suite does not have, and the read above answers
+    // from $meta either way, so the stand-in has nothing to do; the number of queries it saves is
+    // the integration suite's to exercise, not this one's.
+    Functions\when('update_meta_cache')->justReturn([]);
+    Functions\expect('update_post_meta')->twice()->andReturnUsing(static function (int $id, string $key, mixed $value) use (&$meta): bool {
+        $meta[$id][$key] = $value;
+        return true;
+    });
+    Functions\expect('get_posts')->once()->withArgs(fn(array $q): bool => !isset($q['post__in']) && $q['post_status'] === 'publish' && $q['meta_query'] === [
+        'relation' => 'OR',
+        ['key' => Migrate04::META_ATTEMPTS, 'compare' => 'NOT EXISTS'],
+        ['key' => Migrate04::META_ATTEMPTS, 'value' => Migrate04::MAX_ATTEMPTS, 'compare' => '<', 'type' => 'NUMERIC'],
+    ])->andReturn([migrate04LegacyRow(10, '3'), migrate04LegacyRow(11, '3'), migrate04LegacyRow(12, '3')]);
+    Functions\when('wp_update_post')->justReturn(1);
+    // Another plugin's filter kept 10 and 11 in publish; 12 moved.
+    Functions\expect('get_posts')->once()->withArgs(fn(array $q): bool => ($q['post__in'] ?? null) === [10, 11, 12] && $q['post_status'] === 'publish' && $q['fields'] === 'ids')
+        ->andReturn([10, 11]);
+
+    (new Migrate04(new Store()))->run();
+
+    expect($meta[10][Migrate04::META_ATTEMPTS])->toBe(1)
+        ->and($meta[11][Migrate04::META_ATTEMPTS])->toBe(Migrate04::MAX_ATTEMPTS)
+        ->and($meta)->not->toHaveKey(12)
+        // Three rows is a short batch: the pass is done whatever became of them.
+        ->and($stored[Migrate04::FLAG_CONVERSATIONS])->toBe('1');
 });
 
 // needed() runs on `init` on every request the site serves (Plugin::register() hooks it there,

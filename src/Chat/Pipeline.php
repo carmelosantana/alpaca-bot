@@ -12,6 +12,7 @@ use AlpacaBot\Provider\Factory;
 use AlpacaBot\Provider\Model;
 use AlpacaBot\Provider\ModelCatalog;
 use AlpacaBot\Settings\Store;
+use AlpacaBot\Toolkit\FirstWins;
 use AlpacaBot\Toolkit\Registry;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Agent\Output;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Contract\MessageInterface;
@@ -19,13 +20,11 @@ use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Contract\ProviderInterface;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Contract\ToolkitInterface;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Enum\AgentFinishReason;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Enum\ToolResultStatus;
+use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Exception\TerminationException;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Message\AssistantMessage;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Message\Conversation as AgentConversation;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Message\SystemMessage;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Message\UserMessage;
-use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Provider\LlamaCpp\LlamaCppToolCallParser;
-use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Tool\DoneTool;
-use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Tool\ToolCall;
 
 /**
  * Turns one user message into a streamed model reply: enforces the caps, resolves the model and
@@ -77,36 +76,40 @@ use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Tool\ToolCall;
  * behind) is the same code. The model gets the same generation options a plain turn sends
  * (Provider\BoundOptionsProvider), the text streams as it is produced (agentTurn() says how),
  * and the stored reply carries `meta['tool_calls']`, one `{name, arguments, result_excerpt,
- * ok}` per call. The stored reply is the one thing on this branch that can differ from what
+ * ok, result_bytes}` per call, and the receipt `tool_result_bytes`, the sum of their
+ * `result_bytes`. The stored reply is the one thing on this branch that can differ from what
  * streamed: a model whose template cannot really call tools writes the call as prose, and when
  * the faked call is `done` the whole answer is inside it, so the reply is recovered from it
- * before anything is stored (recovered(), which says how, and why the provider's capability
- * data cannot be trusted to tell such a model apart). One departure from the plain path's "a
- * failed turn persists nothing": a provider failure after a tool has already run keeps the
- * turn, stored as an abandoned one is (the partial reply with its `tool_calls`, a receipt for
- * the calls made), and then fails it the same way (`chat/failed`, `Provider error: ...`).
- * Every tool call is recorded on the transcript (the spec's rule), and a draft the run created
- * is in the user's posts whether or not the reply finished; the record is how they learn of
- * it. A failure before any tool ran persists nothing, as a plain one does. The usage metered
- * is the whole run: Output::$usage is the sum over every provider call the agent made, so a
- * turn that took three calls is billed three calls' tokens against the cap; a turn the
- * consumer abandons is billed the calls it had completed by then (the provider decorator's
- * running tally). An ephemeral turn runs plainly, tools or no tools, and that is a decision
- * about each of the three callers that pass the flag, not only the first. Toolkit\
+ * before anything is stored (FakedToolCall::recovered(), which says how, and why the
+ * provider's capability data cannot be trusted to tell such a model apart). One departure from
+ * the plain path's "a failed turn persists nothing": a provider failure after a tool has
+ * already run keeps the turn, stored as an abandoned one is (the partial reply with its
+ * `tool_calls`, a receipt for the calls made), and then fails it the same way (`chat/failed`,
+ * `Provider error: ...`). Every tool call is recorded on the transcript (the spec's rule), and
+ * a draft the run created is in the user's posts whether or not the reply finished; the record
+ * is how they learn of it. A failure before any tool ran persists nothing, as a plain one
+ * does. The usage metered is the whole run: Output::$usage is the sum over every provider call
+ * the agent made, so a turn that took three calls is billed three calls' tokens against the
+ * cap; a turn the consumer abandons is billed the calls it had completed by then (the provider
+ * decorator's running tally). An ephemeral turn runs plainly, tools or no tools, and that is a
+ * decision about each of the three callers that pass the flag, not only the first. Toolkit\
  * SummarizeToolkit's inner call is a tool inside an agent, and an agent inside it would be a
  * recursion with no bound but each level's iteration budget. Shortcodes\Chat's `prompt=` form
  * and Shortcodes\AgentShim's `summarize` are a page rendering itself: the prompt is written by
  * whoever could write the post (a Contributor, at least) and the turn runs as whichever viewer
- * with `edit_posts` opened the page, so a tool turn there would let that prompt make the
+ * the Shortcodes row admits opened the page, so a tool turn there would let that prompt make the
  * server fetch addresses of the model's choosing (web_fetch), or author drafts under the
  * viewer's name that nobody asked for (draft_post), once per cache miss. AgentShim wants a
  * fetch and runs the web_fetch tool itself instead, on the URL its author wrote (its docblock
- * says why that loses nothing). So `ephemeral` carries two decisions — this turn is in nobody's
- * history, and it runs no tools — and a caller that wants one without the other cannot ask;
- * splitting the flag belongs to the release that has such a caller.
+ * says why that loses nothing). So `ephemeral` carries two decisions — this turn is in
+ * nobody's history, and it runs no tools — and a caller that wants one without the other
+ * cannot ask; splitting the flag belongs to the release that has such a caller.
  */
 final class Pipeline
 {
+    /** How many turns are running in this request, one inside another counted twice (running()). */
+    private int $depth = 0;
+
     public function __construct(
         private Store $store,
         private Factory $factory,
@@ -118,6 +121,20 @@ final class Pipeline
         private ?UserPrefs $prefs = null,
         private ?Registry $toolkits = null,
     ) {}
+
+    /**
+     * Whether a turn is running in this request: true from the first iteration of a send()
+     * (complete() and every consumer go through it) until that turn has ended, whether it was
+     * drained, refused, thrown or abandoned, and counted, so a turn started inside another (the
+     * summarize tool's) ending does not end the outer one. Abilities\Register asks it before it
+     * starts a turn of its own, which is what keeps a turn from starting another through an
+     * "execute any ability" tool (Kanboard #4538). It is the instance's count, and one instance
+     * serves the request: Plugin::register() hands every consumer the container's.
+     */
+    public function running(): bool
+    {
+        return $this->depth > 0;
+    }
 
     /**
      * send() drained: the Result once the whole reply is in.
@@ -171,9 +188,28 @@ final class Pipeline
      * @return \Generator<int, Delta, mixed, Result>
      * @throws \InvalidArgumentException for an empty message (also one `before_send` blanked), an image that is not a base64 image data URL or a set of them past the site's allowance, a requested model a non-empty catalog does not list, a conversation the user does not own, or `ephemeral` with a `conversation_id`
      * @throws CapExceeded before any provider call
-     * @throws \RuntimeException when no model can be resolved, or wrapping a provider failure as 'Provider error: ...'
+     * @throws \RuntimeException when no model can be resolved, or wrapping a provider failure as 'Provider error: ...' (a tool turn's failure the provider had no part in is raised in words of its own instead: raised())
      */
     public function send(int $userId, string $text, array $options = []): \Generator
+    {
+        // Around the whole turn, so running() holds for every turn and not only one an ability
+        // starts. A finally, so a throw lets go, and so does a consumer that abandons the
+        // stream: PHP runs a suspended generator's finally when it is destroyed.
+        ++$this->depth;
+        try {
+            return yield from $this->turn($userId, $text, $options);
+        } finally {
+            --$this->depth;
+        }
+    }
+
+    /**
+     * send()'s turn, run inside its count.
+     *
+     * @param array{conversation_id?: int, model?: string, images?: string[], context?: array<string, mixed>, system?: string, temperature?: float, ephemeral?: bool} $options see send()
+     * @return \Generator<int, Delta, mixed, Result>
+     */
+    private function turn(int $userId, string $text, array $options): \Generator
     {
         $text = trim($text);
         $images = self::images((array) ($options['images'] ?? []));
@@ -282,19 +318,23 @@ final class Pipeline
                     }
                     // The run is over and the accumulated text is what will be stored, shown and
                     // built into the receipt: the last moment to take back an answer the model
-                    // wrote as a tool call instead of calling one (recovered(), which says why
-                    // this cannot be left to the provider's capability data). Only a turn that
-                    // reaches its return comes through here: a consumer that walks away is
-                    // settled from the finally below while this generator is still suspended in
-                    // the foreach, so an abandoned turn stores the raw leak, as it stores
-                    // whatever else had streamed.
-                    $content = self::recovered($content);
+                    // wrote as a tool call instead of calling one (FakedToolCall::recovered(),
+                    // which says why this cannot be left to the provider's capability data).
+                    // Only a turn that reaches its return comes through here: a consumer that
+                    // walks away is settled from the finally below while this generator is
+                    // still suspended in the foreach, so an abandoned turn stores the raw leak,
+                    // as it stores whatever else had streamed. The two paths store the same
+                    // bytes — the finally takes the observer's undecided tail the same way
+                    // agentTurn()'s flush() does — and differ only in this call: an abandoned
+                    // turn's partial reply keeps the markup it streamed. Recovering it there as
+                    // well is Kanboard #4329 comment 617 §2, and is not done here.
+                    $content = FakedToolCall::recovered($content);
                     $failure = self::failure($output, $observer);
                     if ($failure !== null) {
-                        // The agent swallowed the provider's throw; raising it here puts it on the
-                        // path a plain provider failure takes (the catch below, which keeps the
-                        // partial transcript when a tool had run).
-                        throw new \RuntimeException($failure);
+                        // The run failed, and failure() has already said whose words the failure
+                        // is in. Raising it here puts it on the path a plain provider failure takes
+                        // (the catch below, which keeps the partial transcript when a tool had run).
+                        throw $failure;
                     }
                 } else {
                     // The vendored stream() marks text and reasoning deltas with finishReason Stop
@@ -325,6 +365,9 @@ final class Pipeline
                 // LogicException after it, a toolkit added through `alpaca_bot/toolkits` that
                 // throws outside the agent's own catch regions, a consumer throwing into the
                 // generator) lands here with the same draft made and the same duty to record it.
+                // Whatever the observer was still deciding about belongs to this reply, and this
+                // is the last moment it can reach the partial transcript below.
+                $content .= $observer?->takeUnsent() ?? '';
                 $toolCalls = $observer?->toolCalls() ?? [];
                 if ($toolCalls !== []) {
                     $this->storePartial($ephemeral, $userId, $conversation, $model, $content, $reasoning, $prompt, $completion, self::elapsedMs($started), $toolCalls);
@@ -336,24 +379,29 @@ final class Pipeline
                      * not stored (a tool turn that had already run tools keeps its partial transcript, so the
                      * draft it made is traceable), and a conversation this turn created is deleted afterwards
                      * unless a listener saved a turn onto it. A listener that throws does not replace the
-                     * provider error: that is rethrown as a RuntimeException with the listener's exception
-                     * chained behind it. The same action fires from settle() when the consumer abandons the
-                     * stream, with a RuntimeException saying so.
+                     * failure: that is rethrown as a RuntimeException, `Provider error: ` and what the
+                     * provider threw, or in words of its own where the provider had no part in it, with
+                     * the listener's exception chained behind it. The same action fires from settle()
+                     * when the consumer abandons the stream, with a RuntimeException saying so.
                      *
                      * @since 0.5.0
-                     * @param \Throwable   $e            what the provider or the tool loop threw
+                     * @param \Throwable   $e            what the turn failed on: what the provider or the tool loop threw, or the Chat\RunFailure the pipeline read out of a run that failed without announcing it
                      * @param Conversation $conversation the conversation, with the user turn appended and no finished reply
                      */
                     do_action('alpaca_bot/chat/failed', $e, $conversation);
                 } finally {
                     // Thrown from the finally so a listener that throws cannot replace the
-                    // provider failure with its own exception: a caller maps what arrives by
-                    // class (ChatController reads an InvalidArgumentException as the user's
-                    // mistake, 400). PHP chains a pending exception behind the one thrown here,
-                    // so a listener's is kept, after $e.
-                    throw new \RuntimeException('Provider error: ' . $e->getMessage(), 0, $e);
+                    // failure with its own exception: a caller maps what arrives by class
+                    // (ChatController reads an InvalidArgumentException as the user's mistake,
+                    // 400). PHP chains a pending exception behind the one thrown here, so a
+                    // listener's is kept, after $e. raised() says what the message is.
+                    throw new \RuntimeException(self::raised($e), 0, $e);
                 }
             } finally {
+                // Empty on every path that came through the catch or through agentTurn()'s
+                // flush; the bytes themselves on the one path that came through neither, the
+                // consumer who stopped iterating while the generator was suspended.
+                $content .= $observer?->takeUnsent() ?? '';
                 $this->settle($streamEnded, $ephemeral, $userId, $conversation, $model, $content, $reasoning, $prompt, $completion, $started, $observer?->toolCalls() ?? []);
             }
         } catch (\Throwable $e) {
@@ -367,6 +415,7 @@ final class Pipeline
         }
         $durationMs = self::elapsedMs($started);
 
+        $toolCalls = $observer?->toolCalls() ?? [];
         // The duration rides on the stored reply as well as the receipt, so a reloaded
         // transcript shows the same `model · tokens · seconds` line a live turn did.
         $reply = new Message(
@@ -376,7 +425,7 @@ final class Pipeline
             ['prompt_tokens' => $prompt, 'completion_tokens' => $completion],
             0,
             [],
-            ['duration_ms' => $durationMs] + ($reasoning !== '' ? ['reasoning' => $reasoning] : []) + self::toolCallsMeta($observer?->toolCalls() ?? []),
+            ['duration_ms' => $durationMs] + ($reasoning !== '' ? ['reasoning' => $reasoning] : []) + self::toolCallsMeta($toolCalls),
         );
         /**
          * Filters the finished assistant reply before it is appended to the conversation, saved and
@@ -398,7 +447,8 @@ final class Pipeline
         if (!$ephemeral) {
             $this->conversations->save($conversation);
         }
-        $logId = $this->meter->record($userId, $model, $prompt, $completion, $durationMs, $conversation->id);
+        $toolResultBytes = self::toolResultBytes($toolCalls);
+        $logId = $this->meter->record($userId, $model, $prompt, $completion, $durationMs, $conversation->id, $toolResultBytes);
         $result = new Result($conversation, $reply, [
             'user_id' => $userId,
             'model' => $model,
@@ -406,6 +456,7 @@ final class Pipeline
             'completion_tokens' => $completion,
             'total_tokens' => $prompt + $completion,
             'duration_ms' => $durationMs,
+            'tool_result_bytes' => $toolResultBytes,
             'conversation_id' => $conversation->id,
             'log_id' => $logId,
             'created' => $reply->created,
@@ -459,7 +510,7 @@ final class Pipeline
      * (`meta['tool_calls']`): a draft the run created exists whether or not the reply was
      * finished, and the record is how the transcript says so.
      *
-     * @param list<array{name: string, arguments: array<string, mixed>, result_excerpt: string, ok: bool}> $toolCalls
+     * @param list<array{name: string, arguments: array<string, mixed>, result_excerpt: string, ok: bool, result_bytes: int}> $toolCalls
      */
     private function settle(bool $streamEnded, bool $ephemeral, int $userId, Conversation $conversation, string $model, string $content, string $reasoning, int $prompt, int $completion, float $started, array $toolCalls = []): void
     {
@@ -496,7 +547,7 @@ final class Pipeline
             // written. Reproduced on PHP 8.4.25. The provider-failure site above keeps a
             // listener's exception instead, by letting PHP chain it behind the RuntimeException
             // it throws from a finally; there is nothing to chain to here, so it goes to the
-            // debug log, behind WP_DEBUG exactly as Rest\Errors::provider() puts the provider's
+            // debug log, behind WP_DEBUG exactly as Errors::provider() puts the provider's
             // own text there.
             if (defined('WP_DEBUG') && WP_DEBUG) {
                 // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log -- Deliberate diagnostic, gated on WP_DEBUG as core's own logging is; this is the only record a listener's failure can leave, since the turn is being torn down and no caller is left to tell.
@@ -514,7 +565,7 @@ final class Pipeline
      * what was stored. An ephemeral turn has no post to store on and stores nothing; the receipt
      * is recorded either way.
      *
-     * @param list<array{name: string, arguments: array<string, mixed>, result_excerpt: string, ok: bool}> $toolCalls
+     * @param list<array{name: string, arguments: array<string, mixed>, result_excerpt: string, ok: bool, result_bytes: int}> $toolCalls
      */
     private function storePartial(bool $ephemeral, int $userId, Conversation $conversation, string $model, string $content, string $reasoning, int $prompt, int $completion, int $durationMs, array $toolCalls): void
     {
@@ -532,15 +583,17 @@ final class Pipeline
         if (!$ephemeral) {
             $this->conversations->save($conversation);
         }
-        $this->meter->record($userId, $model, $prompt, $completion, $durationMs, $conversation->id);
+        $this->meter->record($userId, $model, $prompt, $completion, $durationMs, $conversation->id, self::toolResultBytes($toolCalls));
     }
 
     /**
-     * The message a run failed on, or null when it did not fail. An Error finish is a failure
-     * unless it is positively a termination: a tool that ended the run by throwing
-     * TerminationException, which is not a failure at all. Nothing failed there; a tool asked to
-     * stop, and the turn finishes on its word (agentTurn() yields it). Telling the two apart is
-     * what keeps a toolkit's own "stop" from reaching the user as `Provider error: ...`.
+     * The exception a run that failed is raised as, or null when it did not fail. An Error
+     * finish is a failure unless it is positively a termination: a tool that ended the run by
+     * throwing TerminationException, which is not a failure at all. Nothing failed there; a
+     * tool asked to stop, and the turn finishes on its word (agentTurn() yields it). Telling
+     * the two apart is what keeps a toolkit's own "stop" from reaching the user as a failure at
+     * all: read as one it would be raised out of send(), the reply marked partial and
+     * `alpaca_bot/chat/failed` fired, for a turn nothing went wrong in.
      *
      * An announcement settles it first, and on its own. Every `agent.error` the library notifies
      * is followed immediately by the return it belongs to, so nothing can announce and then go
@@ -580,17 +633,20 @@ final class Pipeline
      * this branch.) Read the old way, such a release would land a provider failure as a
      * *finished* assistant reply carrying the library's own 'Provider error: ...' text, fire
      * `alpaca_bot/chat/completed` and bill the user for it. Read this way, an unrecognised Error
-     * finish is a failure, which is the direction a wrong guess should fail in. (The pin is
-     * `~0.15.2` besides, so a minor release cannot arrive unreviewed.)
+     * finish is a failure, which is the direction a wrong guess should fail in. (composer.json
+     * pins php-agents at `~0.16.0` besides, which admits a 0.16 patch release and no 0.17, so a
+     * patch release can arrive unreviewed and a minor one cannot.)
      *
-     * The announcement supplies the words when it had any: it is the specific message, and
-     * send() raises it. Without one there is nothing to quote — the content is the library's own
-     * prose, never announced and not the plugin's to present as an error — so the failure is
-     * reported in words of this plugin's own, which translate. An announcement that is itself
-     * empty (the provider threw a Throwable whose getMessage() is '') is still an announcement
-     * and still a failure; it simply has no words to lend.
+     * The announcement supplies the words when it had any, and the failure is the provider's: a
+     * plain RuntimeException, which send() raises as `Provider error: ` and those words
+     * (raised()). An announcement that is itself empty (the provider threw a Throwable whose
+     * getMessage() is '') is still the provider's failure and keeps the prefix; it has no words
+     * to lend, so it borrows this plugin's. Without an announcement there is nothing to quote and
+     * no provider failure to report: the content is the library's own prose, never announced. The
+     * failure is a RunFailure in words of this plugin's own, which translate, and which send()
+     * raises without the prefix (Kanboard #4327).
      */
-    private static function failure(Output $output, AgentStreamObserver $observer): ?string
+    private static function failure(Output $output, AgentStreamObserver $observer): ?\RuntimeException
     {
         if ($output->finishReason !== AgentFinishReason::Error) {
             return null;
@@ -602,306 +658,33 @@ final class Pipeline
                     return null;
                 }
             }
+            return new RunFailure(__('The run ended in an error the assistant did not report.', 'alpaca-bot'));
         }
-        return $announced !== null && $announced !== ''
-            ? $announced
-            : __('The run ended in an error the assistant did not report.', 'alpaca-bot');
+        return new \RuntimeException($announced !== '' ? $announced : __('The provider gave no reason.', 'alpaca-bot'));
     }
 
     /**
-     * The reply with a faked tool call taken back out of it, and the answer a faked `done`
-     * buried in its `response` argument given back as the reply.
+     * The message send() raises a failed turn with: `Provider error: ` and what was thrown,
+     * except for two failures the provider had no part in, which arrive in words of their own.
      *
-     * Ollama advertises `tools` for a model whose deployed template is a bare `{{ .Prompt }}`
-     * passthrough: no roles, no `.Tools`, nothing that parses a call back out. Offered tools,
-     * such a model writes the call it was asked for as prose; the OpenAI-compatible endpoint
-     * returns it as ordinary assistant content, and it arrives here as text. When the faked
-     * call is the agent's own `done`, the user's entire answer is inside its `response` and
-     * never reaches the bubble. Detection cannot close that: the capability the provider
-     * reports is the thing that is wrong, and what fails is the deployed template, not the
-     * parameter count (a 2B with a proper template works; a 27B with `{{ .Prompt }}` fails
-     * identically), so this runs on the content whatever the catalogue said about the model.
+     * A RunFailure is failure()'s, for a tool run whose Error finish nobody announced, and its
+     * message is raised as it is. A TerminationException that reaches here never met the
+     * agent's catch: agentTurn() asks every toolkit for its tools (Toolkit\FirstWins::over())
+     * before it starts the fiber the agent runs in, so a toolkit that stops the run from there is
+     * not caught by the library the way a tool that stops it from execute() is (that one is a
+     * finished turn: failure()). It says what the tool said, or that a tool stopped the run when
+     * it said nothing.
      *
-     * The marker is the trigger and the only one: content carrying neither `<tool_call>` nor
-     * `</tool_call>` is returned untouched, and a plain answer never goes near a JSON parser.
-     *
-     * What the markers hold is not one payload. The recorded leak (qwen3-vl:2b, kept verbatim
-     * as tests/fixtures/faked-tool-call-qwen3-vl-2b.txt) has no *opening* marker — the template
-     * consumed it for a first call that did run properly through the API, and the raw text
-     * leaked as well — a stray closing one, a second call with no markers at all, and two JSON
-     * objects separated by a blank line, so json_decode() over the whole string is null. The
-     * content is therefore searched for the byte ranges that are markup (markup(), which says
-     * how) and only those ranges are taken out of it; everything else is copied across
-     * verbatim, byte for byte, including the model's own indentation, its single newlines and
-     * the spacing between its paragraphs. This never rebuilds the reply out of trimmed pieces:
-     * a fix whose first rule is never losing text may not re-flow the text it keeps.
-     *
-     * A faked `done` gives up its `response`, in the markup's place. Every other faked call is
-     * dropped and never executed: recovering text is one thing, running a tool the provider
-     * never authorised through its own API is another. Nor is a recovered call added to
-     * `meta['tool_calls']`, which stays the record of what the agent actually ran
-     * (AgentStreamObserver): the leaked call in the fixture is a copy of one already on that
-     * record, so listing it again would tell a reader of the transcript that a fetch was
-     * attempted twice, and the record's `{result_excerpt, ok}` has no way to say "written, not
-     * run" — it would read as a call made and unanswered, which is a different event.
-     *
-     * Three ways out return `$content` byte for byte, since losing text is the one outcome this
-     * must never have: nothing in it was markup at all (prose that merely mentions the marker —
-     * the guard against mangling an answer *about* tool calls); a recovered `done` whose
-     * `response` is missing or blank (nothing to put in its place, so nothing is taken away);
-     * and a recovery that came to nothing (a faked call and no other text, where the raw JSON
-     * at least shows the user what happened and an empty bubble shows them nothing).
-     *
-     * The only whitespace this writes is at a seam. Markup taken out of the middle of a reply
-     * leaves the blank line that preceded it against whatever followed it, so what followed
-     * goes with it: the rest of the markup's own line and every blank line after it, stopping
-     * at the first line with anything on it. That line's own indentation is never touched — it
-     * is the model's, and shaving it off the first line of a four-space code block while the
-     * rest of the block keeps its four does not merely lose indentation, it stops the block
-     * being a block. Blank lines a removal leaves at the very top, along with trailing space,
-     * go at the end.
-     *
-     * The deltas already streamed still carry the markup; suppressing it live is separate. The
-     * front end replaces the assistant bubble wholesale when the turn ends (`POST /view/bubble`
-     * with the stored reply), so what this returns is what the user is left reading.
-     *
-     * @since 0.5.0
+     * Everything else keeps the prefix, as every failure did before 0.6: a provider that threw
+     * on the plain path, one the agent announced, and whatever else lands in send()'s catch.
      */
-    private static function recovered(string $content): string
+    private static function raised(\Throwable $e): string
     {
-        if (!str_contains($content, '<tool_call>') && !str_contains($content, '</tool_call>')) {
-            return $content;
-        }
-        $edits = self::excisions($content, self::markup($content));
-        if ($edits === null || $edits === []) {
-            return $content;
-        }
-        $reply = '';
-        $cursor = 0;
-        foreach ($edits as [$start, $end, $answer]) {
-            if ($start > $cursor) {
-                $reply .= substr($content, $cursor, $start - $cursor);
-            }
-            $cursor = max($cursor, $end);
-            if ($answer !== '') {
-                $reply .= $answer;
-                continue;
-            }
-            // The blank line before the hole belongs to the text that is staying; the blank
-            // lines after it went with the markup, to the first line with anything on it, whose
-            // own indentation is not whitespace this may write and is left alone. Only where a
-            // line had already ended, though — never after an answer just written in the
-            // markup's place, and never inside a line of prose.
-            if (($reply === '' || preg_match('~\R[^\S\r\n]*\z~', $reply) === 1)
-                && preg_match('~\A[^\S\r\n]*\R(?:[^\S\r\n]*\R)*~', substr($content, $cursor), $seam) === 1
-            ) {
-                $cursor += strlen($seam[0]);
-            }
-        }
-        $reply .= substr($content, $cursor);
-        $reply = rtrim((string) preg_replace('~\A(?:[^\S\r\n]*\R)+~', '', $reply));
-        return $reply === '' ? $content : $reply;
-    }
-
-    /**
-     * Every byte range of the reply that might be markup rather than the model's own words, in
-     * written order, each with the faked calls it holds or null when it is a marker.
-     *
-     * Two passes. The content is cut at every marker first and each segment offered whole: the
-     * recorded leak's two calls are one segment each, since the blank line before the second is
-     * only leading whitespace to the parser. A segment that is not itself a payload is cut again
-     * at every blank line, which is what finds a call the template left no marker around at all
-     * — the shape the second half of the leak would have had if the first had not been marked
-     * either, and the shape a leak takes once AgentStreamObserver::separated() has joined the
-     * prose of one iteration to it. Only the pieces that parse are named here, and a name is a
-     * byte range: the rest of the segment is never read out and never rewritten, so cutting a
-     * segment that holds a call costs the answer around it nothing — not the indentation of a
-     * code block in it, not the blank line inside that block.
-     *
-     * A marker is named only when a call stands against it: the whole segment on one side of it
-     * is a call, or the nearest call the second pass found in that segment has nothing but
-     * whitespace between itself and the marker. Both halves are needed. Without the first, the
-     * markers around a marked call stay in the reply; without the second, the recorded leak's
-     * own shape — a call with no opening marker and the stray closing one its template left
-     * behind — is refused outright by excisions(), because the run it offers ends against a `<`
-     * rather than a line break, and the user reads the raw JSON. A marker with prose between it
-     * and the nearest call, or none near it at all, is a marker the model wrote into its prose
-     * and stays in it.
-     *
-     * A fenced block outside the markers is refused: the vendored parser strips a Markdown code
-     * fence and `arguments` is optional, so any fenced JSON object with a name would otherwise
-     * read as a call, and an answer explaining tool-call syntax would lose its own example. A
-     * fence is how a model *shows* a call; only a marker says it is making one. "Outside" is
-     * every second-pass piece, and the whole of the head and tail segments too — an answer
-     * opening on a fenced example with a stray marker further down is the head segment entire,
-     * and the first pass would otherwise read it as a call and delete the example. Between an
-     * opening and a closing marker a fence is the call's own formatting and is read as one.
-     *
-     * @return list<array{0: int, 1: int, 2: list<ToolCall>|null}>
-     */
-    private static function markup(string $content): array
-    {
-        // phpcs:ignore Universal.Operators.DisallowShortTernary.Found -- The idiomatic guard for preg_split()'s false return; ?: reads better here than repeating the whole call in a full ternary.
-        $segments = preg_split('~</?tool_call>~', $content, -1, PREG_SPLIT_OFFSET_CAPTURE) ?: [];
-        $last = count($segments) - 1;
-        $calls = [];
-        $pieces = [];
-        $against = [];
-        foreach ($segments as $i => [$text, $offset]) {
-            $end = $offset + strlen($text);
-            $whole = trim($text);
-            // Between two markers a fence is the call's own formatting; head and tail are
-            // outside them, where a fence is an example the answer is entitled to keep.
-            $calls[$i] = $i > 0 && $i < $last ? self::fakedCalls($whole) : self::unfenced($whole);
-            $pieces[$i] = $calls[$i] === null ? self::fakedPieces($text, $offset) : [];
-            $first = $pieces[$i][0] ?? null;
-            $final = $pieces[$i] === [] ? null : $pieces[$i][count($pieces[$i]) - 1];
-            $against[$i] = [
-                $calls[$i] !== null || ($first !== null && trim(substr($content, $offset, $first[0] - $offset)) === ''),
-                $calls[$i] !== null || ($final !== null && trim(substr($content, $final[1], $end - $final[1])) === ''),
-            ];
-        }
-        $found = [];
-        $after = 0;
-        foreach ($segments as $i => [$text, $offset]) {
-            if ($i > 0 && ($against[$i - 1][1] || $against[$i][0])) {
-                $found[] = [$after, $offset, null];
-            }
-            $after = $offset + strlen($text);
-            $whole = $calls[$i];
-            if ($whole !== null) {
-                $found[] = [$offset, $after, $whole];
-                continue;
-            }
-            foreach ($pieces[$i] as $piece) {
-                $found[] = $piece;
-            }
-        }
-        return $found;
-    }
-
-    /**
-     * The faked calls in each blank-line-separated piece of one segment that is not itself a
-     * call, as byte ranges of the whole reply. The cut is what finds a call the template left
-     * no marker around; only the pieces that parse are named, so the answer around them is
-     * never read out and never rewritten.
-     *
-     * @return list<array{0: int, 1: int, 2: list<ToolCall>}>
-     */
-    private static function fakedPieces(string $text, int $offset): array
-    {
-        $found = [];
-        // phpcs:ignore Universal.Operators.DisallowShortTernary.Found -- The idiomatic guard for preg_split()'s false return; ?: reads better here than repeating the whole call in a full ternary.
-        foreach (preg_split('~\R[ \t]*\R~', $text, -1, PREG_SPLIT_OFFSET_CAPTURE) ?: [] as [$piece, $at]) {
-            $inside = self::unfenced(trim($piece));
-            if ($inside !== null) {
-                $found[] = [$offset + $at, $offset + $at + strlen($piece), $inside];
-            }
-        }
-        return $found;
-    }
-
-    /**
-     * The faked calls a block holds when it is not a Markdown code fence, and null when it is.
-     * A fence is how a model shows a call rather than makes one, and outside the markers this
-     * refusal is what keeps an answer explaining tool-call syntax in possession of its example.
-     *
-     * @return non-empty-list<ToolCall>|null
-     */
-    private static function unfenced(string $block): ?array
-    {
-        return preg_match('~^```(?:json)?\s*.*?\s*```$~si', $block) === 1 ? null : self::fakedCalls($block);
-    }
-
-    /**
-     * The ranges that really are markup, each with what goes in its place — a faked `done`'s
-     * answer, or nothing at all for a faked call, which is dropped and never run. Null when a
-     * recovered `done` carried no answer, which calls the whole recovery off.
-     *
-     * Candidates are taken a run at a time: a call and the markers around it are one range as
-     * far as the reply is concerned, and the run has to stand on its own lines to be markup at
-     * all. A template leaking a call emits it between newlines; a call written inside a line of
-     * prose is a model writing *about* calls, and the line it sits in is the user's answer.
-     * Missing an inline leak costs the user nothing — the answer is still there to read, in the
-     * raw JSON that was not touched — where rewriting an inline mention costs them the sentence.
-     *
-     * @param list<array{0: int, 1: int, 2: list<ToolCall>|null}> $found
-     * @return list<array{0: int, 1: int, 2: string}>|null
-     */
-    private static function excisions(string $content, array $found): ?array
-    {
-        $edits = [];
-        $count = count($found);
-        $end = 0;
-        for ($i = 0; $i < $count; $i = $end) {
-            // One run: a call and the markers around it touch, byte to byte.
-            $end = $i + 1;
-            while ($end < $count && $found[$end][0] === $found[$end - 1][1]) {
-                ++$end;
-            }
-            if (preg_match('~(?:\A|\R)[^\S\r\n]*\z~', substr($content, 0, $found[$i][0])) !== 1
-                || preg_match('~\A[^\S\r\n]*(?:\R|\z)~', substr($content, $found[$end - 1][1])) !== 1
-            ) {
-                continue;
-            }
-            for ($at = $i; $at < $end; $at++) {
-                [$start, $stop, $calls] = $found[$at];
-                $answer = $calls === null ? '' : self::answer($calls);
-                if ($answer === null) {
-                    return null;
-                }
-                $edits[] = [$start, $stop, $answer];
-            }
-        }
-        return $edits;
-    }
-
-    /**
-     * What a block of faked calls leaves behind: the answers the `done` calls in it carry, and
-     * the empty string when it carries none. Null when a `done` came with no answer at all —
-     * there is nothing to put in the block's place, so the recovery is off and the content
-     * stands as the model wrote it.
-     *
-     * Trailing whitespace goes with the markup; leading whitespace does not. A `done` whose
-     * answer is itself an indented block keeps the indentation of its first line.
-     *
-     * @param list<ToolCall> $calls
-     */
-    private static function answer(array $calls): ?string
-    {
-        $answers = [];
-        foreach ($calls as $call) {
-            if ($call->name !== DoneTool::NAME) {
-                continue;
-            }
-            $response = $call->arguments['response'] ?? null;
-            if (!is_string($response) || trim($response) === '') {
-                return null;
-            }
-            $answers[] = rtrim($response);
-        }
-        return implode("\n\n", $answers);
-    }
-
-    /**
-     * The faked tool calls one candidate block holds, or null when it is not a tool-call payload
-     * at all and so is the model's own prose. Every way the vendored parser can refuse a block
-     * reads the same way here — an empty payload, text that is not JSON, JSON that is not a
-     * call, a call with no name or with arguments that are not an object — because each of them
-     * says the same thing about the block: it is not a call, and it is not this method's to
-     * take out of the reply. A payload the parser reads but finds no call in — `{"tool_calls":
-     * []}` — says it too: nothing was faked there, so there is nothing to take out.
-     *
-     * @return non-empty-list<ToolCall>|null
-     */
-    private static function fakedCalls(string $block): ?array
-    {
-        try {
-            $calls = array_values((new LlamaCppToolCallParser())->parse($block, 'json'));
-        } catch (\Throwable) {
-            return null;
-        }
-        return $calls === [] ? null : $calls;
+        return match (true) {
+            $e instanceof RunFailure => $e->getMessage(),
+            $e instanceof TerminationException => $e->getMessage() !== '' ? $e->getMessage() : __('A tool stopped the run without giving a reason.', 'alpaca-bot'),
+            default => 'Provider error: ' . $e->getMessage(),
+        };
     }
 
     /**
@@ -961,10 +744,15 @@ final class Pipeline
      * text the user should already be reading sits in the queue, so a tool's side effect (a
      * draft created) would land before the sentence announcing it was shown. The drain after
      * termination is for deltas announced with no suspension (a delta raised outside the
-     * fiber), so nothing queued is ever dropped. One of the deltas is empty: the observer
-     * queues one before every tool call, so a consumer is handed control (and a streaming
-     * transport has a frame to write, and so a chance to learn its client has gone) before
-     * the tool runs, not only after the next text arrives.
+     * fiber), so nothing queued is ever dropped. The observer's own flush() and the drain after
+     * it are for the bytes its FakedToolCallStream was still deciding about: they become the
+     * run's last delta, and they do it before $streamed is compared with the Output's content
+     * below, so that comparison sees the same bytes it saw in 0.5. A consumer that walks away
+     * before that drain leaves those bytes to send()'s finally
+     * (AgentStreamObserver::takeUnsent()), so the partial reply it stores is every byte too.
+     * One of the deltas is empty: the observer queues one before every tool call, so a consumer
+     * is handed control (and a streaming transport has a frame to write, and so a chance to
+     * learn its client has gone) before the tool runs, not only after the next text arrives.
      *
      * Rejected: reimplementing the loop as a generator in this plugin (a copy of the vendored
      * loop, drifting from its tool pairing repair, its batching and its empty-reply handling as
@@ -1006,7 +794,8 @@ final class Pipeline
             $history->add($message);
         }
         $agent = new Assistant($provider, $system);
-        foreach ($toolkits as $toolkit) {
+        // A tool name stays with the first toolkit that offered it (Toolkit\FirstWins).
+        foreach (FirstWins::over($toolkits) as $toolkit) {
             $agent->addToolkit($toolkit);
         }
         $agent->attach($observer);
@@ -1026,6 +815,13 @@ final class Pipeline
             }
             $fiber->resume();
         }
+        // The bytes the observer kept back in case they began a marker are the run's last words
+        // now that it has ended, and they go out before any tail below.
+        $observer->flush();
+        foreach ($observer->drain() as $delta) {
+            $streamed .= $delta->text;
+            yield $delta;
+        }
         $output = $fiber->getReturn();
         if (!$output instanceof Output) {
             throw new \LogicException('The agent run returned no Output.');
@@ -1040,7 +836,14 @@ final class Pipeline
             AgentFinishReason::EmptyResponse => __('The model gave no answer.', 'alpaca-bot'),
         };
         if ($tail !== '') {
-            yield new Delta(AgentStreamObserver::separated($streamed, $tail));
+            // Through the scanner like everything else. This is the one text a streamed turn
+            // emits that the observer's own scanner never saw — the agent's `done` answer, or
+            // any iteration whose content never arrived as a text delta — and it carries markup
+            // exactly as often as streamed text does. Its own scanner, because it is a separate
+            // message and must not inherit an open block from the text it does not continue.
+            foreach (FakedToolCallStream::pieces(AgentStreamObserver::separated($streamed, $tail)) as [$piece, $held]) {
+                yield new Delta($piece, '', $held);
+            }
         }
         return $output;
     }
@@ -1049,12 +852,23 @@ final class Pipeline
      * `tool_calls` for a reply's meta: present only when a call was made, so a plain turn's
      * meta is exactly what it was before tools existed.
      *
-     * @param list<array{name: string, arguments: array<string, mixed>, result_excerpt: string, ok: bool}> $toolCalls
-     * @return array{tool_calls?: list<array{name: string, arguments: array<string, mixed>, result_excerpt: string, ok: bool}>}
+     * @param list<array{name: string, arguments: array<string, mixed>, result_excerpt: string, ok: bool, result_bytes: int}> $toolCalls
+     * @return array{tool_calls?: list<array{name: string, arguments: array<string, mixed>, result_excerpt: string, ok: bool, result_bytes: int}>}
      */
     private static function toolCallsMeta(array $toolCalls): array
     {
         return $toolCalls === [] ? [] : ['tool_calls' => $toolCalls];
+    }
+
+    /**
+     * The receipt's `tool_result_bytes`: the sum of the records' `result_bytes`, 0 for a turn
+     * that ran no tool.
+     *
+     * @param list<array{name: string, arguments: array<string, mixed>, result_excerpt: string, ok: bool, result_bytes: int}> $toolCalls
+     */
+    private static function toolResultBytes(array $toolCalls): int
+    {
+        return (int) array_sum(array_column($toolCalls, 'result_bytes'));
     }
 
     /**

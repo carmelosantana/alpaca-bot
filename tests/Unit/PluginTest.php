@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use AlpacaBot\Abilities;
+use AlpacaBot\Access;
 use AlpacaBot\Admin\Assets;
 use AlpacaBot\Admin\ChatScreen;
 use AlpacaBot\Admin\HelpTabs;
@@ -44,7 +45,7 @@ it('exposes a version and boots once', function (): void {
     $b = Plugin::boot();
     expect($a)->toBe($b)
         ->and($a->version())->toBe(Plugin::VERSION)
-        ->and(Plugin::VERSION)->toMatch('/^0\.5\.0/');
+        ->and(Plugin::VERSION)->toMatch('/^0\.6\.0/');
 });
 
 it('registers the settings store, provider factory, model catalog, conversation store, usage meter, cap policy, context collector and chat pipeline, hooks both post types on init, and runs the 0.4 migration on init after them, never on admin_init', function (): void {
@@ -113,16 +114,23 @@ it('registers the settings store, provider factory, model catalog, conversation 
         ->and($plugin->get(CapPolicy::class))->toBeInstanceOf(CapPolicy::class)
         ->and($plugin->get(Collector::class))->toBeInstanceOf(Collector::class)
         ->and($plugin->get(Pipeline::class))->toBeInstanceOf(Pipeline::class);
-    // The three built-in toolkits, registered under the ids the schema's default names, in that
-    // order. The setting enables all three by default, and a stubbed get_option() answers
-    // nothing here, so all three are enabled; the filter runs with the user id it was given.
+    // The built-in toolkits, registered under the ids the schema's `toolkits.enabled` options
+    // name, in that order. A stubbed get_option() answers nothing here, so the schema's default
+    // list is what enables them, and it leaves abilities off; the filter runs with the user id it
+    // was given.
     Functions\when('get_option')->justReturn([]);
+    // enabled() holds each toolkit to its Access row for that user. This test is about the wiring
+    // -- which toolkits are registered, under which ids, into which pipeline -- so the user
+    // passes every row; RegistryTest is where the floor itself is pinned, and
+    // tests/Integration/ToolkitsTest.php where real roles answer it.
+    Functions\when('user_can')->justReturn(true);
     Filters\expectApplied('alpaca_bot/toolkits')->once()->with(Mockery::type('array'), 3)->andReturnFirstArg();
     $registry = $plugin->get(Registry::class);
     expect($registry)->toBeInstanceOf(Registry::class)
-        ->and($registry->ids())->toBe(['web_fetch', 'summarize', 'draft_post']);
+        ->and($registry->ids())->toBe(['web_fetch', 'summarize', 'draft_post', 'abilities']);
     $enabled = $registry->enabled(3);
-    expect($enabled['web_fetch'])->toBeInstanceOf(WebFetchToolkit::class)
+    expect(array_keys($enabled))->toBe(['web_fetch', 'summarize', 'draft_post'])
+        ->and($enabled['web_fetch'])->toBeInstanceOf(WebFetchToolkit::class)
         ->and($enabled['summarize'])->toBeInstanceOf(SummarizeToolkit::class)
         ->and($enabled['draft_post'])->toBeInstanceOf(DraftPostToolkit::class);
     // The pipeline holds that same registry, so a chat turn can run the toolkits: the two are
@@ -201,6 +209,8 @@ it('renders the chat screen, enqueues its assets, hands the pipeline the user pr
     });
     Functions\when('add_submenu_page')->justReturn(false);
     Functions\when('add_shortcode')->justReturn();
+    // The menu's capability is the Chat row now, so building it reads the settings option.
+    Functions\when('get_option')->justReturn([]);
     Filters\expectApplied('alpaca_bot/admin/menu_capability')->once()->andReturn('edit_posts');
     Actions\expectAdded('admin_enqueue_scripts')->once()->with(Mockery::on(
         static fn (mixed $cb): bool => is_array($cb) && ($cb[0] ?? null) instanceof Assets && ($cb[1] ?? null) === 'enqueue'
@@ -287,9 +297,14 @@ it('prints the wp-ai fallback notice to administrators on admin_notices, and bus
         return $cb instanceof Closure;
     }));
     $onUpdate = null;
+    // Mcp\ServerSettings adds a listener of its own on this action (forgetPassed()); the one
+    // under test is Plugin's closure.
     Actions\expectAdded('update_option_' . Plugin::OPTION)->once()->with(Mockery::on(static function (mixed $cb) use (&$onUpdate): bool {
+        if (!$cb instanceof Closure) {
+            return false;
+        }
         $onUpdate = $cb;
-        return $cb instanceof Closure;
+        return true;
     }), 10, 2);
     $plugin = Plugin::boot();
     $plugin->register();
@@ -321,4 +336,97 @@ it('prints the wp-ai fallback notice to administrators on admin_notices, and bus
     $onUpdate(['provider.kind' => 'ollama', 'chat.welcome' => 'a'], ['provider.kind' => 'wp-ai', 'chat.welcome' => 'a']);
     $onUpdate(['provider.kind' => 'ollama', 'chat.welcome' => 'a'], ['provider.kind' => 'ollama', 'chat.welcome' => 'b']);
     $onUpdate('not an array', ['provider.kind' => 'ollama']);
+});
+
+it('registers one Access over the container\'s Store, so every surface resolves a row the same way', function (): void {
+    Functions\when('add_shortcode')->justReturn();
+    Functions\when('get_option')->justReturn(['access.chat' => 'publish_posts']);
+    $plugin = Plugin::boot();
+    $plugin->register();
+    expect($plugin->get(Access::class))->toBeInstanceOf(Access::class)
+        ->and($plugin->get(Access::class)->stored('chat'))->toBe('publish_posts');
+});
+
+it('puts the drawer on the other admin screens: its loader on admin_enqueue_scripts and its launcher on admin_footer, and the editor sidebar on enqueue_block_editor_assets, over the container\'s Access and preferences', function (): void {
+    Functions\when('add_shortcode')->justReturn();
+    Actions\expectAdded('admin_enqueue_scripts')->once()->with(Mockery::on(
+        static fn (mixed $cb): bool => is_array($cb) && ($cb[0] ?? null) instanceof AlpacaBot\Admin\Assets && ($cb[1] ?? null) === 'enqueue'
+    ));
+    Actions\expectAdded('admin_enqueue_scripts')->once()->with(Mockery::on(
+        static fn (mixed $cb): bool => is_array($cb) && ($cb[0] ?? null) instanceof AlpacaBot\Admin\Drawer && ($cb[1] ?? null) === 'enqueue'
+    ));
+    Actions\expectAdded('admin_footer')->once()->with(Mockery::on(
+        static fn (mixed $cb): bool => is_array($cb) && ($cb[0] ?? null) instanceof AlpacaBot\Admin\Drawer && ($cb[1] ?? null) === 'footer'
+    ));
+    // And, in its place on a block editor screen, the editor's own sidebar.
+    Actions\expectAdded('enqueue_block_editor_assets')->once()->with(Mockery::on(
+        static fn (mixed $cb): bool => is_array($cb) && ($cb[0] ?? null) instanceof AlpacaBot\Admin\Drawer && ($cb[1] ?? null) === 'enqueueEditor'
+    ));
+    $plugin = Plugin::boot();
+    $plugin->register();
+    $drawer = $plugin->get(AlpacaBot\Admin\Drawer::class);
+    expect($drawer)->toBeInstanceOf(AlpacaBot\Admin\Drawer::class)
+        ->and((new ReflectionProperty(AlpacaBot\Admin\Drawer::class, 'access'))->getValue($drawer))->toBe($plugin->get(AlpacaBot\Access::class))
+        ->and((new ReflectionProperty(AlpacaBot\Admin\Drawer::class, 'prefs'))->getValue($drawer))->toBe($plugin->get(UserPrefs::class));
+});
+
+// The split of an MCP server's header value into its own option has to run on every write of the
+// settings option, whoever makes it, so it is hooked at boot rather than by the settings page;
+// and the page and the REST route are handed the same instance, so their address check is the
+// one the container holds.
+it('hooks the MCP server settings onto the option\'s writes and hands the same instance to the settings page and the REST route', function (): void {
+    Functions\when('add_shortcode')->justReturn();
+    $hooked = null;
+    Filters\expectAdded('pre_update_option_' . Plugin::OPTION)->once()->with(Mockery::on(static function (mixed $cb) use (&$hooked): bool {
+        $hooked = $cb;
+        return true;
+    }), 10, 2);
+    $plugin = Plugin::boot();
+    $plugin->register();
+    $servers = $plugin->get(AlpacaBot\Mcp\ServerSettings::class);
+    expect($hooked)->toBe([$servers, 'beforeSave'])
+        ->and((new ReflectionProperty(SettingsPage::class, 'servers'))->getValue($plugin->get(SettingsPage::class)))->toBe($servers);
+
+    Functions\when('register_rest_route')->justReturn(true);
+    $settings = null;
+    foreach ((new ReflectionMethod(Plugin::class, 'controllers'))->invoke($plugin) as $controller) {
+        $settings = $controller instanceof AlpacaBot\Rest\SettingsController ? $controller : $settings;
+    }
+    expect((new ReflectionProperty(AlpacaBot\Rest\SettingsController::class, 'servers'))->getValue($settings))->toBe($servers);
+});
+
+// The view routes get the MCP approval fragment through a Discovery over the container's one
+// ClientFactory, the seam a real client arrives through; and the drift marker
+// forgets what a save of the settings answered, whoever makes the save.
+it('hands the view routes a Discovery over the container\'s client factory, and hooks the drift marker onto the option\'s updates', function (): void {
+    Functions\when('add_shortcode')->justReturn();
+    $plugin = Plugin::boot();
+    $plugin->register();
+    $factory = $plugin->get(AlpacaBot\Mcp\ClientFactory::class);
+    expect($factory)->toBeInstanceOf(AlpacaBot\Mcp\ClientFactory::class)
+        // has_action() answers the priority it is hooked at.
+        ->and(has_action('update_option_' . Plugin::OPTION, [AlpacaBot\Mcp\Drift::class, 'afterSave']))->toBe(10);
+
+    $registered = [];
+    Functions\when('register_rest_route')->alias(static function (string $ns, string $path) use (&$registered): void {
+        $registered[] = $path;
+    });
+    $view = null;
+    foreach ((new ReflectionMethod(Plugin::class, 'controllers'))->invoke($plugin) as $controller) {
+        $view = $controller instanceof ViewController ? $controller : $view;
+    }
+    $discovery = (new ReflectionProperty(ViewController::class, 'discovery'))->getValue($view);
+    expect($discovery)->toBeInstanceOf(AlpacaBot\Mcp\Discovery::class)
+        ->and((new ReflectionProperty(AlpacaBot\Mcp\Discovery::class, 'clients'))->getValue($discovery))->toBe($factory)
+        ->and((new ReflectionProperty(AlpacaBot\Mcp\Discovery::class, 'store'))->getValue($discovery))->toBe($plugin->get(Store::class));
+    $view->register();
+    expect($registered)->toContain('/view/mcp-tools/(?P<id>' . AlpacaBot\Settings\Schema::MCP_ID_PATTERN . ')');
+
+    // The registry's MCP servers come through the same factory, over the container's one Store
+    // and one Access, so a turn's toolkits and the approval list ask the same seam.
+    $mcp = (new ReflectionProperty(Registry::class, 'mcp'))->getValue($plugin->get(Registry::class));
+    expect($mcp)->toBeInstanceOf(AlpacaBot\Mcp\Toolkits::class)
+        ->and((new ReflectionProperty(AlpacaBot\Mcp\Toolkits::class, 'clients'))->getValue($mcp))->toBe($factory)
+        ->and((new ReflectionProperty(AlpacaBot\Mcp\Toolkits::class, 'store'))->getValue($mcp))->toBe($plugin->get(Store::class))
+        ->and((new ReflectionProperty(AlpacaBot\Mcp\Toolkits::class, 'access'))->getValue($mcp))->toBe($plugin->get(AlpacaBot\Access::class));
 });

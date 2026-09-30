@@ -25,16 +25,19 @@ it('enqueues nothing, and adds no inline style, on any screen but the chat scree
 // The overrides table is a widefat nested in a Settings API row, and core's forms.css reaches
 // its cells (no left padding on the model name, a stacked column under 782px). The settings page
 // loads no plugin stylesheet, so the few rules that answer that ride inline on core's `forms`
-// handle, after the rules they answer; nothing of the chat screen's is loaded for them.
-it('adds the overrides table rules inline to core forms stylesheet on the settings page, under whatever id core derives, and enqueues nothing there', function (): void {
+// handle, after the rules they answer. The one script it gets is htmx, for the Tools tab's
+// Discover button (an hx-get at the MCP approval fragment); nothing else of the chat screen's.
+it('adds the overrides table rules inline to core forms stylesheet on the settings page, under whatever id core derives, and enqueues htmx there and nothing else', function (): void {
+    Functions\when('plugins_url')->alias(fn(string $p) => '/plugins/alpaca-bot/' . $p);
     $css = null;
     Functions\expect('wp_add_inline_style')->once()->with('forms', Mockery::on(static function (string $code) use (&$css): bool {
         $css = $code;
         return true;
     }));
-    Functions\expect('wp_enqueue_script')->never();
+    Functions\expect('wp_enqueue_script')->once()->with('alpaca-bot-htmx', '/plugins/alpaca-bot/assets/js/htmx.min.js', [], Assets::HTMX_VERSION, true);
     Functions\expect('wp_enqueue_style')->never();
     Functions\expect('wp_enqueue_media')->never();
+    Functions\expect('wp_localize_script')->never();
     (new Assets())->enqueue('alpaca-bot_page_alpaca-bot-settings');
     expect($css)->toContain('.form-table .ab-overrides th')->toContain('.form-table .ab-overrides td')
         // Core's own widefat cell padding (common.css), restored over forms.css's form-table rules.
@@ -43,14 +46,36 @@ it('adds the overrides table rules inline to core forms stylesheet on the settin
         // the centre of its row's inputs; the scoped rule centres it.
         ->toContain('vertical-align: middle')
         // Under 782px forms.css makes every form-table cell a block; the nested ones stay cells,
-        // and the wrapper, sized by the row there rather than by the table, scrolls them.
+        // and the wrapper, sized by the row rather than by the table, scrolls them.
         ->toContain('display: table-cell')
-        ->toContain('@media screen and (max-width: 782px)')->toContain('contain: inline-size')
-        ->not->toContain('.ab-wrap');
+        ->not->toContain('.ab-wrap')
+        // The wrapper is sized by the row at every width, not only under core's breakpoint
+        // (Kanboard #4348: at 1280px with the menu expanded the table widened the page), and
+        // so is every rule here: none sits in a media query.
+        ->toContain('.form-table .ab-overrides { overflow-x: auto; contain: inline-size; }')
+        ->not->toContain('@media')
+        // What keeps that scrollbar for narrow screens: the cells give width back first. A model
+        // id wraps down to 9em rather than holding its column at its longest unbreakable run; the
+        // system prompt's column asks for 35% of the table and shrinks to 12em.
+        ->toContain('.form-table .ab-overrides tbody th { overflow-wrap: anywhere; min-width: 9em; }')
+        ->toContain('.form-table .ab-overrides th.ab-overrides__system { width: 35%; }')
+        ->toContain('.form-table .ab-overrides .regular-text { width: 100%; min-width: 12em; }')
+        // Under 782px forms.css gives every form-table select `width: 100%`, which in an
+        // auto-width column shrank the Tools select to 40px and clipped "Model default"
+        // (Kanboard #4363); sized by its options, it holds its column at its label's width.
+        ->toContain('.form-table .ab-overrides select { width: auto; }')
+        // The MCP servers table is the same nested widefat: the wrapper scrolls and the cells are
+        // cells again, and none of the overrides table's column rules reach it.
+        ->toContain('.form-table .ab-mcp-servers { overflow-x: auto; contain: inline-size; }')
+        ->toContain('.form-table .ab-mcp-servers th, .form-table .ab-mcp-servers td { display: table-cell; width: auto; padding: 8px 10px; vertical-align: middle; }')
+        // A tool's input schema (View\Settings\McpTools) wraps in its cell rather than widening
+        // the table to its longest line, and scrolls past 20em.
+        ->toContain('.form-table .ab-mcp-schema pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 20em; overflow: auto; }');
 
     // A locale that translates "Alpaca Bot" derives another id; the rules follow it.
     Functions\when('get_plugin_page_hookname')->alias(static fn(string $page, string $parent): string => 'robot-alpaca_page_' . $page);
     Functions\expect('wp_add_inline_style')->once()->with('forms', Mockery::type('string'));
+    Functions\expect('wp_enqueue_script')->once()->with('alpaca-bot-htmx', Mockery::any(), [], Assets::HTMX_VERSION, true);
     (new Assets())->enqueue('robot-alpaca_page_alpaca-bot-settings');
 });
 
@@ -221,4 +246,43 @@ it('enqueues the same bundle for a front-end shortcode render, the media picker 
         // The bundle signs every request with the nonce and reads the REST root, on the front end as in wp-admin.
         expect($localised['rest'])->toBe('/wp-json/alpaca-bot/v1')->and($localised['nonce'])->toBe('n')->and($localised['maxImageBytes'])->toBe(6242304);
     }
+});
+
+// ---------------------------------------------------------------- Task 18: what a lazy loader borrows
+
+it('localises settings() as the bundle\'s settings object, the one object a lazily added bundle is handed too', function (): void {
+    Functions\when('plugins_url')->alias(fn(string $p) => '/plugins/alpaca-bot/' . $p);
+    Functions\when('rest_url')->alias(fn(string $p) => '/wp-json/' . $p);
+    Functions\when('wp_create_nonce')->justReturn('n');
+    Functions\when('wp_convert_hr_to_bytes')->justReturn(8 * 1024 * 1024);
+    Functions\when('wp_enqueue_media')->justReturn();
+    Functions\when('wp_enqueue_script')->justReturn();
+    Functions\when('wp_enqueue_style')->justReturn();
+    $localised = null;
+    Functions\expect('wp_localize_script')->once()->with('alpaca-bot-chat', 'alpacaBot', Mockery::on(static function (array $data) use (&$localised): bool {
+        $localised = $data;
+        return true;
+    }));
+    (new Assets())->enqueue(Assets::HOOK);
+    expect($localised)->toBe((new Assets())->settings())
+        ->and(array_keys($localised))->toBe(['rest', 'nonce', 'maxImageBytes', 'i18n', 'offline']);
+});
+
+it('tells a loader where the panel, the drawer preferences and the three chat files are, each file at the version its enqueue would give it, and the chat\'s name for a host to title its panel with', function (): void {
+    Functions\when('plugins_url')->alias(fn(string $p) => '/plugins/alpaca-bot/' . $p);
+    Functions\when('rest_url')->alias(fn(string $p) => '/wp-json/' . $p);
+    $mount = (new Assets())->mount();
+    // The unit process has no WP_DEBUG, so the two build outputs are at the plugin version (the
+    // versioning test above), and htmx at its pinned one, exactly as enqueueChat() versions them.
+    expect($mount)->toBe([
+        'panel' => '/wp-json/alpaca-bot/v1/view/panel',
+        'prefs' => '/wp-json/alpaca-bot/v1/view/drawer',
+        'htmx' => '/plugins/alpaca-bot/assets/js/htmx.min.js?ver=' . Assets::HTMX_VERSION,
+        // The id core prints on the handle's tag (`{$handle}-js`), how the loader knows the page's own htmx.
+        'htmxId' => 'alpaca-bot-htmx-js',
+        'chat' => '/plugins/alpaca-bot/assets/js/chat.js?ver=' . Plugin::VERSION,
+        'css' => '/plugins/alpaca-bot/assets/css/alpaca-bot.css?ver=' . Plugin::VERSION,
+        'title' => 'Alpaca Bot',
+        'failed' => 'The chat could not be loaded. Reload the page and try again.',
+    ]);
 });

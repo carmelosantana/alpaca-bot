@@ -2,13 +2,17 @@
 
 declare(strict_types=1);
 
-namespace AlpacaBot\Rest;
+namespace AlpacaBot;
 
 use AlpacaBot\Chat\CapExceeded;
 
 /**
  * The WP_Error shapes every route answers with. Each carries `status` in its data, which is how
  * the REST server picks the HTTP status for an error, so a controller returns these as they are.
+ *
+ * Outside REST, Abilities\Register returns them as they are, and Shortcodes\Chat and
+ * Toolkit\SummarizeToolkit show their messages (get_error_message()). That is why the class sits
+ * at the plugin root beside Capability, not under Rest\.
  *
  * Codes are namespaced `alpaca_bot_*` except `rest_forbidden`, which is core's own code for a
  * permission failure: clients (and core's own tooling) already special-case it, and a plugin
@@ -30,13 +34,62 @@ final class Errors
         );
     }
 
-    /** `retry_after` in the data mirrors the Retry-After header Controller adds, for clients that read the body only. */
+    /** `retry_after` in the data mirrors the Retry-After header Rest\Controller adds, for clients that read the body only. */
     public static function tooMany(int $retryAfter): \WP_Error
     {
         return new \WP_Error(
             'alpaca_bot_rate_limited',
             __('Too many requests. Try again shortly.', 'alpaca-bot'),
             ['status' => 429, 'retry_after' => $retryAfter],
+        );
+    }
+
+    /**
+     * 429 for a stream redemption that found this person already holding as many live streams as
+     * the site allows (StreamBudget::claim()). Its own code rather than tooMany()'s, because the
+     * two 429s are different waits: the per-minute bucket turns over within the minute and the
+     * request was spent, while this one frees when one of the person's own streams ends and the
+     * ticket is left unspent for the retry. A client that keys on the code can say so; one that
+     * keys on the status alone still sees a 429 with Retry-After. The message names the number
+     * because that is the thing the person can act on, and `limit` carries it for a client that
+     * words its own.
+     *
+     * @since 0.6.0
+     */
+    public static function streamConcurrency(int $limit, int $retryAfter): \WP_Error
+    {
+        return new \WP_Error(
+            'alpaca_bot_stream_concurrency',
+            sprintf(
+                /* translators: %d: how many replies one person may have streaming at once */
+                _n(
+                    'You already have %d stream open. Wait for it to finish, then send again.',
+                    'You already have %d streams open. Wait for one to finish, then send again.',
+                    $limit,
+                    'alpaca-bot',
+                ),
+                $limit,
+            ),
+            ['status' => 429, 'retry_after' => $retryAfter, 'limit' => $limit],
+        );
+    }
+
+    /**
+     * 409 for an ability asked to start a turn while one is already running in the request
+     * (Chat\Pipeline::running()): the ability was reached from inside a turn, through an
+     * "execute any ability" tool the turn was offered, and a turn does not start another
+     * (Kanboard #4538). Conflict rather than 400: the input is fine and the same call made
+     * outside a turn runs. Reached through a tool, the message is the tool's result the model
+     * reads, so it tells the model what to do instead.
+     *
+     * @since 0.6.0
+     */
+    public static function turnRunning(): \WP_Error
+    {
+        return new \WP_Error(
+            'alpaca_bot_turn_running',
+            __('A chat turn is already running, and Alpaca Bot does not start another one inside it. Answer in the turn that is running instead.', 'alpaca-bot'),
+            ['status' => 409],
         );
     }
 
@@ -64,10 +117,17 @@ final class Errors
      * that is not a base64 image data URL or images past the site's allowance, a model the
      * catalog does not list, a conversation that is not theirs. The pipeline's InvalidArgumentException messages are already written for the
      * person who sent the request, so a route passes them through as the message.
+     *
+     * `$code` is `alpaca_bot_bad_request` unless a route has a refusal a client needs to tell
+     * apart: `PUT /settings` answers `alpaca_bot_mcp_address` for an MCP server address that did
+     * not pass the check, and `alpaca_bot_mcp_row` for an MCP server row the schema would drop,
+     * with the rows in `$data`.
+     *
+     * @param array<string, mixed> $data added to the error's data beside `status`
      */
-    public static function badRequest(string $message): \WP_Error
+    public static function badRequest(string $message, string $code = 'alpaca_bot_bad_request', array $data = []): \WP_Error
     {
-        return new \WP_Error('alpaca_bot_bad_request', $message, ['status' => 400]);
+        return new \WP_Error($code, $message, ['status' => 400] + $data);
     }
 
     /**
@@ -81,7 +141,7 @@ final class Errors
     }
 
     /**
-     * 504 for a streamed turn that outran the site's wall-clock budget for one (StreamBudget
+     * 504 for a streamed turn that outran the site's wall-clock budget for one (Rest\StreamBudget
      * says how the budget is chosen). Gateway Timeout rather than 408: the client's request
      * arrived whole and on time, and what ran out of time was the turn behind it. It only ever
      * reaches a client inside an `error` frame — a stream that has already sent its headers has

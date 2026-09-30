@@ -14,46 +14,73 @@ use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Tool\ToolResult;
 /**
  * `web_fetch(url)`: one public web page as readable text, for a URL the user named.
  *
- * The model chooses the URL, so the fetch is held to two checks in turn, and a URL has to pass
- * both. Core's first: wp_http_validate_url(), which refuses anything but http(s), a URL with
- * credentials, a port outside 80/443/8080, and a host that is or resolves to what the running
- * core version knows to be local; then wp_safe_remote_get(), which applies the same check to
- * every redirect hop. What core knows depends on its version: 6.9, the plugin's floor, refuses
+ * The model chooses the URL, so every hop of the fetch, the URL itself and then each redirect up
+ * to MAX_REDIRECTS of them, is held to two checks in turn, and a hop has to pass both. Core's
+ * first: wp_http_validate_url(), which refuses anything but http(s), a URL with credentials, a
+ * port outside 80/443/8080, and a host that is or resolves to what the running core version
+ * knows to be local. What core knows depends on its version: 6.9, the plugin's floor, refuses
  * loopback, RFC 1918 and 0/8 and passes the link-local address where a cloud instance's
  * metadata service answers with the instance's credentials; 7.1 refuses the IPv4 registry; no
- * version reads an AAAA record. So the plugin's own check runs second, on the URL core returned
- * and on every redirect target (through the `requests.before_redirect` action core fires for
- * its own redirect validation): SpecialPurposeAddress, both families, over every address a
- * name resolves to. Two of core's rules are kept on purpose, and hostIsPublic() says what each
- * costs: the site's own host is exempt, and `http_request_host_is_external` opts a host in for
- * this tool as it does for any plugin; `http_allowed_safe_ports` is core's and stays core's.
- * Core's check is asked here as well as inside the request so that the refusal is the tool's
- * own message, not a WP_Error about a blocked URL, and so that nothing is built for a URL that
- * was never going anywhere.
+ * version reads an AAAA record. So the plugin's own check runs second, in AddressPin: one
+ * lookup, both families, every answer held to SpecialPurposeAddress, every answer handed back.
+ * Two of core's rules are kept on purpose, and each says what it costs where it is applied: the
+ * site's own host is exempt (pin()), and `http_request_host_is_external` opts a host in for this
+ * tool as it does for any plugin (AddressPin). `http_allowed_safe_ports` is core's and stays
+ * core's. Core's check is asked here as well as inside the request so that the refusal is the
+ * tool's own message, not a WP_Error about a blocked URL, and so that nothing is built for a URL
+ * that was never going anywhere.
  *
- * What neither check covers, on any core version: a name whose answer changes between the
- * check and the connection. wp_http_validate_url() resolves the host, this class resolves it
- * again, and the transport resolves it once more when it connects; each is a separate lookup,
- * and a name under an attacker's control with a short TTL can answer the checks with a public
- * address and the connection with 127.0.0.1 or the metadata address (DNS rebinding). What that
- * buys the attacker is a GET from the web server's host to whatever that host can reach, with
- * the response text handed to the model: an internal dashboard, or on a cloud instance the
- * metadata service and, under IMDSv1, the instance's credentials, which is everything the
- * address table exists to refuse. Closing it means resolving once and connecting to that
- * address (a transport that pins the resolved IP, CURLOPT_RESOLVE through `http_api_curl`, and
- * an answer for the fsockopen transport), which is a compatibility risk across transports and
- * a piece of work of its own, so it is not done here. An operator who needs it closed closes
- * it where it holds for every plugin at once: an egress policy at the network, so the web
- * server's host cannot open a connection to the metadata address or the private ranges
- * whatever name it resolved.
+ * Wherever the pin reaches, an address the check passed is the address the connection uses, and
+ * no other is available to it. Each check is its own DNS lookup and the transport would make one
+ * more when it connects, so a name under an attacker's control with a short TTL could answer the
+ * checks with a public address and the connection with 127.0.0.1 or the metadata address (DNS
+ * rebinding; audit H-1), and the response text would come back to the model. So the transport is
+ * not asked: a CurlPin hands the checked addresses to cURL in one CURLOPT_RESOLVE entry through
+ * core's `http_api_curl` action, leaving cURL a choice among them and no choice outside them
+ * (how many of them the entry carries is libcurl's to decide and CurlPin's to say), hooked for
+ * the one request and unhooked in a `finally` (get()). Redirects are the same problem once per
+ * hop, so the HTTP API is told to follow none (`redirection` 0, which core's
+ * `empty( $parsed_args['redirection'] )` branch turns into Requests' `follow_redirects` false,
+ * class-wp-http.php:359-363, so a 3xx comes back as a response rather than a `toomanyredirects`
+ * exception). The whole control rests on that mapping holding at 6.9, the plugin's floor, and it
+ * does: the same branch on 6.9, 7.0 and 7.1, and core's own HEAD default runs through it
+ * (`redirection` 0, class-wp-http.php:238-240), so it is not a path core leaves unexercised.
+ * This class then follows the redirects itself, each hop validated, looked up, checked and
+ * pinned like the first. Core's wp_http_validate_url() inside the request still makes a lookup
+ * of its own; it can only refuse, and the connection never uses its answer.
+ *
+ * The pin is a cURL option, so a request WordPress would send another way is refused rather than
+ * sent unpinned: each hop asks curlCarries() for its own scheme before the request is made,
+ * and a no is the tool's answer, naming the reason. That check is asked of the server, not of
+ * the request, so what it cannot see is a listener that sets a transport of its own afterwards
+ * (curlCarries() says where that is possible); what it does close is the ordinary case, a PHP
+ * with no usable cURL for the scheme, on which the refusal is then the tool's whole answer.
+ * Admin\SiteHealth reports that, and the proxy below, where a site owner looks for such things.
+ *
+ * Where the pin does not reach, and the rebinding window stays open. A proxy configured for the
+ * HTTP API (WP_PROXY_HOST with WP_PROXY_PORT) is sent the name and resolves it itself
+ * (class-wp-http.php:401-410), so the pin stops at the proxy, and what the proxy may reach, this
+ * tool may reach; core bypasses the proxy for the site's own host, `localhost` and
+ * WP_PROXY_BYPASS_HOSTS (class-wp-http-proxy.php:171-226), and a request it bypasses is
+ * connected to here as any other. The site's own host is neither looked up nor pinned (pin()).
+ * A public address that the site's own network routes somewhere private is no address check's to
+ * see (SpecialPurposeAddress). An egress policy at the network is the one control that holds for
+ * every plugin at once, and it is what closes that split-horizon case: the web server's host
+ * cannot open a
+ * connection to the metadata address or the private ranges whatever name it resolved. It does
+ * not reach past a proxy that egresses from elsewhere, nor whatever listens on the site's own
+ * host; those are restricted where they run.
  *
  * Three limits that are not negotiable from the model's side: the `toolkits.user_agent`
  * setting on every request, so a site owner can name the bot to the servers it visits (a
  * blank setting falls back to the schema's default rather than sending an empty header);
- * five seconds, so a slow host cannot hold a chat turn for the provider timeout on top of its
- * own; and 1 MiB on the wire, which the HTTP API enforces as it reads. What comes back is
- * read in the charset it declares (utf8() says how that is decided), reduced to text in time
- * linear in its size (text() says how, and why not wp_strip_all_tags()), and cut at MAX_CHARS
+ * five seconds; and 1 MiB on the wire, which the HTTP API enforces as it reads. The last two
+ * are per request rather than per fetch, here and under Requests' own redirect following before
+ * it (each hop got a fresh transport with the same options), so a fetch that takes every one of
+ * MAX_REDIRECTS hops can spend four of each at worst -- twenty seconds and 4 MiB -- of which
+ * only the last hop's body is ever read. What comes back is read in the charset it declares
+ * (utf8() says how that is decided), reduced to text in time linear in its size (text() says
+ * how, and why not wp_strip_all_tags()), and cut at MAX_CHARS
  * characters (not bytes) with a marker. A response that *declares* a Content-Type this class
  * does not read as text is refused outright: 1 MiB of a PDF or an image stripped of "tags" is
  * noise the model would have to pay for in context, and it would tell the user nothing. A
@@ -89,16 +116,20 @@ final class WebFetchToolkit implements ToolkitInterface
     /** Bytes the HTTP API reads before it stops: 1 MiB. */
     public const MAX_BYTES = 1048576;
 
-    /** Seconds one fetch may take, connection and body together. */
+    /** Seconds one request may take, connection and body together; a fetch that follows redirects spends it again per hop (the class docblock). */
     public const TIMEOUT = 5;
+
+    /** Redirects followed before the fetch gives up: the HTTP API's own default is 5; three is what a page that moved needs. */
+    public const MAX_REDIRECTS = 3;
 
     /** Content types past `text/*` that are text: an API answer or a feed a user pasted the URL of. */
     private const TEXT_TYPES = ['application/json', 'application/xml', 'application/xhtml+xml', 'application/rss+xml', 'application/atom+xml', 'application/ld+json'];
 
     /**
-     * @param null|\Closure(string): list<string> $resolver every address a host name answers with, A and AAAA, or [] when it does not resolve or a lookup failed; the default is resolve() over the system resolver, a test hands in its own
+     * @param null|\Closure(string): list<string> $resolver every address a host name answers with, A and AAAA, or [] when it does not resolve or a lookup failed; AddressPin::lookup() over the system resolver by default, a test hands in its own
+     * @param null|\Closure(bool): bool           $curl     whether WordPress would send a request (https or not) through cURL; curlCarries() by default, a test hands in its own
      */
-    public function __construct(private Store $store, private ?\Closure $resolver = null) {}
+    public function __construct(private Store $store, private ?\Closure $resolver = null, private ?\Closure $curl = null) {}
 
     public function tools(): array
     {
@@ -117,40 +148,48 @@ final class WebFetchToolkit implements ToolkitInterface
 
     private function fetch(string $url): ToolResult
     {
-        $safe = wp_http_validate_url(trim($url));
-        if (!is_string($safe) || !$this->hostIsPublic($safe)) {
-            return ToolResult::error(__('That URL is not allowed: only public http(s) addresses can be fetched, never a private, local, or malformed one.', 'alpaca-bot'));
-        }
         $userAgent = trim((string) $this->store->get('toolkits.user_agent'));
         if ($userAgent === '') {
             $userAgent = (string) Schema::defaults()['toolkits.user_agent'];
         }
-        // Every redirect hop through the same check. Core registers its own validate_redirects()
-        // on the Requests hook and re-fires it as this action, after its own callback has run.
-        $guard = function (string $location): void {
-            if (!$this->hostIsPublic($location)) {
-                throw new \WpOrg\Requests\Exception(__('The page redirected to an address that is not allowed.', 'alpaca-bot'), 'alpaca_bot.redirect_refused');
+        $location = trim($url);
+        $hop = 0;
+        while (true) {
+            $safe = wp_http_validate_url($location);
+            try {
+                if (!is_string($safe)) {
+                    throw new AddressRefused('');
+                }
+                $pin = $this->pin($safe);
+            } catch (AddressRefused) {
+                return ToolResult::error($hop === 0
+                    ? __('That URL is not allowed: only public http(s) addresses can be fetched, never a private, local, or malformed one.', 'alpaca-bot')
+                    : __('The page redirected to an address that is not allowed.', 'alpaca-bot'));
             }
-        };
-        add_action('requests-requests.before_redirect', $guard);
-        try {
-            $response = wp_safe_remote_get($safe, [
-                'user-agent' => $userAgent,
-                'timeout' => self::TIMEOUT,
-                'redirection' => 3,
-                'limit_response_size' => self::MAX_BYTES,
-                // wp_safe_remote_get() sets this itself; spelled out so the intent is in one place.
-                'reject_unsafe_urls' => true,
-            ]);
-        } finally {
-            remove_action('requests-requests.before_redirect', $guard);
+            if (!($this->curl ?? self::curlCarries(...))(strtolower((string) wp_parse_url($safe, PHP_URL_SCHEME)) === 'https')) {
+                return ToolResult::error(__('web_fetch cannot run on this server: WordPress would send the request without cURL, and only cURL can be held to the address that was checked. Ask your host for PHP\'s cURL extension with SSL; Tools › Site Health says what this server has.', 'alpaca-bot'));
+            }
+            $response = $this->get($safe, $pin, $userAgent);
+            if (is_wp_error($response)) {
+                /* translators: %s: the HTTP API's error message */
+                return ToolResult::error(sprintf(__('The page could not be fetched: %s', 'alpaca-bot'), $response->get_error_message()));
+            }
+            $code = (int) wp_remote_retrieve_response_code($response);
+            $next = self::redirect($response, $code, $safe);
+            if ($next === null) {
+                break;
+            }
+            if ($hop === self::MAX_REDIRECTS) {
+                /* translators: %d: the number of redirects followed */
+                return ToolResult::error(sprintf(__('The page redirected more than %d times.', 'alpaca-bot'), self::MAX_REDIRECTS));
+            }
+            $location = $next;
+            ++$hop;
         }
-        if (is_wp_error($response)) {
-            /* translators: %s: the HTTP API's error message */
-            return ToolResult::error(sprintf(__('The page could not be fetched: %s', 'alpaca-bot'), $response->get_error_message()));
-        }
-        $code = (int) wp_remote_retrieve_response_code($response);
-        if ($code >= 400 || $code < 200) {
+        // 3xx, not just 4xx and 5xx: `redirection` 0 means nothing was followed on our behalf, and
+        // a 3xx only reaches this line when redirect() declined to follow it (a code it does not
+        // follow, or no usable Location), so there is no page behind it to read.
+        if ($code < 200 || $code >= 300) {
             /* translators: 1: HTTP status code, 2: the URL */
             return ToolResult::error(sprintf(__('HTTP %1$d from %2$s', 'alpaca-bot'), $code, $safe));
         }
@@ -173,85 +212,108 @@ final class WebFetchToolkit implements ToolkitInterface
     }
 
     /**
-     * Whether the URL's host is somewhere a model-chosen fetch may go: an address in none of
-     * SpecialPurposeAddress::RANGES, or a name every one of whose A and AAAA answers is. A name
-     * that does not resolve is refused (the fetch would fail anyway, and core below 7.1 lets it
-     * through), and so is one whose lookup failed (resolve() says why that is not the same
-     * thing). The site's own host is exempt, as it is in core: a local site resolves to a
-     * private address and can still read its own pages. The cost of the exemption is core's
-     * too: whatever else listens on that host on 80, 443 or 8080 is reachable. A special-purpose
-     * address a site has opted in through core's `http_request_host_is_external` filter is
-     * allowed here as well, so that opt-in means the same thing for this tool as for any plugin.
+     * The pin for one hop, carrying the addresses AddressPin checked, or null when the hop needs
+     * none; AddressRefused when the hop may not be fetched. An address literal needs no pin
+     * (there is nothing to resolve), and neither does
+     * the site's own host, which is exempt as it is in core: a local site resolves to a private
+     * address and can still read its own pages. The cost of the exemption is core's too:
+     * whatever else listens on that host on 80, 443 or 8080 is reachable, and the host is not
+     * looked up here, so it is not pinned either; its DNS is the site owner's own.
+     *
+     * @throws AddressRefused
      */
-    private function hostIsPublic(string $url): bool
+    private function pin(string $url): ?CurlPin
     {
         $host = strtolower(trim((string) wp_parse_url($url, PHP_URL_HOST), '.'));
         if ($host === '') {
-            return false;
+            throw new AddressRefused('');
         }
         if ($host === strtolower((string) wp_parse_url(home_url(), PHP_URL_HOST))) {
-            return true;
+            return null;
         }
-        $literal = trim($host, '[]');
-        $addresses = SpecialPurposeAddress::isAddress($literal) ? [$literal] : ($this->resolver ?? self::resolve(...))($host);
-        if ($addresses === []) {
-            return false;
+        $ips = AddressPin::resolve($host, $url, $this->resolver);
+        if (SpecialPurposeAddress::isAddress(trim($host, '[]'))) {
+            return null;
         }
-        foreach ($addresses as $address) {
-            if (!SpecialPurposeAddress::isAddress($address)) {
-                return false;
-            }
-            // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- Deliberately core's own filter, not a hook of ours: a site that has already told WordPress a private host is reachable should not have to say it again here.
-            if (SpecialPurposeAddress::match($address) !== null && !apply_filters('http_request_host_is_external', false, $host, $url)) {
-                return false;
-            }
+        $port = (int) wp_parse_url($url, PHP_URL_PORT);
+        if ($port === 0) {
+            $port = strtolower((string) wp_parse_url($url, PHP_URL_SCHEME)) === 'https' ? 443 : 80;
         }
-        return true;
+        return new CurlPin($host, $port, $ips);
     }
 
     /**
-     * Every address a name answers with, both families, through the system resolver: A through
-     * gethostbynamel(), AAAA through dns_get_record(). The connection will use whichever the
-     * transport prefers, so both have to be looked at. Cost: two lookups on top of the one
-     * wp_http_validate_url() already made, normally answered from the resolver's cache since it
-     * just made the first; a resolver that times out costs its timeout. dns_get_record() warns
-     * as well as returning false on a failed query, and a warning here is a refused fetch, not
-     * an error worth logging, hence the suppression.
+     * One request, redirects off, pinned when there is a pin. The pin is hooked for this call
+     * alone and unhooked however it ends (CurlPin says why applying it to any handle in that
+     * window is safe, and which transport never hands it one).
      *
-     * A lookup that failed is not a lookup that answered "none". Either function returns false
-     * when the query could not be made (a timeout, a nameserver that drops the question), and
-     * that is answered with an empty list, which hostIsPublic() refuses as it refuses a name that
-     * does not resolve. Read as "no records" instead, a false from the AAAA half let a name whose
-     * nameserver answers A with a public address and drops AAAA queries past the table on the A
-     * alone, and the transport's own lookup, which does read AAAA, then chose the address on a
-     * dual-stack host; this class is the one AAAA check in the path (the class docblock), so it
-     * is the one that has to hold. What the refusal costs: a legitimate host behind a resolver
-     * that fails one of the two queries cannot be fetched until the resolver answers, where it
-     * was fetched before on whichever half had answered. The A half costs nothing beyond that,
-     * since wp_http_validate_url() already refused a host gethostbyname() could not answer.
-     *
-     * @param null|\Closure(string): (list<string>|false) $a    the A lookup; gethostbynamel() by default
-     * @param null|\Closure(string): (array<mixed>|false) $aaaa the AAAA lookup; dns_get_record($host, DNS_AAAA) by default
-     * @return list<string> every address, or [] when the name has none or either lookup failed
-     * @internal Public only so the tests can hand in the two lookups; not part of the plugin's API.
+     * @return array<string, mixed>|\WP_Error
      */
-    public static function resolve(string $host, ?\Closure $a = null, ?\Closure $aaaa = null): array
+    private function get(string $url, ?CurlPin $pin, string $userAgent): array|\WP_Error
     {
-        $a ??= static fn(string $host): array|false => gethostbynamel($host);
-        // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged -- dns_get_record() emits a PHP warning as well as returning false when a lookup fails. The false is checked below and refuses the fetch; the warning would only leak resolver detail into the response of an SSRF guard.
-        $aaaa ??= static fn(string $host): array|false => @dns_get_record($host, DNS_AAAA);
-        $v4 = $a($host);
-        $v6 = $aaaa($host);
-        if ($v4 === false || $v6 === false) {
-            return [];
+        if ($pin !== null) {
+            add_action('http_api_curl', $pin, 10, 1);
         }
-        $addresses = array_values(array_filter($v4, 'is_string'));
-        foreach ($v6 as $record) {
-            if (is_array($record) && is_string($record['ipv6'] ?? null)) {
-                $addresses[] = $record['ipv6'];
+        try {
+            return wp_safe_remote_get($url, [
+                'user-agent' => $userAgent,
+                'timeout' => self::TIMEOUT,
+                // This class follows redirects itself, one pinned hop at a time (the class docblock).
+                'redirection' => 0,
+                'limit_response_size' => self::MAX_BYTES,
+                // wp_safe_remote_get() sets this itself; spelled out so the intent is in one place.
+                'reject_unsafe_urls' => true,
+            ]);
+        } finally {
+            if ($pin !== null) {
+                remove_action('http_api_curl', $pin, 10);
             }
         }
-        return $addresses;
+    }
+
+    /**
+     * The absolute URL a response redirects to, or null when it is not a redirect this class
+     * follows: a 301, 302, 303, 307 or 308 with one non-empty Location. A relative Location is
+     * resolved against the hop it came from by core's WP_Http::make_absolute_url(), which hands
+     * an absolute one back as it is (class-wp-http.php:973, :989-990); the unit suite does not load
+     * core, so an absolute Location skips the call and the relative case is pinned in
+     * tests/Integration/ToolkitsTest.php. A repeated Location header (the HTTP API answers an
+     * array) is not guessed at: it is not followed, and the 3xx is reported as an error.
+     *
+     * @param array<string, mixed> $response
+     */
+    private static function redirect(array $response, int $code, string $base): ?string
+    {
+        if (!in_array($code, [301, 302, 303, 307, 308], true)) {
+            return null;
+        }
+        $location = wp_remote_retrieve_header($response, 'location');
+        if (!is_string($location) || trim($location) === '') {
+            return null;
+        }
+        $location = trim($location);
+        return wp_parse_url($location, PHP_URL_SCHEME) !== null ? $location : \WP_Http::make_absolute_url($location, $base);
+    }
+
+    /**
+     * Whether WordPress would send a request of this scheme through cURL, the only transport the
+     * pin can reach. WP_Http::request() passes Requests no `transport` option (WP 7.1
+     * class-wp-http.php:341-345), so Requests picks one per request from the scheme
+     * (Requests.php:457-466): the first class in its list whose test() passes (:246-251). The
+     * list starts as Curl then Fsockopen (:141-144) and add_transport() only appends (:210-215),
+     * so cURL is used exactly when Curl::test() passes for the scheme. Requests' own
+     * get_transport_class() would say this directly but is protected (:225), and
+     * WP_Http::_get_first_available_transport() is deprecated and asks the legacy transports
+     * instead (class-wp-http.php:539-561). The one way around the answer given here is a
+     * listener on `requests-requests.before_request`, which is handed Requests' options by
+     * reference (Requests.php:455, re-fired to WordPress by class-wp-http-requests-hooks.php:75)
+     * and could set a transport of its own; nothing in core does -- its only listener on that
+     * hook is the cookie jar (Cookie/Jar.php:133).
+     */
+    public static function curlCarries(bool $https): bool
+    {
+        return class_exists(\WpOrg\Requests\Transport\Curl::class)
+            && \WpOrg\Requests\Transport\Curl::test([\WpOrg\Requests\Capability::SSL => $https]);
     }
 
     /**

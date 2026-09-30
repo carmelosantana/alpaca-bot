@@ -18,7 +18,7 @@ function helpScreen(string $id): Mockery\MockInterface
 
 // Core derives a submenu screen's id from the *parent's translated menu title*, so the settings
 // page's id is not a constant. These stand in for get_plugin_page_hookname() rather than spell
-// the id out: what a hard-coded string cost was all four tabs on every translated locale, and a
+// the id out: what a hard-coded string cost was every tab on every translated locale, and a
 // test that names the string again cannot notice. The derivation itself is exercised against
 // real core, in a translated locale, in tests/Integration/HelpTabsTest.php.
 beforeEach(function (): void {
@@ -34,17 +34,17 @@ it('names the chat screen and the settings page as the two screens that get the 
     expect(HelpTabs::screens())->toBe([Assets::HOOK, 'robot-alpaca_page_' . SettingsPage::SLUG]);
 });
 
-it('adds the Chat, Shortcodes, Tools and Support tabs, in that order, to the chat screen and to the settings page', function (): void {
+it('adds the Chat, Shortcodes, Tools, Access and Support tabs, in that order, to the chat screen and to the settings page', function (): void {
     Functions\when('esc_url')->returnArg();
     foreach (HelpTabs::screens() as $id) {
         $added = [];
         $screen = helpScreen($id);
-        $screen->shouldReceive('add_help_tab')->times(4)->andReturnUsing(static function (array $tab) use (&$added): void {
+        $screen->shouldReceive('add_help_tab')->times(5)->andReturnUsing(static function (array $tab) use (&$added): void {
             $added[] = $tab;
         });
         (new HelpTabs())->add($screen);
-        expect(array_column($added, 'id'))->toBe(['alpaca-bot-chat', 'alpaca-bot-shortcodes', 'alpaca-bot-tools', 'alpaca-bot-support'], $id)
-            ->and(array_column($added, 'title'))->toBe(['Chat', 'Shortcodes', 'Tools', 'Support'], $id);
+        expect(array_column($added, 'id'))->toBe(['alpaca-bot-chat', 'alpaca-bot-shortcodes', 'alpaca-bot-tools', 'alpaca-bot-access', 'alpaca-bot-support'], $id)
+            ->and(array_column($added, 'title'))->toBe(['Chat', 'Shortcodes', 'Tools', 'Access', 'Support'], $id);
         foreach ($added as $tab) {
             expect($tab['content'])->toBeString()->toContain('<p>');
         }
@@ -84,6 +84,10 @@ it('describes what the chat screen does now, and points support at the wordpress
     Functions\when('esc_url')->returnArg();
     $chat = helpTabContent('alpaca-bot-chat');
     expect($chat)->toContain('New chat')->toContain('Enter')->toContain('Shift')->toContain('image')->toContain('Copy')->toContain('Edit and resend')
+        // The drawer (Admin\Drawer): where it is, and the image button it lacks where the screen has no media library.
+        ->toContain('round button')->toContain('screens that have the button')->toContain('already loads the media library')
+        // The block editor's sidebar (resources/ts/editor.ts) in the drawer's place, and when it names the post.
+        ->toContain('In the block editor the same chat is a sidebar')->toContain('starts on a new chat')->toContain('once that post has been saved or autosaved')
         // The image cap is Assets::maxImageBytes(), which reads post_max_size alone; the tab must name that setting, not the upload limit that has no say.
         ->toContain('post_max_size')->not->toMatch('/is the site.s own upload limit/');
     // A question goes to the wordpress.org forum, premium help is a call booked on
@@ -108,22 +112,51 @@ it('describes what the chat screen does now, and points support at the wordpress
     expect($order)->toBe($sorted)->not->toContain(false);
 });
 
-it('tells a site owner what the tools grant: the fetch is an outbound request, the rebinding window is open, an egress policy is the mitigation, and opening the chat opens the tools', function (): void {
+it('tells a site owner what the tools grant: the fetch is an outbound request pinned to the checked addresses, what the pin does not cover, and who can reach it', function (): void {
     // H-1 and M-3 of the 0.5.0 security audit, both accepted for this release and both argued
     // until now only in a source docblock, where the only person who can act on them will never
-    // read it. What must be here: what web_fetch does, that the DNS-rebinding window between the
-    // address check and the connection is open, who can reach it with no model involved, that an
-    // egress policy is the supported mitigation, and that opening a capability filter to a role
-    // hands that role every enabled tool.
+    // read it. What must be here: what web_fetch does, that the connection can go only to an
+    // address the check passed, on every redirect, and what the pin does not reach (a proxy, the
+    // site's own host, a server without cURL), who can reach it with no model involved, that an
+    // egress policy still covers what the pin does not, and -- since 0.6 closed M-3 -- that opening a
+    // capability filter to a role does not hand that role the tools: each one has a row of its
+    // own in Settings > Access.
     Functions\when('esc_url')->returnArg();
     $tools = helpTabContent('alpaca-bot-tools');
     expect($tools)->toContain('web_fetch')->toContain('draft_post')
         ->toContain('outbound')->toContain('DNS')->toContain('redirect')
+        ->toContain('pinned')->toContain('cURL')->toContain('proxy')->toContain('Site Health')
         ->toContain('egress policy')->toContain('IMDSv2')
+        ->not->toContain('later 0.x')
         ->toContain('Contributor')->toContain('[alpacabot_agent name="get" url="…"]')
         ->toContain('alpaca_bot/capability/chat')->toContain('alpaca_bot/toolkits')
+        ->toContain('Settings › Access')
         // Not overstated into a scare, and not dated with a version that is not this line's.
         ->not->toContain('vulnerab')->not->toMatch('/(?<![\\d.])1\\.\\d/');
+});
+
+// The Access tab is the capability model in the product's own words: a row is a default a filter
+// may override, not an answer, and "Set in code" under a row is that override showing. It names
+// every row but the tool rows by the label Settings › Access gives it, and the tool rows
+// together, so an operator can find the one it means.
+it('says what each Settings › Access row decides and what "Set in code" under one means', function (): void {
+    Functions\when('esc_url')->returnArg();
+    $access = helpTabContent('alpaca-bot-access');
+    foreach (AlpacaBot\Settings\Schema::fields() as $key => $field) {
+        if (str_starts_with($key, 'access.') && $key !== 'access.mcp' && !str_starts_with($key, 'access.tool.')) {
+            expect($access)->toContain('<strong>' . $field['label'] . '</strong>');
+        }
+    }
+    expect($access)->toContain('Set in code')
+        ->toContain('Administrators')->toContain('Editors and up')->toContain('Authors and up')->toContain('Contributors and up')->toContain('Any logged-in user')
+        // The tool floor: opening the chat does not hand a role the tools.
+        ->toContain('as well as Chat')
+        // The Chat row's two surfaces, each behind a filter of its own, and which one a note names.
+        ->toContain('alpaca_bot/admin/menu_capability')->toContain('alpaca_bot/capability/chat')
+        ->toContain('once no filter changes it')
+        // What the note does not cover: it asks as [alpacabot] outside a post, not per post or tag.
+        ->toContain('outside any post')->toContain('<code>[alpacabot_agent]</code>, gets no note')
+        ->not->toMatch('/(?<![\\d.])1\\.\\d/');
 });
 
 it('escapes every URL it prints through esc_url', function (): void {
@@ -136,12 +169,59 @@ it('escapes every URL it prints through esc_url', function (): void {
     expect($urls)->not->toBeEmpty()->and($support)->not->toContain('href="https://');
 });
 
-/** The content of one tab as add() hands it to the chat screen. */
+// The abilities tool is the one tool whose reach is set by other plugins' code, so the person
+// switching tools on is told what a call is and who it runs as, that the list shows what the model
+// reads, and that its row starts where the other tools' rows do not.
+it('tells the person switching tools on what an ability call is: another plugin\'s code, run as the user whose turn it is', function (): void {
+    Functions\when('esc_url')->returnArg();
+    $tools = helpTabContent('alpaca-bot-tools');
+    expect($tools)->toContain('as the user whose turn it is')->toContain('<code>alpaca-bot/*</code>')
+        ->toContain('own permission check')->toContain('destructive')->toContain('same tool name')
+        ->toContain('Contributors and up by default for <code>web_fetch</code>, <code>summarize</code> and <code>draft_post</code>')
+        ->toContain('Administrators for the abilities tool')
+        ->not->toContain('All three')->not->toContain('three ship')
+        // The allowlist bounds only direct calls (review I2): an ability that runs others is named as the way round it.
+        ->toContain('decides only what the model may call directly')->toContain('runs other abilities')
+        ->not->toContain('cannot call the plugin')
+        // The schema's own text (review N2): what Alpaca Bot does with it, not what a provider does.
+        ->toContain('Alpaca Bot neither cleans nor caps')->not->toContain('as the plugin registered it')
+        ->toContain('longer than ' . AlpacaBot\Toolkit\SchemaTool::RESULT_CHARS . ' characters is cut');
+});
+
+// An MCP server's tools are another party's, and Discover and a tool turn contact the server
+// (Task 28): the tab says what is offered and when the address is checked, and does not borrow
+// web_fetch's address rules, which differ (review R88).
+it('tells the person adding an MCP server what is offered, whose text it is, who may use it, and when its address is checked', function (): void {
+    Functions\when('esc_url')->returnArg();
+    $tools = helpTabContent('alpaca-bot-tools');
+    // The one paragraph about MCP, so what it says is not borrowed from the abilities one.
+    preg_match('~<p><strong>An MCP server.*?</p>~s', $tools, $m);
+    $mcp = str_replace('&#039;', "'", $m[0] ?? '');
+    expect($mcp)->not->toContain('no MCP server is contacted')->not->toContain('php-agents')
+        ->toContain('Discover tools asks the server for its tools')
+        ->toContain('checked when it is saved from this screen or over the REST API, and again each time Alpaca Bot connects to it: on Discover tools, and on a chat turn that lists its tools')
+        ->toContain('only to an address that passed, never through a proxy, and follows no redirect')
+        ->toContain('Put a credential in the header, never in the address')
+        ->toContain('only the tools you tick')->toContain('prefix__tool')
+        ->toContain('withheld until you approve it again')->toContain('lists twice')
+        ->toContain("the server's text")->toContain('shortened and flattened exactly as the model gets it')
+        ->toContain('starts at Administrators')
+        // M5 (R101): the schema is the server's text too and reaches the model as sent; C3
+        // (Task 28.3): approving pins it, so the list shows it, cut at McpTools::SCHEMA_CHARS.
+        ->toContain("input schema carries the server's text too")->toContain('Alpaca Bot neither cleans nor caps')
+        ->toContain("pins its input schema with the rest, so the list shows each tool's schema under it, collapsed, with every character outside ASCII written as its \\u escape so that none can hide, and cut at 4000 characters of that text.")
+        ->not->toContain('does not show')
+        ->toContain("even when it is the site's own host")
+        ->toContain('<code>alpaca_bot/mcp/called</code>')
+        ->and($tools)->not->toContain('same address rules');
+});
+
+/** The content of one tab as add() hands it to the chat screen; how many tabs there are is the ordering test's to pin. */
 function helpTabContent(string $tabId): string
 {
     $screen = helpScreen(Assets::HOOK);
     $content = null;
-    $screen->shouldReceive('add_help_tab')->times(4)->andReturnUsing(static function (array $tab) use (&$content, $tabId): void {
+    $screen->shouldReceive('add_help_tab')->atLeast()->once()->andReturnUsing(static function (array $tab) use (&$content, $tabId): void {
         if ($tab['id'] === $tabId) {
             $content = $tab['content'];
         }

@@ -8,6 +8,7 @@ use AlpacaBot\Chat\Delta;
 use AlpacaBot\Chat\Message;
 use AlpacaBot\Chat\Pipeline;
 use AlpacaBot\Chat\Result;
+use AlpacaBot\Chat\RunFailure;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Agent\Output;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Contract\ProviderInterface;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Contract\ToolInterface;
@@ -82,7 +83,7 @@ it('runs the agent loop when a toolkit is enabled and the model supports tools: 
     expect(array_map(static fn(Delta $d): array => [$d->text, $d->reasoning], $seen))->toBe([['', 'thinking'], ['Let me check', ''], ['', ''], ["\n\npong ", ''], ['received', '']])
         ->and($ranWith)->toBe([['', 'thinking'], ['Let me check', ''], ['', '']]);
 
-    $record = ['name' => 'echo_tool', 'arguments' => ['text' => 'ping'], 'result_excerpt' => 'echo:ping', 'ok' => true];
+    $record = ['name' => 'echo_tool', 'arguments' => ['text' => 'ping'], 'result_excerpt' => 'echo:ping', 'ok' => true, 'result_bytes' => 9];
     expect($r->reply->content)->toBe("Let me check\n\npong received")
         ->and($r->reply->meta)->toBe(['duration_ms' => $r->receipt['duration_ms'], 'reasoning' => 'thinking', 'tool_calls' => [$record]])
         // Output::$usage is the sum over the run (AbstractAgent::run() adds each iteration's
@@ -129,11 +130,78 @@ it('records a tool that fails, and one the model names that does not exist, as n
 
     expect($r->reply->content)->toBe('Neither worked.')
         ->and($r->reply->meta['tool_calls'])->toBe([
-            ['name' => 'echo_tool', 'arguments' => ['text' => 'ping'], 'result_excerpt' => 'nope: ping', 'ok' => false],
-            ['name' => 'no_such_tool', 'arguments' => ['x' => 1], 'result_excerpt' => 'Unknown tool: no_such_tool', 'ok' => false],
+            ['name' => 'echo_tool', 'arguments' => ['text' => 'ping'], 'result_excerpt' => 'nope: ping', 'ok' => false, 'result_bytes' => 10],
+            ['name' => 'no_such_tool', 'arguments' => ['x' => 1], 'result_excerpt' => 'Unknown tool: no_such_tool', 'ok' => false, 'result_bytes' => 26],
         ])
         ->and($calls)->toHaveCount(2)
         ->and($r->receipt['total_tokens'])->toBe(4);
+});
+
+// Each record carries the size in bytes of the result its tool returned, and the receipt sums them:
+// the one number that says how much the turn's tools handed back.
+it('reports the sum of the turn\'s tool result sizes on the receipt, the stored row and the usage action', function (): void {
+    $toolkit = echoToolkit('echo_tool');
+    $provider = agentProvider([
+        [new Response('', ProviderFinishReason::ToolUse, [new ToolCall('c1', 'echo_tool', ['text' => 'ping']), new ToolCall('c2', 'echo_tool', ['text' => 'pöng'])])],
+        [new Response('Both echoed.', ProviderFinishReason::Stop, usage: new Usage(2, 2, 4))],
+    ]);
+    $h = pipelineWith($provider, [], [], TOOL_MODEL, null, registryWith(['echo' => $toolkit]));
+    $recorded = null;
+    Actions\expectDone('alpaca_bot/usage/recorded')->once()->whenHappen(static function (array $receipt) use (&$recorded): void {
+        $recorded = $receipt;
+    });
+
+    $r = $h->pipeline->complete(3, 'echo twice');
+
+    // 'echo:ping' is 9 bytes and 'echo:pöng' 10, the ö being two.
+    expect(array_column($r->reply->meta['tool_calls'], 'result_bytes'))->toBe([9, 10])
+        ->and($r->receipt['tool_result_bytes'])->toBe(19)
+        ->and($recorded['tool_result_bytes'])->toBe(19)
+        ->and($h->writes[3][2]['meta_input']['tool_result_bytes'])->toBe(19);
+});
+
+it('reports on an abandoned turn\'s receipt the size of what had come back before the consumer left', function (): void {
+    $toolkit = echoToolkit('draft_post', 'Use it.', static fn(array $a): ToolResult => ToolResult::success('{"id": 225}'));
+    $provider = agentProvider([
+        [new Response('', ProviderFinishReason::ToolUse, [new ToolCall('c1', 'draft_post', ['text' => 'One'])])],
+        [new Response('', ProviderFinishReason::ToolUse, [new ToolCall('c2', 'draft_post', ['text' => 'Two'])])],
+    ]);
+    $h = pipelineWith($provider, [], [], TOOL_MODEL, null, registryWith(['draft' => $toolkit]));
+    Actions\expectDone('alpaca_bot/chat/failed')->once();
+    $recorded = null;
+    Actions\expectDone('alpaca_bot/usage/recorded')->once()->whenHappen(static function (array $receipt) use (&$recorded): void {
+        $recorded = $receipt;
+    });
+
+    $gen = $h->pipeline->send(3, 'draft two');
+    $gen->current();
+    $gen->next();
+    unset($gen);
+
+    // The first call answered 11 bytes; the second was made and never answered.
+    $row = array_values(array_filter($h->writes, static fn(array $w): bool => $w[0] === 'wp_insert_post' && $w[1] === 'chat_log'));
+    expect($recorded['tool_result_bytes'])->toBe(11)
+        ->and($row[0][2]['meta_input']['tool_result_bytes'])->toBe(11);
+});
+
+// The agent indexes tools by name and the last toolkit to name one wins it. The registry hands
+// the built-ins over first, so without a guard a later toolkit (an MCP server, a site's own
+// through the filter) could take a built-in tool's name and its calls. The earlier one keeps it.
+it('keeps a tool name for the toolkit that offered it first, so a later toolkit cannot take its calls', function (): void {
+    $first = echoToolkit('echo_tool', 'Use the first.', static fn(array $a): ToolResult => ToolResult::success('first:' . $a['text']));
+    $second = echoToolkit('echo_tool', 'Use the second.', static fn(array $a): ToolResult => ToolResult::success('second:' . $a['text']));
+    $provider = agentProvider([
+        [new Response('', ProviderFinishReason::ToolUse, [new ToolCall('c1', 'echo_tool', ['text' => 'ping'])])],
+        [new Response('Done.', ProviderFinishReason::Stop, usage: new Usage(2, 2, 4))],
+    ], $calls);
+    $h = pipelineWith($provider, [], [], TOOL_MODEL, null, registryWith(['a' => $first, 'b' => $second]));
+
+    $r = $h->pipeline->complete(3, 'ping');
+
+    expect($r->reply->meta['tool_calls'][0]['result_excerpt'])->toBe('first:ping')
+        ->and(array_map(static fn(object $t): string => $t->name(), $calls[0]['tools']))->toBe(['echo_tool', 'done'])
+        // A toolkit left with no tool says nothing to the model about tools it does not have.
+        ->and($calls[0]['messages'][0]->content())->toContain('Use the first.')->not->toContain('Use the second.');
 });
 
 it('yields the answer a model gives through the done tool, which it never streamed, after the run', function (): void {
@@ -209,7 +277,7 @@ it('keeps the turn when the provider fails after a tool ran: the partial reply i
     // ... but a draft exists in their Posts list, and the transcript is how they learn of it:
     // the reply is stored as the abandoned path stores one, partial, with what streamed and
     // the record of the call; the receipt bills the call that completed; the post stays.
-    $record = ['name' => 'draft_post', 'arguments' => ['text' => 'Hello'], 'result_excerpt' => '{"id": 225}', 'ok' => true];
+    $record = ['name' => 'draft_post', 'arguments' => ['text' => 'Hello'], 'result_excerpt' => '{"id": 225}', 'ok' => true, 'result_bytes' => 11];
     expect($failed[1]->messages[1]->content)->toBe('Drafting.')
         ->and($failed[1]->messages[1]->meta['partial'])->toBeTrue()
         ->and($failed[1]->messages[1]->meta['tool_calls'])->toBe([$record])
@@ -251,7 +319,7 @@ it('keeps the turn when anything else throws after a tool ran, the same way: the
     expect(fn() => $turn->throw(new \LogicException('boom')))->toThrow(\RuntimeException::class, 'Provider error: boom');
     expect($failed[0])->toBeInstanceOf(\LogicException::class);
 
-    $record = ['name' => 'draft_post', 'arguments' => ['text' => 'Hello'], 'result_excerpt' => '{"id": 225}', 'ok' => true];
+    $record = ['name' => 'draft_post', 'arguments' => ['text' => 'Hello'], 'result_excerpt' => '{"id": 225}', 'ok' => true, 'result_bytes' => 11];
     expect($failed[1]->messages)->toHaveCount(2)
         ->and($failed[1]->messages[1]->content)->toContain('Drafting.')->toContain('Done.')
         ->and($failed[1]->messages[1]->meta['partial'])->toBeTrue()
@@ -319,7 +387,9 @@ it('finishes the turn on a tool\'s own word when a toolkit ends the run with a T
     // The library reports a termination as an Error finish with no error announced: nothing
     // failed, a tool asked the run to stop, and its message is the run's last word.
     expect($r->reply->content)->toBe("One moment.\n\nStopped: enough")
-        ->and($r->reply->meta['tool_calls'])->toBe([['name' => 'stop_here', 'arguments' => ['text' => 'enough'], 'result_excerpt' => 'Stopped: enough', 'ok' => true]])
+        ->and($r->reply->meta['tool_calls'])->toBe([['name' => 'stop_here', 'arguments' => ['text' => 'enough'], 'result_excerpt' => 'Stopped: enough', 'ok' => true, 'result_bytes' => 15]])
+        // Counted though the run ended on it and no later request sent it to the model (docs/api.md).
+        ->and($r->receipt['tool_result_bytes'])->toBe(15)
         ->and($r->receipt['total_tokens'])->toBe(3);
 });
 
@@ -373,8 +443,131 @@ it('stores the partial reply with the calls made so far, and lets the fiber go t
         ->and($failed[0]->getMessage())->toContain('abandoned')
         ->and($failed[1]->messages[1]->content)->toBe("first\n\nsecond")
         ->and($failed[1]->messages[1]->meta['partial'])->toBeTrue()
-        ->and($failed[1]->messages[1]->meta['tool_calls'])->toBe([['name' => 'echo_tool', 'arguments' => ['text' => 'ping'], 'result_excerpt' => 'echo:ping', 'ok' => true]])
+        ->and($failed[1]->messages[1]->meta['tool_calls'])->toBe([['name' => 'echo_tool', 'arguments' => ['text' => 'ping'], 'result_excerpt' => 'echo:ping', 'ok' => true, 'result_bytes' => 9]])
         ->and(array_map(static fn(array $w): string => $w[0], $h->writes))->toBe(['wp_insert_post', 'update_post_meta', 'wp_update_post', 'wp_insert_post']);
+});
+
+// AgentStreamObserver keeps back the few bytes that could begin a faked tool call's marker
+// (FakedToolCallStream), so a run whose text ends in one of them has bytes in hand when the
+// agent returns. Both ends of the turn have to take them: the drain loop's flush() for a
+// consumer still reading, and send()'s finally for one that walked away. Without the first the
+// deltas are short of the reply *and* $streamed no longer ends with the Output's content, so
+// the tail branch below yields the whole answer a second time.
+it('flushes the bytes the observer was still deciding about as the run\'s last delta, so the deltas are the reply and no tail is repeated', function (): void {
+    $provider = agentProvider([[new Response('a < b <', ProviderFinishReason::Stop, usage: new Usage(2, 1, 3))]]);
+    $h = pipelineWith($provider, [], [], TOOL_MODEL, null, registryWith(['echo' => echoToolkit('echo_tool')]));
+
+    $gen = $h->pipeline->send(3, 'ask');
+    $deltas = [];
+    foreach ($gen as $d) {
+        $deltas[] = [$d->text, $d->held];
+    }
+    expect($deltas)->toBe([['a < b ', false], ['<', false]])
+        ->and(implode('', array_column($deltas, 0)))->toBe('a < b <')
+        ->and($gen->getReturn()->reply->content)->toBe('a < b <');
+});
+
+it('puts the bytes the observer was still deciding about on an abandoned turn\'s stored partial reply', function (): void {
+    $provider = agentProvider([
+        [new Response('first <', ProviderFinishReason::Stop), new Response('', ProviderFinishReason::ToolUse, [new ToolCall('c1', 'echo_tool', ['text' => 'ping'])])],
+    ]);
+    $h = pipelineWith($provider, [], [], TOOL_MODEL, null, registryWith(['echo' => echoToolkit('echo_tool')]));
+    $failed = null;
+    Actions\expectDone('alpaca_bot/chat/failed')->once()->whenHappen(function (\Throwable $e, Conversation $c) use (&$failed): void {
+        $failed = $c;
+    });
+
+    $gen = $h->pipeline->send(3, 'ping');
+    expect($gen->current()->text)->toBe('first ');
+    $gen->next();
+    expect($gen->current()->text)->toBe('');  // the heartbeat before the tool runs
+    unset($gen);
+
+    // The '<' never reached the consumer, and it is still this reply's byte: the stored partial
+    // is what streamed plus what the observer was holding, not what streamed alone.
+    expect($failed->messages[1]->content)->toBe('first <')
+        ->and($failed->messages[1]->meta['partial'])->toBeTrue();
+});
+
+// settle() stores nothing once the stream has ended, so the finally's take is too late for a
+// turn that threw: the catch stores its own partial reply first, and has to take the bytes
+// before it does. The lever is the consumer's own throw, which is the one failure that reaches
+// the catch without agentTurn() having run its flush().
+it('puts them on the partial reply a turn that threw after a tool ran stores from its catch', function (): void {
+    $toolkit = echoToolkit('draft_post', 'Use it.', static fn(array $a): ToolResult => ToolResult::success('{"id": 225}'));
+    $provider = agentProvider([
+        [new Response('Drafting <', ProviderFinishReason::Stop), new Response('', ProviderFinishReason::ToolUse, [new ToolCall('c1', 'draft_post', ['text' => 'Hello'])])],
+        [new Response('Done. <', ProviderFinishReason::Stop)],
+    ]);
+    $h = pipelineWith($provider, [], [], TOOL_MODEL, null, registryWith(['draft' => $toolkit]));
+    $failed = null;
+    Actions\expectDone('alpaca_bot/chat/failed')->once()->whenHappen(function (\Throwable $e, Conversation $c) use (&$failed): void {
+        $failed = $c;
+    });
+
+    $turn = $h->pipeline->send(3, 'draft it');
+    $seen = '';
+    foreach ($turn as $delta) {
+        $seen .= $delta->text;
+        if (str_contains($seen, 'Done.')) {
+            break;
+        }
+    }
+    // The second iteration's text ends on a byte that could begin a marker, so the observer is
+    // still holding one when the throw arrives.
+    expect($seen)->toBe("Drafting <\n\nDone. ");
+    expect(fn() => $turn->throw(new \LogicException('boom')))->toThrow(\RuntimeException::class);
+    expect($failed->messages[1]->content)->toBe("Drafting <\n\nDone. <")
+        ->and($failed->messages[1]->meta['partial'])->toBeTrue();
+});
+
+// The whole feature at the pipeline's own seam, and the one thing it may never do: the deltas
+// of a faked call carry `held`, and they still concatenate to every byte the model wrote, while
+// the reply the turn stores is the recovered one. Marking, never withholding.
+it('flags a faked call\'s markup on a streamed turn\'s deltas without changing a byte of them', function (): void {
+    $leak = "Let me answer that.\n\n<tool_call>{\"name\": \"done\", \"arguments\": {\"response\": \"An alpaca is a camelid.\"}}</tool_call>";
+    $provider = agentProvider([[new Response($leak, ProviderFinishReason::Stop, usage: new Usage(2, 2, 4))]]);
+    $h = pipelineWith($provider, [], [], TOOL_MODEL, null, registryWith(['echo' => echoToolkit('echo_tool')]));
+
+    $gen = $h->pipeline->send(3, 'what is an alpaca?');
+    $deltas = [];
+    foreach ($gen as $d) {
+        $deltas[] = [$d->text, $d->held];
+    }
+    expect($deltas)->toBe([
+        ["Let me answer that.\n\n", false],
+        ['<tool_call>{"name": "done", "arguments": {"response": "An alpaca is a camelid."}}</tool_call>', true],
+    ])
+        ->and(implode('', array_column($deltas, 0)))->toBe($leak)
+        ->and($gen->getReturn()->reply->content)->toBe("Let me answer that.\n\nAn alpaca is a camelid.");
+});
+
+// The tail Delta is the one text a streamed agent turn emits that the observer's live scanner
+// never sees: the answer arrives on the Output rather than as `agent.text_delta`, so $streamed
+// does not end with it and agentTurn() yields it after the run. It carries markup as often as
+// streamed text does, and unflagged it would put raw JSON on the screen — the exact symptom
+// this task removes everywhere else.
+it('flags a faked call inside the answer the agent gave through its done tool, which never streamed', function (): void {
+    $answer = "Here you are.\n\n<tool_call>{\"name\": \"web_fetch\", \"arguments\": {\"url\": \"https://example.test/\"}}</tool_call>\n\nThat is all.";
+    $provider = agentProvider([
+        [new Response('', ProviderFinishReason::ToolUse, [new ToolCall('c1', 'done', ['response' => $answer])], usage: new Usage(2, 1, 3))],
+    ]);
+    $h = pipelineWith($provider, [], [], TOOL_MODEL, null, registryWith(['echo' => echoToolkit('echo_tool')]));
+
+    $gen = $h->pipeline->send(3, 'answer');
+    $deltas = [];
+    foreach ($gen as $d) {
+        $deltas[] = [$d->text, $d->held];
+    }
+    expect($deltas)->toBe([
+        ["Here you are.\n\n", false],
+        ['<tool_call>{"name": "web_fetch", "arguments": {"url": "https://example.test/"}}</tool_call>', true],
+        ["\n\nThat is all.", false],
+    ])
+        // Still marking rather than withholding: the tail is cut into pieces and not one byte
+        // of it is changed, so what send() accumulates and stores is what it always was.
+        ->and(implode('', array_column($deltas, 0)))->toBe($answer)
+        ->and($gen->getReturn()->reply->content)->toBe("Here you are.\n\nThat is all.");
 });
 
 it('bills an abandoned tool turn for the calls the run had already made, from the usage that had arrived', function (): void {
@@ -444,8 +637,8 @@ it('yields an empty delta before each tool runs, so a consumer that leaves then 
     // never runs, and the record says its call was made and not answered.
     expect($ran)->toBe(1)
         ->and($failed->messages[1]->meta['tool_calls'])->toBe([
-            ['name' => 'draft_post', 'arguments' => ['text' => 'One'], 'result_excerpt' => '{"id": 225}', 'ok' => true],
-            ['name' => 'draft_post', 'arguments' => ['text' => 'Two'], 'result_excerpt' => '', 'ok' => false],
+            ['name' => 'draft_post', 'arguments' => ['text' => 'One'], 'result_excerpt' => '{"id": 225}', 'ok' => true, 'result_bytes' => 11],
+            ['name' => 'draft_post', 'arguments' => ['text' => 'Two'], 'result_excerpt' => '', 'ok' => false, 'result_bytes' => 0],
         ]);
 });
 
@@ -659,7 +852,7 @@ it('recovers the answer a faked done call buried in its own JSON, from the recor
         // The record says what actually ran, once: the API call the agent made. The leaked
         // web_fetch is the same call written out as prose, and listing it again would tell the
         // reader of the transcript that a fetch was attempted twice.
-        ->and($r->reply->meta['tool_calls'])->toBe([['name' => 'web_fetch', 'arguments' => ['text' => 'https://en.wikipedia.org/wiki/Alpaca'], 'result_excerpt' => 'Alpaca - Wikipedia', 'ok' => true]])
+        ->and($r->reply->meta['tool_calls'])->toBe([['name' => 'web_fetch', 'arguments' => ['text' => 'https://en.wikipedia.org/wiki/Alpaca'], 'result_excerpt' => 'Alpaca - Wikipedia', 'ok' => true, 'result_bytes' => 18]])
         ->and($h->writes[1][2][1]['content'])->toBe($r->reply->content);
 });
 
@@ -981,12 +1174,31 @@ it('leaves a plain turn that mentions <tool_call> untouched, tools branch or not
 /** The message an unannounced failure carries, as Pipeline::failure() writes it. */
 const UNREPORTED_FAILURE = 'The run ended in an error the assistant did not report.';
 
-/** Pipeline::failure(), which is private and static. */
-function pipelineFailure(Output $output, AgentStreamObserver $observer): ?string
+/** Pipeline::failure(), which is private and static: the exception a failed run is raised as, or null. */
+function pipelineFailureException(Output $output, AgentStreamObserver $observer): ?\RuntimeException
 {
-    /** @var ?string */
+    /** @var ?\RuntimeException */
     return (new ReflectionMethod(Pipeline::class, 'failure'))->invoke(null, $output, $observer);
 }
+
+/** The message of that exception, or null: what the cases below pin. */
+function pipelineFailure(Output $output, AgentStreamObserver $observer): ?string
+{
+    return pipelineFailureException($output, $observer)?->getMessage();
+}
+
+/** Pipeline::raised(), which is private and static: the message send() raises for what a failed turn threw. */
+function pipelineRaised(\Throwable $e): string
+{
+    /** @var string */
+    return (new ReflectionMethod(Pipeline::class, 'raised'))->invoke(null, $e);
+}
+
+/** The words an announcement with none borrows, as Pipeline::failure() writes them. */
+const NO_REASON = 'The provider gave no reason.';
+
+/** The words a tool that stopped the run with none gets, as Pipeline::raised() writes them. */
+const TOOL_STOPPED = 'A tool stopped the run without giving a reason.';
 
 /** An observer that heard `agent.error` with `$message`, or heard nothing when it is null. */
 function observerHearing(?string $message): AgentStreamObserver
@@ -1009,8 +1221,8 @@ it('reads an Error finish that announced nothing and terminated nothing as a fai
     $unannounced = new Output(content: 'Provider error: boom', finishReason: AgentFinishReason::Error);
 
     expect(pipelineFailure($unannounced, observerHearing(null)))->toBe(UNREPORTED_FAILURE)
-        // Never the library's raw content: send() puts what comes back in a RuntimeException as
-        // the announced message, and 'Provider error: boom' is not a message anything announced.
+        // Never the library's raw content: failure() raises words of this plugin's own when
+        // nothing was announced, and 'Provider error: boom' is not a message anything announced.
         ->not->toContain('boom')
         // Announced or not, the finish decides; the announcement only supplies the words.
         ->and(pipelineFailure($unannounced, observerHearing('boom')))->toBe('boom');
@@ -1021,9 +1233,9 @@ it('reads each of the library\'s announced Error finishes as a failure, in the a
     expect(pipelineFailure(new Output(content: 'Task was cancelled.', finishReason: AgentFinishReason::Error), observerHearing('Task cancelled')))->toBe('Task cancelled')
         ->and(pipelineFailure(new Output(content: 'Provider error: 500 Internal Server Error', finishReason: AgentFinishReason::Error), observerHearing('500 Internal Server Error')))->toBe('500 Internal Server Error')
         // The provider site announces a Throwable's getMessage(), which can be ''. Announced
-        // with no words is still announced, and still a failure — it just borrows this
-        // plugin's words, the same ones an unannounced failure gets.
-        ->and(pipelineFailure(new Output(content: 'Provider error: ', finishReason: AgentFinishReason::Error), observerHearing('')))->toBe(UNREPORTED_FAILURE);
+        // with no words is still the provider's failure, so it keeps the prefix send() puts on
+        // one; it has no words to lend and borrows this plugin's (Kanboard #4327).
+        ->and(pipelineFailure(new Output(content: 'Provider error: ', finishReason: AgentFinishReason::Error), observerHearing('')))->toBe(NO_REASON);
 });
 
 it('reads an announced Error finish as the failure it is even when a tool result repeats its content, because the announcement is read first', function (): void {
@@ -1082,7 +1294,7 @@ it('reads a termination that had nothing to say as the termination it is: an emp
     // a run a tool ended, exactly like any other, and before tools this was a finished turn
     // showing whatever had streamed. Refusing to match on empty content would make it a
     // failure instead — the reply marked partial, `alpaca_bot/chat/failed` fired, and
-    // `Provider error: ...` in the user's bubble — for a stop nothing went wrong in.
+    // UNREPORTED_FAILURE in the user's bubble — for a stop nothing went wrong in.
     $empty = new Output(
         content: '',
         toolResults: [ToolResult::success('')],
@@ -1096,4 +1308,100 @@ it('leaves every finish that is not an Error alone', function (): void {
     foreach ([AgentFinishReason::Stop, AgentFinishReason::Done, AgentFinishReason::MaxIterations, AgentFinishReason::BudgetExhausted, AgentFinishReason::EmptyResponse] as $reason) {
         expect(pipelineFailure(new Output(content: 'Answer', finishReason: $reason), observerHearing('boom')))->toBeNull();
     }
+});
+
+// Kanboard #4327, option (a): `Provider error:` says the provider threw, so it is on what the
+// provider threw and nothing else. A run that ended in an error nobody announced, and a tool
+// that stopped the run from outside the agent's own catch, are raised in the plugin's words.
+
+it('says "Provider error:" only where the provider threw, and raises the plugin\'s own words as they are', function (): void {
+    expect(pipelineRaised(new \RuntimeException('connection refused')))->toBe('Provider error: connection refused')
+        ->and(pipelineRaised(new RunFailure(UNREPORTED_FAILURE)))->toBe(UNREPORTED_FAILURE)
+        ->and(pipelineRaised(new TerminationException('')))->toBe(TOOL_STOPPED)
+        ->and(pipelineRaised(new TerminationException('Stopped: over quota')))->toBe('Stopped: over quota');
+});
+
+it('hands an unannounced failure back in the plugin\'s words, and an announced one as the provider\'s, prefix and all', function (): void {
+    $unannounced = pipelineFailureException(new Output(content: 'Provider error: boom', finishReason: AgentFinishReason::Error), observerHearing(null));
+    $announced = pipelineFailureException(new Output(content: 'Provider error: boom', finishReason: AgentFinishReason::Error), observerHearing('boom'));
+    $silent = pipelineFailureException(new Output(content: 'Provider error: ', finishReason: AgentFinishReason::Error), observerHearing(''));
+
+    expect($unannounced)->toBeInstanceOf(RunFailure::class)
+        ->and(pipelineRaised($unannounced))->toBe(UNREPORTED_FAILURE)
+        ->and($announced)->toBeInstanceOf(\RuntimeException::class)->not->toBeInstanceOf(RunFailure::class)
+        ->and(pipelineRaised($announced))->toBe('Provider error: boom')
+        ->and($silent)->not->toBeInstanceOf(RunFailure::class)
+        ->and(pipelineRaised($silent))->toBe('Provider error: ' . NO_REASON);
+});
+
+// Who asks a toolkit for its tools on a tool turn, and how often: Toolkit\FirstWins::over() once,
+// before the agent runs; the agent then asks FirstWins's wrapper, which answers from that list, and
+// the system prompt asks the toolkit's guidelines() once (McpToolkit's and Toolkit\FirstWins's
+// docblocks rest on this).
+it('asks each toolkit for its tools once on a tool turn, and for its guidelines once', function (): void {
+    $toolkit = new class implements ToolkitInterface {
+        public int $tools = 0;
+        public int $guidelines = 0;
+
+        public function tools(): array
+        {
+            ++$this->tools;
+            return echoToolkit('echo_tool')->tools();
+        }
+
+        public function guidelines(): string
+        {
+            ++$this->guidelines;
+            return 'Use it.';
+        }
+    };
+    $provider = agentProvider([
+        [new Response('', ProviderFinishReason::ToolUse, [new ToolCall('c1', 'echo_tool', ['text' => 'ping'])])],
+        [new Response('Done.', ProviderFinishReason::Stop, usage: new Usage(2, 2, 4))],
+    ]);
+    $h = pipelineWith($provider, [], [], TOOL_MODEL, null, registryWith(['echo' => $toolkit]));
+    $h->pipeline->complete(3, 'ping');
+    expect([$toolkit->tools, $toolkit->guidelines])->toBe([1, 1]);
+});
+
+it('raises a toolkit that stops the run before it starts in words of its own, not as a provider error', function (): void {
+    // Pipeline::agentTurn() asks every toolkit for its tools (Toolkit\FirstWins::over()) before
+    // it starts the fiber the agent runs in, so a TerminationException thrown there is not the
+    // library's to catch: it leaves agentTurn() into send()'s catch, where it used to become
+    // "Provider error: ".
+    $toolkit = new class implements ToolkitInterface {
+        public function tools(): array
+        {
+            throw new TerminationException('');
+        }
+
+        public function guidelines(): string
+        {
+            return 'Use it.';
+        }
+    };
+    $h = pipelineWith(agentProvider([]), [], [], TOOL_MODEL, null, registryWith(['stop' => $toolkit]));
+    $failed = null;
+    Actions\expectDone('alpaca_bot/chat/failed')->once()->whenHappen(function (\Throwable $e) use (&$failed): void {
+        $failed = $e;
+    });
+    Actions\expectDone('alpaca_bot/chat/completed')->never();
+
+    $caught = null;
+    try {
+        $h->pipeline->complete(3, 'go');
+    } catch (\RuntimeException $e) {
+        $caught = $e;
+    }
+
+    expect($caught)->not->toBeNull()
+        ->and($caught->getMessage())->toBe(TOOL_STOPPED)
+        ->and($caught->getPrevious())->toBeInstanceOf(TerminationException::class)
+        // Thrown from FirstWins::over(), called by agentTurn(), and from no frame of the library.
+        ->and(array_map(static fn(array $f): string => ($f['class'] ?? '') . '::' . $f['function'], array_slice($caught->getPrevious()->getTrace(), 0, 3)))
+        ->toBe([$toolkit::class . '::tools', AlpacaBot\Toolkit\FirstWins::class . '::over', Pipeline::class . '::agentTurn'])
+        // chat/failed still hears what was thrown, as it always has.
+        ->and($failed)->toBeInstanceOf(TerminationException::class)
+        // Nothing ran, so nothing is kept: the post made for this turn is taken back.
+        ->and(array_map(static fn(array $w): array => [$w[0], $w[1]], $h->writes))->toBe([['wp_insert_post', 'chat_history'], ['wp_delete_post', 42]]);
 });

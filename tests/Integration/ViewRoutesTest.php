@@ -7,6 +7,8 @@ namespace AlpacaBot\Tests\Integration;
 use AlpacaBot\Admin\Assets;
 use AlpacaBot\Admin\ChatScreen;
 use AlpacaBot\Chat\ConversationStore;
+use AlpacaBot\Chat\Message;
+use AlpacaBot\Context\CurrentScreenSource;
 use AlpacaBot\Plugin;
 use AlpacaBot\Rest\ViewController;
 use AlpacaBot\Settings\Store;
@@ -40,6 +42,26 @@ final class ViewRoutesTest extends TestCase
         $this->assertSame('qwen3:8b', get_user_meta($uid, 'alpaca_bot_default_model', true));
     }
 
+    public function test_drawer_state_is_stored_in_user_meta_one_parameter_at_a_time_over_core_validation(): void
+    {
+        $uid = $this->asAdmin();
+        $res = $this->rest('POST', '/view/drawer', ['open' => 'true', 'conversation_id' => '7']);
+        $this->assertSame(200, $res->get_status(), print_r($res->get_data(), true));
+        $this->assertSame('', $res->get_data());
+        $this->assertSame('1', get_user_meta($uid, 'alpaca_bot_drawer_open', true));
+        $this->assertSame('7', get_user_meta($uid, 'alpaca_bot_drawer_conversation', true));
+
+        // Only the open state named: the conversation is left as it was.
+        $this->rest('POST', '/view/drawer', ['open' => 'false']);
+        $this->assertSame('0', get_user_meta($uid, 'alpaca_bot_drawer_open', true));
+        $this->assertSame('7', get_user_meta($uid, 'alpaca_bot_drawer_conversation', true));
+
+        // Core's schema refuses a negative id before the callback runs.
+        $res = $this->rest('POST', '/view/drawer', ['conversation_id' => '-1']);
+        $this->assertSame(400, $res->get_status());
+        $this->assertSame('7', get_user_meta($uid, 'alpaca_bot_drawer_conversation', true));
+    }
+
     public function test_default_model_is_refused_while_users_may_not_change_the_model(): void
     {
         $uid = $this->asAdmin();
@@ -53,7 +75,7 @@ final class ViewRoutesTest extends TestCase
     public function test_the_routes_are_registered_and_the_controller_serves_the_html_itself(): void
     {
         $routes = rest_get_server()->get_routes();
-        foreach (['/alpaca-bot/v1/view/messages/(?P<id>\d+)', '/alpaca-bot/v1/view/history', '/alpaca-bot/v1/view/models', '/alpaca-bot/v1/view/default-model', '/alpaca-bot/v1/view/bubble'] as $route) {
+        foreach (['/alpaca-bot/v1/view/messages/(?P<id>\d+)', '/alpaca-bot/v1/view/history', '/alpaca-bot/v1/view/models', '/alpaca-bot/v1/view/default-model', '/alpaca-bot/v1/view/bubble', '/alpaca-bot/v1/view/panel', '/alpaca-bot/v1/view/drawer'] as $route) {
             $this->assertArrayHasKey($route, $routes);
         }
         $hooked = [];
@@ -143,10 +165,93 @@ final class ViewRoutesTest extends TestCase
     {
         $subscriber = self::factory()->user->create(['role' => 'subscriber']);
         wp_set_current_user($subscriber);
-        foreach ([['GET', '/view/history'], ['GET', '/view/models'], ['GET', '/view/bubble'], ['POST', '/view/default-model', ['model' => 'x']], ['GET', '/view/messages/1']] as $call) {
+        foreach ([['GET', '/view/history'], ['GET', '/view/models'], ['GET', '/view/bubble'], ['POST', '/view/bubble', ['role' => 'user']], ['POST', '/view/default-model', ['model' => 'x']], ['GET', '/view/messages/1'], ['GET', '/view/panel'], ['POST', '/view/drawer', ['open' => true]]] as $call) {
             $res = $this->rest($call[0], $call[1], $call[2] ?? []);
             $this->assertSame(403, $res->get_status(), $call[1]);
         }
+    }
+
+    public function test_panel_renders_the_drawer_chat_on_the_users_own_conversation(): void
+    {
+        $uid = $this->asAdmin();
+        $conversation = Plugin::instance()->get(ConversationStore::class)->create($uid, 'Drawer thread');
+
+        $res = $this->rest('GET', '/view/panel', ['conversation_id' => (string) $conversation->id]);
+        $this->assertSame(200, $res->get_status(), print_r($res->get_data(), true));
+        $this->assertSame('1', $res->get_headers()['X-Alpaca-Bot-View']);
+        $html = $res->get_data();
+        $this->assertStringStartsWith('<div class="ab-drawer__panel">', $html);
+        $this->assertStringContainsString('<div class="ab-wrap ab-wrap--drawer">', $html);
+        $this->assertStringContainsString('<div id="ab-chat" data-conversation="' . $conversation->id . '">', $html);
+        $this->assertStringContainsString('id="ab-form"', $html);
+    }
+
+    public function test_panel_renders_the_post_and_the_screen_as_chips_and_the_post_only_for_a_user_who_may_edit_it(): void
+    {
+        $author = $this->asAdmin();
+        // Private, with an apostrophe: get_the_title() would texturize the one (&#8217;) and,
+        // this not being an admin request, prefix "Private: " for the other. The chip is named by
+        // the stored title, the one CurrentScreenSource gives the model.
+        $postId = self::factory()->post->create(['post_author' => $author, 'post_title' => "Carmelo's <em>draft</em>", 'post_status' => 'private']);
+        $query = ['post_id' => (string) $postId, 'screen_id' => 'post', 'screen_title' => "Edit\n## Post"];
+
+        $html = $this->rest('GET', '/view/panel', $query)->get_data();
+        $this->assertStringContainsString('<input type="hidden" name="context[post_id]" value="' . $postId . '"><span class="ab-chip__label">Editing: Carmelo&#039;s draft</span>', $html);
+        $this->assertStringContainsString('<input type="hidden" name="context[screen][id]" value="post"><input type="hidden" name="context[screen][title]" value="Edit ## Post"><span class="ab-chip__label">On: Edit ## Post</span>', $html);
+
+        // A contributor has edit_posts, the Chat row's default, so may open the chat, but may not
+        // edit an administrator's post: no post chip, and no id on the turn; the screen chip stays.
+        wp_set_current_user(self::factory()->user->create(['role' => 'contributor']));
+        $res = $this->rest('GET', '/view/panel', $query);
+        $this->assertSame(200, $res->get_status(), print_r($res->get_data(), true));
+        $html = $res->get_data();
+        $this->assertStringNotContainsString('context[post_id]', $html);
+        $this->assertStringNotContainsString('Carmelo', $html);
+        $this->assertStringContainsString('data-chip="screen"', $html);
+    }
+
+    public function test_an_auto_draft_is_no_post_to_the_chip_or_to_the_model_and_the_screen_chip_stays(): void
+    {
+        $uid = $this->asAdmin();
+        // What post-new.php makes before it shows the classic editor's form.
+        $draft = get_default_post_to_edit('post', true);
+        $this->assertSame('auto-draft', get_post($draft->ID)->post_status);
+        $this->assertSame('Auto Draft', get_post($draft->ID)->post_title);
+
+        $html = $this->rest('GET', '/view/panel', ['post_id' => (string) $draft->ID, 'screen_id' => 'post', 'screen_title' => 'Add Post'])->get_data();
+        $this->assertStringNotContainsString('context[post_id]', $html);
+        $this->assertStringNotContainsString('Auto Draft', $html);
+        $this->assertStringContainsString('<span class="ab-chip__label">On: Add Post</span>', $html);
+
+        $contexts = (new CurrentScreenSource())->collect($uid, ['post_id' => $draft->ID, 'screen' => ['id' => 'post', 'title' => 'Add Post']]);
+        $this->assertSame(['screen:post'], array_map(static fn($c): string => $c->id, $contexts));
+
+        // Saved as a draft, it is a post being edited.
+        wp_update_post(['ID' => $draft->ID, 'post_title' => 'Now started', 'post_status' => 'draft']);
+        $html = $this->rest('GET', '/view/panel', ['post_id' => (string) $draft->ID])->get_data();
+        $this->assertStringContainsString('<span class="ab-chip__label">Editing: Now started</span>', $html);
+    }
+
+    public function test_panel_opens_another_users_conversation_as_a_new_chat_with_nothing_of_theirs(): void
+    {
+        $owner = $this->asAdmin();
+        $store = Plugin::instance()->get(ConversationStore::class);
+        $conversation = $store->create($owner, 'Owner private thread');
+        $conversation->append(new Message('user', 'owner question'));
+        $conversation->append(new Message('assistant', 'owner answer', 'fake-model'));
+        $store->save($conversation);
+        $this->assertSame('owner answer', $store->load($conversation->id, $owner)?->last()?->content);
+
+        // A second administrator: same capability, not the owner.
+        $this->asAdmin();
+        $res = $this->rest('GET', '/view/panel', ['conversation_id' => (string) $conversation->id]);
+        $this->assertSame(200, $res->get_status(), print_r($res->get_data(), true));
+        $html = $res->get_data();
+        foreach (['Owner private thread', 'owner question', 'owner answer'] as $theirs) {
+            $this->assertStringNotContainsString($theirs, $html);
+        }
+        $this->assertStringContainsString('<div id="ab-chat" data-conversation="0">', $html);
+        $this->assertStringNotContainsString('data-conversation="' . $conversation->id . '"', $html);
     }
 
     public function test_the_chat_screen_renders_the_shell_and_the_assets_enqueue_on_its_hook_only(): void
@@ -183,5 +288,34 @@ final class ViewRoutesTest extends TestCase
         // rest_url() under the site's plain permalinks: ?rest_route=, the form the client must use.
         $this->assertStringContainsString('"rest":"' . rest_url('alpaca-bot/v1') . '"', (string) wp_scripts()->get_data('alpaca-bot-chat', 'data'));
         $this->assertStringContainsString('?rest_route=/alpaca-bot/v1', rest_url('alpaca-bot/v1'));
+    }
+
+    /**
+     * The drawer's loader knows a page's own htmx by the id core prints on the handle's tag, which
+     * Assets::mount() hands it; this is core printing that tag, so the two cannot drift apart.
+     * The settings screen enqueues htmx, and a `script_loader_src` filter that strips `?ver=`
+     * changes the URL and leaves the id.
+     */
+    public function test_the_htmx_id_the_loader_is_handed_is_the_one_core_prints_on_the_settings_screen(): void
+    {
+        $this->asAdmin();
+        // A queue of its own: another test's enqueue of the chat screen would still be in the global one.
+        $GLOBALS['wp_scripts'] = new \WP_Scripts();
+        $strip = static fn(string $src): string => (string) remove_query_arg('ver', $src);
+        add_filter('script_loader_src', $strip);
+        // admin_enqueue_scripts fires with the screen set: core's own listeners read it.
+        set_current_screen(\AlpacaBot\Admin\SettingsPage::screen());
+        do_action('admin_enqueue_scripts', \AlpacaBot\Admin\SettingsPage::screen());
+        $this->assertTrue(wp_script_is('alpaca-bot-htmx', 'enqueued'));
+        $this->assertFalse(wp_script_is('alpaca-bot-chat', 'enqueued'));
+        ob_start();
+        wp_scripts()->do_items(['alpaca-bot-htmx']);
+        $tag = (string) ob_get_clean();
+        remove_filter('script_loader_src', $strip);
+        $mount = (new Assets())->mount();
+        $this->assertStringContainsString('id="' . $mount['htmxId'] . '"', $tag);
+        $this->assertStringNotContainsString('ver=', $tag);
+        $this->assertStringNotContainsString(esc_url($mount['htmx']), $tag);
+        $GLOBALS['wp_scripts'] = null;
     }
 }

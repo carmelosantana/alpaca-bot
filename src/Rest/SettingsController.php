@@ -4,13 +4,17 @@ declare(strict_types=1);
 
 namespace AlpacaBot\Rest;
 
+use AlpacaBot\Access;
+use AlpacaBot\Errors;
+use AlpacaBot\Mcp\Secrets;
+use AlpacaBot\Mcp\ServerSettings;
 use AlpacaBot\Settings\Schema;
 use AlpacaBot\Settings\Store;
 
 /**
- * The `alpaca_bot_settings` option over REST, for administrators: `GET /settings` is the full
- * array (every Schema key, defaults filled in), `PUT /settings` a partial update of it, and
- * `GET /settings/schema` the field list a client renders a form from.
+ * The `alpaca_bot_settings` option over REST, for administrators by default: `GET /settings` is
+ * the full array (every Schema key, defaults filled in), `PUT /settings` a partial update of it,
+ * and `GET /settings/schema` the field list a client renders a form from.
  *
  * Secrets (Schema::SECRETS, today the provider API key) read back as Schema::MASK when set and
  * as '' when not, so a client can show "there is a key" without holding it. The mask is also
@@ -20,19 +24,29 @@ use AlpacaBot\Settings\Store;
  * form never wipes it. A secret that is not a string at all (`null`, an array) keeps the stored
  * value too, and the reply shows the mask so the client can see it did: the rule and its reasons
  * are Schema::sanitize()'s, shared with every other writer of the option, and this route only
- * hands the body through. `?reveal=1` on the GET answers the raw secret instead of the mask:
- * only the flag is on the URL, and the secret is in the body. A PUT never reveals, whatever its
- * body says.
+ * hands the body through. An MCP server's header value reads back the same way, MASK or '', in
+ * each row of `toolkits.mcp_servers` (masked()), and takes the same three values on the way in;
+ * Mcp\ServerSettings leaves only MASK or '' there on each update_option() of the option once the
+ * plugin has registered its filter, so masked() is for a row that reached the option any other
+ * way. `?reveal=1` on the GET answers the raw secrets
+ * instead of the mask: the provider key from the option, and each header value from
+ * Mcp\Secrets. Only the flag is on the URL, and the secrets are in the body. A PUT never
+ * reveals, whatever its body says.
  *
  * `reveal` asks `manage_options` in show(), a second check the route's own gate has already
- * passed. The gate is filtered — `alpaca_bot/capability/settings` (below) — and the filter
- * decides the route, so without this check a site that loosened the filter for a custom role
- * would be handing that role the provider credential in cleartext. A caller the filter admitted
- * without `manage_options` is not refused the route, only the secret: the reply is the masked
- * read, the same one they get without the flag. Nothing else on the route has a floor, because
- * nothing else on it is a credential; the write verb is the other half of that argument and is
- * a 0.6 ticket (splitting the filter into read and write keys), not a check that can be added
- * here without deciding what a "read-only settings" role means.
+ * passed. The gate is the `settings.read` row of Settings › Access and its filters (capability()
+ * below), and a site may lower that row or filter it for a custom role, so without this check it
+ * would be handing that role the provider credential and every MCP server's header value in
+ * cleartext. A caller the gate admitted without `manage_options` is not refused the route, only
+ * the secrets: the reply is the masked read, the same one they get without the flag. That read
+ * has no floor of its own, and it masks only the provider key and each header value: every other
+ * field is answered as stored. Two of those can hold a credential a site wrote into them. An MCP
+ * server's URL keeps its query string (`?api_key=…`); a user name or password in it is refused
+ * at save (Schema::sanitizeMcpServers()), so the header is where a server's credential goes.
+ * `provider.base_url` keeps all of itself, a user name, password and query string included
+ * (masking it is Kanboard #4539). A site that lowers the `settings.read` row answers those to
+ * the role it admits. The write, which 0.5 gated with the read, now has a row and a key of its
+ * own, so admitting a role to the read no longer admits it to the PUT.
  *
  * The reveal response sets `Cache-Control: no-store` itself even though core normally supplies
  * it. WP_REST_Server::serve_request() sends a response's own headers first and then, when
@@ -54,7 +68,33 @@ use AlpacaBot\Settings\Store;
  * of a second, different verb; a client that wants to change one model reads the map, edits it
  * and sends it back. Whatever arrives goes through Schema::sanitize() on its way to the option
  * (unknown keys dropped, ranges clamped, types coerced), and the reply is the array as stored,
- * masked, so the client sees what the schema made of its input rather than what it sent.
+ * masked, so the client sees what the schema made of its input rather than what it sent. "As
+ * stored" is exact: Store's memo after a write is what the option's filters wrote, so a header
+ * value taken out of its row, or an `access.mcp` entry dropped with its server, is gone from the
+ * reply too.
+ *
+ * A PUT carrying `toolkits.mcp_servers` is refused whole, 400 and nothing written, the other keys
+ * of the same PUT included, in two cases, both checked before anything is stored:
+ * - `alpaca_bot_mcp_row`: a row the schema would drop (Schema::droppedMcpRows()) that names a
+ *   stored server's id, or that is new and has a URL. A client that sends a row for a server means
+ *   to keep it, so a 200 that had quietly deleted it, its header value and its Access entry with
+ *   it, would say the write went as asked. The error's data carries `rows`, each
+ *   `{index, id, url, reason}` (droppedRows()). Leaving a server out of the list, or sending its
+ *   row with `remove`, still deletes it, and a row with neither a stored id nor a URL is still
+ *   ignored.
+ * - `alpaca_bot_mcp_address`: the address of a server whose URL is new or changed does not pass
+ *   the check (Mcp\ServerSettings::refusals()), each row checked under the id the write will give
+ *   it. The message names each refused URL and why.
+ * Neither error carries a header value.
+ *
+ * A stored server whose URL the PUT moves to another host or port loses its header value when the
+ * PUT sends the mask for it (Mcp\ServerSettings says why). The write is not refused for that: its
+ * row reads back '' like any server with no value, and the reply carries
+ * `X-Alpaca-Bot-Mcp-Cleared`, the ids of those servers comma-separated, naming only servers that
+ * had a value (Mcp\ServerSettings::clearedByMove()), because '' alone cannot tell a value just
+ * dropped from one never set. A header rather than an error or a body key keeps
+ * the body the settings array and nothing else, as `X-Alpaca-Bot-Default-Model` does for
+ * `GET /models`.
  *
  * The keys are dotted (`models.temperature`) and read from get_params(), core's merge of every
  * source; in practice only a JSON body can carry them. PHP rewrites a dot in a top-level
@@ -63,34 +103,106 @@ use AlpacaBot\Settings\Store;
  * answer 200 with nothing changed, a PUT that names no known key is a 400 that says to send
  * JSON.
  *
- * Capability filters follow Controller::routeKey(): `alpaca_bot/capability/settings` covers
- * both verbs on `/settings`, and `/settings/schema` has its own, `alpaca_bot/capability/settings/schema`.
- * A site that loosens the first for a custom role has not loosened the second; a client of that
- * role reads the settings and gets a 403 on the schema until the site names it too.
+ * Capability: the two GETs ask the `settings.read` row and the PUT the `settings.write` row,
+ * both `manage_options` by default, through Access::effective() — 0.5's
+ * `alpaca_bot/capability/settings` over the stored row, then
+ * `alpaca_bot/capability/settings/read` or `…/settings/write` over what it returned, so a site
+ * that filtered the old key keeps what it set and the newer key wins where both are set.
  *
- * One key over both verbs is worth saying plainly: loosening `alpaca_bot/capability/settings`
- * to admit a role to the GET admits it to the PUT as well, and `provider.base_url` is a
- * settable field — so that role can point every turn the site takes at a server of its
- * choosing. Tighten per request off the WP_REST_Request the filter is handed
- * (`$request->get_method()`) until 0.6 separates the keys.
+ * These routes do not apply `alpaca_bot/capability/{route}`, so 0.5's
+ * `alpaca_bot/capability/settings/schema` is retired: it is no longer applied, and the schema
+ * route asks the `settings.read` row with the rest of the read. A site that filtered that key
+ * loses the filter, whichever way it pointed it. 0.5 applied it over the route's declared
+ * `manage_options` on its own, independently of `alpaca_bot/capability/settings`, so opening the
+ * schema *alone* was a thing a site could do — and a reasonable one, since the schema route
+ * answers field descriptions and no stored value, which is what a custom settings form for a
+ * lower role needs. That site's role is now refused, so this narrows as well as widens.
+ * `alpaca_bot/capability/settings/read` is where such a filter moves to.
+ *
+ * Splitting the verbs is what makes a read-only settings role possible: `provider.base_url` is a
+ * settable field, so a role admitted to the write can point every turn the site takes at a
+ * server of its choosing.
  */
 final class SettingsController extends Controller
 {
-    public function __construct(private Store $store) {}
+    private ServerSettings $servers;
+
+    /** @param ServerSettings|null $servers the address check a PUT of `toolkits.mcp_servers` runs; one over AddressCheck by default */
+    public function __construct(private Store $store, ?ServerSettings $servers = null)
+    {
+        $this->servers = $servers ?? new ServerSettings();
+    }
 
     public function routes(): array
     {
         return [
-            ['path' => '/settings', 'methods' => 'GET', 'callback' => [$this, 'show'], 'capability' => 'manage_options', 'args' => ['reveal' => ['type' => 'boolean', 'default' => false]]],
-            ['path' => '/settings', 'methods' => 'PUT', 'callback' => [$this, 'update'], 'capability' => 'manage_options'],
-            ['path' => '/settings/schema', 'methods' => 'GET', 'callback' => [$this, 'schema'], 'capability' => 'manage_options'],
+            ['path' => '/settings', 'methods' => 'GET', 'callback' => [$this, 'show'], 'capability' => 'settings.read', 'args' => ['reveal' => ['type' => 'boolean', 'default' => false]]],
+            ['path' => '/settings', 'methods' => 'PUT', 'callback' => [$this, 'update'], 'capability' => 'settings.write'],
+            ['path' => '/settings/schema', 'methods' => 'GET', 'callback' => [$this, 'schema'], 'capability' => 'settings.read'],
         ];
+    }
+
+    /**
+     * These three routes resolve their Settings › Access row rather than the base's
+     * `alpaca_bot/capability/{route}`: accessRow() hands the row to Access::effective(), which
+     * applies 0.5's `alpaca_bot/capability/settings` over the stored row and then the row's own
+     * key, and that chain is the whole of the split.
+     *
+     * `$declared` is what the route table carries — a row name for all three of today's routes —
+     * so the verb is read off the table rather than off the request: the GET and the PUT share a
+     * path, and `routeKey()` would hand both the one key again.
+     *
+     * Only a row Access declares is resolved as one. A route added here that names a plain
+     * capability falls through to the base and is authorised like every other route in the
+     * plugin, `alpaca_bot/capability/{route}` and all. Without that test it would be handed to
+     * Access::effective() as if it were a row: an undeclared row fails closed to
+     * `manage_options`, so the route would quietly be authorised at that rather than at what it
+     * declared, and the only filter it offered a site would be one named after the *declared
+     * capability* — Access::hook() builds the name from the token it is handed, so a route
+     * declaring `edit_posts` would fire `alpaca_bot/capability/edit_posts`, a hook nobody
+     * documents, since bin/hooks-doc.php reads string literals and this name is built at runtime.
+     * The check is against Access::defaults() rather than a list kept here so that a row the access
+     * model declares a default for is usable from this table the day it exists. That is every row
+     * but `mcp.<server id>`, which exists only once a server does and is deliberately not in
+     * defaults(); such a row would fall through to the base, and no route here wants one.
+     *
+     * What Access resolves is returned as it comes, and is never handed back to
+     * parent::capability() as its `$declared` — the fallback above passes the route's *declared*
+     * value, never a resolved one. That is deliberate rather than a shortcut. The base reads `$declared`
+     * for Controller::CHAT, which is the literal string 'chat', while a site's
+     * `alpaca_bot/capability/settings/read` filter may return any capability name it likes —
+     * 'chat' among them, since Capability::filtered() honours every non-empty non-numeric string.
+     * Routing a resolved capability back through that comparison would let such a filter flip a
+     * settings route onto the Chat row; returning here means a capability name can never be read
+     * as the sentinel. It also means these routes apply no `{route}` filter at all, which is what
+     * retires `alpaca_bot/capability/settings/schema` and keeps `alpaca_bot/capability/settings`
+     * to the one application Access makes of it.
+     *
+     * A controller nobody handed an Access — a test, a site building one by hand — resolves the
+     * row to Access::defaults() instead, `manage_options` for both; accessRow() answers that case
+     * once, in the base, so nothing here builds a second Access over the same Store.
+     *
+     * @since 0.6.0
+     */
+    protected function capability(string $route, string $declared, \WP_REST_Request $request): string
+    {
+        return isset(Access::defaults()[$declared])
+            ? $this->accessRow($declared, $request)
+            : parent::capability($route, $declared, $request);
     }
 
     public function show(\WP_REST_Request $request): \WP_REST_Response
     {
         if ((bool) $request->get_param('reveal') && current_user_can('manage_options')) {
-            $response = new \WP_REST_Response($this->store->all());
+            $settings = $this->store->all();
+            if (is_array($settings['toolkits.mcp_servers'] ?? null)) {
+                foreach ($settings['toolkits.mcp_servers'] as $i => $row) {
+                    if (is_array($row)) {
+                        $settings['toolkits.mcp_servers'][$i]['header_value'] = Secrets::resolve($row);
+                    }
+                }
+            }
+            $response = new \WP_REST_Response($settings);
             $response->header('Cache-Control', 'no-store');
             return $response;
         }
@@ -103,8 +215,78 @@ final class SettingsController extends Controller
         if ($input === []) {
             return Errors::badRequest(__('No settings were sent. Send a JSON body of dotted keys, e.g. {"models.temperature": 0.7}.', 'alpaca-bot'));
         }
+        $cleared = [];
+        if (array_key_exists('toolkits.mcp_servers', $input)) {
+            $stored = $this->store->get('toolkits.mcp_servers');
+            $dropped = self::droppedRows($input['toolkits.mcp_servers'], $stored);
+            if ($dropped !== []) {
+                $lines = [];
+                foreach ($dropped as $row) {
+                    /* translators: %s: the row's index in the posted list */
+                    $name = $row['url'] === '' ? sprintf(__('row %s', 'alpaca-bot'), $row['index']) : $row['url'];
+                    /* translators: 1: an MCP server's URL, or which row it is, 2: why the row cannot be kept */
+                    $lines[] = sprintf(__('%1$s: %2$s', 'alpaca-bot'), $name, $row['reason']);
+                }
+                return Errors::badRequest(__('Nothing was saved: an MCP server row could not be kept.', 'alpaca-bot') . ' ' . implode(' ', $lines), 'alpaca_bot_mcp_row', ['rows' => $dropped]);
+            }
+            $rows = Schema::sanitizeMcpServers($input['toolkits.mcp_servers'], $stored);
+            $refused = $this->servers->refusals($rows, $stored);
+            if ($refused !== []) {
+                // Nothing is written, so no write's action clears what passed on the way.
+                $this->servers->forgetPassed();
+                $reasons = [];
+                foreach ($refused as $i => $reason) {
+                    /* translators: 1: an MCP server's URL, 2: why its address was refused */
+                    $reasons[] = sprintf(__('%1$s: %2$s', 'alpaca-bot'), $rows[$i]['url'], $reason);
+                }
+                return Errors::badRequest(__('Nothing was saved: an MCP server\'s address did not pass the check.', 'alpaca-bot') . ' ' . implode(' ', $reasons), 'alpaca_bot_mcp_address');
+            }
+            $cleared = $this->servers->clearedByMove($rows, $stored);
+        }
         $this->store->replace($input);
-        return new \WP_REST_Response($this->masked($this->store->all()));
+        $response = new \WP_REST_Response($this->masked($this->store->all()));
+        if ($cleared !== []) {
+            $response->header('X-Alpaca-Bot-Mcp-Cleared', implode(',', $cleared));
+        }
+        return $response;
+    }
+
+    /**
+     * The rows of a posted `toolkits.mcp_servers` that the schema would drop and that a PUT must
+     * not lose quietly: one that names a stored server's id, and a new one with a URL. A row whose
+     * `remove` is ticked, and a blank row, are not among them (Schema::droppedMcpRows()). Each is
+     * `{index, id, url, reason}`: its key in the posted list, the id it posted when that is a
+     * string, the URL it posted with any user name and password taken out
+     * (Schema::withoutUserinfo()), so a refused credential is not answered back, and why. The
+     * header value is not read.
+     *
+     * @return list<array{index: array-key, id: string|null, url: string, reason: string}>
+     */
+    private static function droppedRows(#[\SensitiveParameter] mixed $raw, mixed $stored): array
+    {
+        $storedIds = Schema::serverIds($stored);
+        $out = [];
+        foreach (Schema::droppedMcpRows($raw) as $key => $fault) {
+            /** @var array<array-key, mixed> $row droppedMcpRows() lists arrays only */
+            $row = is_array($raw) ? $raw[$key] : [];
+            $id = is_string($row['id'] ?? null) ? $row['id'] : null;
+            $url = is_string($row['url'] ?? null) ? Schema::withoutUserinfo($row['url']) : '';
+            if (!in_array($id, $storedIds, true) && trim($url) === '') {
+                continue;
+            }
+            $prefix = is_string($row['prefix'] ?? null) ? $row['prefix'] : '';
+            $out[] = ['index' => $key, 'id' => $id, 'url' => $url, 'reason' => match ($fault) {
+                'url' => __('the URL has to be https with a host.', 'alpaca-bot'),
+                'userinfo' => __('the URL may not carry a user name or password; send a credential as the header value, which reads back masked.', 'alpaca-bot'),
+                /* translators: %s: what a header name has to be (Schema::mcpHeaderNameRule()) */
+                'header' => sprintf(__('the header name has to be %s.', 'alpaca-bot'), Schema::mcpHeaderNameRule()),
+                /* translators: %s: what a prefix has to be (Schema::mcpPrefixRule()) */
+                'prefix' => sprintf(__('the prefix has to be %s.', 'alpaca-bot'), Schema::mcpPrefixRule()),
+                /* translators: %s: a tool-name prefix */
+                'taken' => sprintf(__('the prefix %s is already used by an earlier row of this request.', 'alpaca-bot'), $prefix),
+            }];
+        }
+        return $out;
     }
 
     /**
@@ -121,6 +303,9 @@ final class SettingsController extends Controller
             if (in_array($key, Schema::SECRETS, true)) {
                 $field['secret'] = true;
             }
+            if ($key === 'toolkits.mcp_servers') {
+                $field['secret_fields'] = ['header_value'];
+            }
             $fields[$key] = $field;
         }
         return new \WP_REST_Response(['sections' => Schema::sections(), 'fields' => $fields, 'mask' => Schema::MASK]);
@@ -136,6 +321,9 @@ final class SettingsController extends Controller
             if (($settings[$key] ?? '') !== '') {
                 $settings[$key] = Schema::MASK;
             }
+        }
+        if (array_key_exists('toolkits.mcp_servers', $settings)) {
+            $settings['toolkits.mcp_servers'] = Schema::maskedServers($settings['toolkits.mcp_servers']);
         }
         return $settings;
     }

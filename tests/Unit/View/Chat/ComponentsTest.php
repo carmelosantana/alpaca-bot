@@ -4,8 +4,11 @@ declare(strict_types=1);
 
 use AlpacaBot\Chat\Conversation;
 use AlpacaBot\Chat\Message;
+use AlpacaBot\Provider\Factory;
 use AlpacaBot\Provider\Model;
+use AlpacaBot\Provider\ModelCatalog;
 use AlpacaBot\View\Chat\Composer;
+use AlpacaBot\View\Chat\Drawer;
 use AlpacaBot\View\Chat\Header;
 use AlpacaBot\View\Chat\HistorySelect;
 use AlpacaBot\View\Chat\MessageBubble;
@@ -13,6 +16,7 @@ use AlpacaBot\View\Chat\MessageList;
 use AlpacaBot\View\Chat\ModelSelect;
 use AlpacaBot\View\Chat\Notice;
 use AlpacaBot\View\Chat\Receipt;
+use AlpacaBot\View\Chat\Shell;
 use AlpacaBot\View\Markdown;
 use AlpacaBot\Settings\Store;
 use Brain\Monkey\Functions;
@@ -282,3 +286,128 @@ it('renders a placeholder for the images the store evicted, escaped, and nothing
     expect($bubble(new Message('assistant', 'hi', 'm', null, 0, [], ['images_evicted' => 1])))->not->toContain('ab-msg__images');
 });
 
+// ---------------------------------------------------------------- Task 17: the drawer's panel
+
+it('drawer puts the shell in its own panel: the drawer layout, no core .wrap, and a close button the drawer script reads', function (): void {
+    Functions\when('current_user_can')->justReturn(true);
+    Functions\when('get_post')->justReturn((object) ['ID' => 12, 'post_title' => 'Hello', 'post_status' => 'draft']);
+    Functions\when('wp_strip_all_tags')->alias(static fn(string $s): string => trim(strip_tags($s)));
+    Functions\when('get_transient')->justReturn([['id' => 'llama3.2', 'label' => 'llama3.2']]);
+    Functions\when('wp_get_current_user')->justReturn((object) ['display_name' => 'Carmelo', 'ID' => 3]);
+    Functions\when('get_avatar_url')->justReturn('/u.png');
+    Functions\when('plugins_url')->alias(fn(string $p) => '/plugins/alpaca-bot/' . $p);
+    Functions\when('admin_url')->alias(fn(string $p) => '/wp-admin/' . $p);
+    $store = new Store(['models.default' => 'llama3.2']);
+    $sprite = sys_get_temp_dir() . '/ab-drawer-icons-' . getmypid() . '.svg';
+    file_put_contents($sprite, '<svg xmlns="http://www.w3.org/2000/svg" style="display:none"><symbol id="ab-drawer-probe"></symbol></svg>');
+    try {
+        $html = (new Drawer($store, new ModelCatalog(new Factory($store)), new Conversation(5, 3, 'T', [new Message('assistant', 'a', 'llama3.2')]), [], 12, 'qwen3:8b', $sprite))->render();
+    } finally {
+        unlink($sprite);
+    }
+
+    expect($html)->toStartWith('<div class="ab-drawer__panel"><button type="button" class="ab-btn ab-btn--icon ab-drawer__close" data-action="drawer-close" aria-label="Close the chat">')
+        ->toContain('<div class="ab-wrap ab-wrap--drawer">')
+        // Core's .wrap is the admin screen's layout, and a fixed panel is not laid out inside it.
+        ->not->toContain('class="wrap ab-wrap"')
+        ->not->toContain('ab-wrap--front')
+        // It is the same chat: the header, the transcript and the form the chat screen renders,
+        // on the conversation, the post, the model and the sprite it was handed.
+        ->toContain('href="/wp-admin/admin.php?page=alpaca-bot"')
+        ->toContain('<div id="ab-chat" data-conversation="5">')->toContain('id="ab-messages"')->toContain('ab-msg--assistant')
+        ->toContain('id="ab-form"')->toContain('name="context[post_id]" value="12"')->toContain('name="model" value="qwen3:8b"')
+        ->toContain('<symbol id="ab-drawer-probe">')
+        // The shell is inside the panel, not beside it.
+        ->toEndWith('</div></div>');
+});
+
+// ---------------------------------------------------------------- Task 19: the context chips
+
+it('composer renders a chip per context key, each carrying its own hidden fields and its own remove button', function (): void {
+    $html = (new Composer(new Store(), 0, 'llama3.2', 12, 'Hello world', ['id' => 'edit-post', 'title' => 'Posts']))->render();
+
+    expect($html)->toContain('<div class="ab-composer__chips" role="group" aria-label="What this chat can see">')
+        ->toContain('<span class="ab-chip" data-chip="post"><input type="hidden" name="context[post_id]" value="12"><span class="ab-chip__label">Editing: Hello world</span><button type="button" class="ab-chip__remove" data-action="chip-remove" aria-label="Remove Editing: Hello world">')
+        ->toContain('<span class="ab-chip" data-chip="screen"><input type="hidden" name="context[screen][id]" value="edit-post"><input type="hidden" name="context[screen][title]" value="Posts"><span class="ab-chip__label">On: Posts</span><button type="button" class="ab-chip__remove" data-action="chip-remove" aria-label="Remove On: Posts">')
+        ->toContain('<use href="#lucide-x"></use>')
+        ->and(substr_count($html, 'data-action="chip-remove"'))->toBe(2)
+        // The post first, as CurrentScreenSource sends them; both inside the form, above the box.
+        ->and(strpos($html, 'data-chip="post"'))->toBeLessThan((int) strpos($html, 'data-chip="screen"'))
+        ->and(strpos($html, 'id="ab-form"'))->toBeLessThan((int) strpos($html, 'ab-composer__chips'))
+        ->and(strpos($html, 'ab-composer__chips'))->toBeLessThan((int) strpos($html, 'id="ab-message"'));
+
+    // No post and no screen: no chips row at all, and no context field left over from 0.5.
+    $bare = (new Composer(new Store(), 0, 'llama3.2'))->render();
+    expect($bare)->not->toContain('ab-composer__chips')->not->toContain('ab-chip')->not->toContain('context[');
+
+    // Each on its own: the one chip, and nothing of the other.
+    $post = (new Composer(new Store(), 0, 'llama3.2', 12, 'Hello world'))->render();
+    expect(substr_count($post, 'class="ab-chip"'))->toBe(1)->and($post)->toContain('data-chip="post"')->not->toContain('context[screen]');
+    $screen = (new Composer(new Store(), 0, 'llama3.2', 0, '', ['id' => 'edit-post', 'title' => 'Posts']))->render();
+    expect(substr_count($screen, 'class="ab-chip"'))->toBe(1)->and($screen)->toContain('data-chip="screen"')->not->toContain('context[post_id]');
+
+    // A post with no title is still named.
+    expect((new Composer(new Store(), 0, 'llama3.2', 12))->render())->toContain('<span class="ab-chip__label">Editing: (no title)</span>');
+});
+
+it('composer escapes a hostile post title and a hostile screen title in both the label and the field', function (): void {
+    Functions\when('esc_html')->alias(fn(string $s): string => htmlspecialchars($s, ENT_QUOTES));
+    Functions\when('esc_attr')->alias(fn(string $s): string => htmlspecialchars($s, ENT_QUOTES));
+    $html = (new Composer(new Store(), 0, 'llama3.2', 12, '"><script>alert(1)</script>', ['id' => 'x', 'title' => '"><img src=x onerror=1>']))->render();
+    expect($html)->not->toContain('<script>')->not->toContain('<img src=x')
+        ->toContain('<span class="ab-chip__label">Editing: &quot;&gt;&lt;script&gt;alert(1)&lt;/script&gt;</span>')
+        ->toContain('aria-label="Remove Editing: &quot;&gt;&lt;script&gt;alert(1)&lt;/script&gt;"')
+        ->toContain('<input type="hidden" name="context[screen][title]" value="&quot;&gt;&lt;img src=x onerror=1&gt;">')
+        ->toContain('<span class="ab-chip__label">On: &quot;&gt;&lt;img src=x onerror=1&gt;</span>');
+});
+
+it('shell names the post in a chip only for a user who may edit it, by its stored title', function (): void {
+    // Built here rather than through chatShell(), whose stand-ins for these two would win.
+    Functions\when('get_transient')->justReturn([['id' => 'llama3.2', 'label' => 'llama3.2']]);
+    Functions\when('wp_get_current_user')->justReturn((object) ['display_name' => 'Carmelo', 'ID' => 3]);
+    Functions\when('get_avatar_url')->justReturn('/u.png');
+    Functions\when('plugins_url')->alias(fn(string $p) => '/plugins/alpaca-bot/' . $p);
+    Functions\when('admin_url')->alias(fn(string $p) => '/wp-admin/' . $p);
+    Functions\when('wp_strip_all_tags')->alias(static fn(string $s): string => trim(strip_tags($s)));
+    $store = new Store(['models.default' => 'llama3.2']);
+    $shell = new Shell($store, new ModelCatalog(new Factory($store)), null, [], 12, sys_get_temp_dir() . '/ab-missing-' . getmypid() . '.svg');
+    // Asked twice, once per render below: yes, then no.
+    Functions\expect('current_user_can')->twice()->with('edit_post', 12)->andReturn(true, false);
+    // Read once: the refused render must not load the post at all.
+    Functions\expect('get_post')->once()->with(12)->andReturn((object) ['ID' => 12, 'post_title' => "Carmelo's <em>draft</em>", 'post_status' => 'draft']);
+
+    // The stored title, tags stripped (tests/Integration/ViewRoutesTest.php shows why it is not
+    // get_the_title()).
+    expect($shell->render())->toContain('<span class="ab-chip__label">Editing: Carmelo\'s draft</span>')->toContain('name="context[post_id]" value="12"')
+        // Someone who may not edit it gets no chip, and so no id on the turn.
+        ->and($shell->render())->not->toContain('ab-chip')->not->toContain('context[');
+});
+
+it('shell names no post whose status is auto-draft', function (): void {
+    Functions\when('get_transient')->justReturn([['id' => 'llama3.2', 'label' => 'llama3.2']]);
+    Functions\when('wp_get_current_user')->justReturn((object) ['display_name' => 'Carmelo', 'ID' => 3]);
+    Functions\when('get_avatar_url')->justReturn('/u.png');
+    Functions\when('plugins_url')->alias(fn(string $p) => '/plugins/alpaca-bot/' . $p);
+    Functions\when('admin_url')->alias(fn(string $p) => '/wp-admin/' . $p);
+    Functions\when('wp_strip_all_tags')->alias(static fn(string $s): string => trim(strip_tags($s)));
+    Functions\when('current_user_can')->justReturn(true);
+    Functions\when('get_post')->justReturn((object) ['ID' => 40, 'post_title' => 'Auto Draft', 'post_status' => 'auto-draft']);
+    $store = new Store(['models.default' => 'llama3.2']);
+    $html = (new Shell($store, new ModelCatalog(new Factory($store)), null, [], 40, sys_get_temp_dir() . '/ab-missing-' . getmypid() . '.svg', null, null, true, ['id' => 'post', 'title' => 'Add Post']))->render();
+    expect($html)->not->toContain('data-chip="post"')->not->toContain('context[post_id]')->not->toContain('Auto Draft')
+        // The screen chip stays.
+        ->toContain('<span class="ab-chip__label">On: Add Post</span>');
+});
+
+it('shell and drawer hand the screen to the composer as its chip', function (): void {
+    Functions\when('get_transient')->justReturn([['id' => 'llama3.2', 'label' => 'llama3.2']]);
+    Functions\when('wp_get_current_user')->justReturn((object) ['display_name' => 'Carmelo', 'ID' => 3]);
+    Functions\when('get_avatar_url')->justReturn('/u.png');
+    Functions\when('plugins_url')->alias(fn(string $p) => '/plugins/alpaca-bot/' . $p);
+    Functions\when('admin_url')->alias(fn(string $p) => '/wp-admin/' . $p);
+    $store = new Store(['models.default' => 'llama3.2']);
+    $sprite = sys_get_temp_dir() . '/ab-missing-' . getmypid() . '.svg';
+    $html = (new Drawer($store, new ModelCatalog(new Factory($store)), null, [], 0, null, $sprite, ['id' => 'edit-post', 'title' => 'Posts']))->render();
+    expect($html)->toContain('<span class="ab-chip" data-chip="screen">')->toContain('name="context[screen][id]" value="edit-post"')->toContain('<span class="ab-chip__label">On: Posts</span>')
+        ->not->toContain('data-chip="post"');
+});

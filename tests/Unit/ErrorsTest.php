@@ -3,7 +3,7 @@
 declare(strict_types=1);
 
 use AlpacaBot\Chat\CapExceeded;
-use AlpacaBot\Rest\Errors;
+use AlpacaBot\Errors;
 use Brain\Monkey\Functions;
 
 /*

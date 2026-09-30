@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use AlpacaBot\Access;
 use AlpacaBot\Admin\Menu;
 use AlpacaBot\Admin\SettingsPage;
 use AlpacaBot\Provider\Factory;
@@ -12,7 +13,7 @@ use Brain\Monkey\Functions;
 
 it('registers the top-level menu, the chat page as its first entry and Settings under manage_options, with the capability filtered', function (): void {
     $store = new Store([]);
-    $settings = new SettingsPage($store, new ModelCatalog(new Factory($store)));
+    $settings = new SettingsPage($store, new ModelCatalog(new Factory($store)), new Access($store));
     $chat = static function (): void {};
     // The icon is assets/img/menu-icon.svg, handed to core as the base64 data URI
     // menu-header.php inlines; computed from the file here rather than from Menu::ICON so the
@@ -22,7 +23,7 @@ it('registers the top-level menu, the chat page as its first entry and Settings 
     Functions\expect('add_menu_page')->once()->with('Alpaca Bot', 'Alpaca Bot', 'read', Menu::SLUG, $chat, $icon, 3);
     Functions\expect('add_submenu_page')->once()->with(Menu::SLUG, 'Chat', 'Chat', 'read', Menu::SLUG, $chat);
     Functions\expect('add_submenu_page')->once()->with(Menu::SLUG, 'Alpaca Bot Settings', 'Settings', 'manage_options', SettingsPage::SLUG, [$settings, 'render']);
-    (new Menu($settings, $chat))->register();
+    (new Menu($settings, $chat, new Access(new Store([]))))->register();
 });
 
 it('embeds assets/img/menu-icon.svg byte for byte, so the file stays the single source of truth', function (): void {
@@ -59,7 +60,7 @@ it('ignores a menu capability filter that returns anything but a capability name
     // the site settled on. Anything that is not a capability name is no opinion; the integration
     // suite asserts the same against a real WordPress, where the two checks come apart.
     $store = new Store([]);
-    $settings = new SettingsPage($store, new ModelCatalog(new Factory($store)));
+    $settings = new SettingsPage($store, new ModelCatalog(new Factory($store)), new Access($store));
     $chat = static function (): void {};
     $caps = [];
     Functions\when('add_menu_page')->alias(function (mixed ...$args) use (&$caps): void {
@@ -71,9 +72,31 @@ it('ignores a menu capability filter that returns anything but a capability name
     $bad = [true, false, '1', 0, 7, '', null, ['manage_options']];
     foreach ($bad as $value) {
         Filters\expectApplied('alpaca_bot/admin/menu_capability')->once()->with('edit_posts')->andReturn($value);
-        (new Menu($settings, $chat))->register();
+        (new Menu($settings, $chat, new Access(new Store([]))))->register();
     }
     // Per register(): the menu page, the Chat submenu, then Settings, which is manage_options
     // whatever the filter says.
     expect($caps)->toBe(array_merge(...array_fill(0, count($bad), ['edit_posts', 'edit_posts', 'manage_options'])));
+});
+
+it('shows the menu at the Chat row, so a site that opens the row opens the screen', function (): void {
+    $store = new Store(['access.chat' => 'read']);
+    $settings = new SettingsPage($store, new ModelCatalog(new Factory($store)), new Access($store));
+    $chat = static function (): void {};
+    Filters\expectApplied('alpaca_bot/admin/menu_capability')->once()->with('read')->andReturn('read');
+    Functions\expect('add_menu_page')->once()->withArgs(static fn(mixed ...$a): bool => $a[2] === 'read');
+    Functions\expect('add_submenu_page')->twice()->withArgs(static fn(mixed ...$a): bool => in_array($a[3], ['read', 'manage_options'], true));
+    (new Menu($settings, $chat, new Access($store)))->register();
+});
+
+// ---------------------------------------------------------------- Task 18: the drawer asks the same question
+
+it('answers the chat capability as the menu does, the Chat row through the menu filter, for the drawer to ask too', function (): void {
+    // One question with two askers: register() for the menu and the screen, Admin\Drawer for the
+    // chat on every other screen. The row and the filter, and nothing else.
+    Filters\expectApplied('alpaca_bot/admin/menu_capability')->once()->with('read')->andReturn('publish_posts');
+    expect(Menu::capability(new Access(new Store(['access.chat' => 'read']))))->toBe('publish_posts');
+    // A filter that answers a non-capability is ignored here as it is for the menu.
+    Filters\expectApplied('alpaca_bot/admin/menu_capability')->once()->with('edit_posts')->andReturn(true);
+    expect(Menu::capability(new Access(new Store([]))))->toBe('edit_posts');
 });

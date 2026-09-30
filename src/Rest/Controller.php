@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace AlpacaBot\Rest;
 
-use AlpacaBot\Capability;
+use AlpacaBot\Access;
+use AlpacaBot\Errors;
+use AlpacaBot\RateLimit;
 
 /**
  * Base for every route under `alpaca-bot/v1`. A subclass lists its routes; register() hands each
@@ -27,8 +29,29 @@ abstract class Controller
     public const NAMESPACE = 'alpaca-bot/v1';
 
     /**
+     * The Chat row of Settings › Access, as a route declares it in place of a capability name.
+     * capability() resolves it per request for a route; Admin\Menu::capability() reads the same row
+     * for the menu, its chat screen, the admin-wide drawer and the block editor's sidebar
+     * (Admin\Drawer). Two readers of one
+     * row, not one mechanism serving both —
+     * which is what makes a site that moves the row move the screen and the API together, each
+     * still behind its own filter (`alpaca_bot/capability/{route}` and
+     * `alpaca_bot/admin/menu_capability`).
+     */
+    public const CHAT = 'chat';
+
+    /**
+     * The Settings › Access rows this controller's routes resolve tokens against, once something
+     * has handed them over. Null until then, which capability() reads as the shipped default.
+     */
+    private ?Access $access = null;
+
+    /**
      * One entry per route; `path` is core's route pattern relative to the namespace (named regex
      * groups allowed), `methods` a core method string ('GET', 'POST', 'GET, DELETE', ...).
+     * `capability` is a capability name, `Controller::CHAT` for a route that follows the Chat row
+     * of Settings › Access, or — for a subclass that overrides capability() — whatever token that
+     * override resolves (SettingsController declares Access row names such as `settings.read`).
      *
      * @return list<array{path: string, methods: string, callback: callable, capability: string, args?: array<string, array<string, mixed>>, rate_limit?: bool}>
      */
@@ -51,9 +74,26 @@ abstract class Controller
     }
 
     /**
-     * The permission callback for a route whose default capability is `$capability`. The filter
-     * sees the request, so a site can tighten (or, for a route it exposes to subscribers, loosen)
-     * per request.
+     * Hands this controller the Settings › Access rows its routes resolve tokens against.
+     * Plugin::controllers() calls it on everything the `alpaca_bot/rest/controllers` filter hands
+     * back, a third party's subclass included, so a route registered through that filter may
+     * declare self::CHAT and get the row this site saved. A controller nobody called this on (a
+     * test, a site registering one by hand) resolves the token to Access::defaults() instead —
+     * the shipped default, never an unresolved literal.
+     *
+     * @since 0.6.0
+     */
+    public function useAccess(Access $access): void
+    {
+        $this->access = $access;
+    }
+
+    /**
+     * The permission callback for a route whose declared capability is `$capability` — a
+     * capability name, self::CHAT for a route that follows the Chat row of Settings › Access, or
+     * whatever token an overriding subclass declares. capability() resolves that per request, and
+     * the filter it applies sees the request, so a site can tighten (or, for a route it exposes to
+     * subscribers, loosen) per request.
      *
      * Only a capability name is honoured, and Capability::filtered() is where that rule lives:
      * a filter returning a bool or a number would otherwise cast to a legacy user-level check
@@ -62,33 +102,53 @@ abstract class Controller
      */
     public function permission(string $route, string $capability): \Closure
     {
-        return static function (\WP_REST_Request $request) use ($route, $capability): bool|\WP_Error {
-            /**
-             * Filters the capability a REST route's permission callback checks, per request. `{route}`
-             * is the route's key (Controller::routeKey(): `chat`, `conversations`, `chat/stream`,
-             * `settings/schema`...), so one filter covers a collection and its items. Return a
-             * capability to tighten a route, or to open one to a role (a subscriber-facing chat). Only
-             * a non-empty, non-numeric string is honoured (Capability::filtered()): a bool or a number
-             * would become a legacy user-level check, so it is ignored and the default stands.
-             *
-             * Opening `chat` or `chat/stream` opens every enabled tool to that role as well.
-             * Toolkit\Registry::enabled() chooses a turn's toolkits from the `toolkits.enabled`
-             * setting and the `alpaca_bot/toolkits` filter, and has no capability check of its own,
-             * so there is nothing between "may chat" and "may call the tools that are switched on" —
-             * including `web_fetch`, which makes the web server send an outbound request and hands
-             * the reply back. Only `draft_post` re-checks a capability and refuses a role that lacks
-             * it. `read` and `exist` are honoured strings, so `read` is every Subscriber and `exist`
-             * is every visitor, logged out included. Use `alpaca_bot/toolkits` to take a tool away
-             * from the users a loosened route admits; README's "Tools, and what they let the model
-             * reach" is the operator-facing version of this, with the egress policy that mitigates it.
-             *
-             * @since 0.5.0
-             * @param string           $capability the route's default capability
-             * @param \WP_REST_Request $request    the request being authorised
-             */
-            $cap = Capability::filtered("alpaca_bot/capability/{$route}", $capability, $request);
-            return current_user_can($cap) ? true : Errors::forbidden();
+        return function (\WP_REST_Request $request) use ($route, $capability): bool|\WP_Error {
+            return current_user_can($this->capability($route, $capability, $request)) ? true : Errors::forbidden();
         };
+    }
+
+    /**
+     * What one row of Settings › Access resolves to here, for a controller that may not have been
+     * handed an Access: the row through its own filter, or the row's shipped default when nothing
+     * handed this controller one. Access::effective() fires no filter for self::CHAT — that row's
+     * hooks are the menu's and each route's, and Access owns that rule — so a chat route's only
+     * filter is still the one capability() applies.
+     *
+     * This is the seam a subclass overriding capability() resolves its rows through, rather than
+     * reaching for the Access object: the null case is answered once, here, so an override never
+     * null-checks, and nothing has to build a second Access over the same Store — Plugin::register()
+     * keeps one per request on purpose, and a second would read the settings option again.
+     *
+     * `$args` are the row's own, passed straight through. Access::expectedArgs() fixes how many
+     * each row fires with and effective() throws when handed fewer, which is a programming error
+     * and stays loud. A row Access::defaults() does not list falls back to `manage_options`,
+     * so a row nobody declared fails closed rather than open.
+     *
+     * @param mixed ...$args the arguments this row's filter fires with, Access::expectedArgs() of them
+     * @throws \InvalidArgumentException when fewer than Access::expectedArgs($row) arguments are passed
+     * @since 0.6.0
+     */
+    protected function accessRow(string $row, mixed ...$args): string
+    {
+        return $this->access?->effective($row, ...$args) ?? (Access::defaults()[$row] ?? 'manage_options');
+    }
+
+    /**
+     * The capability this route's permission callback checks for this request: the route's
+     * declared capability — or, for self::CHAT, the Chat row of Settings › Access — through the
+     * route's own filter. Overridable, so a subclass can resolve a route of its own some other
+     * way — accessRow() is how it reaches another row — and fall back here for the rest.
+     *
+     * The row is read here rather than in routes(): routes() is called from register(), on
+     * `rest_api_init`, which fires for every REST request the site serves, `/wp/v2/*` included,
+     * while this runs only for a request that has reached one of these routes — and then through
+     * the memoised Store, which reads the settings option at most once per request however many
+     * rows are asked.
+     */
+    protected function capability(string $route, string $declared, \WP_REST_Request $request): string
+    {
+        $default = $declared === self::CHAT ? $this->accessRow(self::CHAT) : $declared;
+        return RouteCapability::filtered($route, $default, $request);
     }
 
     /**
@@ -109,8 +169,8 @@ abstract class Controller
 
     /**
      * Wraps `$callback` so an exhausted bucket answers 429 without running it. Routes are
-     * limited together under the 'chat' bucket: the limiter guards model spend per person, and
-     * one person opening two chat routes is still one person.
+     * limited together under the 'chat' bucket: the limiter guards model spend, and calls out to
+     * other hosts, per person, and one person opening two such routes is still one person.
      *
      * The refusal is a WP_REST_Response built from Errors::tooMany() rather than the WP_Error
      * itself: core renders a WP_Error's status and body but has nowhere to carry a header, and

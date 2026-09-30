@@ -2,7 +2,10 @@
 
 declare(strict_types=1);
 
+use AlpacaBot\Plugin;
 use AlpacaBot\Settings\Store;
+use AlpacaBot\Toolkit\AddressPin;
+use AlpacaBot\Toolkit\CurlPin;
 use AlpacaBot\Toolkit\WebFetchToolkit;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Enum\ToolResultStatus;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Tool\Tool;
@@ -19,18 +22,24 @@ use Brain\Monkey\Functions;
 // hand in their own.
 
 /** The response `wp_safe_remote_get()` answers, in the array shape the HTTP API uses, and the retrieve_* helpers reading it. */
-function webFetchResponse(string $body, int $code = 200, string $contentType = 'text/html; charset=utf-8'): array
+function webFetchResponse(string $body, int $code = 200, string $contentType = 'text/html; charset=utf-8', array $headers = []): array
 {
     Functions\when('is_wp_error')->justReturn(false);
     Functions\when('wp_remote_retrieve_body')->alias(static fn(array $r): string => $r['body']);
     Functions\when('wp_remote_retrieve_response_code')->alias(static fn(array $r): int => $r['response']['code']);
     Functions\when('wp_remote_retrieve_header')->alias(static fn(array $r, string $h): string => $r['headers'][$h] ?? '');
-    return ['headers' => ['content-type' => $contentType], 'body' => $body, 'response' => ['code' => $code]];
+    return ['headers' => ['content-type' => $contentType] + $headers, 'body' => $body, 'response' => ['code' => $code]];
 }
 
-function webFetchTool(string $userAgent = 'UA/1', ?\Closure $resolver = null): Tool
+function webFetchTool(string $userAgent = 'UA/1', ?\Closure $resolver = null, ?\Closure $curl = null): Tool
 {
-    $tool = (new WebFetchToolkit(new Store(['toolkits.user_agent' => $userAgent]), $resolver ?? static fn(string $host): array => ['93.184.216.34']))->tools()[0];
+    $tool = (new WebFetchToolkit(
+        new Store(['toolkits.user_agent' => $userAgent]),
+        $resolver ?? static fn(string $host): array => ['93.184.216.34'],
+        // The unit suite does not load Requests, so the real check would say "no cURL" and refuse
+        // everything; the tests about the refusal hand in their own answer.
+        $curl ?? static fn(bool $https): bool => true,
+    ))->tools()[0];
     expect($tool)->toBeInstanceOf(Tool::class);
     return $tool;
 }
@@ -46,7 +55,7 @@ it('fetches a URL the guard passes, with the configured user agent under the tim
         && $args['timeout'] === 5
         && $args['limit_response_size'] === 1048576
         && $args['reject_unsafe_urls'] === true
-        && $args['redirection'] === 3)->andReturn(webFetchResponse('<html><head><title>T</title><style>b{}</style></head><body><h1>Hi</h1><script>x()</script><p>Fish &amp; chips</p><noscript>no</noscript><ul><li>one</li><li>two</li></ul></body></html>'));
+        && $args['redirection'] === 0)->andReturn(webFetchResponse('<html><head><title>T</title><style>b{}</style></head><body><h1>Hi</h1><script>x()</script><p>Fish &amp; chips</p><noscript>no</noscript><ul><li>one</li><li>two</li></ul></body></html>'));
     $tool = webFetchTool();
     expect($tool->name())->toBe('web_fetch')
         ->and($tool->toFunctionSchema()['function']['parameters']['required'])->toBe(['url']);
@@ -74,7 +83,7 @@ it('refuses a URL the guard rejects before any request is made, and says why', f
 
 it('falls back to the schema user agent when the setting is blank, so the request never goes out without one', function (): void {
     Functions\expect('wp_http_validate_url')->once()->andReturnFirstArg();
-    Functions\expect('wp_safe_remote_get')->once()->withArgs(static fn(string $url, array $args): bool => $args['user-agent'] === 'AlpacaBot/0.5 (+https://github.com/carmelosantana/alpaca-bot)')->andReturn(webFetchResponse('<p>ok</p>'));
+    Functions\expect('wp_safe_remote_get')->once()->withArgs(static fn(string $url, array $args): bool => $args['user-agent'] === 'AlpacaBot/' . Plugin::VERSION . ' (+https://github.com/carmelosantana/alpaca-bot)')->andReturn(webFetchResponse('<p>ok</p>'));
     expect(webFetchTool('  ')->execute(['url' => 'https://example.test/'])->content)->toBe('ok');
 });
 
@@ -286,18 +295,12 @@ it('refuses a name whose AAAA lookup failed, and accepts one whose AAAA lookup a
     $a = static fn(string $host): array|false => ['93.184.216.34'];
     $failed = static fn(string $host): array|false => false;
     $none = static fn(string $host): array|false => [];
-    $some = static fn(string $host): array|false => [['host' => $host, 'type' => 'AAAA', 'ipv6' => '2606:4700::1']];
-    expect(WebFetchToolkit::resolve('dropped.test', $a, $failed))->toBe([])
-        ->and(WebFetchToolkit::resolve('v4only.test', $a, $none))->toBe(['93.184.216.34'])
-        ->and(WebFetchToolkit::resolve('dual.test', $a, $some))->toBe(['93.184.216.34', '2606:4700::1'])
-        // The A half the same way: core already refused a host gethostbyname() cannot answer, so
-        // a false here is a lookup that failed between the two checks, not a v6-only host.
-        ->and(WebFetchToolkit::resolve('v6only.test', $failed, $some))->toBe([]);
-    // Through the tool: the failed lookup is the refusal a special-purpose address gets, and the
-    // empty one is fetched.
+    // What the two lookups answer on their own is AddressPinTest's; this is what the tool makes
+    // of it: the failed lookup is the refusal a special-purpose address gets, and the empty one
+    // is fetched.
     Functions\when('wp_http_validate_url')->returnArg();
     Functions\expect('wp_safe_remote_get')->once()->withArgs(static fn(string $url): bool => $url === 'https://v4only.test/')->andReturn(webFetchResponse('<p>ok</p>'));
-    $tool = webFetchTool(resolver: static fn(string $host): array => WebFetchToolkit::resolve($host, $a, $host === 'dropped.test' ? $failed : $none));
+    $tool = webFetchTool(resolver: static fn(string $host): array => AddressPin::lookup($host, $a, $host === 'dropped.test' ? $failed : $none));
     $res = $tool->execute(['url' => 'https://dropped.test/']);
     expect($res->status)->toBe(ToolResultStatus::Error)
         ->and($res->content)->toContain('not allowed')
@@ -311,19 +314,134 @@ it('honours core\'s http_request_host_is_external opt-in for a special-purpose a
     expect(webFetchTool()->execute(['url' => 'http://169.254.169.254/'])->content)->toBe('internal');
 });
 
-it('applies the same check to every redirect hop through the HTTP API\'s before_redirect hook, and unhooks after the fetch', function (): void {
+// ---------------------------------------------------------------- one lookup, every checked address, every hop
+// The HTTP API is told to follow no redirect (redirection 0; WP 7.1 class-wp-http.php:359-363
+// turns that into Requests' follow_redirects false, so a 3xx comes back as a response) and the
+// tool follows them itself: each hop validated, looked up once, checked, and pinned into cURL by
+// a CurlPin hooked on http_api_curl for that one request. Brain Monkey never runs a hooked
+// callback, so these pin what is hooked and unhooked and with what entry; CurlPinTest pins what
+// the callback does to a handle.
+
+// first.test is dual-stack on purpose: both of its answers passed the check, so both go into the
+// entry and cURL keeps the family choice. Pin only the first and this assertion fails, which is
+// the regression Kanboard #4483 names -- an IPv6-only server given an unroutable A record.
+it('pins each hop to every address its check passed, hooking one CurlPin per request and unhooking it after', function (): void {
     Functions\when('wp_http_validate_url')->returnArg();
-    $guard = null;
-    Actions\expectAdded('requests-requests.before_redirect')->once()->whenHappen(static function (\Closure $callback) use (&$guard): void {
-        $guard = $callback;
+    $pins = [];
+    Actions\expectAdded('http_api_curl')->twice()->whenHappen(static function (CurlPin $pin, int $priority, int $accepted) use (&$pins): void {
+        $pins[] = [$pin->entry, $priority, $accepted];
     });
-    Actions\expectRemoved('requests-requests.before_redirect')->once();
+    Actions\expectRemoved('http_api_curl')->twice();
+    $tool = webFetchTool(resolver: static fn(string $host): array => ['first.test' => ['93.184.216.34', '2606:2800:220:1::1'], 'next.test' => ['104.20.23.154']][$host]);
+    Functions\expect('wp_safe_remote_get')->twice()->andReturnUsing(static function (string $url, array $args): array {
+        expect($args['redirection'])->toBe(0);
+        return match ($url) {
+            'https://first.test/a' => webFetchResponse('', 301, '', ['location' => 'http://next.test:8080/b']),
+            'http://next.test:8080/b' => webFetchResponse('<p>arrived</p>'),
+        };
+    });
+    expect($tool->execute(['url' => 'https://first.test/a'])->content)->toBe('arrived')
+        ->and($pins)->toBe([['first.test:443:93.184.216.34,2606:2800:220:1::1', 10, 1], ['next.test:8080:104.20.23.154', 10, 1]]);
+});
+
+it('asks the resolver once per hop and pins the answers it checked, so a name that rebinds between lookups never reaches the second', function (): void {
+    Functions\when('wp_http_validate_url')->returnArg();
+    $answers = [['93.184.216.34'], ['127.0.0.1']];
+    $asked = 0;
+    $tool = webFetchTool(resolver: static function (string $host) use (&$answers, &$asked): array {
+        $asked++;
+        return array_shift($answers) ?? [];
+    });
+    $entry = null;
+    Actions\expectAdded('http_api_curl')->once()->whenHappen(static function (CurlPin $pin) use (&$entry): void {
+        $entry = $pin->entry;
+    });
+    Functions\expect('wp_safe_remote_get')->once()->andReturn(webFetchResponse('<p>public</p>'));
+    expect($tool->execute(['url' => 'http://rebind.test/'])->content)->toBe('public')
+        ->and($entry)->toBe('rebind.test:80:93.184.216.34')
+        ->and($asked)->toBe(1);
+});
+
+it('checks every redirect target before it is requested, and refuses one core or the table refuses', function (): void {
+    Functions\when('wp_http_validate_url')->alias(static fn(string $u): string|false => str_starts_with($u, 'ftp:') ? false : $u);
     $tool = webFetchTool(resolver: static fn(string $host): array => $host === 'internal.test' ? ['10.0.0.7'] : ['93.184.216.34']);
-    Functions\expect('wp_safe_remote_get')->once()->andReturn(webFetchResponse('<p>ok</p>'));
-    expect($tool->execute(['url' => 'https://public.test/'])->content)->toBe('ok')
-        ->and($guard)->toBeInstanceOf(\Closure::class);
-    $guard('https://elsewhere.test/');
-    foreach (['http://169.254.169.254/', 'http://internal.test/', 'http://[::1]/'] as $location) {
-        expect(fn() => $guard($location))->toThrow(\WpOrg\Requests\Exception::class, 'not allowed');
+    foreach (['http://internal.test/', 'http://169.254.169.254/latest/meta-data/', 'http://[::1]/', 'ftp://public.test/'] as $location) {
+        Functions\expect('wp_safe_remote_get')->once()->andReturn(webFetchResponse('', 302, '', ['location' => $location]));
+        $res = $tool->execute(['url' => 'https://public.test/']);
+        expect($res->status)->toBe(ToolResultStatus::Error, $location)
+            ->and($res->content)->toContain('redirected')->toContain('not allowed');
     }
+});
+
+it('follows at most three redirects and refuses the fourth', function (): void {
+    Functions\when('wp_http_validate_url')->returnArg();
+    Functions\expect('wp_safe_remote_get')->times(4)->andReturnUsing(static fn(string $url): array => webFetchResponse('', 302, '', ['location' => $url . 'x/']));
+    $res = webFetchTool()->execute(['url' => 'https://loop.test/']);
+    expect($res->status)->toBe(ToolResultStatus::Error)
+        ->and($res->content)->toContain('more than 3');
+});
+
+// A 3xx used to be followed by Requests, so what came back was never one. Now the tool sees
+// every 3xx: one it follows needs a Location, and any other is an error, not a page to read.
+it('reports a redirect with no Location, and a 3xx it does not follow, as an HTTP error rather than as a page', function (): void {
+    Functions\when('wp_http_validate_url')->returnArg();
+    foreach ([[302, []], [300, ['location' => 'https://x.test/']], [304, []]] as [$code, $headers]) {
+        Functions\expect('wp_safe_remote_get')->once()->andReturn(webFetchResponse('<p>body</p>', $code, 'text/html', $headers));
+        $res = webFetchTool()->execute(['url' => 'https://public.test/']);
+        expect($res->status)->toBe(ToolResultStatus::Error, (string) $code)
+            ->and($res->content)->toContain((string) $code)->not->toContain('body');
+    }
+});
+
+it('pins neither an address literal nor the site\'s own host, and still fetches both', function (): void {
+    Functions\when('wp_http_validate_url')->returnArg();
+    Actions\expectAdded('http_api_curl')->never();
+    Functions\expect('wp_safe_remote_get')->twice()->andReturn(webFetchResponse('<p>ok</p>'));
+    $tool = webFetchTool(resolver: static fn(string $host): array => throw new LogicException("{$host} should not be looked up"));
+    expect($tool->execute(['url' => 'http://93.184.216.34/'])->content)->toBe('ok')
+        ->and($tool->execute(['url' => 'https://site.test/about/'])->content)->toBe('ok');
+});
+
+// ---------------------------------------------------------------- only cURL can be pinned
+// The pin is a CURLOPT_RESOLVE option, so a request WordPress would send through another
+// transport would go to whatever the name answers at connect time. Requests chooses a transport
+// per request from the scheme (WP 7.1 Requests.php:463-466), so the question is asked per hop.
+
+it('refuses to fetch when WordPress would not send the request through cURL, before any request, asking with each hop\'s scheme', function (): void {
+    Functions\when('wp_http_validate_url')->returnArg();
+    Functions\expect('wp_safe_remote_get')->never();
+    $asked = [];
+    $tool = webFetchTool(curl: static function (bool $https) use (&$asked): bool {
+        $asked[] = $https;
+        return false;
+    });
+    foreach (['https://public.test/', 'http://public.test/'] as $url) {
+        $res = $tool->execute(['url' => $url]);
+        expect($res->status)->toBe(ToolResultStatus::Error, $url)
+            ->and($res->content)->toContain('cURL')->toContain('Site Health');
+    }
+    expect($asked)->toBe([true, false]);
+});
+
+it('asks again on a redirect, so an https page that redirects to a scheme cURL cannot carry here is refused there', function (): void {
+    Functions\when('wp_http_validate_url')->returnArg();
+    $tool = webFetchTool(curl: static fn(bool $https): bool => $https);
+    Functions\expect('wp_safe_remote_get')->once()->andReturn(webFetchResponse('', 302, '', ['location' => 'http://public.test/plain']));
+    $res = $tool->execute(['url' => 'https://public.test/']);
+    expect($res->status)->toBe(ToolResultStatus::Error)
+        ->and($res->content)->toContain('cURL');
+});
+
+// curlCarries() itself, not a closure standing in for it. Every test above injects its own
+// answer, so nothing else here would notice a body that returned true whatever the server has --
+// the one shape that silently reopens the rebinding window on a live site. The unit runtime has
+// no Requests transport class at all (tests/Pest.php loads only an Exception stand-in), so the
+// class_exists guard is the branch this can exercise, and false is the answer it must give.
+// The other guard, Transport\Curl::test() answering false, needs a PHP without a usable cURL and
+// is not reachable from either suite; tests/Integration/ToolkitsTest.php pins the agreement
+// between this answer and the transport Requests itself would pick on a box that has one.
+it('answers false, for either scheme, when Requests has no cURL transport class to ask', function (): void {
+    expect(class_exists(\WpOrg\Requests\Transport\Curl::class))->toBeFalse()
+        ->and(WebFetchToolkit::curlCarries(true))->toBeFalse()
+        ->and(WebFetchToolkit::curlCarries(false))->toBeFalse();
 });

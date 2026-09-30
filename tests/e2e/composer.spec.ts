@@ -14,23 +14,26 @@ import { fileURLToPath } from 'node:url';
  * which needs only `pnpm build` and a Chromium — `pnpm e2e` runs both files and the other one
  * wants a wp-env.
  *
- * This file is also, for now, the whole of resources/ts/chat.ts's error-path coverage. chat.ts
- * exports nothing, so nothing in tests/ts/ can reach it, and giving it exports would mean a DOM
- * for node:test to run against — a new dependency, which is not a release-week decision. Driving
- * the built bundle in a real browser is in any case the stronger test of the two: it exercises
- * the artifact the zip ships rather than the module the artifact is compiled from. Making chat.ts
- * unit-testable is 0.6 work; until then, an error path added to it belongs here.
+ * The units these exits run through — restoreDraft(), redeem(), refusal(), and boot() itself —
+ * are exported from resources/ts/ and tested under node:test against happy-dom in
+ * tests/ts/chat.test.ts, which carries the first case below as a unit test (Kanboard #4334).
+ * This file stays, and is still the stronger test of the two: it exercises the artifact the zip
+ * ships, in a real browser, rather than the modules the artifact is compiled from. A new error
+ * path gets a unit test there first, and a case here when the bundle's wiring is what could break.
  *
  * The markup is the part of View\Chat\Shell that send() actually reads -- the form, the four
  * hidden fields, the composer buttons, the status region and the transcript -- rather than the
  * whole shell, because a fixture that reproduced the shell would be a copy of it to keep in step.
  * If a selector here stops matching what Shell emits, that is the bundle failing to find it too.
  *
- * The three refusals are the three exits before the stream is consumed. The last one is the one
- * this file was written for: a stream redemption that comes back as something other than
- * text/event-stream (StreamBudget's concurrency 429, an expired or replayed ticket) used to
+ * Three refusals end a send before the stream is consumed, and each has a test here: a bubble render
+ * that fails, a refused POST /chat, and a stream redemption that comes back as something other
+ * than text/event-stream. The last of those is the one this file was written for: it used to
  * remove the empty assistant bubble and return, leaving the typed message and the attached image
- * nowhere at all while the ticket stayed valid for a retry the user could no longer make.
+ * nowhere at all while the ticket stayed valid for a retry the user could no longer make. Two
+ * refusals take that shape and both are covered below: an expired or replayed ticket (403) and
+ * the concurrency cap (429 `alpaca_bot_stream_concurrency`), which is the one refusal the
+ * composer shows as a warning rather than an error, because the ticket survives it.
  */
 
 const ORIGIN = 'https://alpaca-bot.test';
@@ -47,7 +50,6 @@ const SHELL = `<!doctype html>
   <form id="ab-form" class="ab-composer">
     <input type="hidden" name="conversation_id" value="0">
     <input type="hidden" name="model" value="llama3.2">
-    <input type="hidden" name="context[post_id]" value="0">
     <input type="hidden" name="images" value="">
     <textarea id="ab-message" name="message" rows="1"></textarea>
     <div class="ab-composer__buttons">
@@ -103,17 +105,17 @@ async function send(page: import('@playwright/test').Page, text: string): Promis
   await page.locator('#ab-message').press('Enter');
 }
 
-test('a stream redemption that is not an event stream gives the message and the image back and leaves no turn in the transcript', async ({ page }) => {
+test('a stream redemption refused as forbidden gives the message and the image back and leaves no turn in the transcript', async ({ page }) => {
   const seen = await shell(page, {
-    status: 429,
+    status: 403,
     contentType: 'application/json',
-    body: JSON.stringify({ code: 'alpaca_bot_rate_limited', message: 'Too many requests. Try again shortly.', data: { status: 429, retry_after: 30 } }),
+    body: JSON.stringify({ code: 'rest_forbidden', message: 'Invalid or expired stream token.', data: { status: 403 } }),
   });
 
   await send(page, 'the message that must survive');
 
   // The refusal is shown...
-  await expect(page.locator('#ab-status')).toContainText('Too many requests');
+  await expect(page.locator('#ab-status')).toContainText('Invalid or expired stream token');
   // ...the composer has its content back, both halves...
   await expect(page.locator('#ab-message')).toHaveValue('the message that must survive');
   await expect(page.locator('#ab-form input[name="images"]')).toHaveValue(IMAGE);
@@ -121,7 +123,29 @@ test('a stream redemption that is not an event stream gives the message and the 
   await expect(page.locator('#ab-messages article')).toHaveCount(0);
   // The redemption really was attempted, so this is the refusal path and not an earlier exit.
   expect(seen.filter((p) => p.startsWith('/wp-json/alpaca-bot/v1/chat/'))).toHaveLength(1);
-  // The composer is usable again for the retry the still-valid ticket allows.
+  await expect(page.locator('[data-action="send"]')).toBeEnabled();
+});
+
+test('a redemption refused for concurrency says how many streams are open, as a warning, and keeps the message for the retry', async ({ page }) => {
+  // StreamBudget's own 429: the ticket is not spent and lives 120 s, so this is "not yet", not a
+  // failure — the composer keeps what was typed and says why rather than showing a generic error.
+  const seen = await shell(page, {
+    status: 429,
+    contentType: 'application/json',
+    body: JSON.stringify({
+      code: 'alpaca_bot_stream_concurrency',
+      message: 'You already have 3 streams open. Wait for one to finish, then send again.',
+      data: { status: 429, retry_after: 720, limit: 3 },
+    }),
+  });
+
+  await send(page, 'the message that waits its turn');
+
+  await expect(page.locator('#ab-status .notice-warning')).toContainText('You already have 3 streams open');
+  await expect(page.locator('#ab-message')).toHaveValue('the message that waits its turn');
+  await expect(page.locator('#ab-form input[name="images"]')).toHaveValue(IMAGE);
+  await expect(page.locator('#ab-messages article')).toHaveCount(0);
+  expect(seen.filter((p) => p.startsWith('/wp-json/alpaca-bot/v1/chat/'))).toHaveLength(1);
   await expect(page.locator('[data-action="send"]')).toBeEnabled();
 });
 

@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-use AlpacaBot\Rest\RateLimit;
+use AlpacaBot\RateLimit;
 use Brain\Monkey\Filters;
 use Brain\Monkey\Functions;
 

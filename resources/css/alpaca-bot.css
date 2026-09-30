@@ -8,17 +8,25 @@
  * where none of those variables exist. The surfaces, text and borders are core's fixed greys,
  * which do not change between schemes.
  *
- * Two places load this, and one of them is not wp-admin: the admin chat screen
- * (Admin\Assets::enqueue()) and a front-end page carrying `[alpacabot]` with no prompt
- * (Admin\Assets::enqueueFront()). Everything below is shared but the height arithmetic on
- * .ab-wrap, which subtracts wp-admin's chrome from the viewport, and one narrow-screen rule on
- * `.wrap.ab-wrap` that serves it; the front end has no #wpfooter and the shell there is a block
- * inside a page rather than the whole screen, so .ab-wrap--front (near the foot of this file)
- * replaces the height, and has no .wrap for the other rule to match. View\Chat\Shell puts that
- * modifier on, and leaves core's .wrap off, for a shell it was told is not on the admin screen.
+ * Whatever loads this gets its URL from Admin\Assets, and not every loader is in wp-admin:
+ * enqueueChat() enqueues it for the admin chat screen (enqueue()) and for a front-end page carrying
+ * `[alpacabot]` with no prompt (enqueueFront()), and mount() names it for a page that adds it
+ * later, which the admin-wide drawer and the block editor's sidebar do the first time they are
+ * opened (resources/ts/mount.ts). The
+ * height arithmetic on .ab-wrap subtracts wp-admin's chrome
+ * from the viewport, and one narrow-screen rule on `.wrap.ab-wrap` serves it. Two modifiers
+ * replace that height and come without core's .wrap, so that rule does not match them either:
+ * .ab-wrap--front, for a front-end page, which has no #wpfooter and holds the shell as a block
+ * inside its content, and .ab-wrap--drawer, for the admin-wide drawer's panel
+ * (View\Chat\Drawer), which the shell fills, and which the block editor's sidebar mounts too.
+ * View\Chat\Shell picks the wrapper's class, and its docblock says on what.
  */
 
-.ab-wrap {
+/*
+ * The palette and the focus width, on the shell and on the drawer's panel too: the panel's
+ * close button is the panel's child, not the shell's, and inherits nothing the shell declares.
+ */
+.ab-wrap, .ab-drawer__panel {
     /* The fallbacks are core's Default scheme; without one a missing variable would blank the send button. */
     --ab-accent: var(--wp-admin-theme-color, #2271b1);
     --ab-accent-dark: var(--wp-admin-theme-color-darker-10, #135e96);
@@ -31,6 +39,9 @@
     --ab-border: #c3c4c7;
     --ab-code-bg: #1d2327;
     --ab-code-text: #f0f0f1;
+}
+
+.ab-wrap {
     --ab-max: 800px;
     --ab-admin-bar: 32px;
     /* #wpbody-content's padding-bottom, where core parks #wpfooter. */
@@ -187,7 +198,23 @@ pre > .ab-code__copy:focus-visible { outline-color: var(--ab-code-text); }
 .ab-msg__reasoning summary { cursor: pointer; }
 .ab-msg__reasoning-text { max-height: 12em; margin-top: 4px; overflow-y: auto; }
 
+/* The line under a streamed reply while a faked tool call's markup is being held (resources/ts/held.ts). */
+.ab-msg__tool { margin: 4px 0 0; color: var(--ab-muted); font-size: 13px; font-style: italic; }
+/* The markup itself, in place and out of sight. `hidden` alone would leave this to the UA sheet,
+   which any rule setting `display` on a span in a message body would beat; the markup showing is
+   the one failure this feature has, so it is stated here rather than inherited. */
+.ab-msg__held[hidden] { display: none; }
+
 /* ---- composer -------------------------------------------------------------------------- */
+
+/* The context chips above the box: what the next turn will send (View\Chat\Composer::chip()). */
+.ab-composer__chips { display: flex; flex-wrap: wrap; gap: 6px; max-width: var(--ab-max); margin: 0 auto 6px; }
+.ab-chip { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; padding: 2px 4px 2px 10px; border: 1px solid var(--ab-border); border-radius: 999px; background: var(--ab-surface); font-size: 12px; }
+.ab-chip__label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ab-chip__remove { display: inline-flex; flex: none; padding: 2px; border: 0; border-radius: 50%; background: none; color: var(--ab-muted); cursor: pointer; }
+.ab-chip__remove:hover { color: var(--ab-text); }
+.ab-chip__remove:focus-visible { outline: var(--ab-focus-width) solid var(--ab-accent); }
+.ab-chip__remove .ab-icon { width: 14px; height: 14px; }
 
 /* Sticky is for iOS, where 100vh overshoots the visible viewport: the row stays in view as the page scrolls. */
 .ab-composer { position: sticky; bottom: 0; padding-top: 8px; }
@@ -298,10 +325,10 @@ pre > .ab-code__copy[aria-label]:hover::after {
  * on the page to subtract. A bounded box instead. This replaces the height outright rather than
  * zeroing --ab-footer, so the narrow-screen block below, which retunes those variables for
  * wp-admin, has nothing to say here either, nor does its `.wrap.ab-wrap` rule, since this shell
- * has no .wrap. Everything else in this file works on both: the
- * variables all carry fallbacks for the admin colour scheme that is not there, `.ab-status
- * .notice` is what dom.ts writes on either surface, `.wp-header-end` is Header's own <hr>, and
- * `.ab-header > .notice` is the one rule that only wp-admin can trigger -- core's notice mover
+ * has no .wrap. Everything else in this file, but the selectors that name the drawer's classes,
+ * works on both: the variables all carry fallbacks for the admin colour scheme that is not
+ * there, `.ab-status .notice` is what dom.ts writes on either surface, `.wp-header-end` is
+ * Header's own <hr>, and `.ab-header > .notice` is the one rule that only wp-admin can trigger -- core's notice mover
  * -- which costs a front-end page a selector that matches nothing. What this file does *not*
  * carry is core's own admin chrome: `.page-title-action` is styled by wp-admin's stylesheet, so
  * "New chat" is a plain link on a front-end shell.
@@ -309,6 +336,93 @@ pre > .ab-code__copy[aria-label]:hover::after {
 .ab-wrap--front {
     height: min(70vh, 640px);
 }
+
+/* ---- the same shell in the admin-wide drawer --------------------------------------------- */
+
+/*
+ * View\Chat\Drawer: a panel holding a close button and the shell. The panel takes its height from
+ * whatever it is mounted in and the shell fills the panel, so .ab-wrap--drawer replaces the height
+ * .ab-wrap computes from wp-admin's chrome, and the top margin and padding it sets for core's
+ * .wrap, with its own. Its two classes outrank .ab-wrap's one wherever either rule sits.
+ *
+ * The narrow-screen block (core's 782px breakpoint) still reaches this shell. Its `.ab-wrap` rule
+ * retunes only the variables the replaced height was made of, and its `.wrap.ab-wrap` rule needs
+ * core's .wrap, which this shell does not have; its header, select, message and composer rules
+ * apply here as they do on the screen, keyed to the viewport's width and not the panel's.
+ */
+.ab-drawer__panel { position: relative; display: flex; flex-direction: column; height: 100%; }
+.ab-wrap.ab-wrap--drawer { flex: 1; min-height: 0; height: auto; margin: 0; padding: 8px 12px; }
+/* The close button sits over the header's top-right corner; the header keeps clear of it. */
+.ab-wrap--drawer .ab-header { padding-right: 32px; }
+.ab-wrap--drawer .ab-header h1 { font-size: 1.3em; }
+/*
+ * "New chat" as the button it is on the chat screen. Core draws `.page-title-action` only inside
+ * .wrap (common.css's `.wrap .page-title-action`, WP 7.1, which each colour scheme's colors.css
+ * recolours under the same selector), and this shell has no .wrap, so the box is restated here in
+ * core's figures and coloured with the palette's accent, which follows the user's scheme too.
+ */
+.ab-wrap--drawer .page-title-action {
+    display: inline-block;
+    box-sizing: border-box;
+    min-height: 32px;
+    padding: 0 12px;
+    border: 1px solid var(--ab-accent);
+    border-radius: 2px;
+    background: transparent;
+    color: var(--ab-accent);
+    font-size: 13px;
+    font-weight: 500;
+    line-height: 2.30769231;
+    text-decoration: none;
+    white-space: nowrap;
+}
+.ab-wrap--drawer .page-title-action:hover { border-color: var(--ab-accent-dark); color: var(--ab-accent-dark); }
+.ab-wrap--drawer .page-title-action:focus {
+    border-color: var(--ab-accent);
+    box-shadow: 0 0 0 1px var(--ab-accent);
+    outline: var(--ab-focus-width) solid transparent;
+}
+/*
+ * Above core's breakpoint the panel is still 420px wide in the drawer (280px in the block
+ * editor's sidebar), and the two 240px selects, each on a line of its own under the title, made
+ * the header three rows tall. Here they share one row.
+ * Under the breakpoint the panel is the viewport's width and the narrow-screen block's column
+ * layout stands.
+ */
+@media screen and (min-width: 783px) {
+    .ab-wrap--drawer .ab-header__controls { flex-basis: 100%; flex-wrap: nowrap; margin-left: 0; }
+    .ab-wrap--drawer .ab-header__controls > .ab-select, .ab-wrap--drawer .ab-history { flex: 1 1 50%; min-width: 0; }
+    .ab-wrap--drawer .ab-select { width: 100%; }
+}
+.ab-btn.ab-drawer__close { position: absolute; top: 4px; right: 4px; z-index: 1; font-size: 18px; }
+/* The tooltip every icon button gets, centred above it, runs past this corner's top and right
+   edges; this one goes to the left. */
+.ab-btn--icon.ab-drawer__close[aria-label]:hover::after {
+    top: 50%;
+    right: calc(100% + 6px);
+    bottom: auto;
+    left: auto;
+    transform: translateY(-50%);
+}
+
+/* ---- the same shell in the block editor's sidebar ----------------------------------------- */
+
+/*
+ * resources/ts/editor.ts mounts the drawer's panel in a PluginSidebar, whose own header carries
+ * the title and the close button, so the drawer's close button is not wanted here, nor the room
+ * the header keeps for it. The sidebar scrolls as a whole (core's .interface-complementary-area)
+ * and gives what it holds no height, so the panel would be as tall as the chat in it: the composer
+ * under a short transcript rather than at the sidebar's foot, and a long one scrolling the whole
+ * sidebar, the chat's header with it. This makes the sidebar a column whose panel (the
+ * PluginSidebar's `className`, .ab-sidebar-panel) takes what the sidebar's header leaves, so the
+ * panel's height is definite and the drawer's layout holds: the transcript scrolls between the
+ * header and the composer.
+ */
+.interface-complementary-area:has(> .ab-sidebar-panel) { display: flex; flex-direction: column; }
+.ab-sidebar-panel { flex: 1; min-height: 0; }
+.ab-sidebar__slot, .ab-sidebar { height: 100%; }
+.ab-sidebar .ab-drawer__close { display: none; }
+.ab-sidebar .ab-wrap--drawer .ab-header { padding-right: 0; }
 
 /* ---- narrow screens (core's own admin breakpoint) --------------------------------------- */
 

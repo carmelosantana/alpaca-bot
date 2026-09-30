@@ -6,6 +6,8 @@ use AlpacaBot\Chat\ConversationStore;
 use AlpacaBot\Chat\UserPrefs;
 use AlpacaBot\Provider\Factory;
 use AlpacaBot\Provider\ModelCatalog;
+use AlpacaBot\Context\CurrentScreenSource;
+use AlpacaBot\Rest\Controller;
 use AlpacaBot\Rest\ViewController;
 use AlpacaBot\Settings\Store;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Config\ModelDefinition;
@@ -66,14 +68,14 @@ it('persists the default model and returns a notice', function (): void {
 
 // ---------------------------------------------------------------- beyond the brief's two
 
-it('declares the five view routes for editors, with the model list rate limited like /models', function (): void {
+it('declares every view route on the Chat row, its filter key being Controller::routeKey() of its path, and only the model list rate limited, like /models', function (): void {
     $routes = viewController()->routes();
     $byMethod = [];
     foreach ($routes as $route) {
-        expect($route['capability'])->toBe('edit_posts');
+        expect($route['capability'])->toBe(Controller::CHAT);
         $byMethod[$route['methods'] . ' ' . $route['path']] = $route;
     }
-    expect(array_keys($byMethod))->toBe(['GET /view/messages/(?P<id>\d+)', 'GET /view/history', 'GET /view/models', 'POST /view/default-model', 'GET /view/bubble', 'POST /view/bubble'])
+    expect(array_keys($byMethod))->toBe(['GET /view/messages/(?P<id>\d+)', 'GET /view/history', 'GET /view/models', 'POST /view/default-model', 'GET /view/bubble', 'POST /view/bubble', 'GET /view/panel', 'POST /view/drawer'])
         ->and($byMethod['GET /view/models']['args'])->toBe(['refresh' => ['type' => 'boolean', 'default' => false]])
         ->and($byMethod['GET /view/history']['args']['conversation_id']['type'])->toBe('integer')
         ->and($byMethod['POST /view/default-model']['args']['model']['required'])->toBeTrue()
@@ -81,8 +83,13 @@ it('declares the five view routes for editors, with the model list rate limited 
         ->and($byMethod['POST /view/bubble']['args']['role']['enum'])->toBe(['user', 'assistant'])
         ->and($byMethod['POST /view/bubble']['args']['images'])->toBe(['type' => 'array', 'items' => ['type' => 'string'], 'default' => []])
         ->and($byMethod['POST /view/bubble']['args']['tool_calls'])->toBe(['type' => 'array', 'items' => ['type' => 'object'], 'default' => []])
-        // One capability filter key per fragment, the {id} segment removed as for /conversations.
-        ->and(array_map(ViewController::routeKey(...), array_column($routes, 'path')))->toBe(['view/messages', 'view/history', 'view/models', 'view/default-model', 'view/bubble', 'view/bubble']);
+        ->and($byMethod['GET /view/panel']['args'])->toBe(['conversation_id' => ['type' => 'integer', 'default' => 0, 'minimum' => 0], 'post_id' => ['type' => 'integer', 'default' => 0, 'minimum' => 0], 'screen_id' => ['type' => 'string', 'default' => ''], 'screen_title' => ['type' => 'string', 'default' => '']])
+        // No default on either: an absent parameter must read as null, which is how drawer() tells
+        // "not named" from "named as false or 0".
+        ->and($byMethod['POST /view/drawer']['args'])->toBe(['open' => ['type' => 'boolean'], 'conversation_id' => ['type' => 'integer', 'minimum' => 0]])
+        // The filter key is Controller::routeKey() of the path, which drops the {id} segment as it
+        // does for /conversations; the bubble routes share one path, so they share `view/bubble`.
+        ->and(array_map(ViewController::routeKey(...), array_column($routes, 'path')))->toBe(['view/messages', 'view/history', 'view/models', 'view/default-model', 'view/bubble', 'view/bubble', 'view/panel', 'view/drawer']);
     foreach ($byMethod as $key => $route) {
         expect($route['rate_limit'] ?? false)->toBe($key === 'GET /view/models', $key);
     }
@@ -90,7 +97,7 @@ it('declares the five view routes for editors, with the model list rate limited 
 
 it('registers its routes and hooks rest_pre_serve_request to write the HTML itself', function (): void {
     $c = viewController();
-    Functions\expect('register_rest_route')->times(6)->withArgs(fn(string $ns, string $path): bool => $ns === 'alpaca-bot/v1' && str_starts_with($path, '/view/'));
+    Functions\expect('register_rest_route')->times(8)->withArgs(fn(string $ns, string $path): bool => $ns === 'alpaca-bot/v1' && str_starts_with($path, '/view/'));
     Filters\expectAdded('rest_pre_serve_request')->once()->with([$c, 'serve'], PHP_INT_MAX, 4);
     $c->register();
 });
@@ -236,4 +243,279 @@ it('serve() writes a view response as HTML and leaves every other response to co
     ob_start();
     expect($c->serve(false, $view, restRequest('HEAD', '/alpaca-bot/v1/view/history'), $server))->toBeTrue();
     expect(ob_get_clean())->toBe('')->and($server->sent)->toBe([['Content-Type', 'text/html; charset=utf-8']]);
+});
+
+// ---------------------------------------------------------------- Task 17: GET /view/panel
+
+it('renders the drawer panel on one of the user\'s conversations, and a new chat for anyone else\'s, with the post as the composer\'s context', function (): void {
+    Functions\when('admin_url')->alias(fn(string $p) => '/wp-admin/' . $p);
+    Functions\when('current_user_can')->justReturn(true);
+    Functions\when('wp_strip_all_tags')->alias(static fn(string $s): string => trim(strip_tags($s)));
+    Functions\when('get_transient')->justReturn([['id' => 'llama3.2', 'label' => 'llama3.2'], ['id' => 'llava:7b', 'label' => 'llava']]);
+    Functions\when('get_user_meta')->justReturn('llava:7b');
+    $asked = [];
+    Functions\when('get_posts')->alias(static function (array $query) use (&$asked): array {
+        $asked[] = [$query['author'], $query['numberposts']];
+        return [(object) ['ID' => 8, 'post_title' => 'Listed', 'post_date_gmt' => '2024-01-01 00:00:00']];
+    });
+    // Post 6 is user 9's, with a title and a transcript of its own, so a leak through the panel
+    // would show as text here rather than as the 'T' and the turns post 5 has too.
+    Functions\when('get_post')->alias(static fn(int $id): ?object => match ($id) {
+        5 => conversationChatPost(5, '3'),
+        6 => (object) (['post_title' => 'Their private thread'] + (array) conversationChatPost(6, '9')),
+        12 => (object) ['ID' => 12, 'post_title' => 'Hello world', 'post_status' => 'draft'],
+        default => null,
+    });
+    Functions\when('get_post_meta')->alias(static fn(int $id, string $key): mixed => $key === 'ab_messages'
+        ? ($id === 6 ? [['role' => 'user', 'content' => 'their question'], ['role' => 'assistant', 'content' => 'their answer', 'model' => 'm']] : [['role' => 'user', 'content' => 'q'], ['role' => 'assistant', 'content' => 'a', 'model' => 'm']])
+        : '');
+    $c = viewController(['chat.history_limit' => 4]);
+
+    $res = $c->panel(restRequest('GET', '/x', ['conversation_id' => 5, 'post_id' => 12]));
+    expect($res->headers['X-Alpaca-Bot-View'])->toBe('1')
+        ->and($res->get_data())->toStartWith('<div class="ab-drawer__panel">')->toContain('<div class="ab-wrap ab-wrap--drawer">')
+        ->toContain('<div id="ab-chat" data-conversation="5">')->toContain('<option value="8" data-id="8">Listed</option>')
+        // The user's effective model (UserPrefs), not the site default, and the post as the turn's context.
+        ->toContain('name="model" value="llava:7b"')->toContain('name="context[post_id]" value="12"')->toContain('Editing: Hello world');
+
+    // Post 6 is user 9's (this file's stubs): its transcript is not rendered, and it is not an
+    // error either but a new chat, as ?conversation= is on the screen.
+    $theirs = $c->panel(restRequest('GET', '/x', ['conversation_id' => 6]))->get_data();
+    expect($theirs)->not->toContain('Their private thread')->not->toContain('their question')->not->toContain('their answer')
+        ->not->toContain('ab-msg--assistant')->toContain('<div id="ab-chat" data-conversation="0">')
+        // Both histories were user 3's, chat.history_limit deep.
+        ->and($asked)->toBe([[3, 4], [3, 4]]);
+});
+
+it('renders the screen it was sent as the composer\'s chip, cleaned by the rule the turn cleans it by', function (): void {
+    Functions\when('admin_url')->alias(fn(string $p) => '/wp-admin/' . $p);
+    Functions\when('get_transient')->justReturn([['id' => 'llama3.2', 'label' => 'llama3.2']]);
+    Functions\when('get_user_meta')->justReturn('');
+    Functions\when('get_posts')->justReturn([]);
+    Functions\when('wp_strip_all_tags')->alias(static fn(string $s): string => trim(strip_tags($s)));
+    $c = viewController();
+    $raw = ['screen_id' => 'Edit-Post', 'screen_title' => "  <b>Posts</b>\n\t›  Drafts " . str_repeat('é', 200)];
+
+    $html = $c->panel(restRequest('GET', '/x', $raw))->get_data();
+    $clean = CurrentScreenSource::screenFrom(['id' => $raw['screen_id'], 'title' => $raw['screen_title']]);
+    expect($clean)->not->toBeNull()
+        ->and($html)->toContain('<input type="hidden" name="context[screen][id]" value="' . $clean['id'] . '">')
+        ->toContain('<input type="hidden" name="context[screen][title]" value="' . $clean['title'] . '">')
+        ->toContain('<span class="ab-chip__label">On: ' . $clean['title'] . '</span>')
+        ->toContain('value="edit-post"')->toContain('value="Posts › Drafts éé')
+        // No post was named, so no post chip, and no field for one.
+        ->not->toContain('data-chip="post"')->not->toContain('context[post_id]');
+
+    // Nothing the source would refuse is rendered: no chip, so nothing for the turn to send.
+    foreach ([[], ['screen_id' => 'edit-post'], ['screen_title' => 'Posts'], ['screen_id' => '<>!', 'screen_title' => 'Posts'], ['screen_id' => 'x', 'screen_title' => " \n "]] as $params) {
+        expect($c->panel(restRequest('GET', '/x', $params))->get_data())->not->toContain('ab-chip')->not->toContain('context[');
+    }
+});
+
+// ---------------------------------------------------------------- Task 18: POST /view/drawer
+
+it('stores what the drawer shows, writing only what the request named, and answers an empty fragment', function (): void {
+    Functions\expect('update_user_meta')->once()->with(3, 'alpaca_bot_drawer_open', '0');
+    $res = viewController()->drawer(restRequest('POST', '/x', ['open' => false]));
+    expect($res->get_data())->toBe('')->and($res->headers['X-Alpaca-Bot-View'])->toBe('1');
+
+    // A request that names only the conversation leaves the open state as it was: had it written
+    // both, the call for the open state would match no expectation and fail the test.
+    Functions\expect('update_user_meta')->once()->with(3, 'alpaca_bot_drawer_conversation', '9');
+    viewController()->drawer(restRequest('POST', '/x', ['conversation_id' => 9]));
+
+    // Both named: both written, the open state as the '1' drawerOpen() reads back.
+    Functions\expect('update_user_meta')->once()->with(3, 'alpaca_bot_drawer_open', '1');
+    Functions\expect('update_user_meta')->once()->with(3, 'alpaca_bot_drawer_conversation', '0');
+    viewController()->drawer(restRequest('POST', '/x', ['open' => true, 'conversation_id' => 0]));
+});
+
+// ---------------------------------------------------------------- the MCP approval fragment
+
+/**
+ * A ViewController with a Discovery over one stored server, `trk`, whose header value is `$secret`
+ * and whose client is `$client`.
+ */
+function viewControllerWithMcp(AlpacaBot\Tests\Integration\FakeClient $client, string $secret = 'Bearer tok-secret-123', array $approved = []): ViewController
+{
+    Functions\when('get_option')->justReturn(['trk' => $secret]);
+    Functions\when('set_transient')->justReturn(true);
+    Functions\when('delete_transient')->justReturn(true);
+    Functions\when('get_transient')->justReturn(false);
+    Functions\when('wp_strip_all_tags')->alias('strip_tags');
+    $store = new Store(['models.default' => 'llama3.2', 'toolkits.mcp_servers' => [[
+        'id' => 'trk', 'url' => 'https://mcp.example.com/mcp', 'header_name' => 'Authorization',
+        'header_value' => AlpacaBot\Settings\Schema::MASK, 'prefix' => 'trk', 'approved' => $approved,
+    ]]]);
+    $discovery = new AlpacaBot\Mcp\Discovery($store, new AlpacaBot\Mcp\ClientFactory(static fn(): AlpacaBot\Tests\Integration\FakeClient => $client));
+    return new ViewController(new ConversationStore($store), $store, new ModelCatalog(new Factory($store)), new Markdown(), new UserPrefs(), $discovery);
+}
+
+it('declares the MCP tools route only when it has a Discovery: manage_options, rate limited, with the row index as an argument', function (): void {
+    $routes = viewControllerWithMcp(new AlpacaBot\Tests\Integration\FakeClient())->routes();
+    $mcp = array_values(array_filter($routes, static fn(array $r): bool => str_starts_with($r['path'], '/view/mcp-tools')));
+    expect($mcp)->toHaveCount(1)
+        ->and(str_starts_with($mcp[0]['path'], '/view/mcp-tools/(?P<id>'))->toBeTrue()
+        ->and($mcp[0]['methods'])->toBe('GET')
+        ->and($mcp[0]['capability'])->toBe('manage_options')
+        ->and($mcp[0]['rate_limit'])->toBeTrue()
+        ->and($mcp[0]['args'])->toBe(['index' => ['type' => 'integer', 'default' => 0, 'minimum' => 0]])
+        ->and(ViewController::routeKey($mcp[0]['path']))->toBe('view/mcp-tools')
+        ->and(count($routes))->toBe(9)
+        ->and(array_filter(viewController()->routes(), static fn(array $r): bool => str_starts_with($r['path'], '/view/mcp-tools')))->toBe([]);
+});
+
+// M7 (R101): the route's id is the schema's server id, no wider. Core matches a route as
+// `@^{route}$@i` (WP_REST_Server::match_request_to_handler()); the case-insensitive flag is the one
+// difference, so the route is asked case-sensitively here and Discovery::server() refuses the rest.
+it('takes as the MCP tools route\'s id exactly what Schema::isMcpId() admits', function (): void {
+    $routes = viewControllerWithMcp(new AlpacaBot\Tests\Integration\FakeClient())->routes();
+    $path = array_values(array_filter($routes, static fn(array $r): bool => str_starts_with($r['path'], '/view/mcp-tools')))[0]['path'];
+    $ids = ['trk', 'a', 'a_b_9', 'z9', str_repeat('a', 24), '1trk', '9', '_trk', str_repeat('a', 25), '', 'a-b', 'a.b', 'Trk', 'trk/x', "trk\n"];
+    $matched = array_filter($ids, static fn(string $id): bool => preg_match('@^' . $path . '$@D', '/view/mcp-tools/' . $id) === 1);
+    expect(array_values($matched))->toBe(array_values(array_filter($ids, [AlpacaBot\Settings\Schema::class, 'isMcpId'])))
+        ->and($matched)->toContain('trk')->not->toContain('1trk');
+});
+
+// The route's own gate is `alpaca_bot/capability/view/mcp-tools`, and a filter decides it. The
+// callback asks manage_options again, as SettingsController::show() does for `?reveal=1`: discovery
+// sends the stored credential to a remote host, so a role a filter admitted must not get that.
+it('refuses a user the route\'s filter admitted but who does not hold manage_options, and never lists the server', function (): void {
+    $client = new AlpacaBot\Tests\Integration\FakeClient([new AlpacaBot\Mcp\ToolDefinition('search', 'Search.', ['type' => 'object'])]);
+    $c = viewControllerWithMcp($client);
+    Functions\when('current_user_can')->alias(static fn(string $cap): bool => $cap !== 'manage_options');
+    $res = $c->mcpTools(restRequest('GET', '/x', ['id' => 'trk', 'index' => 0]));
+    expect($res)->toBeInstanceOf(WP_Error::class)
+        ->and($res->get_error_code())->toBe('rest_forbidden')
+        ->and($res->get_error_data()['status'])->toBe(403)
+        ->and($client->listed)->toBe(0);
+});
+
+it('refuses the route on a controller that was built without a Discovery', function (): void {
+    Functions\when('current_user_can')->justReturn(true);
+    $res = viewController()->mcpTools(restRequest('GET', '/x', ['id' => 'trk', 'index' => 0]));
+    expect($res)->toBeInstanceOf(WP_Error::class)->and($res->get_error_data()['status'])->toBe(403);
+});
+
+it('answers 404 for a server id the settings do not hold', function (): void {
+    Functions\when('current_user_can')->justReturn(true);
+    $client = new AlpacaBot\Tests\Integration\FakeClient();
+    $res = viewControllerWithMcp($client)->mcpTools(restRequest('GET', '/x', ['id' => 'nope', 'index' => 0]));
+    expect($res)->toBeInstanceOf(WP_Error::class)
+        ->and($res->get_error_code())->toBe('alpaca_bot_not_found')
+        ->and($res->get_error_data()['status'])->toBe(404)
+        ->and($client->listed)->toBe(0);
+});
+
+it('answers the approval list as an HTML fragment, its boxes posting under the index it was asked for', function (): void {
+    Functions\when('current_user_can')->justReturn(true);
+    $search = new AlpacaBot\Mcp\ToolDefinition('search', 'Search.', ['type' => 'object']);
+    $res = viewControllerWithMcp(new AlpacaBot\Tests\Integration\FakeClient([$search]))->mcpTools(restRequest('GET', '/x', ['id' => 'trk', 'index' => 3]));
+    expect($res)->toBeInstanceOf(WP_REST_Response::class)
+        ->and($res->get_status())->toBe(200)
+        ->and($res->headers['X-Alpaca-Bot-View'])->toBe('1')
+        ->and($res->get_data())->toContain('name="alpaca_bot_settings[toolkits.mcp_servers][3][approved][search]" value="' . $search->fingerprint() . '" checked="checked"');
+});
+
+// A server that cannot be listed is a 200 carrying the fragment's notice, not an error status, and
+// the approvals the cell held go back with it.
+it('answers a server that cannot be listed with the fragment\'s notice, keeping the approvals', function (): void {
+    Functions\when('current_user_can')->justReturn(true);
+    $fp = str_repeat('a', 64);
+    $sentence = 'The MCP server refused the credentials it was sent (HTTP 401).';
+    $res = viewControllerWithMcp(new AlpacaBot\Tests\Integration\FakeClient([], [], new AlpacaBot\Mcp\McpUnavailable($sentence)), approved: ['search' => $fp])
+        ->mcpTools(restRequest('GET', '/x', ['id' => 'trk', 'index' => 0]));
+    expect($res)->toBeInstanceOf(WP_REST_Response::class)
+        ->and($res->get_status())->toBe(200)
+        ->and($res->get_data())->toBe('<div class="notice notice-error inline"><p>' . $sentence . '</p></div><input type="hidden" name="alpaca_bot_settings[toolkits.mcp_servers][0][approved][search]" value="' . $fp . '">1 tool approved.');
+});
+
+// M-5 (Task 26 review): a failed Discover replaces the approvals cell, so the fragment has to say
+// what the cell said: how many tools are approved, and which of them the drift marker names.
+it('keeps the approval count and the drift note in the notice of a server that cannot be listed', function (): void {
+    Functions\when('current_user_can')->justReturn(true);
+    $c = viewControllerWithMcp(new AlpacaBot\Tests\Integration\FakeClient([], [], new AlpacaBot\Mcp\McpUnavailable('The MCP request failed.')), approved: ['search' => str_repeat('a', 64), 'write' => str_repeat('b', 64)]);
+    Functions\when('get_transient')->alias(static fn(string $key): mixed => $key === 'alpaca_bot_mcp_drift_trk' ? ['search', 'unapproved'] : false);
+    $html = (string) $c->mcpTools(restRequest('GET', '/x', ['id' => 'trk', 'index' => 0]))->get_data();
+    expect($html)->toContain('2 tools approved.')
+        ->toContain('<p class="description"><strong>changed since approval: review</strong> <code>search</code></p>')
+        ->not->toContain('unapproved');
+});
+
+// Task 28.3: a client the factory refuses to build is the notice with a 200 too, never an error
+// out of the route: an address Egress refuses says why in its own words, which name the host,
+// and anything else says the plugin's sentence, none of what was thrown.
+it('answers a refused or failed client build with the fragment\'s notice and a 200', function (Throwable $thrown, string $notice): void {
+    Functions\when('current_user_can')->justReturn(true);
+    viewControllerWithMcp(new AlpacaBot\Tests\Integration\FakeClient());
+    $store = new Store(['models.default' => 'llama3.2', 'toolkits.mcp_servers' => [[
+        'id' => 'trk', 'url' => 'https://mcp.example.com/mcp', 'header_name' => 'Authorization',
+        'header_value' => AlpacaBot\Settings\Schema::MASK, 'prefix' => 'trk', 'approved' => [],
+    ]]]);
+    $discovery = new AlpacaBot\Mcp\Discovery($store, new AlpacaBot\Mcp\ClientFactory(static fn(): never => throw $thrown));
+    $res = (new ViewController(new ConversationStore($store), $store, new ModelCatalog(new Factory($store)), new Markdown(), new UserPrefs(), $discovery))
+        ->mcpTools(restRequest('GET', '/x', ['id' => 'trk', 'index' => 0]));
+    expect($res)->toBeInstanceOf(WP_REST_Response::class)
+        ->and($res->get_status())->toBe(200)
+        ->and((string) $res->get_data())->toStartWith('<div class="notice notice-error inline"><p>' . $notice . '</p></div>')
+        ->not->toContain('LIBRARYWORDS')
+        ->not->toContain('tok-secret-123');
+})->with([
+    'AddressRefused' => [new AlpacaBot\Toolkit\AddressRefused('mcp.example.com does not resolve, or its lookup failed.'), 'mcp.example.com does not resolve, or its lookup failed.'],
+    'a plain RuntimeException' => [new RuntimeException('LIBRARYWORDS Bearer tok-secret-123'), 'The MCP client failed in a way this plugin does not recognise, so the server was not listed.'],
+]);
+
+// Carry 4: what the notice prints is the McpUnavailable's own message and nothing it chains. The
+// adapter keeps the library's exception as `previous`, and a JSON-RPC error there carries the
+// server's words and its `data`, unredacted by design.
+it('prints only the failure\'s own message, never what it chains or a JSON-RPC error\'s data', function (): void {
+    Functions\when('current_user_can')->justReturn(true);
+    $rpc = new AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Mcp\McpRpcException('tools/list', -32003, 'server words SECRETWORDS', ['leak' => 'SECRETDATA']);
+    $sentence = 'The MCP server answered with JSON-RPC error -32003.';
+    $html = (string) viewControllerWithMcp(new AlpacaBot\Tests\Integration\FakeClient([], [], new AlpacaBot\Mcp\McpUnavailable($sentence, 0, $rpc)))
+        ->mcpTools(restRequest('GET', '/x', ['id' => 'trk', 'index' => 0]))->get_data();
+    expect($html)->toContain($sentence)
+        ->not->toContain('SECRETWORDS')
+        ->not->toContain('SECRETDATA');
+});
+
+// R81: the message is untrusted: escaped where the notice prints it, and the header
+// value this server is sent is replaced wherever it appears, whole or as the credential after
+// its scheme word, before the message is cut to 500 characters.
+it('prints any other reason escaped, without the header value, and cut to 500 characters', function (): void {
+    Functions\when('current_user_can')->justReturn(true);
+    Functions\when('esc_html')->alias(static fn(string $s): string => htmlspecialchars($s, ENT_QUOTES));
+    $fail = static fn(string $message): string => (string) viewControllerWithMcp(new AlpacaBot\Tests\Integration\FakeClient([], [], new AlpacaBot\Mcp\McpUnavailable($message)))
+        ->mcpTools(restRequest('GET', '/x', ['id' => 'trk', 'index' => 0]))->get_data();
+    $html = $fail('401 <script>alert(1)</script> for "Bearer tok-secret-123", token tok-secret-123');
+    expect($html)->not->toContain('<script')
+        ->toContain('&lt;script&gt;alert(1)&lt;/script&gt;')
+        ->not->toContain('tok-secret-123')
+        ->toContain('for &quot;••••&quot;, token ••••');
+    $long = $fail(str_repeat('x', 499) . 'tok-secret-123' . str_repeat('y', 600));
+    preg_match('#<p>(.*)</p>#s', $long, $m);
+    expect($long)->not->toContain('tok-secret')
+        ->and(mb_strlen($m[1]))->toBe(501)
+        ->and($m[1])->toBe(str_repeat('x', 499) . '•…');
+});
+
+// A credential under 8 characters is not looked for on its own: replacing it would blank out
+// ordinary words. The whole value still is, when it is 8 or more.
+it('replaces only a header value, or a credential in it, of 8 characters or more', function (): void {
+    Functions\when('current_user_can')->justReturn(true);
+    $fail = static fn(string $secret, string $message): string => (string) viewControllerWithMcp(new AlpacaBot\Tests\Integration\FakeClient([], [], new AlpacaBot\Mcp\McpUnavailable($message)), $secret)
+        ->mcpTools(restRequest('GET', '/x', ['id' => 'trk', 'index' => 0]))->get_data();
+    expect($fail('Bearer t', 'got Bearer t at the gate'))->toContain('got •••• at the gate')
+        ->and($fail('Token abc', 'the abc of it'))->toContain('the abc of it')
+        ->and($fail('Bearer  12345678', 'saw 12345678'))->toContain('saw ••••')
+        ->and($fail('', 'nothing to hide'))->toContain('nothing to hide');
+});
+
+// M-7: the list works out which tools share a name the way McpToolkit does, under the server's own prefix.
+it('marks tools that would share a name under the server\'s own prefix', function (): void {
+    Functions\when('current_user_can')->justReturn(true);
+    $long = new AlpacaBot\Mcp\ToolDefinition(str_repeat('x', 100), 'Long.', ['type' => 'object']);
+    $short = new AlpacaBot\Mcp\ToolDefinition(substr(AlpacaBot\Toolkit\ToolName::fit('trk__' . $long->name), strlen('trk__')), 'Short.', ['type' => 'object']);
+    $res = viewControllerWithMcp(new AlpacaBot\Tests\Integration\FakeClient([$long, $short]))->mcpTools(restRequest('GET', '/x', ['id' => 'trk', 'index' => 0]));
+    expect(substr_count((string) $res->get_data(), 'Reaches the model under the same tool name as'))->toBe(2);
 });

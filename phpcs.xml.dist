@@ -3,6 +3,7 @@
     <description>WordPress Coding Standards for Alpaca Bot 0.5 (PSR-4, strict types).</description>
 
     <file>alpaca-bot.php</file>
+    <file>uninstall.php</file>
     <file>src</file>
     <exclude-pattern>vendor/*</exclude-pattern>
     <exclude-pattern>vendor-prefixed/*</exclude-pattern>
@@ -59,7 +60,7 @@
 
         <!--
             `throw` is not an output context in this plugin. An exception message reaches a
-            WP_Error (Rest\Errors, JSON-encoded by the REST server), the debug log behind
+            WP_Error (AlpacaBot\Errors, JSON-encoded by the REST server), the debug log behind
             WP_DEBUG, WP_CLI::error() on a terminal, or View\Chat\Notice, which runs it through
             esc_html() when it builds the markup. Nothing echoes getMessage() into a page. Running
             esc_html() at the throw site instead would put HTML entities into log files, CLI
@@ -70,7 +71,7 @@
         <!--
             Hooks are named `alpaca_bot/scope/event` on purpose. That slash convention is the
             plugin's documented public extension API (bin/hooks-doc.php generates the reference
-            from it), so renaming the 19 hooks to underscores would break every site filtering
+            from it), so renaming them to underscores would break every site filtering
             them for a cosmetic gain.
         -->
         <exclude name="WordPress.NamingConventions.ValidHookName.UseUnderscores"/>
@@ -101,7 +102,7 @@
         <!--
             `current_time('timestamp', true)` is this codebase's injectable clock, not an oversight.
             The unit suite freezes time by stubbing `current_time` through Brain Monkey
-            (tests/Unit/Chat/UsageMeterTest.php, Rest/RateLimitTest.php and others); `time()`, which
+            (tests/Unit/Chat/UsageMeterTest.php, RateLimitTest.php and others); `time()`, which
             the sniff asks for, is a PHP internal that cannot be stubbed, so taking its advice would
             delete the seam every time-dependent test depends on.
         -->

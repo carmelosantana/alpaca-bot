@@ -9,7 +9,12 @@ Every example below was run against a local harness site, `alpaca10.wp.test`, as
 user with an Application Password, and the output shown is what came back (long model
 reasoning is cut with `…`, and the site's private provider URL is replaced with
 `http://ollama.example:11434/v1`). Where an example could not be run against a live site it says
-so and cites the integration test it comes from.
+so and cites the integration test it comes from. One key was added to captured output by hand:
+the receipts of the two chat samples (sections 3 and 4) predate `tool_result_bytes`, added in
+0.6.0, and carry the `0` that a turn which ran no tool answers with.
+The `GET /settings` sample in section 3 was taken on a `wp-env` development site instead: the
+route run in-process as an administrator (`rest_do_request()`), its JSON piped through
+`jq -c .`, over settings written for the sample.
 
 ## 1. Where the API is
 
@@ -94,30 +99,54 @@ $ curl -s 'https://alpaca10.wp.test/index.php?rest_route=/alpaca-bot/v1/models'
 Revoke a password when the client is done with it: `wp user application-password delete admin
 <uuid>` (the uuid is in `wp user application-password list admin`).
 
-### Capabilities and the `alpaca_bot/capability/{route}` filters
+### Capabilities and the `alpaca_bot/capability/*` filters
 
-Each route declares a capability. Chat, streaming, conversations, models and usage need
-`edit_posts` (Contributors and up); the settings routes need `manage_options`.
+Each route declares a capability or a row of **Settings › Access**. Chat, streaming,
+conversations, models, usage and the view fragments take the Chat row, `edit_posts` (Contributors
+and up) unless the site changed it; the settings routes take the `settings.read` and
+`settings.write` rows, `manage_options` each unless the site changed them. Whichever it is, it is
+only the default the route's own filters are handed. One view fragment is the exception:
+`/view/mcp-tools/{id}` declares `manage_options` itself, and its callback asks for
+`manage_options` again whatever its filter answers, as `?reveal=1` does on `GET /settings`.
 
 | Filter key | Routes covered | Default |
 |---|---|---|
-| `chat` | `POST /chat` | `edit_posts` |
-| `chat/stream` | `GET /chat/{id}/stream` | `edit_posts` |
-| `conversations` | `GET\|DELETE /conversations`, `GET\|DELETE /conversations/{id}` | `edit_posts` |
-| `models` | `GET /models` | `edit_posts` |
-| `usage` | `GET /usage` | `edit_posts` |
-| `settings` | `GET\|PUT /settings` | `manage_options` |
-| `settings/schema` | `GET /settings/schema` | `manage_options` |
-| `view/messages` | `GET /view/messages/{id}` | `edit_posts` |
-| `view/history` | `GET /view/history` | `edit_posts` |
-| `view/models` | `GET /view/models` | `edit_posts` |
-| `view/default-model` | `POST /view/default-model` | `edit_posts` |
-| `view/bubble` | `GET\|POST /view/bubble` | `edit_posts` |
+| `chat` | `POST /chat` | Chat row (`edit_posts`) |
+| `chat/stream` | `GET /chat/{id}/stream` | Chat row (`edit_posts`) |
+| `conversations` | `GET\|DELETE /conversations`, `GET\|DELETE /conversations/{id}` | Chat row (`edit_posts`) |
+| `models` | `GET /models` | Chat row (`edit_posts`) |
+| `usage` | `GET /usage` | Chat row (`edit_posts`) |
+| `settings/read` | `GET /settings`, `GET /settings/schema` | the row of that name (`manage_options`), after `alpaca_bot/capability/settings` |
+| `settings/write` | `PUT /settings` | the row of that name (`manage_options`), after `alpaca_bot/capability/settings` |
+| `view/messages` | `GET /view/messages/{id}` | Chat row (`edit_posts`) |
+| `view/history` | `GET /view/history` | Chat row (`edit_posts`) |
+| `view/models` | `GET /view/models` | Chat row (`edit_posts`) |
+| `view/default-model` | `POST /view/default-model` | Chat row (`edit_posts`) |
+| `view/bubble` | `GET\|POST /view/bubble` | Chat row (`edit_posts`) |
+| `view/panel` | `GET /view/panel` | Chat row (`edit_posts`) |
+| `view/drawer` | `POST /view/drawer` | Chat row (`edit_posts`) |
+| `view/mcp-tools` | `GET /view/mcp-tools/{id}` | `manage_options`, and the callback asks `manage_options` again |
 
 The filter is `alpaca_bot/capability/{key}` with signature `(string $capability,
 \WP_REST_Request $request)`, and the key is the route path with its `{id}` segment removed, so
-one filter covers a collection and its items. `settings/schema` is its own key: loosening
-`settings` for a custom role does not let that role read the schema until you name it too.
+one filter covers a collection and its items.
+
+The three settings routes are the exception: they take no `{route}` key at all. Each resolves its
+**Settings › Access** row (section 7) instead — `settings.read` for the two GETs, `settings.write`
+for the `PUT` — and a row runs two filters in order, both with the same `(string $capability,
+\WP_REST_Request $request)` signature. First `alpaca_bot/capability/settings`, 0.5's one key over
+the settings routes, over the stored row; then `alpaca_bot/capability/settings/read` or
+`alpaca_bot/capability/settings/write` over whatever that returned. So a site that already filters
+`alpaca_bot/capability/settings` keeps exactly what it set, on all three routes, and the newer key
+is how it takes the write (or the read) back. `alpaca_bot/capability/settings/schema` is retired:
+it is no longer applied, and the schema route asks `settings/read` with the rest of the read.
+
+These filters are not only called to authorise a request. The **Settings › Access** tab (section 7)
+asks some of them to show under a row whether code has moved it: `alpaca_bot/capability/settings`
+and `alpaca_bot/capability/settings/read` or `…/write` with a `GET` or `PUT /settings` request,
+and `alpaca_bot/capability/chat` with a `POST /chat` request. The tab builds those requests
+itself; no client sent them and they authorise nothing, so a filter that logs or counts what it
+is handed sees them too.
 
 ```php
 // Let Authors chat and read their own history, but keep settings to administrators.
@@ -132,32 +161,36 @@ add_filter('alpaca_bot/capability/conversations', static function (string $cap, 
 ```
 
 Return a capability name. Only a non-empty, non-numeric string is honoured; anything else
-(`true`, `false`, `null`, a number) is ignored and the route's declared capability is checked
-instead. That rule exists because `current_user_can('1')` is a legacy user-level check that
-every Contributor passes, so a filter that returned a boolean by mistake would otherwise open
-the route rather than close it.
+(`true`, `false`, `null`, a number) is ignored and the value that filter was handed stands — the
+route's declared capability, the Chat row for a chat route, or for a settings route whatever the
+previous link in its chain returned. That rule exists because
+`current_user_can('1')` is a legacy user-level check that every Contributor passes, so a filter
+that returned a boolean by mistake would otherwise open the route rather than close it.
 
 ## 3. Routes
 
 | Method | Route | Capability | Rate limited |
 |---|---|---|---|
-| `POST` | `/chat` | `edit_posts` | yes (`chat` bucket) |
-| `GET` | `/chat/{conversation}/stream?token=…` | `edit_posts` | no (the ticket was) |
-| `GET` | `/conversations?limit=` | `edit_posts` | no |
-| `DELETE` | `/conversations` | `edit_posts` | no |
-| `GET` | `/conversations/{id}` | `edit_posts` | no |
-| `DELETE` | `/conversations/{id}` | `edit_posts` | no |
-| `GET` | `/models?refresh=` | `edit_posts` | yes (`chat` bucket) |
-| `GET` | `/settings?reveal=` | `manage_options` | no |
-| `PUT` | `/settings` | `manage_options` | no |
-| `GET` | `/settings/schema` | `manage_options` | no |
-| `GET` | `/usage?user=` | `edit_posts` (`user=all` needs `manage_options`) | no |
-| `GET` | `/view/messages/{id}` | `edit_posts` | no |
-| `GET` | `/view/history?conversation_id=` | `edit_posts` | no |
-| `GET` | `/view/models?refresh=` | `edit_posts` | yes (`chat` bucket) |
-| `POST` | `/view/default-model` | `edit_posts` | no |
-| `GET` | `/view/bubble?role=&streaming=` | `edit_posts` | no |
-| `POST` | `/view/bubble` | `edit_posts` | no |
+| `POST` | `/chat` | Chat row (`edit_posts`) | yes (`chat` bucket) |
+| `GET` | `/chat/{conversation}/stream?token=…` | Chat row (`edit_posts`) | no (the ticket was) |
+| `GET` | `/conversations?limit=` | Chat row (`edit_posts`) | no |
+| `DELETE` | `/conversations` | Chat row (`edit_posts`) | no |
+| `GET` | `/conversations/{id}` | Chat row (`edit_posts`) | no |
+| `DELETE` | `/conversations/{id}` | Chat row (`edit_posts`) | no |
+| `GET` | `/models?refresh=` | Chat row (`edit_posts`) | yes (`chat` bucket) |
+| `GET` | `/settings?reveal=` | `settings.read` row (`manage_options`); `reveal=1` needs `manage_options` | no |
+| `PUT` | `/settings` | `settings.write` row (`manage_options`) | no |
+| `GET` | `/settings/schema` | `settings.read` row (`manage_options`) | no |
+| `GET` | `/usage?user=` | Chat row (`edit_posts`); `user=all` needs `manage_options` | no |
+| `GET` | `/view/messages/{id}` | Chat row (`edit_posts`) | no |
+| `GET` | `/view/history?conversation_id=` | Chat row (`edit_posts`) | no |
+| `GET` | `/view/models?refresh=` | Chat row (`edit_posts`) | yes (`chat` bucket) |
+| `POST` | `/view/default-model` | Chat row (`edit_posts`) | no |
+| `GET` | `/view/bubble?role=&streaming=` | Chat row (`edit_posts`) | no |
+| `POST` | `/view/bubble` | Chat row (`edit_posts`) | no |
+| `GET` | `/view/panel?conversation_id=&post_id=&screen_id=&screen_title=` | Chat row (`edit_posts`) | no |
+| `POST` | `/view/drawer` | Chat row (`edit_posts`) | no |
+| `GET` | `/view/mcp-tools/{id}?index=` | `manage_options`, asked again by the callback | yes (`chat` bucket) |
 
 Every response is JSON except a redeemed stream, which is `text/event-stream`, and the `/view/*`
 fragments, which are `text/html` (section 3, "The `/view/*` fragments"). In the examples,
@@ -177,10 +210,22 @@ Body (JSON): `message` (string; may be omitted for an images-only turn), `conver
 default), `images` (array of `data:` URLs), `context` (object, passed to the context
 collectors), `stream` (boolean, default false).
 
+Two `context` keys are the plugin's own. `post_id` (integer) is the post being edited, which
+reaches the model only on a turn by a user who may edit it, and not while its status is
+`auto-draft` (the post core makes for an Add New screen, until it is first saved or autosaved). `screen` (`{id, title}`, two strings)
+is the admin screen the chat is on, which reaches the model as the heading "On: {title}" with
+nothing under it. The title is untrusted text: its tags are stripped and every run of
+whitespace, line breaks included, becomes one space, so it cannot open a heading of its own in
+the context block; it is then cut to 120 characters, the ellipsis of a cut one included. The id
+is reduced to lowercase letters, digits, `_` and `-`, at most 64 of them. A `screen` that is not
+an object of two strings, or that cleans to an empty id or title, is ignored. The chat screen and
+the drawer send a key for each context chip above the composer, so a chip the user takes off
+before sending is not in the body.
+
 ```
 $ curl -s -u "admin:$PW" -H 'Content-Type: application/json' \
     -d '{"message":"Reply with exactly three words."}' "$B/chat"
-{"conversation_id":163,"message":{"role":"assistant","content":"Boring is right.","model":"qwen3-vl:2b","usage":{"prompt_tokens":16,"completion_tokens":3776},"created":1788736235,"images":[],"meta":{"reasoning":"Hmm, the user asked me to reply with exactly three words. …"}},"receipt":{"user_id":1,"model":"qwen3-vl:2b","prompt_tokens":16,"completion_tokens":3776,"total_tokens":3792,"duration_ms":14941,"conversation_id":163,"log_id":164,"created":1788736235},"contexts":[]}
+{"conversation_id":163,"message":{"role":"assistant","content":"Boring is right.","model":"qwen3-vl:2b","usage":{"prompt_tokens":16,"completion_tokens":3776},"created":1788736235,"images":[],"meta":{"reasoning":"Hmm, the user asked me to reply with exactly three words. …"}},"receipt":{"user_id":1,"model":"qwen3-vl:2b","prompt_tokens":16,"completion_tokens":3776,"total_tokens":3792,"duration_ms":14941,"tool_result_bytes":0,"conversation_id":163,"log_id":164,"created":1788736235},"contexts":[]}
 ```
 
 The 200 body is `{conversation_id, message, receipt, contexts}`:
@@ -193,7 +238,10 @@ The 200 body is `{conversation_id, message, receipt, contexts}`:
   completion tokens and count against the monthly caps, which is why a three-word answer above
   cost 3,776 of them.
 - `receipt` is the usage row the turn wrote: `{user_id, model, prompt_tokens,
-  completion_tokens, total_tokens, duration_ms, conversation_id, log_id, created}`.
+  completion_tokens, total_tokens, duration_ms, tool_result_bytes, conversation_id, log_id,
+  created}`. `tool_result_bytes` is the total size in bytes of every tool result the turn's
+  tools returned, each as the tool handed it back (after any cut the tool makes), whether or not
+  a later request of the turn then sent it to the model; 0 for a turn that ran none.
 - `contexts` lists the context sources folded into the system prompt (`[]` when the request
   carried no `context`).
 
@@ -266,7 +314,7 @@ you received it. The route answers a refusal as JSON before any frame is written
 | No `token` parameter | 400 `rest_missing_callback_param` (core) |
 | Token unknown, expired, another user's, for another conversation, or already redeemed | 403 `rest_forbidden` "Invalid or expired stream token." |
 | Not logged in | 401 `rest_forbidden` |
-| This user already has the most streams the site allows running at once (3; filter `alpaca_bot/stream/concurrent`) | 429 `alpaca_bot_rate_limited`, `Retry-After` header and `data.retry_after` in seconds. **The ticket is not spent**: retry it while it lives. The wait is a ceiling — the soonest running stream's lease — so it can be longer than the 120 s the ticket has left, and then the turn has to be posted again |
+| This user already has the most streams the site allows running at once (3; filter `alpaca_bot/stream/concurrent`) | 429 `alpaca_bot_stream_concurrency`, `Retry-After` header, `data.retry_after` in seconds and `data.limit` (how many streams one person may hold). **The ticket is not spent**: retry it while it lives. The wait is a ceiling — the soonest running stream's lease — so it can be longer than the 120 s the ticket has left, and then the turn has to be posted again |
 | `HEAD` | 405 `alpaca_bot_method_not_allowed` with `Allow: GET` (core routes a HEAD to the GET handler; the handler refuses it before the ticket is touched, so a probe neither runs nor spends the turn) |
 | Any other method | 404 `rest_no_route` (core: no such route for that method) |
 
@@ -305,9 +353,10 @@ $ curl -s -u "admin:$PW" "$B/conversations/163"
 `meta.duration_ms` (the samples above predate it). A reply cut short by a client that
 disconnected mid-stream, or by a failure after a tool had already run, is stored with
 `meta.partial: true`. A reply that ran tools (a toolkit is enabled and the model can call
-tools) carries `meta.tool_calls`, one `{name, arguments, result_excerpt, ok}` per call in the
-order their results came back: the arguments as the model sent them with each string held to
-1,000 characters, the first 200 characters of the result, and whether the tool succeeded. A
+tools) carries `meta.tool_calls`, one `{name, arguments, result_excerpt, ok, result_bytes}` per
+call in the order their results came back: the arguments as the model sent them with each string
+held to 1,000 characters, the first 200 characters of the result, whether the tool succeeded, and
+the size of the whole result in bytes (0 for a call that was never answered). A
 turn that ran no tool has no `tool_calls` key. A message whose images were
 dropped to keep the transcript within the database's packet limit carries
 `meta.images_evicted`, the count of images it lost; `images` is then shorter by that many,
@@ -365,16 +414,23 @@ x-alpaca-bot-default-model: qwen3-vl:2b
 
 ### `GET /settings`, `PUT /settings`, `GET /settings/schema`
 
-Administrators only. `GET /settings` is the whole `alpaca_bot_settings` option, every schema key
-with defaults filled in. The one secret, `provider.api_key`, reads back as `••••` when a key is
-stored and `""` when none is:
+Administrators by default: the two GETs ask the `settings.read` row of **Settings › Access** and
+the `PUT` asks `settings.write` (section 2). `?reveal=1` needs `manage_options` whatever the rows
+say. `GET /settings` is the whole `alpaca_bot_settings` option, every schema key
+with defaults filled in. The `access.*` keys are the Settings › Access rows (section 7); each one
+is a capability name from a fixed list, except `access.mcp`, which is one map of MCP server id to
+capability. Two things are secrets, and both read back as `••••` when one is stored and `""` when
+none is: `provider.api_key`, and the `header_value` of each row of `toolkits.mcp_servers`:
 
 ```
-$ curl -s -u "admin:$PW" "$B/settings"
-{"provider.kind":"ollama","provider.base_url":"http:\/\/ollama.example:11434\/v1","provider.api_key":"","provider.timeout":60,"models.default":"qwen3-vl:2b","models.temperature":0.7,"models.num_ctx":8192,"models.keep_alive":"5m","models.overrides":[],"chat.system_prompt":"","chat.welcome":"How can I help?","chat.placeholder":"Message Alpaca Bot","chat.user_can_change_model":true,"chat.context_messages":20,"chat.history_limit":20,"chat.spellcheck":true,"chat.assistant_avatar":"","privacy.save_history":true,"privacy.usage_log":true,"privacy.usage_retention_days":0,"governance.site_monthly_tokens":0,"governance.user_monthly_tokens":0,"toolkits.enabled":["web_fetch","summarize","draft_post"],"toolkits.user_agent":"AlpacaBot\/0.5 (+https:\/\/github.com\/carmelosantana\/alpaca-bot)"}
+# GET /settings as an administrator, run in-process on wp-env (rest_do_request()), piped through jq -c .
+{"provider.kind":"ollama","provider.base_url":"http://ollama.example:11434/v1","provider.api_key":"","provider.timeout":60,"models.default":"qwen3-vl:2b","models.temperature":0.7,"models.num_ctx":8192,"models.keep_alive":"5m","models.overrides":[],"chat.system_prompt":"","chat.welcome":"How can I help?","chat.placeholder":"Message Alpaca Bot","chat.user_can_change_model":true,"chat.context_messages":20,"chat.history_limit":20,"chat.spellcheck":true,"chat.assistant_avatar":"","privacy.save_history":true,"privacy.usage_log":true,"privacy.usage_retention_days":90,"governance.site_monthly_tokens":0,"governance.user_monthly_tokens":0,"toolkits.enabled":["web_fetch","summarize","draft_post"],"toolkits.user_agent":"AlpacaBot/… (+https://github.com/carmelosantana/alpaca-bot)","toolkits.abilities":[],"toolkits.mcp_servers":[{"id":"docs","url":"https://mcp.example.com/mcp","header_name":"Authorization","header_value":"••••","prefix":"docs","timeout":30,"max_bytes":1048576,"approved":[]}],"access.chat":"edit_posts","access.tool.web_fetch":"edit_posts","access.tool.summarize":"edit_posts","access.tool.draft_post":"edit_posts","access.tool.abilities":"manage_options","access.settings.read":"manage_options","access.settings.write":"manage_options","access.shortcode":"edit_posts","access.mcp":[]}
 ```
 
-(`provider.base_url` is the site's own value.) What this route answers is what is *stored*, which
+(`provider.base_url`, `models.default` and the one server row were written for the sample; every
+other key is its default. `toolkits.user_agent`'s default names the installed version,
+`Plugin::VERSION`, which is cut to `…` here so the sample is not tied to one release.) What this
+route answers is what is *stored*, which
 for two keys is not the same as what the plugin *uses*:
 
 - `provider.base_url` loses to a non-empty `OLLAMA_API_URL` constant — see the rule below the
@@ -384,7 +440,10 @@ for two keys is not the same as what the plugin *uses*:
 - `chat.user_can_change_model` and `privacy.save_history` change what `POST /chat` does with a
   body it accepts, silently; section 3's `POST /chat` covers both.
 
-`?reveal=1` answers the raw key instead. The response is not cacheable — WordPress sends its own
+`?reveal=1` answers the raw secrets instead: the key, and each MCP server's header value, which
+is read from the option it is kept in (`alpaca_bot_mcp_secrets`, below). It needs
+`manage_options` whatever the `settings.read` row says; a user the row admits without it gets the
+masked read. The response is not cacheable — WordPress sends its own
 no-cache headers on any REST response to a logged-in user, and this route sets `no-store` on the
 reveal itself so the guarantee still holds on a site that has filtered core's headers off:
 
@@ -400,7 +459,9 @@ the flag. Filter `rest_send_nocache_headers` to false and the plain `GET` answer
 
 `PUT /settings` is a partial update: send the keys you are changing, as a JSON body of dotted
 keys, and the reply is the whole array as stored (masked). Values go through the schema on the
-way in: unknown keys are dropped, numbers clamped to their range, types coerced.
+way in: unknown keys are dropped, numbers clamped to their range, types coerced. "As stored"
+includes what happens after the schema: a header value taken out of its row, and an `access.mcp`
+entry dropped with its server, are gone from the reply as they are from the option.
 
 ```
 $ curl -s -u "admin:$PW" -H 'Content-Type: application/json' -X PUT \
@@ -457,16 +518,95 @@ Rules worth knowing before you write:
 
 - **`toolkits.enabled` is a list of ids, replaced wholesale.** The built-in toolkits the
   assistant may use, by the ids the schema route lists under the field's `options`
-  (`web_fetch`, `summarize`, `draft_post`; all three by default). What is stored is the
-  subset of those ids you sent, in the schema's order: an id it does not know is dropped, a
-  duplicate is one entry, and `[]` switches every tool off. A value that is not a list at all
-  stores `[]` rather than the default, since the default switches everything on. The field's
-  `type` is `checkbox-list`, which a form renders as one checkbox per option.
+  (`web_fetch`, `summarize`, `draft_post`, `abilities`; the default is `web_fetch`,
+  `summarize` and `draft_post`). What is stored is the subset of those ids you sent, in the
+  schema's order: an id it does not know is dropped, a duplicate is one entry, and `[]`
+  switches every tool off. A value that is not a list at all stores `[]` rather than the
+  default, since the default switches tools on. The field's `type` is `checkbox-list`, which a
+  form renders as one checkbox per option.
 
   ```
   $ curl -s -u "admin:$PW" -H 'Content-Type: application/json' -X PUT -d '{"toolkits.enabled": ["draft_post", "bogus", "web_fetch"]}' "$B/settings" | jq -c '{"toolkits.enabled"}'
   {"toolkits.enabled":["web_fetch","draft_post"]}
   ```
+
+- **`toolkits.abilities` is a list of ability names, replaced wholesale.** The WordPress
+  abilities the `abilities` toolkit offers the model, as `namespace/name` strings. What is
+  stored is each name of that form you sent, once, in the order sent; anything else (a string
+  of another shape, a number, `""`) is dropped, and so is any `alpaca-bot/*` name, since the
+  plugin's own abilities are never offered. A value that is neither a JSON array nor an object
+  stores `[]`; an object's keys are ignored and its values read as the list. Whether a name is
+  in the site's list of abilities (`wp_get_abilities()`) is not checked on the way in: the
+  toolkit skips one that is not, and the Tools tab shows it ticked and marked as not in that
+  list. The field's `type` is `array`; its choices are the site's list of abilities, which the
+  schema route does not include.
+
+  ```
+  $ curl -s -u "admin:$PW" -H 'Content-Type: application/json' -X PUT -d '{"toolkits.abilities": ["core/get-site-info", "alpaca-bot/chat", "Not A Name", "core/get-site-info"]}' "$B/settings" | jq -c '{"toolkits.abilities"}'
+  {"toolkits.abilities":["core/get-site-info"]}
+  ```
+
+- **`toolkits.mcp_servers` is a list of remote MCP servers, replaced wholesale.** Each row is
+  `{id, url, header_name, header_value, prefix, timeout, max_bytes, approved}`:
+
+  - `url` must be `https` with a host (see below for a row that has none). The address is checked on the way
+    in for every server whose URL is new or changed: a private, loopback, link-local or other
+    special-purpose address, or a name that resolves to one, is refused, and the PUT answers
+    `400 alpaca_bot_mcp_address` naming the URL and why, and writes nothing, the other keys of
+    the PUT included. It is checked again each time the plugin connects to the server (a
+    `GET /view/mcp-tools/{id}`, or a chat turn that lists the server's tools), however the row
+    was written, and the connection goes only to an address that passed. Both checks are the
+    address rule `web_fetch` uses without that tool's exemptions: core's own
+    `http_request_host_is_external` listeners, which let through the site's own host,
+    every `allowed_redirect_hosts` host and, on multisite, every domain of the network, are not
+    asked. A listener the site adds to `http_request_host_is_external` is, and returning `true`
+    for a host is how a private server is let in. A connection to an MCP server never goes
+    through a proxy, neither WordPress's (`WP_PROXY_HOST`) nor one set in the server's
+    environment, so a site that must reach the internet through a proxy cannot reach one.
+  - `prefix` names the server's tools for the model, `<prefix>__<tool>`: a lowercase letter, then
+    up to 15 of `[a-z0-9_]`, unique in the list, and never `ability`.
+  - `id` is what the server is known by: its `access.mcp` entry, its capability filter
+    `alpaca_bot/capability/mcp/<id>`, its header value. A lowercase letter, then up to 23 of
+    `[a-z0-9_]`. Send a stored server's `id` back with its row to keep it. A row without one is
+    that stored server when its URL and prefix are the server's and no row of the PUT names the
+    server's id, so a client that writes its servers without ids can send the same body again
+    and keep them; any other row without one is a new server, given an id made from its prefix,
+    never one a stored server has.
+  - `header_name` and `header_value` are one static header sent with every request, typically
+    `Authorization` and `Bearer …`. The name is `""` (no header) or up to 64 of `[A-Za-z0-9-]`
+    with a letter among them. Any other name is refused (below): one of those characters with no
+    letter (`123`, `-1`), or a JSON number, because PHP reads `123` as a number and the value
+    would be sent in the name's place; and a name outside that alphabet or over 64 characters
+    (`X_Key`, `Bad Header`, `+1`), which would otherwise be saved as no header at all. The value has the
+    key's three spellings (`""` clears it, `"••••"` keeps what is stored, any other string
+    replaces it) with CR, LF and NUL removed,
+    except that `"••••"` keeps nothing for a new server, which has nothing stored, or for a
+    stored server whose URL now has another host or port. The value is not sent to an address it
+    was not set for, so a server moved to another host needs its value sent again; a new path on
+    the same host and port keeps it. When a stored value was dropped that way, the reply names
+    those servers' ids, comma-separated, in an `X-Alpaca-Bot-Mcp-Cleared` header, and their rows
+    read `""`; a server that had no value is not named. The value is not kept in
+    `alpaca_bot_settings`, which WordPress loads on every request, but in
+    `alpaca_bot_mcp_secrets`, which it does not; the row holds `"••••"` or `""`.
+  - `timeout` (1-120 seconds, default 30) and `max_bytes` (1024-8388608, default 1048576) bound
+    one call.
+  - `approved` is tool name => the 64-hex-character fingerprint of the definition that was
+    approved; anything else is dropped.
+
+  A row the list cannot keep (a URL that is not `https` with a host, a URL with a user name or
+  password in it, a header name the rule above refuses, a prefix the rule refuses, or a prefix an
+  earlier row of the PUT already has)
+  is refused rather than dropped when it names a stored server's `id` or is a new row with a
+  URL: the PUT answers `400 alpaca_bot_mcp_row` and writes nothing, the other keys included. A
+  credential goes in the header, which reads back masked, never in the URL, which reads back as
+  stored. The error's `data.rows` names each such row as `{index, id, url, reason}`: its index
+  in the posted list, the `id` it sent (or `null`), the URL it sent without any user name and
+  password, and why. A row with neither a stored server's
+  `id` nor a URL, and a row sent with `"remove": true`, are left out without a word.
+
+  A server left out of the list, or sent with `"remove": true`, is removed, and its header value
+  and its `access.mcp` entry go with it, so a server added later under the same id starts at
+  administrators only. The schema route flags the field `secret_fields: ["header_value"]`.
 
 - **`privacy.usage_retention_days`** (0-3650, 0 = keep forever) drives a daily cron event,
   `alpaca_bot/usage/cleanup`, that deletes usage receipts (`chat_log` rows) older than the
@@ -475,8 +615,9 @@ Rules worth knowing before you write:
   already in place gets 0 written on upgrade; only a fresh install takes the default of 90.
 
 `GET /settings/schema` is the field list a client renders a form from, `{sections, fields,
-mask}`; a secret field is flagged `secret: true` and server-side sanitize callables are left
-out. Three of the 24 fields:
+mask}`; a secret field is flagged `secret: true`, a field holding secrets inside its rows names
+them in `secret_fields` (`toolkits.mcp_servers`: `["header_value"]`), and server-side sanitize
+callables are left out. Three of the fields:
 
 ```
 $ curl -s -u "admin:$PW" "$B/settings/schema"
@@ -509,8 +650,11 @@ total is. Both are `SettingsRoutesTest::test_usage_route_reports_the_month`.
 ### The `/view/*` fragments
 
 The chat screen (section 7) is server-rendered, and these routes render its pieces again on
-demand: htmx swaps the selects, and the screen's script asks for the bubbles. They are for the
-screen. A client that wants data reads the JSON routes above; these answer HTML, escaped where
+demand: htmx swaps the selects, the screen's script asks for the bubbles, and `/view/panel`
+renders the whole chat for the admin-wide drawer, whose state `/view/drawer` stores, and for
+the block editor's sidebar; `/view/mcp-tools` renders one MCP server's approval list for the
+settings page's Tools tab. They are for the plugin's own screens. A client
+that wants data reads the JSON routes above; these answer HTML, escaped where
 it is built, under `Content-Type: text/html; charset=utf-8` and an `X-Alpaca-Bot-View: 1`
 header. An error is still core's JSON error shape.
 
@@ -522,6 +666,16 @@ header. An error is still core's JSON error shape.
 | `POST /view/default-model` | An inline admin notice; stores `model` as your default (Kanboard #565) | `model` (string, required). 403 while `chat.user_can_change_model` is off, whatever the select says |
 | `GET /view/bubble` | An empty bubble for the screen to stream into | `role` (`user`\|`assistant`, default `assistant`), `streaming` (boolean: a polite live region) |
 | `POST /view/bubble` | A finished bubble, an assistant's content rendered as markdown; a user turn with its images is the optimistic bubble the screen shows while the turn runs | `role` (required), `content`, `model`, `usage` (`{prompt_tokens, completion_tokens}` or null), `duration_ms`, `images` (array of `data:` URLs; a user turn only), `tool_calls` (the reply's `meta.tool_calls`; the receipt ends `· 2 tools`) |
+| `GET /view/panel` | The whole chat (header, transcript and composer) in the drawer's panel, with its close button, which the block editor's sidebar hides in favour of its own | `conversation_id`: one of your own to open; 0, a missing one or anyone else's is a new chat, as `?conversation=` is on the chat screen. `post_id`: the post being edited, rendered as the composer's post chip when you may edit it and it is not an `auto-draft`, as `&post=` is on the chat screen. `screen_id` and `screen_title`: the screen's id and page title, cleaned as `POST /chat` cleans `context.screen` and rendered as the composer's screen chip; either one empty, or cleaned to nothing, is no chip. A chip's hidden fields are what the chat bundle sends as `context` |
+| `POST /view/drawer` | Nothing (an empty fragment); stores what the admin-wide drawer shows for you, as user meta `alpaca_bot_drawer_open` and `alpaca_bot_drawer_conversation` | `open` (boolean), `conversation_id` (integer, 0 or more). A parameter you leave out is left as it was; the conversation is not checked here, and one that is not yours opens as a new chat when `/view/panel` is asked for it |
+| `GET /view/mcp-tools/{id}` | The tools the stored MCP server `{id}` lists, as the Tools tab's approval list: a checkbox per tool whose value is the fingerprint of the definition shown, ticked when the tool is approved at that fingerprint, or new and not annotated `destructiveHint: true`; a tool approved at another fingerprint is marked "changed since approval: review" and starts clear. Under each tool its input schema, pretty-printed, with every character outside ASCII as its `\uXXXX` escape, cut at 4000 characters of that text, HTML-escaped, in a collapsed `<details>`. The name, title, description and schema are HTML-escaped with every `&` encoded again, so an entity the server wrote, such as `&#x202E;`, shows as its letters and not as the character it spells. A tool whose name a save could not keep, or whose name the listing repeats, is listed with no checkbox and a line saying why. Listing the server rewrites or clears its drift marker (below). `manage_options`, asked again by the callback whatever `alpaca_bot/capability/view/mcp-tools` answers, and rate limited in the `chat` bucket. 404 for an id the settings do not hold. A server that cannot be listed answers 200 with an error notice (the reason, escaped, with the server's header value, and the credential after its scheme word, replaced by `••••` where either is 8 characters or more, cut to 500 characters) and what the approvals cell held: a hidden input per stored approval, how many there are, and the "changed since approval: review" line for the approved tools the drift marker names | `index` (integer, 0 or more, default 0): the server's row on the Tools tab, which decides the names the checkboxes post under, `alpaca_bot_settings[toolkits.mcp_servers][<index>][approved][<tool>]` |
+
+Saving the Tools tab with those boxes is the approval: a ticked box pins its tool to the
+fingerprint it carries, and a clear one drops the tool's approval. The drift marker is a
+transient per server, `alpaca_bot_mcp_drift_<id>`, a week long, naming the approved tools whose
+definition no longer matched their pin when the server was last listed; the Tools tab reads it
+to say "changed since approval: review" without asking the server, and a save that re-pins a
+named tool or drops its approval takes the name out.
 
 Your effective model is the one you last chose in the select (stored as user meta
 `alpaca_bot_default_model`) while the site lets users choose and the provider still lists it,
@@ -573,28 +727,29 @@ event: start
 data: {"conversation_id":169,"model":"minicpm-v4.6:1b"}
 
 event: delta
-data: {"text":"","reasoning":"First"}
+data: {"text":"","reasoning":"First","held":false}
 
 event: delta
-data: {"text":"","reasoning":","}
+data: {"text":"","reasoning":",","held":false}
 
 …
 
 event: delta
-data: {"text":"orange","reasoning":""}
+data: {"text":"orange","reasoning":"","held":false}
 
 event: done
-data: {"conversation_id":169,"message":{"role":"assistant","content":"orange","model":"minicpm-v4.6:1b","usage":{"prompt_tokens":18,"completion_tokens":283},"created":1788736395,"images":[],"meta":{"reasoning":"First, the user says: \"Name one colour. One word only.\" …"}},"receipt":{"user_id":1,"model":"minicpm-v4.6:1b","prompt_tokens":18,"completion_tokens":283,"total_tokens":301,"duration_ms":5282,"conversation_id":169,"log_id":170,"created":1788736395},"contexts":[]}
+data: {"conversation_id":169,"message":{"role":"assistant","content":"orange","model":"minicpm-v4.6:1b","usage":{"prompt_tokens":18,"completion_tokens":283},"created":1788736395,"images":[],"meta":{"reasoning":"First, the user says: \"Name one colour. One word only.\" …"}},"receipt":{"user_id":1,"model":"minicpm-v4.6:1b","prompt_tokens":18,"completion_tokens":283,"total_tokens":301,"duration_ms":5282,"tool_result_bytes":0,"conversation_id":169,"log_id":170,"created":1788736395},"contexts":[]}
 ```
 
 | Event | Data | When |
 |---|---|---|
 | `start` | `{conversation_id, model}` | Once the conversation exists (created on the spot for a ticket that named 0), before any text. This is where a new conversation's id arrives. |
-| `delta` | `{text, reasoning}` | One per fragment, and both fields may be empty (see below). A thinking model sends its reasoning as `reasoning` deltas with empty `text` first, then the answer as `text`. |
+| `delta` | `{text, reasoning, held}` | One per fragment; `text` and `reasoning` may each be empty (see below), and `held` says the text is a faked tool call's markup (see below). A thinking model sends its reasoning as `reasoning` deltas with empty `text` first, then the answer as `text`. |
 | `done` | The exact body a direct `POST /chat` answers with: `{conversation_id, message, receipt, contexts}` | The turn finished. The connection closes after it. |
 | `error` | `{code, message, data}`, the same JSON body a non-streaming error would carry | The turn was refused or failed. A refusal (cap exceeded, bad request) is an `error` frame alone with no `start`; a provider that fails mid-reply sends its deltas first, then `error`; a turn that outran the site's stream budget ends the same way, with `alpaca_bot_stream_timeout` after the deltas that had arrived. The connection closes after it. |
 
-A `delta` frame may be wholly empty — `{"text":"","reasoning":""}` — and an empty one may
+A `delta` frame may be wholly empty — `{"text":"","reasoning":"","held":false}`, or the same
+with `held: true` when it falls inside a faked tool call (below) — and an empty one may
 arrive before any text at all, including as the very first `delta` of a turn. That is not a bug
 to guard against: on a turn that calls tools the server writes one per tool call, all of them
 before any tool of that iteration runs, as the heartbeat that bounds an abandoned turn. An
@@ -605,9 +760,31 @@ tool with no text before it would otherwise leave nothing to write, and the tool
 (a draft created) would land with the tab already closed. Append the empty strings and render
 nothing.
 
+`held` is `true` on the text of a faked tool call while it streams. A model whose deployed
+template cannot really call tools writes the call out as text, `<tool_call>{…}</tool_call>`, and
+every byte from the opening marker through its closing one arrives flagged. The bytes are still
+sent: a turn's `text` deltas still concatenate to exactly what the model wrote, so a client that
+ignores `held` — the reader below does — renders what it always did. The admin screen keeps held
+text out of sight and shows "Calling a tool…" under it, from the first held fragment until the
+next unheld one; the closing marker is itself held, so the line outlives the block until the
+model writes its next ordinary word. Then it either renders the stored reply on `done`, which
+has the markup taken out of it and a faked `done` call's answer put in its place, or, on `error`
+or a dropped connection, shows the held text exactly where it arrived.
+
+Two things are never held. A block whose opening marker the model's template swallowed is not,
+because recognising it would mean buffering every reply to its end. And a plain turn's text is
+not, because the plain streaming path builds its deltas without a scanner at all — only a
+tool-capable turn is scanned. That is the reason, rather than anything about what a plain turn's
+text contains: a plain turn that quotes `<tool_call>` in its prose is sent unflagged too. A
+marker split across two frames is not a problem — the server keeps back up to 11 bytes that
+could begin one until the next fragment settles it — and the empty heartbeat `delta` carries
+`held: true` when it falls inside an open block.
+
 A client that disconnects mid-stream is not refunded: the server notices at the next write,
-stores what was sent so far with `message.meta.partial: true`, and records a receipt for the
-tokens that arrived.
+stores what had arrived with `message.meta.partial: true`, and records a receipt for the
+tokens that arrived. What it stores can be up to 11 bytes longer than what it sent — the tail
+the scanner was still deciding about when the connection went belongs to the reply, so it is
+folded into the stored partial although no frame ever carried it.
 
 `EventSource` can read this, but it cannot send headers, so it only works from a cookie session
 on the same origin (the token in the URL is the only credential a ticket needs beyond that).
@@ -675,6 +852,8 @@ route the same object is the `error` frame's data.
 | Status | Code | When | Extra `data` |
 |---|---|---|---|
 | 400 | `alpaca_bot_bad_request` | An empty turn; a model the catalog does not list; an image that is not a `data:` URL; a `conversation_id` that is not yours; a settings PUT naming no schema key | |
+| 400 | `alpaca_bot_mcp_row` | A settings PUT whose `toolkits.mcp_servers` has a row the schema cannot keep that names a stored server's id or is a new row with a URL; nothing is written | `rows`: each `{index, id, url, reason}` |
+| 400 | `alpaca_bot_mcp_address` | A settings PUT whose `toolkits.mcp_servers` has a new or changed URL whose address is refused (private, loopback, link-local or special-purpose, or a name resolving to one); nothing is written, and the message names each URL and why | |
 | 400 | `rest_invalid_param`, `rest_missing_callback_param` | Core's schema validation: `limit` out of 0-200, `user` not `me`/`all`, `refresh` not a boolean, a stream GET with no `token` | `params`, `details` |
 | 401 | `rest_forbidden` | Not authenticated (no cookie+nonce, no Application Password) | |
 | 402 | `alpaca_bot_cap_exceeded` | The monthly token cap is spent (`governance.user_monthly_tokens` or `governance.site_monthly_tokens`) | `scope` (`user`/`site`); `limit` and `used` only when `scope` is `user` |
@@ -682,8 +861,9 @@ route the same object is the `error` frame's data.
 | 404 | `alpaca_bot_not_found` | A conversation that does not exist or is not yours | |
 | 404 | `rest_no_route` | Core: no such route for that method (e.g. `POST` on the stream route) | |
 | 405 | `alpaca_bot_method_not_allowed` | `HEAD` on the stream route (`Allow: GET`) | |
-| 429 | `alpaca_bot_rate_limited` | Two different causes, one code: the `chat` bucket is spent for this minute (`Retry-After` holds the seconds until it turns over); or a stream redemption found this user already at the concurrent-stream cap, where `Retry-After` is a ceiling on the wait for a slot — up to the site's whole stream budget, 720 s at the defaults — and the ticket is left unspent | `retry_after` (same number as the header) |
-| 502 | `alpaca_bot_provider_error` | The model provider failed or could not be built | `detail` (the raw provider error, administrators only) |
+| 429 | `alpaca_bot_rate_limited` | The `chat` bucket is spent for this minute (`Retry-After` holds the seconds until it turns over) | `retry_after` (same number as the header) |
+| 429 | `alpaca_bot_stream_concurrency` | A stream redemption found this user already at the concurrent-stream cap. `Retry-After` is a ceiling on the wait for a slot — up to the site's whole stream budget, 720 s at the defaults — and the ticket is left unspent | `retry_after` (same number as the header), `limit` (the cap the claim was held to, 3 at the defaults) |
+| 502 | `alpaca_bot_provider_error` | The model provider failed or could not be built; also a tool turn whose run failed without the provider saying so, or that a tool stopped before it began | `detail` (administrators only): `Provider error: …` and the provider's own text when the provider threw, or in words of its own where the provider had no part in it |
 | 504 | `alpaca_bot_stream_timeout` | A streamed turn ran past the site's wall-clock budget for one turn and was stopped; what had arrived is saved as a partial reply. Only ever an `error` frame — the response's status was already sent — so this is a code to key on, not a status a client will read | `limit` (the budget in seconds, 720 at the defaults) |
 
 The 402, with the per-user cap set to 1 token for the run:
@@ -725,7 +905,7 @@ anyway. A failed first turn leaves no empty conversation behind.
 
 ## 6. Rate limit
 
-`POST /chat`, `GET /models` and `GET /view/models` -- every route the section 3 table marks
+`POST /chat`, `GET /models`, `GET /view/models` and `GET /view/mcp-tools/{id}` -- every route the section 3 table marks
 `chat` bucket, and only those -- share one fixed-window counter: 30 hits per user per UTC
 calendar minute by default, kept in a transient. The same counter is spent outside the REST API
 by the `chat` and `summarize` abilities and by the `[alpacabot]` shortcodes, so one person on any
@@ -735,9 +915,11 @@ not limited: the POST that issued its ticket was, and the ticket can be redeemed
 
 What bounds that route instead is a concurrency cap, because one ticket holds a PHP worker for
 the length of a turn whether or not anyone is still reading: one person may have 3 streams
-running at once (filter `alpaca_bot/stream/concurrent`), and a redemption over that is the 429
-in the table above with its ticket left unspent. The one case that exceeds it is a provider that
-hangs: a stream stuck inside a provider call writes no frame, so it is still holding its PHP
+running at once (filter `alpaca_bot/stream/concurrent`), and a redemption over that is a 429
+`alpaca_bot_stream_concurrency` with its ticket left unspent, which is a different code from the
+per-minute bucket's so a client can tell "wait for the minute" from "wait for your own stream to
+finish". The one case that exceeds it is a provider that hangs: a stream stuck inside a
+provider call writes no frame, so it is still holding its PHP
 worker when its slot is released at the end of the budget — `Rest\StreamBudget` carries that
 argument in full. A turn is also bounded in wall-clock time —
 `provider.timeout × 6 × 2`, 720 s at the defaults, filter `alpaca_bot/stream/budget` — after
@@ -778,14 +960,17 @@ retry-after: 10
 ## 7. The admin surface
 
 The plugin's menu slug is `alpaca-bot`: `admin.php?page=alpaca-bot` is the chat screen and
-`admin.php?page=alpaca-bot-settings&tab={provider|models|chat|privacy|governance|toolkits}`
+`admin.php?page=alpaca-bot-settings&tab={provider|models|chat|privacy|governance|toolkits|access}`
 the settings page, one Schema section per tab, saved through core's `options.php` with the same
-`Schema::sanitize()` the REST route uses. Settings is always `manage_options`.
+`Schema::sanitize()` the REST route uses. The settings page is always `manage_options` — core's
+`options.php` demands it — whatever the `settings.read` and `settings.write` rows say; those two
+govern the REST routes and nothing else.
 
-The chat screen's capability is `edit_posts` through `alpaca_bot/admin/menu_capability`, with
-signature `(string $capability)` — no request, since a menu is built once per admin load. It is
-filtered separately from the REST routes, so a site can open the screen to a role without the
-API or the reverse:
+The chat screen's capability is the Chat row of **Settings › Access** (`edit_posts` by default)
+through `alpaca_bot/admin/menu_capability`, with signature `(string $capability)` — no request,
+since a menu is built once per admin load. The row is the same one the chat REST routes take as
+their default, so moving it moves the screen and the API together; the two filters stay separate,
+so a site can still open the screen to a role without the API or the reverse:
 
 ```php
 add_filter('alpaca_bot/admin/menu_capability', static fn(string $cap): string => 'publish_posts');
@@ -793,7 +978,7 @@ add_filter('alpaca_bot/admin/menu_capability', static fn(string $cap): string =>
 
 The same rule §2 gives for the REST capability filters applies here, for the same reason: only a
 non-empty, non-numeric string is honoured, and anything else (`true`, `false`, `null`, a number)
-is ignored in favour of `edit_posts`. `__return_true` is the trap this closes — it is the obvious
+is ignored in favour of the Chat row. `__return_true` is the trap this closes — it is the obvious
 thing to reach for when a menu will not appear, and `(string) true` is `'1'`, which
 `current_user_can()` reads as the legacy `level_1` check rather than as a capability. Stock
 `edit_posts` and `level_1` cover the same roles, so on a default site the swap would show no
@@ -803,9 +988,46 @@ capability.
 
 The bare chat screen is a new chat. `admin.php?page=alpaca-bot&conversation={id}` opens one of
 your own (anyone else's, or a missing one, is a new chat again), and `&post={id}` names the post
-the screen was opened from, which rides on the first turn as its context. The screen's requests
-are the `/view/*` fragments (section 3) and `POST /chat`; its model select posts your choice to
+the screen was opened from. A user who may edit that post sees it as a chip above the composer,
+unless it is an `auto-draft`, and every turn sent while the chip is there carries it as
+`context.post_id`. With no chip no post is sent, and the `current-screen` context source includes
+the post only on a turn by a user who may edit it in any case. The screen's requests are
+`/view/*` fragments (section 3) and `POST /chat`; its model select posts your choice to
 `/view/default-model` on change, and the screen opens on that choice next time.
+
+On the other admin screens the same chat is a drawer: a launcher at the bottom right of the page,
+and the chat itself fetched from `GET /view/panel` the first time it is opened, which is also when
+the chat's script, htmx and stylesheet are added to that page. It lists the same per-user
+conversations as the screen, so a thread started in one continues in the other. Whether it is
+open and which conversation it holds are yours, stored through `POST /view/drawer` and read back
+on the next screen, where a drawer left open opens itself and fetches `GET /view/panel` again.
+Its composer shows the screen it is on as a chip, unless the screen's page title is empty or
+cleans to nothing. On a classic editor screen it shows the post being edited as another, to a user
+who may edit it, but not while its status is `auto-draft`, which is the post core makes for an
+Add New screen until it is first saved or autosaved. Each chip is sent as `context.screen` or
+`context.post_id` until it is taken off. It is not printed on the chat screen itself, on a block editor screen, or on any request for which
+core defines `IFRAME_REQUEST` (the plugin details modal and `media-upload.php` among them). It
+never loads the media library, so its image button is there only on a screen that loads the
+library itself.
+
+In the block editor, on a post's screen, the same `GET /view/panel` fragment is mounted in a
+`PluginSidebar` instead, which the editor opens from the Alpaca Bot button in its top bar, with
+`post_id` taken from `core/editor`, so a turn started there carries the post being edited. It
+starts on a new chat. It is fetched the first time the sidebar is opened, and closing the sidebar
+keeps the chat, a turn in flight included. On a new post, which is an `auto-draft` until it is
+first saved or autosaved, the composer shows no post chip; once the editor has saved the post,
+the sidebar fetches `GET /view/panel` for it again and takes only the post chip from it, into the
+chat it already has, so the next turn carries the post with no reload. The image button stays,
+because the block editor loads the media library. The site editor, the widgets editor and the
+Customizer's widgets, which have no post to edit, get neither the drawer nor the sidebar.
+
+The launcher and the editor's sidebar are shown to the users the screen's capability admits,
+through `alpaca_bot/admin/menu_capability` above: the question the menu asks
+(`Admin\Menu::capability()`). What the drawer or the sidebar then requests is not gated by that
+filter. `GET /view/panel`, `POST /view/drawer` and each request of the chat inside either meet
+their own route's `alpaca_bot/capability/{route}` filter, as the chat screen's requests do, so a
+site that opens the screen to a role and not the view routes gives that role a launcher, or a
+sidebar, whose chat does not load.
 
 ## 8. Adding routes
 
@@ -827,3 +1049,11 @@ add_filter('alpaca_bot/rest/controllers', static function (array $controllers): 
 ```
 
 The route key for that filter is `ping`, so `alpaca_bot/capability/ping` applies to it.
+
+A route may declare `\AlpacaBot\Rest\Controller::CHAT` in place of a capability name, and it
+then follows the Chat row of **Settings › Access** — still through its own
+`alpaca_bot/capability/{key}` filter. Every controller the filter hands back is given the row
+resolver, so this works from a third party's subclass as it does from the plugin's own — but only
+through this filter. A controller you build and `register()` yourself on `rest_api_init` is never
+handed one, and its `CHAT` routes fall back to the shipped `edit_posts` rather than to the row the
+site saved.

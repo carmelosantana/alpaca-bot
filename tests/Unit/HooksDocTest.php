@@ -396,7 +396,7 @@ it('lists before_send ahead of system_prompt for a real turn, and names the cron
         ->and($run['stdout'])->toContain('`alpaca_bot/usage/cleanup`')->toContain('WP-Cron');
 });
 
-it('documents exactly the twenty-two hooks the plugin ships, the two built through Capability::filtered() included', function (): void {
+it('documents exactly the twenty-five hooks the plugin ships, the four built through Capability::filtered() included', function (): void {
     $run = hooksDoc(dirname(__DIR__, 2));
 
     expect($run['code'])->toBe(0, $run['stderr']);
@@ -407,12 +407,15 @@ it('documents exactly the twenty-two hooks the plugin ships, the two built throu
         'alpaca_bot/abilities',
         'alpaca_bot/admin/menu_capability',
         'alpaca_bot/cap/allowed',
+        'alpaca_bot/capability/settings',
+        'alpaca_bot/capability/{hook}',
         'alpaca_bot/capability/{route}',
         'alpaca_bot/chat/completed',
         'alpaca_bot/chat/failed',
         'alpaca_bot/chat/started',
         'alpaca_bot/context',
         'alpaca_bot/context/sources',
+        'alpaca_bot/mcp/called',
         'alpaca_bot/message/after_receive',
         'alpaca_bot/message/before_send',
         'alpaca_bot/models',

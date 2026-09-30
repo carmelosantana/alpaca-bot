@@ -1,0 +1,159 @@
+<?php
+
+declare(strict_types=1);
+
+use AlpacaBot\Access;
+use AlpacaBot\Mcp\ClientFactory;
+use AlpacaBot\Mcp\McpToolkit;
+use AlpacaBot\Mcp\Secrets;
+use AlpacaBot\Mcp\ServerConfig;
+use AlpacaBot\Mcp\Toolkits;
+use AlpacaBot\Mcp\ToolDefinition;
+use AlpacaBot\Settings\Schema;
+use AlpacaBot\Settings\Store;
+use AlpacaBot\Tests\Integration\FakeClient;
+use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Tool\ToolResult;
+use Brain\Monkey\Actions;
+use Brain\Monkey\Functions;
+
+// Each stored MCP server with something approved, for a user who passes its own Settings ›
+// Access row, becomes one McpToolkit keyed `mcp.<id>`. A server that is skipped costs nothing
+// beyond the settings the request already read: no client is built and no credential is read.
+
+beforeEach(function (): void {
+    Functions\when('wp_strip_all_tags')->alias(static fn(string $s): string => strip_tags($s));
+    // A listing that finds no drift clears the server's marker (Drift::set()).
+    Functions\when('delete_transient')->justReturn(true);
+});
+
+/**
+ * A Toolkits over one stored server row (merged over a working `trk` row), whose factory
+ * records every ServerConfig it is handed into `$built` and answers a FakeClient listing `$tools`.
+ *
+ * @param array<string, mixed>  $row      merged over the default row
+ * @param array<string, mixed>  $settings merged over the Store's settings
+ * @param list<ServerConfig>    $built
+ * @param list<array{0: int, 1: string}> $asked every user_can() as [user, capability]
+ * @param list<string>          $secrets  every option name get_option() was asked for
+ */
+function mcpToolkits(array $row = [], array $settings = [], ?array &$built = null, ?array &$asked = null, ?array &$secrets = null, bool $can = true, array $tools = [], ?\Throwable $buildError = null): Toolkits
+{
+    $built = [];
+    $asked = [];
+    $secrets = [];
+    Functions\when('user_can')->alias(static function (int $user, string $cap) use (&$asked, $can): bool {
+        $asked[] = [$user, $cap];
+        return $can;
+    });
+    Functions\when('get_option')->alias(static function (string $name, mixed $default = false) use (&$secrets): mixed {
+        $secrets[] = $name;
+        return $name === Secrets::OPTION ? ['trk' => 'Bearer t'] : $default;
+    });
+    $store = new Store($settings + ['toolkits.mcp_servers' => [array_replace([
+        'id' => 'trk', 'url' => 'https://mcp.example.com/mcp', 'header_name' => 'Authorization',
+        'header_value' => Schema::MASK, 'prefix' => 'trk', 'timeout' => 30.0, 'max_bytes' => 1048576,
+        'approved' => ['search' => str_repeat('a', 64)],
+    ], $row)]]);
+    return new Toolkits($store, new Access($store), new ClientFactory(static function (ServerConfig $server) use (&$built, $tools, $buildError): FakeClient {
+        $built[] = $server;
+        return $buildError !== null ? throw $buildError : new FakeClient($tools, ['search' => ToolResult::success('hit')]);
+    }));
+}
+
+it('builds one toolkit keyed mcp.<id> for a user who passes the server\'s row, administrators only by default', function (): void {
+    $kits = mcpToolkits([], [], $built, $asked);
+    expect(array_keys($kits->for(5)))->toBe(['mcp.trk'])
+        ->and($kits->for(5)['mcp.trk'])->toBeInstanceOf(McpToolkit::class)
+        ->and($asked[0])->toBe([5, 'manage_options'])
+        // The client is the toolkit's to build, when its tools are first asked for.
+        ->and($built)->toBe([]);
+    $kits->for(5)['mcp.trk']->tools();
+    expect($built[0]->id)->toBe('trk');
+});
+
+it('asks the row as the settings narrow it', function (): void {
+    $kits = mcpToolkits([], ['access.mcp' => ['trk' => 'edit_posts']], $built, $asked);
+    $kits->for(5);
+    expect($asked)->toBe([[5, 'edit_posts']]);
+});
+
+it('builds nothing and reads no credential for a user who fails the server\'s row', function (): void {
+    $kits = mcpToolkits([], [], $built, $asked, $secrets, false);
+    expect($kits->for(5))->toBe([])
+        ->and($asked)->toBe([[5, 'manage_options']])
+        ->and($built)->toBe([])
+        ->and($secrets)->not->toContain(Secrets::OPTION);
+});
+
+it('does not build a server with nothing approved, or ask anyone about it', function (): void {
+    $kits = mcpToolkits(['approved' => []], [], $built, $asked, $secrets);
+    expect($kits->for(5))->toBe([])
+        ->and($asked)->toBe([])
+        ->and($built)->toBe([])
+        ->and($secrets)->not->toContain(Secrets::OPTION);
+});
+
+it('skips a row whose id is not a server id, since its Access row could be another\'s', function (string|int|null $id): void {
+    $kits = mcpToolkits(['id' => $id], [], $built, $asked);
+    expect($kits->for(5))->toBe([])->and($asked)->toBe([])->and($built)->toBe([]);
+})->with([[''], ['Bad.Id'], [null], [7]]);
+
+it('hands the factory the server with the header value Secrets keeps in place of the mask', function (): void {
+    $kits = mcpToolkits([], [], $built);
+    $kits->for(5)['mcp.trk']->tools();
+    expect($built[0]->headerValue)->toBe('Bearer t')
+        ->and($built[0]->headerName)->toBe('Authorization')
+        ->and($built[0]->approved)->toBe(['search' => str_repeat('a', 64)]);
+});
+
+it('announces a call as the user the row was asked for, and records drift in the server\'s marker', function (): void {
+    $search = new ToolDefinition('search', 'Search.', ['type' => 'object']);
+    $kits = mcpToolkits(['approved' => ['search' => $search->fingerprint(), 'gone' => str_repeat('b', 64)]], [], $built, $asked, $secrets, true, [$search, new ToolDefinition('gone', 'Changed.', ['type' => 'object'])]);
+    Functions\expect('set_transient')->once()->with('alpaca_bot_mcp_drift_trk', ['gone'], 604800)->andReturn(true);
+    Actions\expectDone('alpaca_bot/mcp/called')->once()->with('trk', 'search', [], 5, Mockery::type(ToolResult::class));
+    expect($kits->for(5)['mcp.trk']->tools()[0]->execute([])->content)->toBe('hit');
+});
+
+// I-2: a builder that fails (a real one refuses an address that does not resolve, and says which
+// host) must not take the registry down with it for every user the row admits.
+it('hands back the toolkit when its client cannot be built, and the toolkit offers nothing', function (): void {
+    $kits = mcpToolkits([], [], $built, $asked, $secrets, true, [], new AlpacaBot\Toolkit\AddressRefused('mcp.example.com does not resolve, or its lookup failed.'));
+    $kit = $kits->for(5)['mcp.trk'] ?? null;
+    expect($kit)->toBeInstanceOf(McpToolkit::class)
+        ->and($built)->toBe([])
+        ->and($kit?->tools())->toBe([])
+        ->and($kit?->guidelines())->toBe('')
+        ->and($built)->toHaveCount(1);
+});
+
+// M-4: Store hands back what is stored, and a row written round the schema can hold anything. One
+// that cannot be read as a server is skipped, for every user, rather than failing the turn.
+it('skips a stored row it cannot read as a server', function (string $field): void {
+    $kits = mcpToolkits([$field => new stdClass()], [], $built, $asked);
+    expect($kits->for(5))->toBe([])->and($built)->toBe([]);
+})->with([['url'], ['header_name'], ['prefix']]);
+
+// N-2: the schema keeps two servers' tools apart by their prefixes, but Store hands back what is
+// stored, and a row written round the schema (add_option(), a hand edit) never met that rule. A
+// row whose prefix the rule refuses, or that an earlier row already holds, is not offered.
+it('skips a stored row whose prefix the schema refuses or an earlier row holds', function (array $rows, array $offered): void {
+    $row = static fn(string $id, string $prefix): array => ['id' => $id, 'url' => 'https://' . $id . '.example.com/mcp', 'header_name' => '', 'header_value' => '', 'prefix' => $prefix, 'approved' => ['search' => str_repeat('a', 64)]];
+    $kits = mcpToolkits([], ['toolkits.mcp_servers' => array_map(static fn(array $r): array => $row(...$r), $rows)], $built, $asked);
+    expect(array_keys($kits->for(5)))->toBe($offered);
+})->with([
+    'trk and trk_, whose tools _x and x would both be trk___x' => [[['trk', 'trk'], ['trku', 'trk_']], ['mcp.trk']],
+    'a prefix holding __' => [[['ab', 'a__b'], ['cd', 'cd']], ['mcp.cd']],
+    'the abilities\' prefix' => [[['abl', 'ability'], ['cd', 'cd']], ['mcp.cd']],
+    'one prefix on two rows: the earlier keeps it' => [[['one', 'trk'], ['two', 'trk']], ['mcp.one']],
+]);
+
+// Which row keeps a prefix does not depend on who asks: an earlier row holds it even for a user its
+// Access row refuses, and even when it approves nothing, so no user is offered the later one.
+it('lets an earlier row hold its prefix whoever asks and whatever it approves', function (): void {
+    $row = static fn(string $id, array $approved): array => ['id' => $id, 'url' => 'https://' . $id . '.example.com/mcp', 'header_name' => '', 'header_value' => '', 'prefix' => 'trk', 'approved' => $approved];
+    $kits = mcpToolkits([], ['toolkits.mcp_servers' => [$row('one', ['search' => str_repeat('a', 64)]), $row('two', ['search' => str_repeat('a', 64)])], 'access.mcp' => ['one' => 'edit_others_posts']], $built, $asked);
+    Functions\when('user_can')->alias(static fn(int $user, string $cap): bool => $cap !== 'edit_others_posts');
+    expect($kits->for(5))->toBe([]);
+    $empty = mcpToolkits([], ['toolkits.mcp_servers' => [$row('one', []), $row('two', ['search' => str_repeat('a', 64)])]], $built, $asked);
+    expect($empty->for(5))->toBe([]);
+});

@@ -238,11 +238,11 @@ final class ChatCommand
     /**
      * Read or write a setting.
      *
-     * With no key, prints every setting as JSON, with provider.api_key shown as `***` when it is
-     * set (ask for it by key to see it). With a key, prints that setting's value as JSON; with a
+     * With no key, prints every setting as JSON, with provider.api_key masked when it is set
+     * (ask for it by key to see it), and each MCP server's header value masked, by key too. With a key, prints that setting's value as JSON; with a
      * key and a value, stores the value first (through the same schema the settings screen uses,
-     * so what is echoed is what was kept). An array setting such as models.overrides takes its
-     * value as a JSON object.
+     * so what is echoed is what was kept). An array setting takes its value as JSON: an object
+     * for a map such as models.overrides, a list for toolkits.abilities.
      *
      * ## OPTIONS
      *
@@ -264,19 +264,21 @@ final class ChatCommand
     {
         if (!isset($args[0])) {
             $all = $this->store->all();
-            // Schema::SECRETS is the one list of credential-holding keys, and Schema::MASK the
-            // one stand-in for a stored one: the settings screen (Admin\Fields::display()), the
-            // REST read (Rest\SettingsController::masked()) and this dump all read them, so a
-            // second secret added to the schema is hidden here too. The whole dump is what ends
+            // Schema::SECRETS is the list of top-level credential-holding keys, and Schema::MASK
+            // the one stand-in for a stored one: the settings screen (Admin\Fields::display()),
+            // the REST read (Rest\SettingsController::masked()) and this dump all read them, so a
+            // second secret added to that list is hidden here too. The whole dump is what ends
             // up in CI logs and shell history; asking for one by name
             // (`wp alpaca-bot settings provider.api_key`) still prints it, since that is an
-            // operator deliberately asking.
+            // operator deliberately asking. An MCP server's header value is the other credential,
+            // nested in its row; Schema::maskedServers() masks it here and read by name alike.
             foreach (Schema::SECRETS as $secret) {
                 // An unset key stays visibly empty: "is one configured?" is still answerable.
                 if (($all[$secret] ?? '') !== '') {
                     $all[$secret] = Schema::MASK;
                 }
             }
+            $all['toolkits.mcp_servers'] = Schema::maskedServers($all['toolkits.mcp_servers'] ?? []);
             $this->json($all);
             return;
         }
@@ -291,13 +293,14 @@ final class ChatCommand
             if ($field['type'] === 'array') {
                 $value = json_decode($value, true);
                 if (!is_array($value)) {
-                    $this->error(sprintf('%s takes a JSON object.', $key));
+                    $this->error(sprintf(in_array($key, Schema::LISTS, true) ? '%s takes a JSON list.' : '%s takes a JSON object.', $key));
                     return;
                 }
             }
             $this->store->set($key, $value);
         }
-        $this->emit(wp_json_encode($this->store->get($key), self::JSON) . "\n");
+        $value = $this->store->get($key);
+        $this->emit(wp_json_encode($key === 'toolkits.mcp_servers' ? Schema::maskedServers($value) : $value, self::JSON) . "\n");
     }
 
     /**
