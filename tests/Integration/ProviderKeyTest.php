@@ -288,6 +288,53 @@ final class ProviderKeyTest extends TestCase
         $this->assertSame('https://steal.example.net/v2', get_option(Plugin::OPTION)['provider.base_url']);
     }
 
+    // #4700: saving '' over a row still carrying a plaintext key, with no key option yet, changes
+    // the key the site uses (the plaintext one, to none) and writes no key option, since nothing
+    // was held to delete. The model list answered with the old key goes all the same.
+    public function test_clearing_a_plaintext_key_no_option_holds_yet_drops_the_cached_model_list(): void
+    {
+        $this->seed060Row('sk-FAKE-plain');
+        $this->assertFalse(get_option(ProviderKey::OPTION));
+        set_transient(ModelCatalog::TRANSIENT, ['stale'], 300);
+        $keyWrites = 0;
+        $count = static function (string $option) use (&$keyWrites): void {
+            $keyWrites += $option === ProviderKey::OPTION ? 1 : 0;
+        };
+        foreach (['added_option', 'updated_option', 'deleted_option'] as $hook) {
+            add_action($hook, $count);
+        }
+        Plugin::instance()->get(Store::class)->set('provider.api_key', '');
+        $this->assertSame(0, $keyWrites);
+        $this->assertSame('', $this->rawRow()['provider.api_key']);
+        $this->assertFalse(get_transient(ModelCatalog::TRANSIENT));
+    }
+    // #4700: deleting the settings row changes the key the site uses to none (a row read back as
+    // the defaults holds '', whatever the key option still holds), and the list goes with it.
+    public function test_deleting_the_settings_row_drops_the_cached_model_list(): void
+    {
+        Plugin::instance()->get(Store::class)->set('provider.api_key', 'sk-FAKE-row');
+        set_transient(ModelCatalog::TRANSIENT, ['stale'], 300);
+        delete_option(Plugin::OPTION);
+        $this->assertSame('', ProviderKey::resolve(get_option(Plugin::OPTION, Schema::defaults())['provider.api_key']));
+        $this->assertFalse(get_transient(ModelCatalog::TRANSIENT));
+    }
+
+    // Plugin.php's account of the move: a plaintext key lifted out of the row, unchanged, busts the
+    // list twice, once on the key option's add and once on the row's plaintext going to MASK.
+    public function test_the_migration_of_an_unchanged_plaintext_key_busts_the_list_twice(): void
+    {
+        $this->seed060Row('sk-FAKE-twice');
+        $busts = 0;
+        $count = static function () use (&$busts): void {
+            ++$busts;
+        };
+        add_action('delete_transient_' . ModelCatalog::TRANSIENT, $count);
+        $this->runInitMigrations();
+        remove_action('delete_transient_' . ModelCatalog::TRANSIENT, $count);
+        $this->assertKeyKeptOutOfTheRow('sk-FAKE-twice');
+        $this->assertSame(2, $busts);
+    }
+
     // #4699's cost: the three screens that show the key read its option once each over a row that
     // says MASK, and the front end, which shows none of them, reads it no more than before. Its one
     // read is the provider built for the model list (Factory, the sender), so the list is fetched
