@@ -96,7 +96,8 @@ use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Message\UserMessage;
  * of the run's calls after the first (CapPolicy::assertMayContinue(); Kanboard #4701). The check
  * before a turn that a tool starts inside the run (SummarizeToolkit's) counts it as well. So no
  * provider call is made once the cap is reached, and a tool turn overshoots a cap by at most the
- * one call that crossed it rather than by the rest of its iteration budget. A turn stopped there is kept whether or not a tool had run, stored as a
+ * one call that crossed it rather than by the rest of its iteration budget. A turn stopped
+ * there is kept whether or not a tool had run, stored as a
  * failed tool turn is (the partial reply, a receipt for the calls made, `chat/failed`), and
  * CapExceeded itself is raised, `stopped` and carrying the conversation id, so every caller
  * answers it as it answers the refusal before a turn. An ephemeral turn runs plainly, tools or no tools, and that is a
