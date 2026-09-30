@@ -224,6 +224,40 @@ There is a price as well as a symptom. `web_fetch`, `summarize` and `draft_post`
 
 Releases before 0.5.0 are on the [releases page](https://github.com/carmelosantana/alpaca-bot/releases).
 
+### 0.6.1
+
+Security and reliability fixes for 0.6.0. **Breaking** is what an upgrading site may have to act on.
+
+<details>
+<summary>Breaking</summary>
+
+- **Moving the provider's address clears its API key.** Changing `provider.base_url` to another scheme, host or port, on the settings page, over `PUT /settings` or with WP-CLI, now drops the stored key unless the same save sends a new one, so a key can no longer follow the address to a host it was never meant for. REST names it in an `X-Alpaca-Bot-Cleared: provider.api_key` response header, the settings page shows a notice and WP-CLI warns (Kanboard #4539).
+- **The provider API key moved to its own option**, `alpaca_bot_provider_key`, which is not autoloaded, out of `alpaca_bot_settings`, which is. An existing key moves on the first request after the upgrade, and uninstalling removes the new option too. Downgrading to 0.6.0 afterwards sends the masked placeholder instead of the key; upgrading again restores it (Kanboard #4384).
+- **An ability ticked under Settings › Tools may run only other ticked abilities**, never Alpaca Bot's own. An "execute any ability" tool, such as the MCP Adapter's, could reach an ability that was not ticked, or start a chat turn inside the current one; it is refused now (Kanboard #4538).
+- **`wp alpaca-bot settings toolkits.mcp_servers` refuses a row it cannot keep** the way REST does, exiting non-zero, naming the row and writing nothing, where it dropped the row silently (Kanboard #4540).
+
+</details>
+
+<details>
+<summary>Fixed</summary>
+
+- On a host that disables cURL's functions, the chat and MCP servers use PHP's own HTTP client instead of failing with a fatal error on the first request (Kanboard #4690).
+- A turn whose tools offer nothing, an unreachable MCP server or abilities with none ticked, takes the plain chat path instead of the agent loop (Kanboard #4541).
+- Switching conversation while a reply is still arriving no longer sends your next message to another conversation, and a message keeps the context chips and model it was sent with (Kanboard #4525, #4691).
+- A message that could not be sent keeps its text in a note above the conversation, instead of overwriting what you typed or landing in another conversation's box (Kanboard #4692).
+- The drawer and the block editor's sidebar keep their REST nonce fresh from page load, so a tab left open for a day opens the chat without asking for a reload (Kanboard #4526).
+- With the chat open in two tabs, the drawer and sidebar reopen the conversation you last used (Kanboard #4693).
+- Settings › Access marks a row "set in code" when a filter moves any chat route or either shortcode, not only `POST /chat` and `[alpacabot]`, and logs a filter's error to the debug log (Kanboard #4537, #4694).
+
+</details>
+
+<details>
+<summary>Changed</summary>
+
+- The block editor's sidebar reopens the conversation you last had open in it or in the drawer, instead of starting a new chat (Kanboard #4527).
+
+</details>
+
 ### 0.6.0
 
 The chat on most admin screens and in the block editor, a capability for each part of the plugin, and tools from the site's WordPress abilities and from remote MCP servers. **Breaking** is what an upgrading site, or a client of the REST API, may have to act on.

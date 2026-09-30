@@ -47,7 +47,7 @@ it('exposes a version and boots once', function (): void {
     $b = Plugin::boot();
     expect($a)->toBe($b)
         ->and($a->version())->toBe(Plugin::VERSION)
-        ->and(Plugin::VERSION)->toMatch('/^0\.6\.0/');
+        ->and(Plugin::VERSION)->toMatch('/^0\.6\.1/');
 });
 
 it('registers the settings store, provider factory, model catalog, conversation store, usage meter, cap policy, context collector and chat pipeline, hooks both post types on init, and runs the 0.4 migration on init after them, never on admin_init', function (): void {
