@@ -259,3 +259,51 @@ test('mountPanel uses the htmx the page carries under its handle id, whatever it
   assert.equal(second, 'failed');
   assert.equal(asked.length, 1);
 });
+
+/**
+ * rememberConversation() dedups against what this tab last wrote to POST /view/drawer (Kanboard
+ * #4693), and a write that failed is not what it last wrote: the memory does not hold it. So a
+ * refused write (a nonce the server no longer takes) or one that never arrived (a network error)
+ * leaves the next announcement of the same conversation to write again, and one that succeeded
+ * does not. A failure that lands after a later write was sent forgets nothing of that later one.
+ */
+test('rememberConversation writes again after a write that failed, and not after one that succeeded (Kanboard #4693)', async (t) => {
+  installDom('<aside id="host" data-conversation="5"></aside>');
+  const real = globalThis.fetch;
+  t.after(() => { globalThis.fetch = real; });
+  const answers: (number | 'network')[] = [500, 'network', 200, 403, 200];
+  const sent: string[] = [];
+  let settled = 0;
+  globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+    sent.push(String(init?.body ?? ''));
+    const answer = answers.shift() ?? 200;
+    try {
+      if (answer === 'network') throw new TypeError('Failed to fetch');
+      return new Response('', { status: answer });
+    } finally {
+      settled++;
+    }
+  }) as typeof fetch;
+  const { rememberConversation } = await import('../../resources/ts/mount.ts');
+  const host = document.getElementById('host') as HTMLElement;
+  const remember = rememberConversation(host, { ...CFG, prefs: 'https://alpaca-bot.test/wp-json/alpaca-bot/v1/view/drawer' }, () => 'n');
+  const settle = async (): Promise<void> => { await new Promise((resolve) => setTimeout(resolve, 5)); };
+
+  remember(5); // 500
+  await settle();
+  remember(5); // a network error
+  await settle();
+  remember(5); // 200
+  await settle();
+  remember(5); // written already: nothing sent
+  assert.deepEqual(sent, ['{"conversation_id":5}', '{"conversation_id":5}', '{"conversation_id":5}']);
+
+  // 7 is refused, but only after 9 has been sent: 9 stays what this tab last wrote.
+  remember(7); // 403
+  remember(9); // 200
+  await settle();
+  remember(9);
+  assert.equal(settled, 5);
+  assert.deepEqual(sent.slice(3), ['{"conversation_id":7}', '{"conversation_id":9}']);
+  assert.equal(host.dataset.conversation, '9');
+});

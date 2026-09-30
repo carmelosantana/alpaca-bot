@@ -119,33 +119,54 @@ export async function mountPanel(host: HTMLElement, cfg: MountSettings, nonce: s
 /**
  * The user's drawer preferences, to POST /view/drawer (`cfg.prefs`): whether the drawer is open,
  * and the conversation last shown. Fire and forget: a preference that fails to save is not worth
- * a notice over the chat.
+ * a notice over the chat. It answers whether the write was taken (a 2xx), and never rejects, so a
+ * caller that ignores it is left no unhandled rejection; rememberConversation() is the one that
+ * reads it.
  */
-export function savePrefs(cfg: MountSettings, nonce: string, body: { open?: boolean; conversation_id?: number }): void {
-  void fetch(cfg.prefs, {
+export function savePrefs(cfg: MountSettings, nonce: string, body: { open?: boolean; conversation_id?: number }): Promise<boolean> {
+  return fetch(cfg.prefs, {
     method: 'POST',
     credentials: 'same-origin',
     headers: { 'X-WP-Nonce': nonce, 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
-  }).catch(() => {});
+  }).then((res) => res.ok, () => false);
 }
 
 /**
  * The conversation `host` shows, remembered for the user: the drawer's, and the editor sidebar's,
  * which share the one memory (Kanboard #4527), so either reopens on the conversation last shown in
- * either. What is remembered is the host's `data-conversation`, which the drawer's element carries
- * from Admin\Drawer::footer() and the sidebar's is given from `alpacaBotMount.conversation`, and a
- * mount that failed is tried again on it. It changes on each `ab:conversation` the chat announces
- * from inside the host (resources/ts/boot.ts) and on the id the returned function is called with
- * (the host's New chat, with 0), and is saved to POST /view/drawer when it changes rather than on
- * every announcement. The drawer's open flag is not touched.
+ * either. It is set on each `ab:conversation` the chat announces from inside the host
+ * (resources/ts/boot.ts: a turn's `start` and `done` frames, and each htmx swap inside the chat,
+ * which re-announces the transcript shown, a switch in the history select among them) and on the
+ * id the returned function is called with (the host's New chat, with 0).
+ *
+ * The rule across tabs is that the last activity wins (Kanboard #4693): whichever tab last
+ * announced a conversation owns the memory, since that is where the user was last. So a write is
+ * skipped only when it is the value this tab last wrote, which before its first write is nothing,
+ * and never because it is the host's `data-conversation`. That attribute starts at what the page
+ * was printed with (Admin\Drawer::footer() for the drawer, `alpacaBotMount.conversation` for the
+ * sidebar), which another tab may have moved the memory on from since: tab A loads on 5, tab B
+ * moves to 7, and tab A's turns in 5 must still write 5, or the next screen opens 7. Each tab
+ * then writes once for its first announcement and once per change of what it shows, however
+ * many times a turn announces the same id. A mount or an open announces nothing (the chat bundle
+ * binds its listeners after the mount's swap), so it writes no conversation.
+ *
+ * The value counts as written from the moment it is sent, so a turn's `done` that arrives while
+ * its `start`'s write is in flight sends nothing, and it is forgotten if that write fails (refused,
+ * or never arriving), so the next announcement of it tries again; a failure that lands after a
+ * later write was sent forgets nothing of that later one. `data-conversation` still means the
+ * conversation the host shows, updated on every announcement, written or not: a mount that failed
+ * is tried again on it. The drawer's open flag is not touched.
  */
 export function rememberConversation(host: HTMLElement, cfg: MountSettings, nonce: () => string): (id: number) => void {
+  let written: number | null = null;
   function remember(id: number): void {
-    const value = String(id);
-    if (value === (host.dataset.conversation ?? '0')) return;
-    host.dataset.conversation = value;
-    savePrefs(cfg, nonce(), { conversation_id: id });
+    host.dataset.conversation = String(id);
+    if (id === written) return;
+    written = id;
+    void savePrefs(cfg, nonce(), { conversation_id: id }).then((ok) => {
+      if (!ok && written === id) written = null;
+    });
   }
   document.addEventListener('ab:conversation', (e) => {
     if (host.contains(e.target as Node)) remember((e as CustomEvent<{ id: number }>).detail.id);

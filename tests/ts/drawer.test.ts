@@ -29,20 +29,20 @@ function heartbeat(): (event: 'heartbeat-send' | 'heartbeat-tick', data: Record<
   return (event, data) => { for (const handler of handlers.get(event) ?? []) handler(null, data); };
 }
 
-/** Every request the drawer makes, by URL path, with the nonce it carried: fetch()'s and htmx.ajax()'s. */
-function record(t: TestContext): { path: string; nonce: string }[] {
-  const seen: { path: string; nonce: string }[] = [];
+/** Every request the drawer makes, by URL path, with the nonce and the body it carried: fetch()'s and htmx.ajax()'s. */
+function record(t: TestContext): { path: string; nonce: string; body: string }[] {
+  const seen: { path: string; nonce: string; body: string }[] = [];
   const real = globalThis.fetch;
   t.after(() => { globalThis.fetch = real; });
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
-    seen.push({ path: new URL(String(input)).pathname, nonce: new Headers(init?.headers).get('X-WP-Nonce') ?? '' });
+    seen.push({ path: new URL(String(input)).pathname, nonce: new Headers(init?.headers).get('X-WP-Nonce') ?? '', body: String(init?.body ?? '') });
     // A body that is no element, so "New chat" answers false and swaps nothing in.
     return new Response('', { headers: { 'content-type': 'text/html' } });
   }) as typeof fetch;
   // htmx is on the page (its tag is, PAGE's first line), and brings no fragment: the mount then
   // fails, which is all this needs, having made the request.
   (window as unknown as { htmx: unknown }).htmx = {
-    ajax: async (_method: string, url: string, opts: { headers: Record<string, string> }) => { seen.push({ path: new URL(url).pathname, nonce: opts.headers['X-WP-Nonce'] ?? '' }); },
+    ajax: async (_method: string, url: string, opts: { headers: Record<string, string> }) => { seen.push({ path: new URL(url).pathname, nonce: opts.headers['X-WP-Nonce'] ?? '', body: '' }); },
     process: () => {},
   };
   t.mock.method(console, 'error', () => {});
@@ -131,4 +131,41 @@ test('the booted chat and the drawer both on the heartbeat: the chat starts with
   assert.deepEqual(sent, { alpaca_bot_nonce: 1 });
   fire('heartbeat-tick', { alpaca_bot_nonce: 'fresher' });
   assert.equal(window.alpacaBot.nonce, 'fresher');
+});
+
+/**
+ * Two tabs, one memory (Kanboard #4693). Tab A loads on conversation 5, and tab B then moves to 7,
+ * so the stored conversation is 7 while tab A's drawer element still says 5, the value it was
+ * printed with. Tab A goes on chatting in 5. Each of its announcements of 5 must reach POST
+ * /view/drawer the first time, or the next screen opens 7 though the user's last activity was in
+ * 5: the drawer dedups against what this tab last wrote, which before its first write is nothing,
+ * and not against the page-load value. Tab B is not in this document; its only trace is the 7 the
+ * server holds, which tab A cannot see, and that is the point. A mere open writes no conversation.
+ */
+test('a tab writes its first announcement even when it is the conversation the page loaded on, then only changes (Kanboard #4693)', async (t) => {
+  installDom(PAGE.replace('data-conversation="0"', 'data-conversation="5"'));
+  heartbeat();
+  const seen = record(t);
+  window.alpacaBot = { rest: REST, nonce: 'n', offline: 'offline', i18n: {} };
+  const { startDrawer } = await import('../../resources/ts/drawer-start.ts');
+  const launcher = document.getElementById('ab-drawer-launcher') as HTMLElement;
+  const host = document.getElementById('ab-drawer') as HTMLElement;
+  startDrawer(MOUNT, launcher, host);
+  const written = (): string[] => seen.filter((r) => r.path.endsWith('/view/drawer')).map((r) => r.body);
+
+  launcher.click();
+  await until(() => seen.some((r) => r.path.endsWith('/view/panel')));
+  // Opening saves the open flag and mounts; it announces no conversation, so it writes none.
+  assert.deepEqual(written(), ['{"open":true}']);
+
+  // Tab A's turn in 5: its start frame and its done frame each announce 5.
+  const announce = (id: number): void => { host.dispatchEvent(new CustomEvent('ab:conversation', { bubbles: true, detail: { id } })); };
+  announce(5);
+  announce(5);
+  // Then the user switches to 8 in this tab, and back to 5.
+  announce(8);
+  announce(5);
+  assert.deepEqual(written(), ['{"open":true}', '{"conversation_id":5}', '{"conversation_id":8}', '{"conversation_id":5}']);
+  // What the drawer element says it shows is the last announced, for a mount tried again.
+  assert.equal(host.dataset.conversation, '5');
 });

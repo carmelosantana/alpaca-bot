@@ -123,19 +123,25 @@ test('the sidebar opens on the conversation the drawer remembers, and remembers 
   await until(() => seen.some((r) => r.path === '/view/panel'));
   assert.equal(seen.find((r) => r.path === '/view/panel')?.query, '42');
 
-  // The chat announces the conversation its transcript shows, from inside the sidebar; the
-  // one it opened on is not saved again, a new one is, once, and one from outside is not.
+  // Opening announces nothing, so it writes nothing.
+  assert.deepEqual(seen.filter((r) => r.method === 'POST').map((r) => `${r.path} ${r.body}`), []);
+
+  // The chat announces the conversation its transcript shows, from inside the sidebar. The
+  // first announcement is saved even when it is the one the sidebar opened on, since another
+  // tab may have moved the memory on since this page loaded (Kanboard #4693); after that, only a
+  // change is, and one from outside the sidebar is not.
   const inside = document.querySelector('.ab-sidebar') as HTMLElement;
   const announce = (from: Element, id: number): void => { from.dispatchEvent(new CustomEvent('ab:conversation', { bubbles: true, detail: { id } })); };
+  announce(inside, 42);
   announce(inside, 42);
   announce(inside, 7);
   announce(inside, 7);
   announce(document.body, 9);
-  await until(() => seen.some((r) => r.method === 'POST'));
-  assert.deepEqual(seen.filter((r) => r.method === 'POST').map((r) => `${r.path} ${r.body}`), ['/view/drawer {"conversation_id":7}']);
+  assert.deepEqual(seen.filter((r) => r.method === 'POST').map((r) => `${r.path} ${r.body}`), ['/view/drawer {"conversation_id":42}', '/view/drawer {"conversation_id":7}']);
 
   // A mount that failed (this one did: no chat bundle loads here) is tried again on the next
   // open, on the conversation remembered since.
+  await until(() => inside.textContent === 'failed');
   open();
   await until(() => seen.filter((r) => r.path === '/view/panel').length === 2);
   assert.equal(seen.filter((r) => r.path === '/view/panel')[1]?.query, '7');
