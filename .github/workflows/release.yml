@@ -216,7 +216,7 @@ jobs:
       # post-install strauss run builds vendor-prefixed/) and its own `pnpm install
       # --frozen-lockfile` and `pnpm build`, so there is nothing to install ahead of it; the four
       # setup steps above only put php, composer, pnpm and node on the PATH it needs. It ends by
-      # asserting eleven runtime paths inside the zip and rejecting vendor/, node_modules/,
+      # asserting the runtime paths it lists inside the zip and rejecting vendor/, node_modules/,
       # tests/, bin/, tools/, resources/, dist/ and every dot-prefixed entry, so a build that
       # produced the wrong tree fails here rather than being published.
       - name: Build
