@@ -15,7 +15,8 @@
  * that is not ours.
  *
  * What it removes, on each site:
- * - options: the settings row, the MCP header values (`alpaca_bot_mcp_secrets`), the four
+ * - options: the settings row, the provider API key (`alpaca_bot_provider_key`), the MCP header
+ *   values (`alpaca_bot_mcp_secrets`), the four
  *   Settings\Migrate04 flags, the stream slot rows Rest\StreamBudget writes with $wpdb, and the
  *   options 0.4 wrote (one per settings field 0.4.17 had and five older ones, its version
  *   stamp, and its shortcode cache);
@@ -94,6 +95,7 @@ if (!defined('WP_UNINSTALL_PLUGIN')) {
 
     $options = [
         'alpaca_bot_settings',
+        'alpaca_bot_provider_key',
         'alpaca_bot_mcp_secrets',
         'alpaca_bot_migrated_04',
         'alpaca_bot_migrated_04_conversations',
