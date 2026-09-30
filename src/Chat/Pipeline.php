@@ -91,7 +91,13 @@ use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Message\UserMessage;
  * does. The usage metered is the whole run: Output::$usage is the sum over every provider call
  * the agent made, so a turn that took three calls is billed three calls' tokens against the
  * cap; a turn the consumer abandons is billed the calls it had completed by then (the provider
- * decorator's running tally). An ephemeral turn runs plainly, tools or no tools, and that is a
+ * decorator's running tally). The cap is checked again before each of those calls after the
+ * first (CapPolicy::assertMayContinue(), with that tally counted in; Kanboard #4701), so a tool
+ * turn overshoots a cap by at most the one call that crossed it rather than by the rest of its
+ * iteration budget. A turn stopped there is kept whether or not a tool had run, stored as a
+ * failed tool turn is (the partial reply, a receipt for the calls made, `chat/failed`), and
+ * CapExceeded itself is raised, `stopped` and carrying the conversation id, so every caller
+ * answers it as it answers the refusal before a turn. An ephemeral turn runs plainly, tools or no tools, and that is a
  * decision about each of the three callers that pass the flag, not only the first. Toolkit\
  * SummarizeToolkit's inner call is a tool inside an agent, and an agent inside it would be a
  * recursion with no bound but each level's iteration budget. Shortcodes\Chat's `prompt=` form
@@ -188,7 +194,7 @@ final class Pipeline
      * @param array{conversation_id?: int, model?: string, images?: string[], context?: array<string, mixed>, system?: string, temperature?: float, ephemeral?: bool} $options
      * @return \Generator<int, Delta, mixed, Result>
      * @throws \InvalidArgumentException for an empty message (also one `before_send` blanked), an image that is not a base64 image data URL or a set of them past the site's allowance, a requested model a non-empty catalog does not list, a conversation the user does not own, or `ephemeral` with a `conversation_id`
-     * @throws CapExceeded before any provider call
+     * @throws CapExceeded before any provider call, or on a tool turn before a further one (`stopped`: the class docblock)
      * @throws \RuntimeException when no model can be resolved, or wrapping a provider failure as 'Provider error: ...' (a tool turn's failure the provider had no part in is raised in words of its own instead: raised())
      */
     public function send(int $userId, string $text, array $options = []): \Generator
@@ -262,6 +268,7 @@ final class Pipeline
             ];
             $toolkits = $ephemeral ? [] : $this->toolkitsFor($userId, $model);
             $observer = null;
+            $bound = null;
 
             /**
              * Fires when the turn is committed: the message is on the conversation, the system prompt
@@ -289,8 +296,11 @@ final class Pipeline
                 $provider = $this->factory->make($model);
                 $toolkits = self::offered($toolkits);
                 if ($toolkits !== []) {
-                    $observer = new AgentStreamObserver();
                     $bound = new BoundOptionsProvider($provider, $providerOptions);
+                    // Before each provider call after the first, the cap again, with the run's
+                    // spend so far counted in (Kanboard #4701; the catch below says what a stop
+                    // leaves behind).
+                    $observer = new AgentStreamObserver(fn() => $this->caps->assertMayContinue($userId, $bound->usage()->totalTokens));
                     $turn = $this->agentTurn($bound, $toolkits, $messages, $observer);
                     foreach ($turn as $delta) {
                         $content .= $delta->text;
@@ -371,23 +381,39 @@ final class Pipeline
                 // is the last moment it can reach the partial transcript below.
                 $content .= $observer?->takeUnsent() ?? '';
                 $toolCalls = $observer?->toolCalls() ?? [];
-                if ($toolCalls !== []) {
+                // A tool turn the cap stopped between two provider calls (Kanboard #4701) is kept
+                // whether or not a tool had run: at least one call was made and answered, so there
+                // is spend to bill and, usually, text the user has already read. It is billed from
+                // the tally, which the stop leaves complete for every call made, where the last
+                // reading before a yield can be one chunk short of a call's usage.
+                $capped = $e instanceof CapExceeded && $e->stopped;
+                if ($capped && $bound !== null) {
+                    $tally = $bound->usage();
+                    $prompt = $tally->promptTokens;
+                    $completion = $tally->completionTokens;
+                }
+                if ($toolCalls !== [] || $capped) {
                     $this->storePartial($ephemeral, $userId, $conversation, $model, $content, $reasoning, $prompt, $completion, self::elapsedMs($started), $toolCalls);
+                }
+                if ($capped) {
+                    $e->conversationId = $conversation->id;
                 }
                 try {
                     /**
                      * Fires when the provider call (or the tool loop) failed before the reply finished, in
                      * place of `alpaca_bot/message/after_receive` and `alpaca_bot/chat/completed`. The reply is
                      * not stored (a tool turn that had already run tools keeps its partial transcript, so the
-                     * draft it made is traceable), and a conversation this turn created is deleted afterwards
+                     * draft it made is traceable, and so does a tool turn the monthly cap stopped between two
+                     * provider calls), and a conversation this turn created is deleted afterwards
                      * unless a listener saved a turn onto it. A listener that throws does not replace the
                      * failure: that is rethrown as a RuntimeException, `Provider error: ` and what the
                      * provider threw, or in words of its own where the provider had no part in it, with
-                     * the listener's exception chained behind it. The same action fires from settle()
-                     * when the consumer abandons the stream, with a RuntimeException saying so.
+                     * the listener's exception chained behind it; a cap stop is rethrown as the
+                     * Chat\CapExceeded it is. The same action fires from settle() when the consumer
+                     * abandons the stream, with a RuntimeException saying so.
                      *
                      * @since 0.5.0
-                     * @param \Throwable   $e            what the turn failed on: what the provider or the tool loop threw, or the Chat\RunFailure the pipeline read out of a run that failed without announcing it
+                     * @param \Throwable   $e            what the turn failed on: what the provider or the tool loop threw, the Chat\RunFailure the pipeline read out of a run that failed without announcing it, or the Chat\CapExceeded (`stopped`) that ended a tool turn at the cap
                      * @param Conversation $conversation the conversation, with the user turn appended and no finished reply
                      */
                     do_action('alpaca_bot/chat/failed', $e, $conversation);
@@ -396,8 +422,10 @@ final class Pipeline
                     // failure with its own exception: a caller maps what arrives by class
                     // (ChatController reads an InvalidArgumentException as the user's mistake,
                     // 400). PHP chains a pending exception behind the one thrown here, so a
-                    // listener's is kept, after $e. raised() says what the message is.
-                    throw new \RuntimeException(self::raised($e), 0, $e);
+                    // listener's is kept, after $e. raised() says what the message is. A cap stop
+                    // is raised as itself, so every caller answers it as it answers the refusal
+                    // before a turn (Errors::fromPipeline(): the 402).
+                    throw $capped ? $e : new \RuntimeException(self::raised($e), 0, $e);
                 }
             } finally {
                 // Empty on every path that came through the catch or through agentTurn()'s
