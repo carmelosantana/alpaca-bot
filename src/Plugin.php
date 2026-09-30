@@ -272,6 +272,9 @@ final class Plugin
         // process running us, and the class itself never references WP_CLI until then.
         if (defined('WP_CLI') && constant('WP_CLI')) {
             \WP_CLI::add_command('alpaca-bot', new Cli\ChatCommand($this->get(Chat\Pipeline::class), $this->get(Provider\ModelCatalog::class), $meter, $store, servers: $this->get(Mcp\ServerSettings::class)));
+            // A raw `wp option update|patch|add` of the option goes through the same Store and
+            // checks (Cli\RawOptionWrite says how, and why it has to end the command itself).
+            (new Cli\RawOptionWrite($store, $this->get(Mcp\ServerSettings::class)))->register();
         }
     }
 
