@@ -503,10 +503,11 @@ it('leaves other writes to core: another option, this one as it is spelled, and 
 
 /**
  * A stand-in for $wpdb: get_row() answers the column lookup with `$column`, get_var() answers the
- * comparisons from `$answers` in order, and every query is recorded.
+ * comparisons from `$answers` in order (null for no row; 'ERROR' for a failed query, which answers
+ * null and sets `last_error`, as wpdb does), and every query is recorded.
  *
  * @param array{0: string, 1: string}|null $column
- * @param list<string|null>                $answers
+ * @param list<int|string|null>            $answers
  */
 function fakeWpdb(?array $column, array $answers = []): object
 {
@@ -516,6 +517,7 @@ function fakeWpdb(?array $column, array $answers = []): object
     }
     return new class ($column, $answers) {
         public string $options = 'wp_options';
+        public string $last_error = '';
         /** @var list<string> */
         public array $queries = [];
 
@@ -534,10 +536,12 @@ function fakeWpdb(?array $column, array $answers = []): object
             return $this->column;
         }
 
-        public function get_var(string $query): ?string
+        public function get_var(string $query): mixed
         {
             $this->queries[] = $query;
-            return array_shift($this->answers);
+            $answer = array_shift($this->answers);
+            $this->last_error = $answer === 'ERROR' ? 'no such table' : '';
+            return $answer === 'ERROR' ? null : $answer;
         }
     };
 }
@@ -570,20 +574,57 @@ it('leaves a name the database tells apart to core, and reads the column once pe
         ->and(array_filter($wpdb->queries, static fn(string $q): bool => str_contains($q, 'information_schema')))->toHaveCount(1);
 });
 
-it('refuses, failing closed, when the database cannot say how it compares option names', function (?array $column, array $answers): void {
+// Fix round 3: without the column's collation (information_schema unreadable, or not a plain
+// name, or its comparison erring) the table is asked instead, the name against the stored row in
+// the column's own comparison; with no row of ours, and on a failed query, trim plus ASCII case
+// decides. A write of another option is never refused unless the database says it is ours.
+it('without the column\'s collation, asks the stored row, and refuses only when the table says the name is ours', function (?array $column, array $answers, string $name, bool $refused): void {
     global $wpdb;
     $wpdb = fakeWpdb($column, $answers);
-    $c = rawWrite([], name: 'blogname', realDatabaseCheck: true);
+    $c = rawWrite([], name: $name, realDatabaseCheck: true);
 
-    $kept = $c->subject->refuseSpelling('x', 'blogname', 'y');
+    $kept = $c->subject->refuseSpelling('x', $name, 'y');
 
-    expect($kept)->toBe('y')
-        ->and($c->errors)->toBe(["Alpaca Bot could not ask the database whether 'blogname' is alpaca_bot_settings, which WP-CLI would write round Alpaca Bot's checks, so nothing was written."])
-        ->and(has_filter('pre_update_option', [$c->subject, 'refuseSpelling']))->toBeFalse();
+    expect($kept)->toBe($refused ? 'y' : 'x')
+        ->and($c->errors)->toBe($refused ? ["'{$name}' is alpaca_bot_settings to the database, which WP-CLI would write round Alpaca Bot's checks, so nothing was written. Write it as alpaca_bot_settings."] : [])
+        ->and(end($wpdb->queries))->toBe("SELECT option_name = '{$name}' FROM wp_options WHERE option_name = 'alpaca_bot_settings' LIMIT 1");
 })->with([
-    'no column found' => [null, []],
-    'a collation that is not a plain name' => [['utf8mb4', 'utf8mb4_bin; DROP'], []],
-    'the comparison errs' => [['utf8mb4', 'utf8mb4_unicode_520_ci'], [null]],
+    'no column row, the table says ours' => [null, ['1'], "alp\u{00E4}ca_bot_settings", true],
+    'no column row, the table says another' => [null, ['0'], 'blogname', false],
+    'a collation that is not a plain name' => [['utf8mb4', 'utf8mb4_bin; DROP'], ['1'], "alp\u{00E4}ca_bot_settings", true],
+    'the collation comparison errs' => [['utf8mb4', 'utf8mb4_unicode_520_ci'], ['ERROR', '0'], 'blogname', false],
+    // A driver (a drop-in, say) may hand back an int.
+    'the table answers an int' => [null, [1], "alp\u{00E4}ca_bot_settings", true],
+]);
+
+it('with no collation and no row of ours, decides by trim and ASCII case, the residual gap included', function (string $name, bool $refused): void {
+    global $wpdb;
+    $wpdb = fakeWpdb(null, [null]);
+    $c = rawWrite([], name: $name, realDatabaseCheck: true);
+
+    expect($c->subject->refuseSpelling('x', trim($name), 'y'))->toBe($refused ? 'y' : 'x')
+        ->and($c->errors)->toHaveCount($refused ? 1 : 0);
+})->with([
+    'other letters' => ['ALPACA_BOT_SETTINGS', true],
+    'other letters, padded' => [' Alpaca_Bot_Settings ', true],
+    'another option' => ['blogname', false],
+    // The gap: only here, with information_schema unreadable and no row yet, a name the collation
+    // would equate beyond ASCII case is not caught.
+    'an accent (the residual gap)' => ["alp\u{00E4}ca_bot_settings", false],
+]);
+
+it('refuses on a failed table query only for a name that is ours by trim and ASCII case', function (string $name, bool $refused): void {
+    global $wpdb;
+    $wpdb = fakeWpdb(null, ['ERROR']);
+    $c = rawWrite([], name: $name, realDatabaseCheck: true);
+
+    $kept = $c->subject->refuseSpelling('x', $name, 'y');
+
+    expect($kept)->toBe($refused ? 'y' : 'x')
+        ->and($c->errors)->toBe($refused ? ["Alpaca Bot could not ask the database whether '{$name}' is alpaca_bot_settings, which WP-CLI would write round Alpaca Bot's checks, so nothing was written."] : []);
+})->with([
+    'ours in other letters' => ['ALPACA_BOT_SETTINGS', true],
+    'another option' => ['blogname', false],
 ]);
 
 it('asks the database nothing for this option as it is spelled, or outside WP-CLI\'s command', function (string $option, bool $inCommand): void {

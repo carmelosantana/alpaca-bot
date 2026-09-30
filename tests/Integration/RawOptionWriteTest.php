@@ -597,4 +597,39 @@ final class RawOptionWriteTest extends TestCase
         $this->assertSame([], $this->rowsNamedLikeTheOption());
         $this->assertSame([], $this->said);
     }
+
+    // Fix round 3: where the column's collation cannot be read, the table itself is asked, the name
+    // against this option's stored row in the column's own comparison, on the real database; with
+    // no row of ours, trim plus ASCII case decides, which leaves the one documented gap.
+    public function test_without_the_collation_the_stored_row_decides_and_with_no_row_ascii_case_does(): void
+    {
+        global $wpdb;
+        $this->wpCli();
+        $row = get_option(Plugin::OPTION);
+        $unread = function (RawOptionWrite $raw): RawOptionWrite {
+            (new \ReflectionProperty(RawOptionWrite::class, 'column'))->setValue($raw, false);
+            return $raw;
+        };
+
+        foreach (["alp\u{00E4}ca_bot_settings", "alpaca_bot_settings\u{00A0}", 'ALPACA_BOT_SETTINGS'] as $name) {
+            $unread($this->armed('update', inCommand: false));
+            $this->assertStringStartsWith("Error: '{$name}' is alpaca_bot_settings to the database", $this->command('update', [$name, '{"models.temperature":"hot"}'], ['format' => 'json']));
+        }
+        wp_cache_flush();
+        $this->assertSame($row, get_option(Plugin::OPTION));
+        $unread($this->armed('update', inCommand: false));
+        $this->assertSame('returned', $this->command('update', ['blogname', 'Fallback test'], []));
+        $this->assertSame('Fallback test', get_option('blogname'));
+
+        delete_option(Plugin::OPTION);
+        $unread($this->armed('add', inCommand: false));
+        $this->assertStringStartsWith("Error: 'ALPACA_BOT_SETTINGS' is alpaca_bot_settings to the database", $this->command('add', ['ALPACA_BOT_SETTINGS', '{"models.temperature":"hot"}'], ['format' => 'json']));
+        $this->assertSame([], $this->rowsNamedLikeTheOption());
+        // The residual gap, pinned so that a change to it is seen: information_schema unreadable
+        // and no row of ours yet, a name the collation equates beyond ASCII case is not refused.
+        $raw = $unread($this->armed('add', inCommand: false));
+        $this->assertSame('returned', $this->command('add', ["alp\u{00E4}ca_bot_settings", '{"models.temperature":"hot"}'], ['format' => 'json']));
+        $raw->disarm();
+        $this->assertSame(1, (int) $wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$wpdb->options} WHERE option_name = %s", Plugin::OPTION)));
+    }
 }

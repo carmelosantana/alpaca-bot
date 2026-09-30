@@ -54,10 +54,20 @@ use AlpacaBot\Settings\Store;
  * `pre_update_option` filter and `add_option` action, which update_option() and add_option()
  * reach with the trimmed name before they write. When WP-CLI's command is writing such a name,
  * the command fails with nothing written and this disarms. "Such a name" is the database's
- * answer: the name and this option compared in the column's own character set and collation
- * (databaseTakes(), which reads them from information_schema once), asked only while armed,
- * inside WP-CLI's command, for a name that is not this option byte for byte, once per name.
- * When the database cannot answer, the write is refused.
+ * answer (databaseTakes()), asked only while armed, inside WP-CLI's command, for a name that is
+ * not this option byte for byte, once per name, in up to three steps:
+ * 1. the name and this option compared in the option_name column's own character set and
+ *    collation, read from information_schema once;
+ * 2. when those cannot be read (or the comparison fails), the name compared with this option's
+ *    stored row, `SELECT option_name = %s … WHERE option_name = 'alpaca_bot_settings'`, which is
+ *    the column's own comparison and needs no information_schema;
+ * 3. when there is no stored row either (an `add` over nothing), the name trimmed and compared
+ *    in ASCII case.
+ * A failed step-2 query refuses the write only for a name that is this option by trim and ASCII
+ * case, saying the database could not be asked; any other name passes. A write of another option
+ * is never refused unless the database says the name is this one's. The one gap left: with
+ * information_schema unreadable and no row of this option yet, a name the collation equates
+ * beyond ASCII case (an accent, say) is not caught.
  *
  * `--autoload` as that call has it (from the command line or wp-cli.yml) is never ignored: the
  * row stays autoloaded, so anything but on, yes or true fails the command with nothing written
@@ -269,13 +279,17 @@ final class RawOptionWrite
     }
 
     /**
-     * Whether the options table takes `$name` for this option: the two compared in its
-     * option_name column's character set and collation, read from information_schema once. Null
-     * when either cannot be read or the comparison fails.
+     * Whether the options table takes `$name` for this option, asked in three steps (the class
+     * docblock): the two names compared in the option_name column's character set and collation,
+     * read from information_schema once; failing that, `$name` compared with this option's stored
+     * row in the column's own comparison; with no such row, trim plus ASCII case. Null (refuse,
+     * saying the database could not be asked) only when the row query fails and `$name` is this
+     * option by trim and ASCII case; a failed query for any other name answers false.
      */
     private function databaseTakes(string $name): ?bool
     {
         global $wpdb;
+        $ascii = strcasecmp(trim($name), Plugin::OPTION) === 0;
         if ($this->column === null) {
             // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- Read once per process and kept in $column; no API reports a column's collation.
             $row = $wpdb->get_row($wpdb->prepare('SELECT CHARACTER_SET_NAME, COLLATION_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s AND COLUMN_NAME = %s', $wpdb->options, 'option_name'), \ARRAY_N);
@@ -283,19 +297,34 @@ final class RawOptionWrite
                 ? [(string) $row[0], (string) $row[1]]
                 : false;
         }
-        if ($this->column === false) {
-            return null;
+        if ($this->column !== false) {
+            [$charset, $collation] = $this->column;
+            // Both identifiers are held to [A-Za-z0-9_]+ above; the two names go through prepare().
+            $sql = "SELECT CONVERT(%s USING {$charset}) COLLATE {$collation} = CONVERT(%s USING {$charset}) COLLATE {$collation}";
+            // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.NotPrepared -- A comparison, not a table read; the answer is kept per name in $taken; $sql carries only the two identifiers checked above, and the names go through prepare().
+            $same = self::bit($wpdb->get_var($wpdb->prepare($sql, $name, Plugin::OPTION)));
+            if ($same !== null) {
+                return $same === '1';
+            }
         }
-        [$charset, $collation] = $this->column;
-        // Both identifiers are held to [A-Za-z0-9_]+ above; the two names go through prepare().
-        $sql = "SELECT CONVERT(%s USING {$charset}) COLLATE {$collation} = CONVERT(%s USING {$charset}) COLLATE {$collation}";
-        // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.NotPrepared -- A comparison, not a table read; the answer is kept per name in $taken; $sql carries only the two identifiers checked above, and the names go through prepare().
-        $same = $wpdb->get_var($wpdb->prepare($sql, $name, Plugin::OPTION));
-        return match ((string) $same) {
-            '1' => true,
-            '0' => false,
-            default => null,
-        };
+        // The column's own comparison, against this option's stored row: no information_schema.
+        // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- A comparison against one row; the answer is kept per name in $taken.
+        $answer = $wpdb->get_var($wpdb->prepare("SELECT option_name = %s FROM {$wpdb->options} WHERE option_name = %s LIMIT 1", $name, Plugin::OPTION));
+        $same = self::bit($answer);
+        if ($same !== null) {
+            return $same === '1';
+        }
+        if ($answer === null && (string) $wpdb->last_error === '') {
+            return $ascii;
+        }
+        return $ascii ? null : false;
+    }
+
+    /** A comparison's answer as '1' or '0' (a driver may hand back an int), or null for anything else. */
+    private static function bit(mixed $answer): ?string
+    {
+        $answer = is_int($answer) || is_string($answer) ? (string) $answer : null;
+        return $answer === '1' || $answer === '0' ? $answer : null;
     }
 
     /**
