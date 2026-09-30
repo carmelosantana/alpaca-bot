@@ -16,12 +16,12 @@ use AlpacaBot\Plugin;
  * beforeSave() writes both, on `pre_update_option_alpaca_bot_settings`, which core applies to
  * every update_option() of the row whoever calls it (the settings page, the REST route, Store,
  * which `wp option update|patch|add` write through: Cli\RawOptionWrite) before the branch that
- * turns a site's first save into add_option(). A posted
- * MASK, or a value that is not a string, keeps the held key; '' deletes the option; any other
- * string replaces it. This option is written from inside the row's update_option(), before core
- * writes the row, as Mcp\Secrets is. add_option() called on its own (from code; `wp option add`
- * writes through Store instead) runs no `pre_update_option_*` filter, so a key written that way
- * stays in the row until migrate() lifts it on the next request.
+ * turns a save with no row yet (a site's first, or the first after the row was deleted) into
+ * add_option(). A posted MASK, or a value that is not a string, keeps the held key; '' deletes
+ * the option; any other string replaces it. This option is written from inside the row's
+ * update_option(), before core writes the row, as Mcp\Secrets is. add_option() called on its own
+ * (from code; `wp option add` writes through Store instead) runs no `pre_update_option_*` filter,
+ * so a key written that way stays in the row until migrate() lifts it on the next request.
  *
  * Everything that needs the key itself asks resolve() with what the row holds: the provider
  * factory (the one sender), the REST route's reveal and `wp alpaca-bot settings provider.api_key`.
