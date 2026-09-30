@@ -16,9 +16,9 @@ use AlpacaBot\View\Component;
  * how it resolves the URL), and an admin_url() written in here sent a visitor of that page out
  * of the site into wp-admin. The chat bundle reads this link's href for the history select's own
  * "New chat" option, so the two follow one value. Where the page hosting the shell starts a new
- * chat in place instead, neither is followed: the admin-wide drawer (resources/ts/drawer-start.ts) and
- * the block editor's sidebar (resources/ts/editor-start.ts) take the link's click and cancel the
- * select's `ab:new-chat` (resources/ts/boot.ts).
+ * chat in place instead, neither is followed: the admin-wide drawer
+ * (resources/ts/drawer-start.ts) and the block editor's sidebar (resources/ts/editor-start.ts)
+ * take the link's click and cancel the select's `ab:new-chat` (resources/ts/boot.ts).
  */
 final class Header extends Component
 {

@@ -15,7 +15,7 @@ use AlpacaBot\Chat\UserPrefs;
  * fragment is in the page. Until the first open, the screen carries the launcher, the loader and
  * their stylesheet, and none of the chat. On a block editor screen for a post, the same chat is
  * the editor's own sidebar instead, enqueued on `enqueue_block_editor_assets` (enqueueEditor())
- * and loaded the same way the first time the sidebar is opened (resources/ts/editor.ts).
+ * and loaded the same way the first time the sidebar is opened (resources/ts/editor-start.ts).
  *
  * Three kinds of screen are left out. The plugin's own chat screen, where this would be the chat
  * twice over; a block editor screen, which owns the whole viewport and where Kanboard #4369
@@ -52,10 +52,9 @@ use AlpacaBot\Chat\UserPrefs;
  * Open or closed, and the conversation shown, are the user's (Chat\UserPrefs), stored through
  * `POST /view/drawer`, so the drawer comes back the way it was left on the next screen. The
  * conversation is the editor sidebar's too, which opens on it and stores the one it shows
- * (enqueueEditor(), Kanboard #4527). A drawer
- * left open fetches `GET /view/panel` again on each screen it is reopened on, and that fragment
- * renders the model select, which asks the provider when the model cache is cold
- * (ViewController::routes() says so).
+ * (enqueueEditor(), Kanboard #4527). A drawer left open fetches `GET /view/panel` again on each
+ * screen it is reopened on, and that fragment renders the model select, which asks the provider
+ * when the model cache is cold (ViewController::routes() says so).
  *
  * @since 0.6.0
  */
@@ -105,22 +104,23 @@ final class Drawer
 
     /**
      * `enqueue_block_editor_assets`: the chat as the block editor's own sidebar
-     * (resources/ts/editor.ts), which mounts the fragment the drawer mounts, for the user the
+     * (resources/ts/editor-start.ts), which mounts the fragment the drawer mounts, for the user the
      * drawer is for (Menu::capability(), as wanted() asks). Core fires this hook wherever it loads
      * a block editor, and the site editor, the widgets editor and the Customizer's widgets have no
      * post to edit, so only a screen whose base is `post` and that core says is a block editor
      * gets the sidebar; the classic editor gets the drawer instead (wanted()).
      *
-     * The four `wp-*` dependencies are the globals editor.ts reads off `window.wp`, so it runs
-     * after the bundles that set them. `wp-editor` depends on the other three already, and they
-     * are named anyway because editor.ts reads all four and a dependency of a dependency is not a
-     * promise. `heartbeat` is here for the reason it is on the loader (enqueue()). Both settings
-     * objects are the loader's, because the sidebar mounts the chat the way the drawer does
-     * (resources/ts/mount.ts), and `alpacaBotMount` carries one thing more: `conversation`, the
-     * conversation the drawer remembers (Chat\UserPrefs::drawerConversation()), which the sidebar
-     * reopens and keeps up to date as the drawer does, so the two are one memory (Kanboard #4527).
-     * The drawer reads it off the element footer() prints, and a block editor screen gets no
-     * footer() (wanted()). It is user meta, which the class docblock says is in memory by now.
+     * The four `wp-*` dependencies are the globals editor.js reads off `window.wp`
+     * (resources/ts/editor-start.ts), so it runs after the bundles that set them. `wp-editor`
+     * depends on the other three already, and they are named anyway because the sidebar reads all
+     * four and a dependency of a dependency is not a promise. `heartbeat` is here for the reason it
+     * is on the loader (enqueue()). Both settings objects are the loader's, because the sidebar
+     * mounts the chat the way the drawer does (resources/ts/mount.ts), and `alpacaBotMount` carries
+     * one thing more: `conversation`, the conversation the drawer remembers
+     * (Chat\UserPrefs::drawerConversation()), which the sidebar reopens and keeps up to date as the
+     * drawer does, so the two are one memory (Kanboard #4527). The drawer reads it off the element
+     * footer() prints, and a block editor screen gets no footer() (wanted()). It is user meta,
+     * which the class docblock says is in memory by now.
      */
     public function enqueueEditor(): void
     {

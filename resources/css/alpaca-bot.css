@@ -408,15 +408,15 @@ pre > .ab-code__copy[aria-label]:hover::after {
 /* ---- the same shell in the block editor's sidebar ----------------------------------------- */
 
 /*
- * resources/ts/editor.ts mounts the drawer's panel in a PluginSidebar, whose own header carries
- * the title and the close button, so the drawer's close button is not wanted here, nor the room
- * the header keeps for it. The sidebar scrolls as a whole (core's .interface-complementary-area)
- * and gives what it holds no height, so the panel would be as tall as the chat in it: the composer
- * under a short transcript rather than at the sidebar's foot, and a long one scrolling the whole
- * sidebar, the chat's header with it. This makes the sidebar a column whose panel (the
- * PluginSidebar's `className`, .ab-sidebar-panel) takes what the sidebar's header leaves, so the
- * panel's height is definite and the drawer's layout holds: the transcript scrolls between the
- * header and the composer.
+ * resources/ts/editor-start.ts mounts the drawer's panel in a PluginSidebar, whose own header
+ * carries the title and the close button, so the drawer's close button is not wanted here, nor the
+ * room the header keeps for it. The sidebar scrolls as a whole (core's
+ * .interface-complementary-area) and gives what it holds no height, so the panel would be as tall
+ * as the chat in it: the composer under a short transcript rather than at the sidebar's foot, and a
+ * long one scrolling the whole sidebar, the chat's header with it. This makes the sidebar a column
+ * whose panel (the PluginSidebar's `className`, .ab-sidebar-panel) takes what the sidebar's header
+ * leaves, so the panel's height is definite and the drawer's layout holds: the transcript scrolls
+ * between the header and the composer.
  */
 .interface-complementary-area:has(> .ab-sidebar-panel) { display: flex; flex-direction: column; }
 .ab-sidebar-panel { flex: 1; min-height: 0; }

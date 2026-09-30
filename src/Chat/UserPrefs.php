@@ -30,7 +30,10 @@ final class UserPrefs
     /** Whether the admin-wide drawer was left open: '1' is open, and anything else reads as closed. */
     public const META_DRAWER_OPEN = 'alpaca_bot_drawer_open';
 
-    /** The conversation the drawer or the editor sidebar last showed, as a string of digits; '0', or anything unreadable, is a new chat. */
+    /**
+     * The conversation the drawer or the editor sidebar last showed, as a string of digits; '0',
+     * or anything unreadable, is a new chat.
+     */
     public const META_DRAWER_CONVERSATION = 'alpaca_bot_drawer_conversation';
 
     public function defaultModel(int $userId): string

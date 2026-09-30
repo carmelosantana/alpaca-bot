@@ -13,8 +13,8 @@ use AlpacaBot\View\Component;
  * The chat as the admin-wide drawer shows it, and the whole of what `GET /view/panel` answers: a
  * panel holding a close button and the Shell the chat screen renders, in the shell's drawer
  * layout (Shell's `$drawer`). The block editor mounts the same fragment in a sidebar of its own
- * (resources/ts/editor.ts), so the chat screen, the drawer and the editor's sidebar show the same
- * chat.
+ * (resources/ts/editor-start.ts), so the chat screen, the drawer and the editor's sidebar show the
+ * same chat.
  *
  * It is the chat screen's Shell rather than a second rendering of its pieces, so the header, the
  * transcript and the composer are the screen's own. A conversation opened here is one of the same

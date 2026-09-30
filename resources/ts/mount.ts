@@ -73,8 +73,8 @@ export function withQuery(base: string, query: Record<string, string>): string {
  * The query every fetch of GET /view/panel into `host` carries: the conversation to open, and
  * what the composer's context chips name, off the host's data attributes: the ones
  * Admin\Drawer::footer() prints on the drawer element (the post on the classic editor, the
- * screen's id and page title), or the post editor-start.ts sets on the sidebar's. An element without
- * them asks for no chips.
+ * screen's id and page title), or the post editor-start.ts sets on the sidebar's. An element
+ * without them asks for no chips.
  */
 export function panelQuery(host: HTMLElement, conversation: string): Record<string, string> {
   return {

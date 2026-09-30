@@ -48,8 +48,9 @@
  *
  * "New chat" starts over in place, as it does in the drawer (mount.ts newChat()): the chat
  * screen's link would leave the editor, and is remembered as no conversation. It puts back the
- * chips the server renders for the post, a post chip the user took off included. The image button stays: the block editor loads the
- * media library (edit-form-blocks.php calls wp_enqueue_media()).
+ * chips the server renders for the post, a post chip the user took off included. The image
+ * button stays: the block editor loads the media library (edit-form-blocks.php calls
+ * wp_enqueue_media()).
  *
  * Its own module, and not the entry's, so node:test can drive it (tests/ts/editor.test.ts): the
  * entry, editor.ts, reads the page as it loads, and no test imports an entry (tests/ts/env.ts).
@@ -70,14 +71,14 @@ export interface EditorWp {
   data: { select(store: 'core/editor'): EditorSelectors; subscribe(listener: () => void): unknown };
 }
 
-/** The sidebar's behaviour, registered as a block editor plugin on the `window.wp` the entry found. */
+/** The sidebar's behaviour, registered as a block editor plugin on the entry's `window.wp`. */
 export function startEditor(cfg: MountSettings, wp: EditorWp): void {
   const editor = (): EditorSelectors => wp.data.select('core/editor');
   // Fresh from the heartbeat before the first open too (nonce.ts pageNonce(), Kanboard #4526).
   const nonce = pageNonce();
   const host = document.createElement('div');
   host.className = 'ab-sidebar';
-  // The conversation the drawer remembers, which the sidebar opens on and keeps (the file docblock).
+  // The drawer's remembered conversation, which the sidebar opens on and keeps (file docblock).
   host.dataset.conversation = cfg.conversation ?? '0';
   const remember = rememberConversation(host, cfg, nonce);
   let mounted: Promise<void> | null = null;
