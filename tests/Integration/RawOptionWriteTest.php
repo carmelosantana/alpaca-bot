@@ -29,7 +29,8 @@ final class RawOptionWriteTest extends TestCase
     /** @var list<string> */
     private array $said = [];
 
-    private function armed(string $mode): RawOptionWrite
+    /** @param bool $inCommand what the takeover's call-stack check answers; true stands in for WP-CLI's Option_Command */
+    private function armed(string $mode, bool $inCommand = true): RawOptionWrite
     {
         $raw = new RawOptionWrite(
             Plugin::instance()->get(Store::class),
@@ -46,13 +47,14 @@ final class RawOptionWriteTest extends TestCase
             halt: static function (int $code): void {
                 throw new \OverflowException('halt ' . $code);
             },
+            inCommand: $inCommand ? static fn(): bool => true : null,
         );
         $raw->arm($mode);
         return $raw;
     }
 
     /** Runs what the command runs on the value, and answers how the command ended. */
-    private function write(string $mode, mixed $value): string
+    private function write(string $mode, mixed $value, ?RawOptionWrite &$raw = null): string
     {
         $raw = $this->armed($mode);
         try {
@@ -60,9 +62,12 @@ final class RawOptionWriteTest extends TestCase
             return 'returned';
         } catch (\OverflowException | \RuntimeException $e) {
             return $e->getMessage();
-        } finally {
-            remove_filter('sanitize_option_' . Plugin::OPTION, [$raw, 'sanitize']);
         }
+    }
+
+    private function isArmed(RawOptionWrite $raw): bool
+    {
+        return has_filter('sanitize_option_' . Plugin::OPTION, [$raw, 'sanitize']) !== false;
     }
 
     public function tear_down(): void
@@ -73,9 +78,68 @@ final class RawOptionWriteTest extends TestCase
         parent::tear_down();
     }
 
-    public function test_nothing_is_armed_outside_the_three_commands(): void
+    public function test_it_is_disarmed_after_a_takeover_a_refusal_and_an_add_it_leaves_to_core(): void
     {
-        $this->assertFalse(has_filter('sanitize_option_' . Plugin::OPTION));
+        $this->assertFalse(has_filter('sanitize_option_' . Plugin::OPTION), 'nothing is armed outside a command');
+
+        $this->assertSame('halt 0', $this->write('update', ['models.temperature' => 0.4], $raw));
+        $this->assertFalse($this->isArmed($raw), 'after a takeover');
+
+        $this->assertStringStartsWith('Error: ', $this->write('update', 'not an object', $raw));
+        $this->assertFalse($this->isArmed($raw), 'after a refusal');
+
+        $this->assertStringStartsWith('Error: ', $this->write('patch', ['toolkits.mcp_servers' => [['url' => 'http://x.example.com/mcp', 'prefix' => 'x']]] + get_option(Plugin::OPTION), $raw));
+        $this->assertFalse($this->isArmed($raw), 'after an MCP refusal');
+
+        $this->assertSame('returned', $this->write('add', ['models.temperature' => 0.2], $raw));
+        $this->assertFalse($this->isArmed($raw), 'after an add over an existing row');
+
+        // The comparison pass stays armed (patch makes it before its write); after_invoke disarms.
+        $this->assertSame('returned', $this->write('patch', get_option(Plugin::OPTION), $raw));
+        $this->assertTrue($this->isArmed($raw));
+        $raw->disarm();
+        $this->assertFalse($this->isArmed($raw));
+    }
+
+    // Left armed (a command WP-CLI ended with an error inside WP_CLI::runcommand()), the default
+    // call-stack check still lets a later write from the same process through as it is.
+    public function test_a_write_outside_the_option_command_is_not_taken_over(): void
+    {
+        $raw = $this->armed('update', inCommand: false);
+        Plugin::instance()->get(Store::class)->set('models.temperature', 0.45);
+
+        $this->assertSame(0.45, get_option(Plugin::OPTION)['models.temperature']);
+        $this->assertSame([], $this->said);
+        $this->assertFalse($this->isArmed($raw));
+    }
+
+    public function test_a_patch_delete_resets_the_key_to_its_default(): void
+    {
+        Plugin::instance()->get(Store::class)->set('models.temperature', 0.3);
+        $row = get_option(Plugin::OPTION);
+        unset($row['models.temperature']);
+
+        $this->assertSame('halt 0', $this->write('patch', $row));
+
+        $this->assertSame(0.7, get_option(Plugin::OPTION)['models.temperature']);
+    }
+
+    public function test_a_move_clears_a_plaintext_key_an_unmigrated_row_still_carries(): void
+    {
+        global $wpdb;
+        Plugin::instance()->get(Store::class)->replace(['provider.base_url' => 'https://openrouter.ai/api/v1']);
+        $row = ['provider.api_key' => 'sk-FAKE-plain'] + get_option(Plugin::OPTION);
+        $wpdb->update($wpdb->options, ['option_value' => maybe_serialize($row)], ['option_name' => Plugin::OPTION]);
+        wp_cache_delete('alloptions', 'options');
+        wp_cache_delete(Plugin::OPTION, 'options');
+        (new \ReflectionProperty(Store::class, 'cache'))->setValue(Plugin::instance()->get(Store::class), null);
+        $this->assertTrue(ProviderKey::pending(get_option(Plugin::OPTION)));
+
+        $this->assertSame('halt 0', $this->write('patch', ['provider.base_url' => 'https://steal.example.net/v1'] + get_option(Plugin::OPTION)));
+
+        $this->assertStoredProviderKey('', get_option(Plugin::OPTION));
+        $this->assertSame('', ProviderKey::resolve(get_option(Plugin::OPTION)['provider.api_key']));
+        $this->assertContains('Warning: provider.api_key was cleared, because provider.base_url moved to another host, port or scheme. Set it again: wp alpaca-bot settings provider.api_key <key>', $this->said);
     }
 
     public function test_a_base_url_move_clears_the_key_and_warns(): void
@@ -151,11 +215,10 @@ final class RawOptionWriteTest extends TestCase
             $ended = 'returned';
         } catch (\OverflowException $e) {
             $ended = $e->getMessage();
-        } finally {
-            remove_filter('sanitize_option_' . Plugin::OPTION, [$raw, 'sanitize']);
         }
 
         $this->assertSame('halt 0', $ended);
+        $this->assertFalse($this->isArmed($raw));
         $this->assertStoredProviderKey('sk-FAKE-added', get_option(Plugin::OPTION));
         $this->assertSame(0.6, get_option(Plugin::OPTION)['models.temperature']);
         $this->assertSame(["Success: Added 'alpaca_bot_settings' option."], $this->said);

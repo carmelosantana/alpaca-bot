@@ -24,7 +24,7 @@ use Brain\Monkey\Functions;
  * @param array<string, mixed>  $stored
  * @param array<string, string> $secrets
  */
-function rawWrite(array $stored, string $command = 'update', ?ServerSettings $servers = null, array $secrets = [], mixed $row = null): object
+function rawWrite(array $stored, string $command = 'update', ?ServerSettings $servers = null, array $secrets = [], mixed $row = null, bool $inCommand = true): object
 {
     $c = new class {
         public RawOptionWrite $subject;
@@ -59,6 +59,7 @@ function rawWrite(array $stored, string $command = 'update', ?ServerSettings $se
         halt: static function (int $code) use ($c): void {
             $c->halted = $code;
         },
+        inCommand: static fn(): bool => $inCommand,
     );
     $c->subject->arm($command);
     return $c;
@@ -157,7 +158,8 @@ it('refuses an MCP row the schema cannot keep with the message REST gives, and w
         ->and($c->errors)->toBe([$rest->get_error_message()])
         ->and($c->errors[0])->toContain('http://insecure.example.com/mcp: ')
         ->and($c->success)->toBe([])
-        ->and($c->halted)->toBeNull();
+        ->and($c->halted)->toBeNull()
+        ->and(has_filter('sanitize_option_' . Plugin::OPTION, [$c->subject, 'sanitize']))->toBeFalse();
 });
 
 it('refuses an MCP address the egress check refuses with the message REST gives, and writes nothing', function (): void {
@@ -224,3 +226,105 @@ it('lets its own write pass the sanitize filter untouched', function (): void {
     expect($inner['models.temperature'])->toBe(0.4)
         ->and($c->success)->toBe(["Updated 'alpaca_bot_settings' option."]);
 });
+
+// Review round 1, item 1: `wp option patch delete alpaca_bot_settings <key>` hands over the row
+// without that key. Store keeps a key left out, so the patch mode reads a stored key the value no
+// longer carries as a reset to its default, which is what the delete did before (the key read back
+// as the default).
+it('resets a key a patch deleted to its default', function (): void {
+    Functions\expect('update_option')->once()->with(Plugin::OPTION, Mockery::on(static fn(array $v): bool => $v['models.temperature'] === 0.7 && $v['models.num_ctx'] === 4096))->andReturn(true);
+    $c = rawWrite(['models.temperature' => 0.3, 'models.num_ctx' => 4096], 'patch');
+    $row = get_option(Plugin::OPTION);
+    unset($row['models.temperature']);
+
+    $c->subject->sanitize($row);
+
+    expect($c->store->get('models.temperature'))->toBe(0.7)
+        ->and($c->success)->toBe(["Updated 'alpaca_bot_settings' option."]);
+});
+
+it('keeps a key an update leaves out, as Store and REST do', function (): void {
+    Functions\expect('update_option')->once()->with(Plugin::OPTION, Mockery::on(static fn(array $v): bool => $v['models.temperature'] === 0.3 && $v['models.num_ctx'] === 2048))->andReturn(true);
+    $c = rawWrite(['models.temperature' => 0.3], 'update');
+
+    $c->subject->sanitize(['models.num_ctx' => 2048]);
+
+    expect($c->halted)->toBe(0);
+});
+
+// Review round 1, item 3: update and patch hand over the whole row. On a row the migration has not
+// lifted, its plaintext key would read as a new key and survive a base URL move; a key whose value
+// is the stored row's is left out instead, as Store::set() leaves it, so it reads as "keep", and
+// keep does not survive a move.
+it('clears a plaintext key an unmigrated row still carries when a raw patch moves the base URL', function (): void {
+    $stored = ['provider.base_url' => 'https://openrouter.ai/api/v1', 'provider.api_key' => 'sk-FAKE-plain'];
+    Functions\expect('update_option')->once()->with(Plugin::OPTION, Mockery::on(static fn(array $v): bool => $v['provider.api_key'] === '' && $v['provider.base_url'] === 'https://steal.example.net/v1'))->andReturn(true);
+    $c = rawWrite($stored, 'patch');
+
+    $c->subject->sanitize(['provider.base_url' => 'https://steal.example.net/v1'] + get_option(Plugin::OPTION));
+
+    expect($c->warnings)->toBe(['provider.api_key was cleared, because provider.base_url moved to another host, port or scheme. Set it again: wp alpaca-bot settings provider.api_key <key>']);
+});
+
+// Review round 1, item 2: armed for one command, and for no longer than that command.
+it('disarms once it has taken a write over', function (): void {
+    Functions\when('update_option')->justReturn(true);
+    $c = rawWrite([]);
+
+    $c->subject->sanitize(['models.temperature' => 0.4]);
+
+    expect(has_filter('sanitize_option_' . Plugin::OPTION, [$c->subject, 'sanitize']))->toBeFalse();
+});
+
+it('disarms once it has refused a write', function (): void {
+    Functions\expect('update_option')->never();
+    $c = rawWrite([]);
+
+    $c->subject->sanitize('not an object');
+
+    expect($c->errors)->toHaveCount(1)
+        ->and(has_filter('sanitize_option_' . Plugin::OPTION, [$c->subject, 'sanitize']))->toBeFalse();
+});
+
+it('disarms when it leaves an add over an existing row to add_option()', function (): void {
+    $c = rawWrite([], 'add');
+
+    $c->subject->sanitize(['models.temperature' => 0.2]);
+
+    expect(has_filter('sanitize_option_' . Plugin::OPTION, [$c->subject, 'sanitize']))->toBeFalse();
+});
+
+it('stays armed over the comparison pass, which patch makes before the write, until disarm()', function (): void {
+    $c = rawWrite([], 'patch');
+
+    $c->subject->sanitize(get_option(Plugin::OPTION));
+    $armed = has_filter('sanitize_option_' . Plugin::OPTION, [$c->subject, 'sanitize']);
+    $c->subject->disarm();
+
+    expect($armed)->toBe(10)
+        ->and(has_filter('sanitize_option_' . Plugin::OPTION, [$c->subject, 'sanitize']))->toBeFalse();
+});
+
+it('takes nothing over outside the option command that armed it, and disarms', function (): void {
+    Functions\expect('update_option')->never();
+    $c = rawWrite([], inCommand: false);
+
+    expect($c->subject->sanitize(['models.temperature' => 0.4]))->toBe(['models.temperature' => 0.4])
+        ->and($c->halted)->toBeNull()
+        ->and(has_filter('sanitize_option_' . Plugin::OPTION, [$c->subject, 'sanitize']))->toBeFalse();
+});
+
+it('names the option a command writes only for update, set, add and patch of alpaca_bot_settings', function (array $args, bool $named): void {
+    expect(RawOptionWrite::namesOption($args))->toBe($named);
+})->with([
+    'update' => [['option', 'update', 'alpaca_bot_settings', '{}'], true],
+    'set' => [['option', 'set', 'alpaca_bot_settings', '{}'], true],
+    'add' => [['option', 'add', 'alpaca_bot_settings', '{}'], true],
+    'patch update' => [['option', 'patch', 'update', 'alpaca_bot_settings', 'models.temperature', '0.3'], true],
+    'patch delete' => [['option', 'patch', 'delete', 'alpaca_bot_settings', 'models.temperature'], true],
+    'another option' => [['option', 'update', 'blogname', 'x'], false],
+    'patch of another option' => [['option', 'patch', 'update', 'blogname', 'k', 'v'], false],
+    'get' => [['option', 'get', 'alpaca_bot_settings'], false],
+    'another command' => [['alpaca-bot', 'settings', 'alpaca_bot_settings'], false],
+    'too short' => [['option', 'update'], false],
+]);
