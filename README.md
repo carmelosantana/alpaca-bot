@@ -224,6 +224,25 @@ There is a price as well as a symptom. `web_fetch`, `summarize` and `draft_post`
 
 Releases before 0.5.0 are on the [releases page](https://github.com/carmelosantana/alpaca-bot/releases).
 
+### 0.6.3
+
+The monthly token cap now holds inside a tool turn.
+
+<details>
+<summary>Changed</summary>
+
+- **A tool turn re-checks the monthly token cap before each further model call**, counting what the turn has spent so far, and so does a turn one of its tools starts (`summarize`). Within one request a turn now overshoots a cap by at most the call that crossed it, where it could run the rest of its tool budget past it (Kanboard #4701).
+- **A turn the cap stops keeps its reply so far**, stored and billed, and answers with the usual `402 alpaca_bot_cap_exceeded`, now saying the reply stopped, with `data.stopped` and `data.conversation_id` so a client can find the saved reply. `alpaca_bot/chat/failed` fires for it with the `CapExceeded`. `wp alpaca-bot chat` names the conversation it was saved on, in plain output and in `--json`.
+
+</details>
+
+<details>
+<summary>Fixed</summary>
+
+- The end-to-end tests log in after wp-login's own focus timer and check both fields before submitting, which a cold CI container could otherwise mix up.
+
+</details>
+
 ### 0.6.2
 
 WP-CLI and settings-storage fixes for 0.6.1. **Breaking** is what an upgrading site may have to act on.

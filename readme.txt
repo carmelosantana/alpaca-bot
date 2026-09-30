@@ -4,7 +4,7 @@ Donate link: https://www.patreon.com/carmelosantana
 Tags: ai, large language model, chatbot, ollama, agent  
 Requires at least: 6.9  
 Tested up to: 7.1  
-Stable tag: 0.6.2  
+Stable tag: 0.6.3  
 Requires PHP: 8.4  
 License: GPLv2 or later  
 License URI: https://www.gnu.org/licenses/gpl-2.0.html  
@@ -112,6 +112,19 @@ There is a price as well as a symptom. `web_fetch`, `summarize` and `draft_post`
 == Changelog ==
 
 Releases before 0.5.0 are on the [releases page](https://github.com/carmelosantana/alpaca-bot/releases).
+
+= 0.6.3 =
+
+The monthly token cap now holds inside a tool turn.
+
+**Changed**
+
+- **A tool turn re-checks the monthly token cap before each further model call**, counting what the turn has spent so far, and so does a turn one of its tools starts (`summarize`). Within one request a turn now overshoots a cap by at most the call that crossed it, where it could run the rest of its tool budget past it (Kanboard #4701).
+- **A turn the cap stops keeps its reply so far**, stored and billed, and answers with the usual `402 alpaca_bot_cap_exceeded`, now saying the reply stopped, with `data.stopped` and `data.conversation_id` so a client can find the saved reply. `alpaca_bot/chat/failed` fires for it with the `CapExceeded`. `wp alpaca-bot chat` names the conversation it was saved on, in plain output and in `--json`.
+
+**Fixed**
+
+- The end-to-end tests log in after wp-login's own focus timer and check both fields before submitting, which a cold CI container could otherwise mix up.
 
 = 0.6.2 =
 
@@ -223,6 +236,10 @@ A ground-up rewrite. The 0.4 code is gone rather than refactored, so the list be
 - The plugin's own dependencies are namespace-prefixed, so php-agents or CommonMark installed by another plugin cannot collide with the copies shipped here.
 
 == Upgrade Notice ==
+
+= 0.6.3 =
+
+The monthly token cap is re-checked between a tool turn's model calls. A turn it stops keeps its reply so far and answers 402 saying so.
 
 = 0.6.2 =
 
