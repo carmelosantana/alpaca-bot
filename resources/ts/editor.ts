@@ -47,6 +47,7 @@
  * This is an entry esbuild builds, and runs when the page loads it.
  */
 import { mountPanel, newChat, panelQuery, postChip, type MountSettings } from './mount.ts';
+import { pageNonce } from './nonce.ts';
 
 type CreateElement = (type: unknown, props: Record<string, unknown> | null, ...children: unknown[]) => unknown;
 interface EditorSelectors {
@@ -63,7 +64,8 @@ interface EditorWp {
 
 function start(cfg: MountSettings, wp: EditorWp): void {
   const editor = (): EditorSelectors => wp.data.select('core/editor');
-  const nonce = (): string => window.alpacaBot?.nonce ?? '';
+  // Fresh from the heartbeat before the first open too (nonce.ts pageNonce(), Kanboard #4526).
+  const nonce = pageNonce();
   const host = document.createElement('div');
   host.className = 'ab-sidebar';
   let mounted: Promise<void> | null = null;

@@ -23,12 +23,13 @@
  * entry, drawer.ts, reads the page as it loads, and no test imports an entry (tests/ts/env.ts).
  */
 import { mountPanel, newChat, panelQuery, type MountSettings } from './mount.ts';
+import { pageNonce } from './nonce.ts';
 
 /** The drawer's behaviour, on the launcher and the drawer element Admin\Drawer::footer() prints. */
 export function startDrawer(cfg: MountSettings, launcher: HTMLElement, host: HTMLElement): void {
   let mounted: Promise<void> | null = null;
   let remembered = host.dataset.conversation ?? '0';
-  const nonce = (): string => window.alpacaBot?.nonce ?? '';
+  const nonce = pageNonce();
 
   host.dataset.media = window.wp?.media ? '1' : '0';
 

@@ -256,9 +256,10 @@ final class Assets
     }
 
     /**
-     * `heartbeat_received`: chat.ts sends `alpaca_bot_nonce: 1` on heartbeat-send, and the
-     * answer carries a fresh `wp_rest` nonce under the same key. A heartbeat that did not ask
-     * (another screen's) is left as it was.
+     * `heartbeat_received`: the chat bundle sends `alpaca_bot_nonce: 1` on heartbeat-send, and
+     * so do the drawer's loader and the editor sidebar before it is added (resources/ts/nonce.ts),
+     * and the answer carries a fresh `wp_rest` nonce under the same key. A heartbeat that did not
+     * ask (another screen's) is left as it was.
      *
      * @param array<string, mixed> $response
      * @param array<string, mixed> $data what the browser sent

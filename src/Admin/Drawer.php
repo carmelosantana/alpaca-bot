@@ -83,10 +83,12 @@ final class Drawer
     /**
      * `admin_enqueue_scripts`: the launcher's few rules and the loader, with the two settings
      * objects the chat reads once the loader adds it (Assets::settings() and Assets::mount()).
-     * `heartbeat` is a dependency because the chat bundle refreshes its nonce on core's heartbeat
-     * (resources/ts/nonce.ts), and a script the loader adds to the page by hand cannot declare
-     * one. wp_enqueue_media() is not called: where the screen has not loaded the media library
-     * itself, resources/ts/drawer-start.ts marks the drawer and this stylesheet hides the image button.
+     * `heartbeat` is a dependency because the loader keeps its nonce fresh on core's heartbeat from
+     * the page's load, for the requests it signs before the first open (Kanboard #4526), and the
+     * chat bundle it adds does too once it boots (resources/ts/nonce.ts); a script the loader adds
+     * to the page by hand cannot declare a dependency of its own. wp_enqueue_media() is not
+     * called: where the screen has not loaded the media library itself,
+     * resources/ts/drawer-start.ts marks the drawer and this stylesheet hides the image button.
      */
     public function enqueue(): void
     {
