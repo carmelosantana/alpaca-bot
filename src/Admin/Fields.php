@@ -16,7 +16,8 @@ use AlpacaBot\Settings\Schema;
  * over both show Schema::MASK when a value is stored and '' when not. An MCP server's header
  * value gets the same treatment in the carry-over of `toolkits.mcp_servers`. Schema::sanitize() reads
  * the mask back as "keep what is stored", so a form saved without touching the key keeps it,
- * and a form saved with the field emptied clears it. The rule is applied here, at the one
+ * unless the same save moves the Base URL to another scheme, host or port
+ * (Schema::providerKeyClearedByMove()), and a form saved with the field emptied clears it. The rule is applied here, at the one
  * place a value turns into markup, so no caller can print the key by forgetting to mask it.
  *
  * Every attribute goes through esc_attr(), every text node through esc_html() or

@@ -43,6 +43,10 @@ use AlpacaBot\View\Settings\McpTools;
  * TypeError on every save; the closure reads the option and passes it. What it reads is the raw
  * stored row (get_option()), not Store's memo: the memo may be from earlier in the request, and
  * a sanitize callback should compare against what is in the database at the moment of the write.
+ * The mask keeps the key only while the Base URL keeps its origin: a save that moves it to another
+ * scheme, host or port clears the key unless a new one is typed with it, and the callback adds a
+ * notice saying so (Schema::providerKeyClearedByMove()), as heldServers() does for an MCP
+ * server's header value.
  *
  * Per-model overrides are a table with a row per model the catalog knows, posted as
  * `alpaca_bot_settings[models.overrides][<model>][<field>]`; Schema::sanitizeOverrides() drops a
@@ -124,6 +128,9 @@ final class SettingsPage
                     $input = [];
                 }
                 $input = is_array($input) ? $input : [];
+                if (Schema::providerKeyClearedByMove($input, $stored)) {
+                    add_settings_error(Plugin::OPTION, 'provider_key_cleared', esc_html__('The API key was cleared, because the Base URL moved to another host, port or scheme. Enter it again.', 'alpaca-bot'));
+                }
                 return self::heldServers(Schema::sanitize($input, $stored), $input, $stored, $servers);
             },
             'default' => Schema::defaults(),

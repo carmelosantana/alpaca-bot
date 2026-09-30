@@ -60,6 +60,32 @@ it('refuses a form post that PHP cut short, keeping the option as it was and tel
 
 // Every schema field but `access.mcp`, which has no control of its own: a row per MCP server
 // stands in for it, and with no server there is none.
+// #4539, ruling T4-c: the page posts the key as the mask, so a save that moves the Base URL to
+// another origin clears it (Schema::providerKeyClearedByMove()), and the page says so, as it does
+// for an MCP server's header value. A same-origin change clears nothing and says nothing.
+it('clears the key on a save that moves the base URL to another origin, and tells the admin', function (): void {
+    Functions\when('add_settings_section')->justReturn(null);
+    Functions\when('add_settings_field')->justReturn(null);
+    $opts = null;
+    Functions\expect('register_setting')->once()->withArgs(function (string $group, string $option, array $o) use (&$opts): bool {
+        $opts = $o;
+        return true;
+    });
+    Functions\when('get_option')->justReturn(['provider.api_key' => 'sk-FAKE-stored', 'provider.base_url' => 'https://openrouter.ai/api/v1']);
+    $notices = [];
+    Functions\when('add_settings_error')->alias(function (string $setting, string $code, string $message) use (&$notices): void {
+        $notices[] = [$setting, $code, $message];
+    });
+    settingsPage()->register();
+
+    $kept = ($opts['sanitize_callback'])(['provider.base_url' => 'https://openrouter.ai/v2', 'provider.api_key' => Schema::MASK], Plugin::OPTION);
+    expect($kept['provider.api_key'])->toBe('sk-FAKE-stored')->and($notices)->toBe([]);
+
+    $out = ($opts['sanitize_callback'])(['provider.base_url' => 'https://steal.example.net/v1', 'provider.api_key' => Schema::MASK], Plugin::OPTION);
+    expect($out['provider.api_key'])->toBe('')
+        ->and($notices)->toBe([[Plugin::OPTION, 'provider_key_cleared', 'The API key was cleared, because the Base URL moved to another host, port or scheme. Enter it again.']]);
+});
+
 it('adds a section per schema section on its own page and a field per schema field but the MCP map on that page', function (): void {
     Functions\when('register_setting')->justReturn(null);
     $sections = [];

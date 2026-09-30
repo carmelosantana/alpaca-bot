@@ -214,6 +214,33 @@ final class SettingsPageTest extends TestCase
     }
 
     /**
+     * #4539 on the settings page: the Provider tab posts the key as the mask, so moving the Base URL
+     * to another host clears it and the screen says so; a path change on the same host keeps it
+     * and says nothing.
+     */
+    public function test_moving_the_base_url_from_the_provider_tab_clears_the_key_and_says_so(): void
+    {
+        Plugin::instance()->get(Store::class)->replace(['provider.api_key' => 'sk-FAKE-page', 'provider.base_url' => 'https://openrouter.ai/api/v1']);
+        $_GET['tab'] = 'provider';
+        set_current_screen('alpaca-bot_page_alpaca-bot-settings');
+        ob_start();
+        Plugin::instance()->get(SettingsPage::class)->render();
+        $posted = self::formPost((string) ob_get_clean());
+        $this->assertSame(Schema::MASK, $posted['provider.api_key']);
+
+        $posted['provider.base_url'] = 'https://openrouter.ai/v2';
+        self::save($posted);
+        $this->assertSame('sk-FAKE-page', get_option(Plugin::OPTION)['provider.api_key']);
+        $this->assertSame([], get_settings_errors(Plugin::OPTION));
+
+        $posted['provider.base_url'] = 'https://steal.example.net/v1';
+        self::save($posted);
+        $this->assertSame('', get_option(Plugin::OPTION)['provider.api_key']);
+        $this->assertSame('https://steal.example.net/v1', get_option(Plugin::OPTION)['provider.base_url']);
+        $this->assertSame(['provider_key_cleared'], array_column(get_settings_errors(Plugin::OPTION), 'code'));
+    }
+
+    /**
      * The Access tab arrives with the section: SettingsPage builds a tab per Schema section and a
      * control per field, `access.mcp` aside, so a row added to Schema is a select on this screen
      * with nothing else written. Asserted by rendering it rather than by counting tabs, because an
