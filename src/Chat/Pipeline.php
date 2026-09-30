@@ -91,10 +91,12 @@ use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Message\UserMessage;
  * does. The usage metered is the whole run: Output::$usage is the sum over every provider call
  * the agent made, so a turn that took three calls is billed three calls' tokens against the
  * cap; a turn the consumer abandons is billed the calls it had completed by then (the provider
- * decorator's running tally). The cap is checked again before each of those calls after the
- * first (CapPolicy::assertMayContinue(), with that tally counted in; Kanboard #4701), so a tool
- * turn overshoots a cap by at most the one call that crossed it rather than by the rest of its
- * iteration budget. A turn stopped there is kept whether or not a tool had run, stored as a
+ * decorator's running tally). That tally counts toward the caps while the run lasts
+ * (CapPolicy::hold(), let go of however the run ends), and the cap is checked again before each
+ * of the run's calls after the first (CapPolicy::assertMayContinue(); Kanboard #4701). The check
+ * before a turn that a tool starts inside the run (SummarizeToolkit's) counts it as well. So no
+ * provider call is made once the cap is reached, and a tool turn overshoots a cap by at most the
+ * one call that crossed it rather than by the rest of its iteration budget. A turn stopped there is kept whether or not a tool had run, stored as a
  * failed tool turn is (the partial reply, a receipt for the calls made, `chat/failed`), and
  * CapExceeded itself is raised, `stopped` and carrying the conversation id, so every caller
  * answers it as it answers the refusal before a turn. An ephemeral turn runs plainly, tools or no tools, and that is a
@@ -269,6 +271,7 @@ final class Pipeline
             $toolkits = $ephemeral ? [] : $this->toolkitsFor($userId, $model);
             $observer = null;
             $bound = null;
+            $hold = null;
 
             /**
              * Fires when the turn is committed: the message is on the conversation, the system prompt
@@ -297,10 +300,12 @@ final class Pipeline
                 $toolkits = self::offered($toolkits);
                 if ($toolkits !== []) {
                     $bound = new BoundOptionsProvider($provider, $providerOptions);
-                    // Before each provider call after the first, the cap again, with the run's
-                    // spend so far counted in (Kanboard #4701; the catch below says what a stop
-                    // leaves behind).
-                    $observer = new AgentStreamObserver(fn() => $this->caps->assertMayContinue($userId, $bound->usage()->totalTokens));
+                    // The run's spend counts toward the caps while it runs, at its own checks and
+                    // at those of any turn a tool starts inside it; the finally below lets go of
+                    // it. Before each provider call after the first, the cap again (Kanboard
+                    // #4701; the catch below says what a stop leaves behind).
+                    $hold = $this->caps->hold($userId, static fn(): int => $bound->usage()->totalTokens);
+                    $observer = new AgentStreamObserver(fn() => $this->caps->assertMayContinue($userId));
                     $turn = $this->agentTurn($bound, $toolkits, $messages, $observer);
                     foreach ($turn as $delta) {
                         $content .= $delta->text;
@@ -387,6 +392,12 @@ final class Pipeline
                 // the tally, which the stop leaves complete for every call made, where the last
                 // reading before a yield can be one chunk short of a call's usage.
                 $capped = $e instanceof CapExceeded && $e->stopped;
+                // Let go of the running spend before the receipt below counts it and before a
+                // `chat/failed` listener could start a turn that would count it twice; the
+                // finally does the same for every other way out (release() is idempotent).
+                if ($hold !== null) {
+                    $this->caps->release($hold);
+                }
                 if ($capped && $bound !== null) {
                     $tally = $bound->usage();
                     $prompt = $tally->promptTokens;
@@ -428,6 +439,12 @@ final class Pipeline
                     throw $capped ? $e : new \RuntimeException(self::raised($e), 0, $e);
                 }
             } finally {
+                // Every way out of the run: finished, failed, stopped at the cap, abandoned. The
+                // spend is the receipt's to count from here (recorded below, or by settle()), and
+                // a later turn in this request must not count it twice.
+                if ($hold !== null) {
+                    $this->caps->release($hold);
+                }
                 // Empty on every path that came through the catch or through agentTurn()'s
                 // flush; the bytes themselves on the one path that came through neither, the
                 // consumer who stopped iterating while the generator was suspended.

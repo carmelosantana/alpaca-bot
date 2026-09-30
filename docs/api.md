@@ -895,7 +895,9 @@ anyone who may chat can reach this error. Per `ErrorsTest`:
 ```
 
 A tool turn is checked again before each provider call after its first, with what the turn has
-spent so far counted in, so it overshoots a cap by at most the one call that crossed it. Stopped
+spent so far counted in; a turn one of its tools starts (`summarize`) is checked with that spend
+counted too. So no provider call is made once the cap is reached, and a turn overshoots a cap by
+at most the one call that crossed it. Stopped
 there, it keeps what it produced as a partial reply with its receipt, and answers with the same
 402, saying the reply stopped. Per `ChatControllerTest`, a new conversation (id 42) whose first
 call took the user from 90 to 105 of 100 tokens:
