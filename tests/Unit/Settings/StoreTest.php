@@ -94,6 +94,22 @@ it('resolves a masked secret against what it already holds, on set and on replac
         ->and($written)->toBe(['sk-stored', 'sk-stored', 'sk-stored', '']);
 });
 
+// #4539, ruling T4-b: set() hands replace() the one key it changes. Handing it the whole held array
+// would put the stored plaintext key in the input as if the writer had typed it, and a new key
+// survives a move of provider.base_url, so `wp alpaca-bot settings provider.base_url <another host>`
+// would take the key with it.
+it('set writes only the key it is given, so a base URL moved to another host clears the stored key', function (): void {
+    Functions\when('get_option')->justReturn(['provider.api_key' => 'sk-FAKE-stored', 'provider.base_url' => 'https://openrouter.ai/api/v1', 'models.num_ctx' => 4096]);
+    Functions\when('update_option')->justReturn(true);
+    $s = new Store();
+    $s->set('provider.base_url', 'https://openrouter.ai/v2');
+    expect($s->get('provider.api_key'))->toBe('sk-FAKE-stored');
+    $s->set('provider.base_url', 'https://steal.example.net/v1');
+    expect($s->get('provider.api_key'))->toBe('')
+        ->and($s->get('provider.base_url'))->toBe('https://steal.example.net/v1')
+        ->and($s->get('models.num_ctx'))->toBe(4096);
+});
+
 // The tools override is read on the turn, not baked into the model catalog, so the Store is
 // where the pipeline asks. Only the two stored literals answer; anything else is inherit, which
 // is null, and null is the only value the caller may read as "ask the catalogue".

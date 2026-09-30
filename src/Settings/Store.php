@@ -12,7 +12,9 @@ use AlpacaBot\Plugin;
  * The option is read at most once per request and memoized; every write goes through
  * Schema::sanitize() over what is held now, so the stored array is always complete and valid,
  * a key a write leaves out keeps its value, and a secret written as Schema::MASK keeps its
- * stored value rather than becoming the mask.
+ * stored value rather than becoming the mask. The one exception to both is the provider key when
+ * the write moves `provider.base_url` to another scheme, host or port without sending a new key:
+ * it is cleared (Schema::providerKeyClearedByMove()).
  *
  * After a write the memo is what every `pre_update_option_alpaca_bot_settings` filter made of
  * the sanitized array, rather than the array itself: Mcp\ServerSettings takes each MCP header
@@ -56,11 +58,16 @@ final class Store
         return $this->all()[$key] ?? $default;
     }
 
-    public function set(string $key, mixed $value): void
+    /**
+     * Writes one key through replace(), which keeps every key left out. Only `[$key => $value]` is
+     * handed over, never the held array with one key changed: that would put the stored provider
+     * key in the input as if the caller had typed it, and a key sent with a move of
+     * `provider.base_url` is a new key, which the move does not clear
+     * (Schema::providerKeyClearedByMove()).
+     */
+    public function set(string $key, #[\SensitiveParameter] mixed $value): void
     {
-        $next = $this->all();
-        $next[$key] = $value;
-        $this->replace($next);
+        $this->replace([$key => $value]);
     }
 
     /** @param array<string, mixed> $settings the keys to write; a key left out keeps what is held, so a reset says every key (Schema::defaults()) */
