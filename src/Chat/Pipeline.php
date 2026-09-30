@@ -811,7 +811,7 @@ final class Pipeline
      * what the turn leaves behind before raising it, since that depends on whether a tool had
      * already run.
      *
-     * @param list<FirstWins> $toolkits as offered() left them: each offers at least one tool, and no name twice
+     * @param list<FirstWins> $toolkits as offered() left them: each offers at least one tool, and no name is offered by two of them
      * @param MessageInterface[] $messages as buildMessages() built them: the system message, if any, then the turns, the one being sent last
      * @return \Generator<int, Delta, mixed, Output>
      */

@@ -114,8 +114,10 @@ final class Plugin
         });
         // The key is not in the row (Settings\ProviderKey): the row reads MASK before and after a
         // change of key, so the row's update_option() can change nothing and fire neither hook
-        // above. Its own option is written, added or deleted exactly when the key changes, and
-        // each of the three busts the list the old key was answered with.
+        // above. Its own option is written, added or deleted whenever the key changes, and each
+        // of the three busts the list the old key was answered with. It is also written once when a
+        // plaintext key moves out of the row (migrate(), or beforeSave() over a row migrate() has
+        // not reached), with the key unchanged, which costs one bust of that list more.
         $providerKey = new Settings\ProviderKey();
         $providerKey->register();
         foreach (['add_option_', 'update_option_', 'delete_option_'] as $hook) {

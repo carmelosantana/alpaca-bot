@@ -31,10 +31,13 @@ use AlpacaBot\Vendor\Symfony\Contracts\HttpClient\HttpClientInterface;
  *   die with an Error on the Curl client. There these callers go Native while web_fetch, whose
  *   question is Requests' and stays so, still runs.
  *
- * The agreement runs one way only: wherever web_fetch refuses for want of cURL these callers go
- * Native, but they can go Native where web_fetch runs, on the host just described and on Windows
- * with none of `curl.cainfo`, `openssl.cafile` or `openssl.capath` set, where create() itself
- * answers Native or Amp (HttpClient.php:52-66; Egress replaces Amp with Native).
+ * The agreement runs one way only, and only on that question: wherever web_fetch refuses because
+ * curl_init or curl_exec cannot be called, these callers go Native. web_fetch also refuses an
+ * https page where libcurl was built without SSL, which is not asked here, so there these callers
+ * can still get the Curl client. And they can go Native where web_fetch runs, on the host just
+ * described and on Windows with none of `curl.cainfo`, `openssl.cafile` or `openssl.capath` set,
+ * where create() itself answers Native or Amp (HttpClient.php:52-66; Egress replaces Amp with
+ * Native).
  *
  * Where both say yes the choice is create()'s, unchanged, with the options handed in. Otherwise
  * the client is Symfony's Native client with those same options and create()'s host connection

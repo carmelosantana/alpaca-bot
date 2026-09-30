@@ -296,7 +296,8 @@ final class Schema
      * is no key. A site's first save is where it shows: core's add_option() runs the settings
      * page's sanitize callback a second time, over the row ProviderKey::beforeSave() has already
      * left MASK in, with nothing stored yet. ProviderKey::beforeSave() writes '' for a MASK when no
-     * key is held, and ProviderKey::resolve() never answers MASK as a key.
+     * key is held and the stored row carries no plaintext key either (over one that does, it keeps
+     * that key and writes MASK), and ProviderKey::resolve() never answers MASK as a key.
      */
     private static function secret(mixed $raw, mixed $stored): string
     {
