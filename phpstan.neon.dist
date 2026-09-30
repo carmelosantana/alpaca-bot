@@ -2,6 +2,10 @@ includes:
     - vendor/szepeviktor/phpstan-wordpress/extension.neon
 parameters:
     level: 6
+    # Per checkout, not the shared sys_get_temp_dir()/phpstan: two worktrees sharing one result
+    # cache made a worker OOM reconciling the other's entries (Kanboard #4469). Relative paths
+    # resolve against this file's directory.
+    tmpDir: .phpstan-cache
     paths: [src, uninstall.php, bin/hooks-doc.php, bin/readme-sync.php]
     scanFiles:
         - alpaca-bot.php
