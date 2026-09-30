@@ -67,9 +67,6 @@ final class RawOptionWrite
     /** The mode it is armed for, one of COMMANDS' values; null while disarmed. */
     private ?string $mode = null;
 
-    /** True while its own Store::replace() is writing, whose update_option() runs the filter again. */
-    private bool $writing = false;
-
     /** Whether the words of the command WP-CLI is about to run name this option (namesOption()). */
     private bool $named = false;
 
@@ -188,7 +185,7 @@ final class RawOptionWrite
     /** The takeover (the class docblock). */
     public function sanitize(#[\SensitiveParameter] mixed $value): mixed
     {
-        if ($this->writing || $this->mode === null) {
+        if ($this->mode === null) {
             return $value;
         }
         $row = get_option(Plugin::OPTION);
@@ -218,13 +215,10 @@ final class RawOptionWrite
             $cleared = $check->cleared;
         }
         $keyCleared = ProviderKey::clearedByMove($input, $this->store->all());
+        // Disarmed before the write: Store::replace()'s update_option() runs sanitize_option() on
+        // the value again, and that pass is this write, not a second raw one.
         $this->disarm();
-        $this->writing = true;
-        try {
-            $this->store->replace($input);
-        } finally {
-            $this->writing = false;
-        }
+        $this->store->replace($input);
         foreach (ClearedWarnings::lines($cleared, $keyCleared) as $line) {
             ($this->warn)($line);
         }

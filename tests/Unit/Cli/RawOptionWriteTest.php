@@ -221,16 +221,20 @@ it('takes over option add when there is no row yet, and says it added it', funct
         ->and($c->halted)->toBe(0);
 });
 
-// Store::replace() calls update_option(), which runs sanitize_option() again on its way in: that
-// pass is the plugin's own write, not a second raw one, and goes through as it is.
-it('lets its own write pass the sanitize filter untouched', function (): void {
+// Store::replace() calls update_option(), which runs sanitize_option() again on its way in. The
+// takeover disarms before it writes, so that pass finds it disarmed and its own write passes
+// untouched; armed, the pass would be taken over as a second raw write and update_option() called
+// twice.
+it('is disarmed before its own write, so its own write passes untouched', function (): void {
     $c = null;
     $inner = null;
+    $armedAtWrite = null;
     $calls = 0;
-    Functions\expect('update_option')->once()->andReturnUsing(static function (string $name, array $value) use (&$c, &$inner, &$calls): bool {
+    Functions\expect('update_option')->once()->andReturnUsing(static function (string $name, array $value) use (&$c, &$inner, &$armedAtWrite, &$calls): bool {
         if (++$calls > 1) {
             throw new RuntimeException('its own write was taken over as a second raw write');
         }
+        $armedAtWrite = has_filter('sanitize_option_' . Plugin::OPTION, [$c->subject, 'sanitize']);
         $inner = $c->subject->sanitize($value);
         return true;
     });
@@ -238,7 +242,8 @@ it('lets its own write pass the sanitize filter untouched', function (): void {
 
     $c->subject->sanitize(['models.temperature' => 0.4]);
 
-    expect($inner['models.temperature'])->toBe(0.4)
+    expect($armedAtWrite)->toBeFalse()
+        ->and($inner['models.temperature'])->toBe(0.4)
         ->and($c->success)->toBe(["Updated 'alpaca_bot_settings' option."]);
 });
 
