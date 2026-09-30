@@ -460,8 +460,11 @@ test('the sidebar reopens the conversation it last showed, the drawer opens on i
   await turnDone(sidebar);
   const conversation = await sidebar.locator('#ab-form input[name="conversation_id"]').inputValue();
   expect(Number(conversation)).toBeGreaterThan(0);
-  // The conversation, and not the drawer's open flag.
-  expect((await saved).postDataJSON()).toEqual({ conversation_id: Number(conversation) });
+  // The conversation, and not the drawer's open flag. Stored before the page is left: the POST is
+  // fire and forget, and a navigation could cancel it.
+  let request = await saved;
+  expect(request.postDataJSON()).toEqual({ conversation_id: Number(conversation) });
+  expect((await request.response())?.status()).toBe(200);
 
   // Back in the editor, the sidebar opens on it, with its turn.
   await open();
@@ -479,7 +482,9 @@ test('the sidebar reopens the conversation it last showed, the drawer opens on i
   saved = stored();
   await sidebar.locator('.page-title-action').click();
   await expect(sidebar.locator('#ab-form input[name="conversation_id"]')).toHaveValue('0');
-  expect((await saved).postDataJSON()).toEqual({ conversation_id: 0 });
+  request = await saved;
+  expect(request.postDataJSON()).toEqual({ conversation_id: 0 });
+  expect((await request.response())?.status()).toBe(200);
   await page.goto('/wp-admin/index.php');
   await expect(page.locator('#ab-drawer')).toHaveAttribute('data-conversation', '0');
 });
