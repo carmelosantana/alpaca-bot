@@ -44,8 +44,9 @@ use AlpacaBot\Vendor\Symfony\Contracts\HttpClient\HttpClientInterface;
  *   ClientFactory build `new Mcp\Egress()`).
  *
  * The client under the pin is AlpacaBot\HttpTransport::create(): Symfony's Native client where
- * cURL cannot be called (curl_init or curl_exec missing or disabled, the answer web_fetch goes
- * by), and HttpClient::create() (vendor-prefixed HttpClient.php:31-66) everywhere else, which
+ * its Curl client cannot run (curl_init or curl_exec missing or disabled, the answer web_fetch
+ * goes by, or any other cURL function that client calls; HttpTransport lists them), and
+ * HttpClient::create() (vendor-prefixed HttpClient.php:31-66) everywhere else, which
  * answers with Curl, Native or Amp. Amp is a candidate only where the unprefixed
  * amphp/http-client classes are loaded (HttpClient.php:14, :33), which the plugin does not ship
  * and another plugin could; it is then chosen over Curl when PHP's curl lacks HTTP/2 push or its
