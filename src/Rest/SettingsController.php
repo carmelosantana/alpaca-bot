@@ -8,6 +8,7 @@ use AlpacaBot\Access;
 use AlpacaBot\Errors;
 use AlpacaBot\Mcp\Secrets;
 use AlpacaBot\Mcp\ServerSettings;
+use AlpacaBot\Settings\ProviderKey;
 use AlpacaBot\Settings\Schema;
 use AlpacaBot\Settings\Store;
 
@@ -201,6 +202,7 @@ final class SettingsController extends Controller
     {
         if ((bool) $request->get_param('reveal') && current_user_can('manage_options')) {
             $settings = $this->store->all();
+            $settings['provider.api_key'] = ProviderKey::resolve($settings['provider.api_key'] ?? '');
             if (is_array($settings['toolkits.mcp_servers'] ?? null)) {
                 foreach ($settings['toolkits.mcp_servers'] as $i => $row) {
                     if (is_array($row)) {

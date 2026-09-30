@@ -86,7 +86,7 @@ final class SettingsRoutesTest extends TestCase
     {
         $this->asAdmin();
         $this->rest('PUT', '/settings', ['provider.base_url' => 'https://openrouter.ai/api/v1', 'provider.api_key' => 'sk-FAKE-admin', 'access.settings.write' => 'edit_posts']);
-        $this->assertSame('sk-FAKE-admin', get_option(Plugin::OPTION)['provider.api_key']);
+        $this->assertStoredProviderKey('sk-FAKE-admin', get_option(Plugin::OPTION));
         wp_set_current_user(self::factory()->user->create(['role' => 'editor']));
 
         $res = $this->rest('PUT', '/settings', ['provider.base_url' => 'https://steal.example.net/v1', 'provider.api_key' => Schema::MASK]);
@@ -94,13 +94,13 @@ final class SettingsRoutesTest extends TestCase
         $this->assertSame('provider.api_key', $res->get_headers()['X-Alpaca-Bot-Cleared'] ?? null);
         $this->assertSame('', $res->get_data()['provider.api_key']);
         $this->assertSame('https://steal.example.net/v1', get_option(Plugin::OPTION)['provider.base_url']);
-        $this->assertSame('', get_option(Plugin::OPTION)['provider.api_key']);
+        $this->assertStoredProviderKey('', get_option(Plugin::OPTION));
 
         // A path change on the new host keeps a key typed for it, and says nothing.
         $this->rest('PUT', '/settings', ['provider.api_key' => 'sk-FAKE-editor']);
         $res = $this->rest('PUT', '/settings', ['provider.base_url' => 'https://steal.example.net/v2', 'provider.api_key' => Schema::MASK]);
         $this->assertArrayNotHasKey('X-Alpaca-Bot-Cleared', $res->get_headers());
-        $this->assertSame('sk-FAKE-editor', get_option(Plugin::OPTION)['provider.api_key']);
+        $this->assertStoredProviderKey('sk-FAKE-editor', get_option(Plugin::OPTION));
     }
 
     /**
@@ -205,7 +205,7 @@ final class SettingsRoutesTest extends TestCase
         $this->asAdmin();
         $res = $this->rest('PUT', '/settings', ['provider.api_key' => 'sk-live-1234']);
         $this->assertSame(Schema::MASK, $res->get_data()['provider.api_key']);
-        $this->assertSame('sk-live-1234', get_option('alpaca_bot_settings')['provider.api_key']);
+        $this->assertStoredProviderKey('sk-live-1234', get_option('alpaca_bot_settings'));
         $this->assertSame(Schema::MASK, $this->rest('GET', '/settings')->get_data()['provider.api_key']);
         $this->assertStringNotContainsString('sk-live', (string) wp_json_encode($this->rest('GET', '/settings')->get_data()));
 
@@ -214,7 +214,7 @@ final class SettingsRoutesTest extends TestCase
         $this->assertSame('no-store', $revealed->get_headers()['Cache-Control']);
 
         $this->rest('PUT', '/settings', ['provider.api_key' => Schema::MASK, 'models.num_ctx' => 2048]);
-        $this->assertSame('sk-live-1234', get_option('alpaca_bot_settings')['provider.api_key']);
+        $this->assertStoredProviderKey('sk-live-1234', get_option('alpaca_bot_settings'));
         $this->assertSame(2048, get_option('alpaca_bot_settings')['models.num_ctx']);
 
         // Not a string at all (a typed client's null, an untouched form control serialised as
@@ -225,14 +225,14 @@ final class SettingsRoutesTest extends TestCase
         $res = rest_get_server()->dispatch($request);
         $this->assertSame(200, $res->get_status(), print_r($res->get_data(), true));
         $this->assertSame(Schema::MASK, $res->get_data()['provider.api_key']);
-        $this->assertSame('sk-live-1234', get_option('alpaca_bot_settings')['provider.api_key']);
+        $this->assertStoredProviderKey('sk-live-1234', get_option('alpaca_bot_settings'));
         $this->assertSame(4096, get_option('alpaca_bot_settings')['models.num_ctx']);
         $this->rest('PUT', '/settings', ['provider.api_key' => ['sk-live-9999']]);
-        $this->assertSame('sk-live-1234', get_option('alpaca_bot_settings')['provider.api_key']);
+        $this->assertStoredProviderKey('sk-live-1234', get_option('alpaca_bot_settings'));
 
         $res = $this->rest('PUT', '/settings', ['provider.api_key' => '']);
         $this->assertSame('', $res->get_data()['provider.api_key']);
-        $this->assertSame('', get_option('alpaca_bot_settings')['provider.api_key']);
+        $this->assertStoredProviderKey('', get_option('alpaca_bot_settings'));
         $this->assertSame('', $this->rest('GET', '/settings')->get_data()['provider.api_key']);
     }
 

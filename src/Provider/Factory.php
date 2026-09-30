@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace AlpacaBot\Provider;
 
+use AlpacaBot\Settings\ProviderKey;
 use AlpacaBot\Settings\Schema;
 use AlpacaBot\Settings\Store;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Contract\ProviderInterface;
@@ -136,7 +137,8 @@ final class Factory
         // WpAiClientProvider sends the schemas to core raw, so a toolkit schema that works
         // here may be rejected on `wp-ai` by the core provider (WpAiClientProvider says why
         // the sanitising is not copied there).
-        $apiKey = (string) $this->store->get('provider.api_key');
+        // The row carries MASK for a kept key; the key itself is in its own option.
+        $apiKey = ProviderKey::resolve($this->store->get('provider.api_key'));
         if ($apiKey !== '') {
             $http = new BearerHttpClient($http, $apiKey);
         }

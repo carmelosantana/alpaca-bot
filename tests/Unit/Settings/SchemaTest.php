@@ -167,8 +167,12 @@ it('keeps a stored secret when handed the mask, clears it on an empty string, re
         ->and(Schema::sanitize(['provider.api_key' => ' sk-new '], $stored)['provider.api_key'])->toBe('sk-new')
         // Absent keeps what is stored, as for any field: only '' clears.
         ->and(Schema::sanitize([], $stored)['provider.api_key'])->toBe('sk-stored')
-        // The mask over nothing stored is nothing stored, never the literal mask.
-        ->and(Schema::sanitize(['provider.api_key' => Schema::MASK], [])['provider.api_key'])->toBe('');
+        // The mask over nothing stored stays the mask: the key is kept out of the row
+        // (Settings\ProviderKey), so "nothing stored here" is not "no key", and a site's first
+        // save sanitizes the row a second time after the key has been lifted out of it. The
+        // filter that lifts it writes '' when nothing is held, and ProviderKey::resolve() never
+        // answers the mask as a key.
+        ->and(Schema::sanitize(['provider.api_key' => Schema::MASK], [])['provider.api_key'])->toBe(Schema::MASK);
 });
 
 it('keeps a stored secret when handed anything that is not a string, rather than clearing it', function (): void {

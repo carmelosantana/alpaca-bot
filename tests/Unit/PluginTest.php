@@ -22,6 +22,8 @@ use AlpacaBot\Provider\ModelCatalog;
 use AlpacaBot\Rest\StreamController;
 use AlpacaBot\Rest\ViewController;
 use AlpacaBot\Settings\Migrate04;
+use AlpacaBot\Settings\ProviderKey;
+use AlpacaBot\Settings\Schema;
 use AlpacaBot\Settings\Store;
 use AlpacaBot\Shortcodes;
 use AlpacaBot\Toolkit\DraftPostToolkit;
@@ -377,8 +379,9 @@ it('puts the drawer on the other admin screens: its loader on admin_enqueue_scri
 it('hooks the MCP server settings onto the option\'s writes and hands the same instance to the settings page and the REST route', function (): void {
     Functions\when('add_shortcode')->justReturn();
     $hooked = null;
-    Filters\expectAdded('pre_update_option_' . Plugin::OPTION)->once()->with(Mockery::on(static function (mixed $cb) use (&$hooked): bool {
-        $hooked = $cb;
+    // Settings\ProviderKey adds a filter of its own on this hook; the one under test is the MCP split.
+    Filters\expectAdded('pre_update_option_' . Plugin::OPTION)->twice()->with(Mockery::on(static function (mixed $cb) use (&$hooked): bool {
+        $hooked = is_array($cb) && $cb[0] instanceof AlpacaBot\Mcp\ServerSettings ? $cb : $hooked;
         return true;
     }), 10, 2);
     $plugin = Plugin::boot();
@@ -393,6 +396,59 @@ it('hooks the MCP server settings onto the option\'s writes and hands the same i
         $settings = $controller instanceof AlpacaBot\Rest\SettingsController ? $controller : $settings;
     }
     expect((new ReflectionProperty(AlpacaBot\Rest\SettingsController::class, 'servers'))->getValue($settings))->toBe($servers);
+});
+
+// The provider key is kept out of the autoloaded row (Settings\ProviderKey, Kanboard #4384): lifted
+// out of every write of the option, moved out of a 0.6.0 row on init, and, since the row reads
+// MASK before and after a change of key, the model list is busted from the key's own option.
+it('lifts the provider key out of every write of the option, moves a 0.6.0 key on init, and busts the model catalog when the key option changes', function (): void {
+    Functions\when('add_shortcode')->justReturn();
+    $lift = null;
+    Filters\expectAdded('pre_update_option_' . Plugin::OPTION)->twice()->with(Mockery::on(static function (mixed $cb) use (&$lift): bool {
+        $lift = is_array($cb) && $cb[0] instanceof ProviderKey ? $cb : $lift;
+        return true;
+    }), 10, 2);
+    $busts = [];
+    foreach (['add_option_', 'update_option_', 'delete_option_'] as $hook) {
+        Actions\expectAdded($hook . ProviderKey::OPTION)->once()->with(Mockery::on(static function (mixed $cb) use (&$busts): bool {
+            $busts[] = $cb;
+            return $cb instanceof Closure;
+        }));
+    }
+    $onInit = null;
+    Actions\expectAdded('init')->once()->with(Mockery::on(static function (mixed $cb) use (&$onInit): bool {
+        $onInit = $cb instanceof Closure ? $cb : $onInit;
+        return $cb instanceof Closure;
+    }), 20);
+    Actions\expectAdded('init')->times(3)->with(Mockery::type('array'));
+    $plugin = Plugin::boot();
+    $plugin->register();
+    expect($lift)->toBeArray()
+        ->and($lift[1])->toBe('beforeSave')
+        ->and($busts)->toHaveCount(3);
+
+    Functions\expect('delete_transient')->times(3)->with(ModelCatalog::TRANSIENT)->andReturn(true);
+    foreach ($busts as $bust) {
+        $bust();
+    }
+
+    // Every Migrate04 step flagged done, so the only move left is the key's.
+    $stored = [Plugin::OPTION => ['provider.api_key' => 'sk-FAKE-plain']];
+    foreach ([Migrate04::FLAG, Migrate04::FLAG_RETENTION, Migrate04::FLAG_CONVERSATIONS, Migrate04::FLAG_AUTOLOAD] as $flag) {
+        $stored[$flag] = '1';
+    }
+    Functions\when('get_option')->alias(static function (string $name, mixed $default = false) use (&$stored): mixed {
+        return $stored[$name] ?? $default;
+    });
+    Functions\when('update_option')->alias(static function (string $name, mixed $value, mixed $autoload = null) use (&$stored): bool {
+        $stored[$name] = $value;
+        $stored['__autoload__' . $name] = $autoload;
+        return true;
+    });
+    $onInit();
+    expect($stored[Plugin::OPTION]['provider.api_key'])->toBe(Schema::MASK)
+        ->and($stored[ProviderKey::OPTION])->toBe('sk-FAKE-plain')
+        ->and($stored['__autoload__' . ProviderKey::OPTION])->toBeFalse();
 });
 
 // The view routes get the MCP approval fragment through a Discovery over the container's one

@@ -285,13 +285,23 @@ final class Schema
      * is the one that loses nothing: a typed client's `null`, an untouched password control a
      * form serialised as `null`, a stray array, all leave the stored key as it was. The reply to
      * a write shows the mask when a key is stored, so a client that meant "clear" sees it did not.
+     *
+     * MASK over nothing stored stays MASK, as an MCP header value's does (sanitizeMcpServers()):
+     * the key is kept out of the row (Settings\ProviderKey), so '' in `$stored` does not say there
+     * is no key. A site's first save is where it shows: core's add_option() runs the settings
+     * page's sanitize callback a second time, over the row ProviderKey::beforeSave() has already
+     * left MASK in, with nothing stored yet. ProviderKey::beforeSave() writes '' for a MASK when no
+     * key is held, and ProviderKey::resolve() never answers MASK as a key.
      */
     private static function secret(mixed $raw, mixed $stored): string
     {
         if (is_string($raw) && $raw !== self::MASK) {
             return $raw;
         }
-        return is_string($stored) ? $stored : '';
+        if (is_string($stored) && $stored !== '') {
+            return $stored;
+        }
+        return $raw === self::MASK ? self::MASK : '';
     }
 
     /** @param Field $f */

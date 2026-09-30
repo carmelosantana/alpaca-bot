@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use AlpacaBot\Chat\Result;
 use AlpacaBot\Plugin;
+use AlpacaBot\Settings\ProviderKey;
 use AlpacaBot\Settings\Schema;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Config\ModelDefinition;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Contract\ProviderInterface;
@@ -464,6 +465,24 @@ it('masks the API key in the whole dump but prints it when asked for by name', f
         ->and($dump)->not->toContain('sk-secret')
         ->and(json_decode($dump, true))->toBe(array_replace(Schema::defaults(), ['models.default' => 'llama3.2', 'provider.api_key' => Schema::MASK]))
         ->and($c->out)->toBe("\"sk-secret\"\n");
+});
+
+// Since Kanboard #4384 the row carries the mask and the key is in Settings\ProviderKey's option:
+// asked for by name, the command still prints the key itself, and the dump still the mask.
+it('prints the kept API key when asked for by name while the row carries the mask', function (): void {
+    $h = pipelineWith(null, ['provider.api_key' => Schema::MASK]);
+    Functions\when('get_option')->alias(static fn(string $name, mixed $default = false): mixed => $name === ProviderKey::OPTION ? 'sk-FAKE-held' : $default);
+    $c = cliCommand($h);
+
+    $c->command->settings([], []);
+    $dump = $c->out;
+    $c->out = '';
+    $c->command->settings(['provider.api_key'], []);
+
+    expect($c->errors)->toBe([])
+        ->and($dump)->not->toContain('sk-FAKE-held')
+        ->and(json_decode($dump, true)['provider.api_key'])->toBe(Schema::MASK)
+        ->and($c->out)->toBe("\"sk-FAKE-held\"\n");
 });
 
 // An MCP server's header value is not in the option at all (Mcp\ServerSettings keeps it in an

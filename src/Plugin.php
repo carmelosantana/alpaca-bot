@@ -90,7 +90,7 @@ final class Plugin
         add_action('update_option_' . self::OPTION, function (mixed $old, mixed $new): void {
             if (is_array($old) && is_array($new)) {
                 $changed = false;
-                foreach (['provider.kind', 'provider.base_url', 'provider.api_key'] as $key) {
+                foreach (['provider.kind', 'provider.base_url'] as $key) {
                     $changed = $changed || ($old[$key] ?? null) !== ($new[$key] ?? null);
                 }
                 if (!$changed) {
@@ -112,6 +112,17 @@ final class Plugin
         add_action('add_option_' . self::OPTION, function (): void {
             delete_transient(Provider\ModelCatalog::TRANSIENT);
         });
+        // The key is not in the row (Settings\ProviderKey): the row reads MASK before and after a
+        // change of key, so the row's update_option() can change nothing and fire neither hook
+        // above. Its own option is written, added or deleted exactly when the key changes, and
+        // each of the three busts the list the old key was answered with.
+        $providerKey = new Settings\ProviderKey();
+        $providerKey->register();
+        foreach (['add_option_', 'update_option_', 'delete_option_'] as $hook) {
+            add_action($hook . Settings\ProviderKey::OPTION, function (): void {
+                delete_transient(Provider\ModelCatalog::TRANSIENT);
+            });
+        }
         // An MCP server's header value is taken out of its row on every update_option() of the
         // option, whoever calls it (Mcp\ServerSettings says why that is a filter, and what
         // add_option() on its own does instead). The settings page and
@@ -202,6 +213,9 @@ final class Plugin
             if ($migration->needed()) {
                 $migration->run();
             }
+            // Its own class, not a step of Migrate04: that class's steps are flagged, and this one
+            // needs no flag, since the row it reads is already in alloptions (ProviderKey::migrate()).
+            Settings\ProviderKey::migrate();
         }, 20);
         add_action('rest_api_init', function (): void {
             foreach ($this->controllers() as $controller) {

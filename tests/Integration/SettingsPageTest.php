@@ -9,6 +9,7 @@ use AlpacaBot\Admin\Menu;
 use AlpacaBot\Admin\SettingsPage;
 use AlpacaBot\Plugin;
 use AlpacaBot\Provider\Model;
+use AlpacaBot\Settings\ProviderKey;
 use AlpacaBot\Settings\Schema;
 use AlpacaBot\Settings\Store;
 
@@ -77,13 +78,27 @@ final class SettingsPageTest extends TestCase
     public function test_saving_the_mask_keeps_the_stored_key_and_an_empty_string_clears_it(): void
     {
         update_option('alpaca_bot_settings', array_merge(Schema::defaults(), ['provider.api_key' => 'sk-integration']));
-        $this->assertSame('sk-integration', get_option('alpaca_bot_settings')['provider.api_key']);
+        $this->assertStoredProviderKey('sk-integration', get_option('alpaca_bot_settings'));
         update_option('alpaca_bot_settings', ['provider.api_key' => Schema::MASK, 'models.temperature' => '1.1'] + Schema::defaults());
         $saved = get_option('alpaca_bot_settings');
-        $this->assertSame('sk-integration', $saved['provider.api_key']);
+        $this->assertStoredProviderKey('sk-integration', $saved);
         $this->assertSame(1.1, $saved['models.temperature']);
         update_option('alpaca_bot_settings', ['provider.api_key' => ''] + Schema::defaults());
-        $this->assertSame('', get_option('alpaca_bot_settings')['provider.api_key']);
+        $this->assertStoredProviderKey('', get_option('alpaca_bot_settings'));
+    }
+
+    // A site's first save takes core's add_option() branch, which runs this sanitize callback a
+    // second time over the value the filters left: the mask, with nothing stored yet and the
+    // default Base URL to compare against. The key must survive that pass, and the Base URL that
+    // differs from the default must not read as a move that clears it.
+    public function test_a_sites_first_save_with_a_key_keeps_it(): void
+    {
+        delete_option(Plugin::OPTION);
+        delete_option(ProviderKey::OPTION);
+        update_option(Plugin::OPTION, ['provider.api_key' => 'sk-FAKE-first', 'provider.base_url' => 'https://openrouter.ai/api/v1'] + Schema::defaults());
+        $this->assertSame(Schema::MASK, get_option(Plugin::OPTION)['provider.api_key']);
+        $this->assertSame('sk-FAKE-first', get_option(ProviderKey::OPTION));
+        $this->assertSame([], get_settings_errors(Plugin::OPTION));
     }
 
     public function test_menu_pages_are_registered(): void
@@ -180,7 +195,7 @@ final class SettingsPageTest extends TestCase
             'privacy.usage_retention_days' => 0,
         ]));
         $before = get_option('alpaca_bot_settings');
-        $this->assertSame('sk-secret-integration', $before['provider.api_key']);
+        $this->assertStoredProviderKey('sk-secret-integration', $before);
         $this->assertSame(['github' => 'read'], $before['access.mcp']);
         $this->assertSame(['search' => str_repeat('c', 64)], $before['toolkits.mcp_servers'][0]['approved']);
         $this->assertSame(Schema::MASK, $before['toolkits.mcp_servers'][0]['header_value']);
@@ -230,12 +245,12 @@ final class SettingsPageTest extends TestCase
 
         $posted['provider.base_url'] = 'https://openrouter.ai/v2';
         self::save($posted);
-        $this->assertSame('sk-FAKE-page', get_option(Plugin::OPTION)['provider.api_key']);
+        $this->assertStoredProviderKey('sk-FAKE-page', get_option(Plugin::OPTION));
         $this->assertSame([], get_settings_errors(Plugin::OPTION));
 
         $posted['provider.base_url'] = 'https://steal.example.net/v1';
         self::save($posted);
-        $this->assertSame('', get_option(Plugin::OPTION)['provider.api_key']);
+        $this->assertStoredProviderKey('', get_option(Plugin::OPTION));
         $this->assertSame('https://steal.example.net/v1', get_option(Plugin::OPTION)['provider.base_url']);
         $this->assertSame(['provider_key_cleared'], array_column(get_settings_errors(Plugin::OPTION), 'code'));
     }
@@ -547,7 +562,7 @@ final class SettingsPageTest extends TestCase
         $_POST[SettingsPage::END_MARKER] = '1';
         update_option('alpaca_bot_settings', $posted);
         $this->assertSame('changed-on-the-models-tab', get_option('alpaca_bot_settings')['models.default']);
-        $this->assertSame('sk-REVIEW-SENTINEL-9f3a', get_option('alpaca_bot_settings')['provider.api_key']);
+        $this->assertStoredProviderKey('sk-REVIEW-SENTINEL-9f3a', get_option('alpaca_bot_settings'));
 
         // Layer two, the schema alone: no $_POST, the guard is inert, and the post is the old
         // layout's truncation, the Models fields with the whole carry-over dropped.
@@ -558,7 +573,7 @@ final class SettingsPageTest extends TestCase
         update_option('alpaca_bot_settings', $cut);
         $after = get_option('alpaca_bot_settings');
         $this->assertSame('changed-again', $after['models.default']);
-        $this->assertSame('sk-REVIEW-SENTINEL-9f3a', $after['provider.api_key']);
+        $this->assertStoredProviderKey('sk-REVIEW-SENTINEL-9f3a', $after);
         $this->assertSame('https://openrouter.ai/api/v1', $after['provider.base_url']);
         $this->assertSame(array_keys(Schema::fields()), array_keys($after));
     }

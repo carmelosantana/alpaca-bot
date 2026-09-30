@@ -9,6 +9,7 @@ use AlpacaBot\Chat\Result;
 use AlpacaBot\Chat\UsageMeter;
 use AlpacaBot\Mcp\ServerSettings;
 use AlpacaBot\Provider\ModelCatalog;
+use AlpacaBot\Settings\ProviderKey;
 use AlpacaBot\Settings\Schema;
 use AlpacaBot\Settings\Store;
 
@@ -338,7 +339,12 @@ final class ChatCommand
             $this->store->set($key, $value);
         }
         $stored = $this->store->get($key);
-        $this->emit(wp_json_encode($key === 'toolkits.mcp_servers' ? Schema::maskedServers($stored) : $stored, self::JSON) . "\n");
+        $stored = match ($key) {
+            'toolkits.mcp_servers' => Schema::maskedServers($stored),
+            'provider.api_key' => ProviderKey::resolve($stored),
+            default => $stored,
+        };
+        $this->emit(wp_json_encode($stored, self::JSON) . "\n");
         if ($cleared !== []) {
             ($this->warn)(sprintf(
                 count($cleared) === 1
