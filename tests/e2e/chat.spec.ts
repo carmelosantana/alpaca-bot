@@ -75,3 +75,73 @@ test('a turn on the admin chat screen streams the provider reply into an assista
   // #ab-status, so an empty status region is the assertion that the turn took the happy path.
   await expect(page.locator('#ab-status')).toBeEmpty();
 });
+
+/**
+ * Kanboard #4525: a turn still running when the history select opens another conversation must
+ * not take the composer back to its own when it finishes. The turn's `start` and `done` frames
+ * both name the conversation it ran in, and before the fix either one wrote that id into the
+ * hidden conversation_id field, so the next message went to a conversation the transcript did
+ * not show.
+ *
+ * The race is made deterministic rather than timed: page.route() holds the turn's stream
+ * redemption until the switch has landed (the transcript and the field both on conversation A),
+ * so every frame of the turn arrives after it. The assertion is the next turn's POST /chat body,
+ * which is where a wrong field would send the message.
+ */
+test('switching conversation through the history select mid-turn sends the next message to the conversation now open', async ({ page }) => {
+  await page.goto('/wp-login.php');
+  await page.fill('#user_login', ADMIN_USER);
+  await page.fill('#user_pass', ADMIN_PASSWORD);
+  await Promise.all([page.waitForURL(/wp-admin/), page.click('#wp-submit')]);
+
+  const field = page.locator('#ab-form [name="conversation_id"]');
+  const send = page.locator('#ab-form [data-action="send"]');
+  const receipts = page.locator('#ab-messages article.ab-msg--assistant footer.ab-receipt');
+  /** One message, sent and run to its receipt: one more receipt than the transcript had. */
+  async function turn(text: string): Promise<void> {
+    const before = await receipts.count();
+    await page.fill('#ab-message', text);
+    await page.locator('#ab-message').press('Enter');
+    await expect(receipts).toHaveCount(before + 1, { timeout: 30_000 });
+    await expect(send).toBeEnabled();
+  }
+
+  // Conversation A, finished, so the history select lists it on the next load.
+  await page.goto('/wp-admin/admin.php?page=alpaca-bot');
+  await expect(page.locator('#ab-form')).toBeVisible();
+  await turn('conversation A');
+  const a = await field.inputValue();
+  expect(Number(a)).toBeGreaterThan(0);
+
+  // A new chat whose first turn is held at its stream redemption.
+  await page.goto('/wp-admin/admin.php?page=alpaca-bot');
+  await expect(field).toHaveValue('0');
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  let held!: () => void;
+  const redeeming = new Promise<void>((resolve) => { held = resolve; });
+  const isStream = (url: URL): boolean => /chat(?:\/|%2F)\d+(?:\/|%2F)stream/i.test(url.href);
+  await page.route(isStream, async (route) => {
+    held();
+    await gate;
+    await route.continue();
+  });
+  await page.fill('#ab-message', 'conversation B');
+  await page.locator('#ab-message').press('Enter');
+  await redeeming;
+
+  // Open A while B's turn waits, then let B's frames through.
+  await page.locator('#ab-history-select').selectOption(a);
+  await expect(page.locator('#ab-messages')).toHaveAttribute('data-conversation', a);
+  await expect(field).toHaveValue(a);
+  release();
+  await expect(send).toBeEnabled({ timeout: 30_000 });
+  await page.unroute(isStream);
+
+  // B's `start` and `done` have both arrived and the composer is still on A.
+  await expect(field).toHaveValue(a);
+  await expect(page.locator('#ab-messages')).toHaveAttribute('data-conversation', a);
+  const ticket = page.waitForRequest((req) => req.method() === 'POST' && /alpaca-bot(?:\/|%2F)v1(?:\/|%2F)chat(?:$|[?&])/.test(req.url()));
+  await turn('back in A');
+  expect(JSON.parse((await ticket).postData() ?? '{}').conversation_id).toBe(Number(a));
+});
