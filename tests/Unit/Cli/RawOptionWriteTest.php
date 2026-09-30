@@ -350,22 +350,24 @@ it('takes nothing over while WP-CLI\'s option command writes another option, and
         ->and(has_filter('sanitize_option_' . Plugin::OPTION, [$c->subject, 'sanitize']))->toBeFalse();
 })->with(['update', 'patch', 'add']);
 
-it('refuses --autoload set to anything but on, writes nothing, and disarms', function (mixed $autoload, string $shown): void {
+it('refuses --autoload set to anything but on, naming it as it was written, writes nothing, and disarms', function (mixed $autoload, string $message): void {
     Functions\expect('update_option')->never();
     $c = rawWrite([], assoc: ['autoload' => $autoload]);
 
     $c->subject->sanitize(['models.temperature' => 0.4]);
 
-    expect($c->errors)->toBe(["alpaca_bot_settings stays autoloaded, so --autoload={$shown} is refused and nothing was written. Leave --autoload out, or pass --autoload=on."])
+    expect($c->errors)->toBe([$message])
         ->and($c->success)->toBe([])
         ->and($c->halted)->toBeNull()
         ->and(has_filter('sanitize_option_' . Plugin::OPTION, [$c->subject, 'sanitize']))->toBeFalse();
 })->with([
-    'off' => ['off', 'off'],
-    'no' => ['no', 'no'],
-    'false' => ['false', 'false'],
-    'false from wp-cli.yml' => [false, 'false'],
-    'something else' => ['auto', 'auto'],
+    'off' => ['off', 'alpaca_bot_settings stays autoloaded, so --autoload=off is refused and nothing was written. Leave --autoload out, or pass --autoload=on.'],
+    'no' => ['no', 'alpaca_bot_settings stays autoloaded, so --autoload=no is refused and nothing was written. Leave --autoload out, or pass --autoload=on.'],
+    'something else' => ['auto', 'alpaca_bot_settings stays autoloaded, so --autoload=auto is refused and nothing was written. Leave --autoload out, or pass --autoload=on.'],
+    // WP-CLI refuses --autoload=false and --no-autoload itself; a bool reaches here only from
+    // wp-cli.yml, whose YAML reads an unquoted off, no or false as false.
+    'autoload: off in wp-cli.yml' => [false, 'alpaca_bot_settings stays autoloaded, so autoload: off in wp-cli.yml (off, no or false there) is refused and nothing was written. Take autoload out of wp-cli.yml, or set it to on.'],
+    'a list in wp-cli.yml' => [['off'], 'alpaca_bot_settings stays autoloaded, so autoload: array in wp-cli.yml is refused and nothing was written. Take autoload out of wp-cli.yml, or set it to on.'],
 ]);
 
 // Refused before the stored row passes untouched: that pass would leave WP-CLI to call

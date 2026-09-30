@@ -76,6 +76,12 @@ final class RawOptionWriteTest extends TestCase
      * what WP-CLI itself prints in `$this->said`, prefixed `WP-CLI: `. Skips where there is no phar.
      * The class is required, not copied, so a WP-CLI that renames it, or its update(), patch() or
      * add(), fails the tests that call it.
+     *
+     * Both places bin/test-integration.sh runs the suite have the phar there, so these run rather
+     * than skip: the harness's `cli` service runs the `wordpress:cli-php8.4` image, and wp-env's
+     * `tests-cli` (CI) is built FROM `wordpress:cli-php8.4` too (@wordpress/env's
+     * cliDockerFileContents(), with .wp-env.json's phpVersion), which ships WP-CLI at
+     * /usr/local/bin/wp. A skip means the suite ran somewhere else.
      */
     private function wpCli(): void
     {

@@ -219,12 +219,15 @@ final class RawOptionWrite
         $autoload = self::autoload($cli[1]);
         if ($autoload === false) {
             $this->disarm();
+            // Named as it was written: a string is the flag's value; anything else comes from
+            // wp-cli.yml, since WP-CLI refuses --autoload=false and --no-autoload itself, and
+            // YAML reads an unquoted off, no or false there as false.
             $shown = $cli[1]['autoload'];
-            ($this->fail)(sprintf(
-                '%s stays autoloaded, so --autoload=%s is refused and nothing was written. Leave --autoload out, or pass --autoload=on.',
-                Plugin::OPTION,
-                is_bool($shown) ? ($shown ? 'true' : 'false') : (is_scalar($shown) ? (string) $shown : get_debug_type($shown)),
-            ));
+            ($this->fail)(Plugin::OPTION . ' stays autoloaded, so ' . match (true) {
+                is_string($shown) => "--autoload={$shown} is refused and nothing was written. Leave --autoload out, or pass --autoload=on.",
+                $shown === false => 'autoload: off in wp-cli.yml (off, no or false there) is refused and nothing was written. Take autoload out of wp-cli.yml, or set it to on.',
+                default => 'autoload: ' . get_debug_type($shown) . ' in wp-cli.yml is refused and nothing was written. Take autoload out of wp-cli.yml, or set it to on.',
+            });
             return $value;
         }
         if ($value === $row) {
