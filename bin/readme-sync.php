@@ -57,6 +57,14 @@
  *   a repo-relative   => the same path under GITHUB, so a link that works on the GitHub page
  *   link                works on the listing too rather than 404ing under wordpress.org.
  *
+ * One exception to rendering a heading's body: a heading named in ON_GITHUB keeps its `= X =`
+ * but its body is replaced by one line linking to that heading's anchor in README.md on GitHub.
+ * wordpress.org keeps only the first 2,500 words of Description and drops the rest with no sign
+ * to the reader, and the sections after Usage and Shortcodes -- Support among them -- were the
+ * ones it dropped. The listing therefore names those two long reference sections and points at
+ * them, and README.md stays the full document. An unknown `== Usage ==` section would not help:
+ * the parser appends it to Description before the trim, so it counts all the same.
+ *
  * Anything else -- paragraphs, lists, inline code, absolute links, emphasis -- is copied
  * through. The output is deterministic: it depends on README.md, readme.txt and this file, and
  * on nothing about the machine or the clock.
@@ -81,6 +89,14 @@ const SECTIONS = [
     'Frequently Asked Questions' => ['Frequently Asked Questions'],
     'Changelog' => ['Changelog'],
 ];
+
+/**
+ * The README headings a readme.txt section names but does not carry: each renders as its
+ * `= X =` and a link to its anchor in README.md on GitHub (see the file docblock for why). The
+ * heading still has to exist and still has to have a body, exactly like one that is rendered,
+ * so a renamed or emptied section cannot leave a link to an anchor that is gone.
+ */
+const ON_GITHUB = ['Usage', 'Shortcodes'];
 
 /** Where a repo-relative link points once it is on wordpress.org. */
 const GITHUB = 'https://github.com/carmelosantana/alpaca-bot/blob/main/';
@@ -346,11 +362,23 @@ function render(array $md): array
             if ($body === []) {
                 fail('README.md\'s "## ' . $heading . '" section is empty');
             }
+            if ($nested && in_array($heading, ON_GITHUB, true)) {
+                $body = ['Read [' . $heading . '](' . GITHUB . 'README.md#' . anchor($heading) . ') in the README on GitHub.'];
+            }
             $blocks[] = implode("\n", $nested ? array_merge(['= ' . $heading . ' =', ''], $body) : $body);
         }
         $rendered[$target] = implode("\n\n", $blocks);
     }
     return $rendered;
+}
+
+/**
+ * The anchor GitHub gives a Markdown heading: lower-cased, every character that is not a letter,
+ * a digit, a space, a hyphen or an underscore removed, and each space made a hyphen.
+ */
+function anchor(string $heading): string
+{
+    return str_replace(' ', '-', (string) preg_replace('/[^\p{L}\p{N} _-]/u', '', mb_strtolower($heading)));
 }
 
 /**

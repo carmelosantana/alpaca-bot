@@ -146,16 +146,44 @@ it('replaces only the three sections it owns', function (): void {
 
 // The nesting decides the heading, not the number of hashes: `### 0.5.0` under `## Changelog`,
 // whose own heading the section marker already is, has `= X =` left to become -- and that is the
-// line wordpress.org splits releases on. The same `###` under `## Usage`, which got a `= Usage =`
+// line wordpress.org splits releases on. The same `###` under `## Setup`, which got a `= Setup =`
 // of its own, has no level left and flattens to bold.
 it('renders a heading one nesting step below the section marker', function (): void {
-    $root = readmeSyncTree(str_replace('## Usage' . "\n\n" . 'use it', '## Usage' . "\n\n" . '### The chat screen' . "\n\n" . 'use it', readmeSyncMarkdown()));
+    $root = readmeSyncTree(str_replace('## Setup' . "\n\n" . 'set it up', '## Setup' . "\n\n" . '### The first run' . "\n\n" . 'set it up', readmeSyncMarkdown()));
     readmeSync($root, $root . '/out.txt');
     $out = (string) file_get_contents($root . '/out.txt');
 
     expect($out)->toContain("= 0.5.0 =\n\n- a change")
         ->and($out)->toContain("= Is it good? =\n\nYes.")
-        ->and($out)->toContain("= Usage =\n\n**The chat screen**");
+        ->and($out)->toContain("= Setup =\n\n**The first run**");
+});
+
+// wordpress.org keeps the first 2,500 words of Description and drops the rest, silently for the
+// reader. Usage and Shortcodes are the long reference sections, so the listing names them and
+// links to their full text on GitHub instead of carrying it; that keeps Support and Made Possible
+// By, which come after them, on the listing.
+it('renders Usage and Shortcodes as a pointer to their README anchor on GitHub, not as their text', function (): void {
+    $root = readmeSyncTree(readmeSyncMarkdown());
+    $result = readmeSync($root, $root . '/out.txt');
+    $out = (string) file_get_contents($root . '/out.txt');
+
+    expect($result['code'])->toBe(0)
+        ->and($out)->toContain("= Usage =\n\nRead [Usage](https://github.com/carmelosantana/alpaca-bot/blob/main/README.md#usage) in the README on GitHub.")
+        ->and($out)->toContain("= Shortcodes =\n\nRead [Shortcodes](https://github.com/carmelosantana/alpaca-bot/blob/main/README.md#shortcodes) in the README on GitHub.")
+        ->and($out)->not->toContain('use it')
+        ->and($out)->not->toContain('shortcodes here')
+        ->and($out)->toContain("= Support =\n\nask on Discord")
+        ->and($out)->toContain("= Made Possible By =\n\nother people");
+});
+
+it('still fails when README.md has lost a heading it only points to', function (): void {
+    $root = readmeSyncTree(str_replace("## Shortcodes\n", "## Short codes\n", readmeSyncMarkdown()));
+    $before = (string) file_get_contents($root . '/readme.txt');
+    $result = readmeSync($root, null);
+
+    expect($result['code'])->toBe(1)
+        ->and($result['stderr'])->toContain('## Shortcodes')
+        ->and(file_get_contents($root . '/readme.txt'))->toBe($before);
 });
 
 // A `<details>` fold is GitHub markup; the readme.txt parser has none of its own, and the
@@ -263,6 +291,20 @@ it('is what the committed readme.txt already says', function (): void {
 
     expect($result['code'])->toBe(0)
         ->and($result['stdout'])->toBe((string) file_get_contents($root . '/readme.txt'));
+});
+
+// Measured the way wordpress.org's readme parser measures it (Plugin Check 2.1.0 bundles the same
+// Parser: trim_length($content, 2500, 'words') splits on /(\s+)/u and keeps 2 x 2500 pieces). An
+// unknown `== X ==` section is appended to Description before that trim, so the whole run from
+// `== Description ==` to the next known section is what counts. 2,300 leaves the next README edit
+// some room before the listing starts losing its last sections without a word.
+it('keeps the committed Description under wordpress.org\'s 2,500-word trim, with room to spare', function (): void {
+    $readme = (string) file_get_contents(dirname(__DIR__, 2) . '/readme.txt');
+    expect(preg_match('/^== Description ==\n(.*?)^== Installation ==$/ms', $readme, $m))->toBe(1);
+    $pieces = preg_split('/(\s+)/u', trim($m[1]), -1, PREG_SPLIT_DELIM_CAPTURE);
+    expect($pieces)->toBeArray();
+
+    expect((int) ceil(count((array) $pieces) / 2))->toBeLessThanOrEqual(2300);
 });
 
 it('leaves the shipped header block alone on the real repo too', function (): void {
