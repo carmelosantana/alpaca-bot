@@ -188,13 +188,13 @@ final class Access
      *
      * A caller that passes fewer than expectedArgs() throws rather than being tolerated. This is
      * the enforcement path: an enforcement caller is about to decide whether somebody may do
-     * something, and it knows its own arguments, so a short call is a programming
-     * error and nothing else. Falling back to the stored value instead would throw away whatever
-     * the site's filter had to say — including a filter that *tightens* the row — and hand back
-     * a looser capability than the site asked for, with no symptom. A fatal in development is
-     * the cheap end of that trade. A screen, which must not be fatal, catches what this throws
-     * itself (Admin\SettingsPage::ask(), which passes every row its full count). Extra arguments are passed on untouched, so a row may
-     * grow one without breaking its callers.
+     * something, and it knows its own arguments, so a short call is a programming error and
+     * nothing else. Falling back to the stored value instead would throw away whatever the site's
+     * filter had to say — including a filter that *tightens* the row — and hand back a looser
+     * capability than the site asked for, with no symptom. A fatal in development is the cheap end
+     * of that trade. A screen, which must not be fatal, catches what this throws itself
+     * (Admin\SettingsPage::ask(), which passes every row its full count). Extra arguments are
+     * passed on untouched, so a row may grow one without breaking its callers.
      *
      * @param mixed ...$args extra arguments the row's filter receives after the capability
      * @throws \InvalidArgumentException when fewer than expectedArgs() arguments are passed

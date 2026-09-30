@@ -270,13 +270,14 @@ final class SettingsPage
      * given at runtime (accessArgs()), so a listener registered for its row's arguments is called
      * with them here too. Those arguments are always the full count Access::expectedArgs() fixes,
      * so effective() never refuses them. It is asked once, through ask(), which catches and logs
-     * whatever it throws (the option read in stored() included), so a listener on such a row runs
-     * once each time the tab is shown, and a throwing one leaves one line (Kanboard #4694).
+     * whatever the row's filter throws, so a listener on such a row runs once each time the tab is
+     * shown, and a throwing one leaves one line (Kanboard #4694).
      *
      * Two rows govern more than one surface, and each surface is asked once, the answers grouped
-     * (setInCodeEach()), so a listener with side effects runs once per surface too. The Shortcodes row is asked through Access::effective()
-     * once per shortcode it governs, `[alpacabot]` and `[alpacabot_agent]`, with post id 0 and
-     * that tag, which is what Shortcodes\Chat passes for one rendered outside a post.
+     * (setInCodeEach()), so a listener with side effects runs once per surface too. The Shortcodes
+     * row is asked through Access::effective() once per shortcode it governs, `[alpacabot]` and
+     * `[alpacabot_agent]`, with post id 0 and that tag, which is what Shortcodes\Chat passes for
+     * one rendered outside a post.
      *
      * The Chat row has no filter in Access, so effective('chat') is the stored value whatever a
      * site did. The menu's filter (Menu::capability(), which the chat screen, the drawer and the
