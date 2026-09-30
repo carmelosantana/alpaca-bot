@@ -43,11 +43,11 @@ find dist/alpaca-bot -exec touch -h -d "@$SOURCE_DATE_EPOCH" {} +
 # The list is fed to grep by herestring, never `printf | grep -q`: -q exits on the first match
 # and closes the pipe, and a writer still writing at that moment is killed by SIGPIPE, so
 # `pipefail` hands back 141 and a path that IS in the zip is reported MISSING. Whether the
-# writer is still writing turns on the bytes left in flight against the pipe buffer (65,536
-# bytes on Linux), not on how many entries matched, and the listing's size moves with every
-# file the plugin ships. So a pipe here can pass today and fail later, and the flip arrives
-# with the artifact's growth rather than with an edit to this line. A herestring has no writer
-# to kill.
+# writer is still writing turns on the bytes left in flight against the pipe buffer (64 KiB
+# by default on x86-64 Linux), not on how many entries matched, and the listing's size moves
+# with every file the plugin ships. So a pipe here can pass today and fail later, and the flip
+# arrives with the artifact's growth rather than with an edit to this line. A herestring has
+# no writer to kill.
 list=$(unzip -Z1 dist/alpaca-bot.zip)
 fail=0
 # First, so an empty zip is named as one cause before the path list reports it as every path
