@@ -78,7 +78,9 @@ final class Plugin
         // on every turn for the transient's lifetime. Removing this bust needs a per-kind
         // default (or an eager re-list) to go in with it.
         // On `update_option_*` rather than in Store: every writer (the settings page, the REST
-        // route, WP-CLI, a filter) goes through the option, and only one of them through Store.
+        // route, WP-CLI, a filter) goes through the option, and not every writer goes through
+        // Store: the settings page saves through core's options.php, and any other code can call
+        // update_option().
         // Neither closure is `static`, for the reason the receipt-retention hook below gives.
         add_action('admin_notices', function () use ($factory): void {
             $notice = $factory->fallbackNotice();
@@ -108,7 +110,8 @@ final class Plugin
         // save kept the previous one's models for the transient's five minutes — which, by the
         // argument above, means every turn in that window refused by name on `wp-ai`.
         // Unconditional: an add has no old value to compare the three keys against, and the one
-        // deleted transient it can cost is on the first settings save a site ever makes.
+        // deleted transient it can cost is on a save that creates the row: a site's first, or the
+        // first after the row was deleted.
         add_action('add_option_' . self::OPTION, function (): void {
             delete_transient(Provider\ModelCatalog::TRANSIENT);
         });

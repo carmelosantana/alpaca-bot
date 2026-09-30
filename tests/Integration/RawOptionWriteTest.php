@@ -176,6 +176,38 @@ final class RawOptionWriteTest extends TestCase
         $this->assertSame([], $this->said);
     }
 
+    // README's REST API and WP-CLI section: a raw `wp option update alpaca_bot_settings '{}'
+    // --format=json` no longer resets the settings, since a key it leaves out keeps its value, and
+    // `wp option delete alpaca_bot_settings` is the reset.
+    public function test_an_empty_update_keeps_every_setting_and_a_delete_is_the_reset(): void
+    {
+        Plugin::instance()->get(Store::class)->set('models.temperature', 0.3);
+        $row = get_option(Plugin::OPTION);
+
+        $this->assertSame('halt 0', $this->write('update', []));
+        $this->assertSame($row, get_option(Plugin::OPTION));
+
+        // The next request's Store (this one's has the row memoized) reads every default.
+        delete_option(Plugin::OPTION);
+        $this->assertSame(Schema::defaults(), (new Store())->all());
+    }
+
+    // README's MCP paragraph: the raw write is one of the saves that keep no server under a
+    // reserved prefix, and check its address.
+    public function test_a_reserved_prefix_is_refused_as_rest_refuses_it(): void
+    {
+        $before = get_option(Plugin::OPTION);
+        $rows = [['url' => 'https://ab.example.com/mcp', 'prefix' => Schema::RESERVED_PREFIX]];
+        $this->asAdmin();
+        $rest = $this->rest('PUT', '/settings', ['toolkits.mcp_servers' => $rows]);
+        $this->assertSame(400, $rest->get_status());
+
+        $ended = $this->write('update', ['toolkits.mcp_servers' => $rows] + $before);
+
+        $this->assertSame('Error: ' . $rest->get_data()['message'], $ended);
+        $this->assertSame($before, get_option(Plugin::OPTION));
+    }
+
     public function test_a_key_only_write_succeeds_and_the_key_reaches_resolve(): void
     {
         Plugin::instance()->get(Store::class)->set('provider.api_key', 'sk-FAKE-first');

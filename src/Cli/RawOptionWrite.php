@@ -29,7 +29,8 @@ use AlpacaBot\Settings\Store;
  * `WP_CLI::runcommand()` (a patch path that is not there, say) runs no `after_invoke:` and
  * leaves it armed until then, so the takeover also asks inCommand(): a value is taken over only
  * while WP-CLI's Option_Command update(), patch() or add() is on the call stack, and a write
- * from anywhere else goes through as it is and disarms it. `wp alpaca-bot settings` (which writes through Store itself) never arms it.
+ * from anywhere else goes through as it is and disarms it. `wp alpaca-bot settings` (which
+ * writes through Store itself) never arms it.
  *
  * Armed, it listens on `sanitize_option_alpaca_bot_settings`, which each of the three runs on
  * the value it was handed before it writes: `update` and `patch` call sanitize_option()
@@ -42,20 +43,30 @@ use AlpacaBot\Settings\Store;
  * and "keep" does not survive a move of its URL. In `patch` mode a key the stored row has and the
  * value does not is one `wp option patch delete` removed, and is written as its default, as the
  * delete did before (Store would otherwise keep it); in `update` mode a key left out keeps its
- * value, as it does over REST. Then:
- * a refused MCP row fails the command with the message REST gives and nothing written; otherwise
- * the value is written through Store::replace(), the warnings are printed, then the success line
- * WP-CLI would print, and the command ends there with exit code 0. It has to end there: when a
- * write changed only a secret, Settings\ProviderKey or Mcp\ServerSettings lifts it out of the
- * row, the row equals the stored one, update_option() answers false, and WP-CLI would report
- * "Could not update option" for a write that happened (#4696).
+ * value, as it does over REST. Then: a refused MCP row fails the command with the message REST
+ * gives and nothing written; otherwise the value is written through Store::replace(), the
+ * warnings are printed, then the success line WP-CLI would print, and the command ends there
+ * with exit code 0. It has to end there: when a write changed only a secret, Settings\ProviderKey
+ * or Mcp\ServerSettings lifts it out of the row, the row equals the stored one, update_option()
+ * answers false, and WP-CLI would report "Could not update option" for a write that happened
+ * (#4696).
+ *
+ * By default the end is WP_CLI::halt(0), which throws WP-CLI's ExitException only while its
+ * private `$capture_exit` is set, and calls exit() otherwise (class-wp-cli.php, halt(), 2.12).
+ * `$capture_exit` is set only by `WP_CLI::runcommand()` with `launch => false` and
+ * `exit_error => false`. So a takeover inside `WP_CLI::runcommand('option update
+ * alpaca_bot_settings …', ['launch' => false])`, with `exit_error` left at its default of true,
+ * ends the whole calling process with exit code 0, and the caller's code after that
+ * runcommand() never runs. A top-level `wp option update`, and a runcommand() with
+ * `launch => true` (a process of its own), end only the command.
  *
  * `option add` over a row that exists is left alone, so add_option() refuses it as it always
  * has; over none, the write goes through Store as well, and so through the `pre_update_option_*`
  * filters that keep the provider key and the MCP header values out of the row.
  *
- * Nothing here touches WP-CLI itself: success, warning, failure and the exit go through
- * injectable callables, whose defaults call WP_CLI.
+ * Apart from register()'s calls to WP_CLI::add_hook(), nothing here calls WP-CLI directly:
+ * success, warning, failure and the exit go through injectable callables, whose defaults call
+ * WP_CLI.
  *
  * @since 0.6.2
  */

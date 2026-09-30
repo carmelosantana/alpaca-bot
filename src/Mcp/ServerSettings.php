@@ -15,11 +15,13 @@ use AlpacaBot\Toolkit\AddressRefused;
  *
  * beforeSave() is the split, on `pre_update_option_alpaca_bot_settings`. It is a filter rather
  * than something in Store for the reason Plugin::register() gives for its catalog bust: every
- * update_option() of the option runs it, and only one writer goes through Store. Core applies it
- * in update_option() before the branch that turns a site's first save into add_option(), so that
- * save is covered too. add_option() called on its own (from code; `wp option add` writes through
- * Store instead, Cli\RawOptionWrite) runs no `pre_update_option_*` filter, so a row written that
- * way keeps whatever it was given; the read side masks it all the same (Schema::maskedServers()).
+ * update_option() of the option runs it, and not every writer goes through Store (the settings
+ * page saves through core's options.php, and any other code can call update_option()). Core
+ * applies it in update_option() before the branch that turns a save with no row yet (a site's
+ * first, or the first after the row was deleted) into add_option(), so that save is covered too.
+ * add_option() called on its own (from code; `wp option add` writes through Store instead,
+ * Cli\RawOptionWrite) runs no `pre_update_option_*` filter, so a row written that way keeps
+ * whatever it was given; the read side masks it all the same (Schema::maskedServers()).
  *
  * For each row, a header value of Schema::MASK keeps the value Secrets holds for that id, '' removes
  * it, and any other string replaces it; the row is rewritten to carry MASK when a value is kept and
