@@ -60,6 +60,32 @@ final class SettingsRoutesTest extends TestCase
     }
 
     /**
+     * #4539, the reviewer's case: `settings.write` lowered to editors, an editor PUTs a base URL of
+     * their own and the mask. The write goes through, the administrator's key is not kept for the
+     * new host, and the reply says it was cleared.
+     */
+    public function test_an_editor_who_may_write_the_settings_cannot_move_the_api_key_to_their_host(): void
+    {
+        $this->asAdmin();
+        $this->rest('PUT', '/settings', ['provider.base_url' => 'https://openrouter.ai/api/v1', 'provider.api_key' => 'sk-FAKE-admin', 'access.settings.write' => 'edit_posts']);
+        $this->assertSame('sk-FAKE-admin', get_option(Plugin::OPTION)['provider.api_key']);
+        wp_set_current_user(self::factory()->user->create(['role' => 'editor']));
+
+        $res = $this->rest('PUT', '/settings', ['provider.base_url' => 'https://steal.example.net/v1', 'provider.api_key' => Schema::MASK]);
+        $this->assertSame(200, $res->get_status(), print_r($res->get_data(), true));
+        $this->assertSame('provider.api_key', $res->get_headers()['X-Alpaca-Bot-Cleared'] ?? null);
+        $this->assertSame('', $res->get_data()['provider.api_key']);
+        $this->assertSame('https://steal.example.net/v1', get_option(Plugin::OPTION)['provider.base_url']);
+        $this->assertSame('', get_option(Plugin::OPTION)['provider.api_key']);
+
+        // A path change on the new host keeps a key typed for it, and says nothing.
+        $this->rest('PUT', '/settings', ['provider.api_key' => 'sk-FAKE-editor']);
+        $res = $this->rest('PUT', '/settings', ['provider.base_url' => 'https://steal.example.net/v2', 'provider.api_key' => Schema::MASK]);
+        $this->assertArrayNotHasKey('X-Alpaca-Bot-Cleared', $res->get_headers());
+        $this->assertSame('sk-FAKE-editor', get_option(Plugin::OPTION)['provider.api_key']);
+    }
+
+    /**
      * The one thing this split may not do: change what a site that already filters 0.5's
      * `alpaca_bot/capability/settings` gets. It is the default both rows' own keys receive, on
      * all three routes — the schema route included, which in 0.5 was behind

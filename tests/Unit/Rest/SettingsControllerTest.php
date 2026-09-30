@@ -215,6 +215,30 @@ it('clears the key when the write sends an empty string', function (): void {
         ->and($res->get_data()['provider.api_key'])->toBe('');
 });
 
+// #4539, ruling T4-c: a PUT that moves provider.base_url to another origin and only keeps the key
+// clears it, and says so in X-Alpaca-Bot-Cleared, since '' in the reply cannot tell a key just
+// dropped from one never set. No header for a move with a new key, a same-origin change, or a
+// write that leaves the URL alone.
+it('clears the key on a PUT that moves the base URL to another origin, and names it in a header', function (): void {
+    $this->stored['provider.base_url'] = 'https://openrouter.ai/api/v1';
+    $res = $this->controller->update(restRequest('PUT', '/alpaca-bot/v1/settings', ['provider.base_url' => 'https://steal.example.net/v1', 'provider.api_key' => Schema::MASK]));
+    expect($res->get_status())->toBe(200)
+        ->and($this->written['provider.api_key'])->toBe('')
+        ->and($res->get_data()['provider.api_key'])->toBe('')
+        ->and($res->get_headers())->toBe(['X-Alpaca-Bot-Cleared' => 'provider.api_key']);
+});
+
+it('sends no cleared header when the key survives the write', function (array $body): void {
+    $this->stored['provider.base_url'] = 'https://openrouter.ai/api/v1';
+    $res = (new SettingsController(new Store()))->update(restRequest('PUT', '/alpaca-bot/v1/settings', $body));
+    expect($res->get_headers())->toBe([])
+        ->and($this->written['provider.api_key'])->not->toBe('');
+})->with([
+    'a move with a new key' => [['provider.base_url' => 'https://api.example.net/v1', 'provider.api_key' => 'sk-FAKE-new']],
+    'only the path changed' => [['provider.base_url' => 'https://openrouter.ai/v2', 'provider.api_key' => Schema::MASK]],
+    'the URL left alone' => [['models.num_ctx' => 2048]],
+]);
+
 it('never reveals in a write reply, even when the body asks', function (): void {
     $res = $this->controller->update(restRequest('PUT', '/alpaca-bot/v1/settings', ['reveal' => true, 'models.num_ctx' => 2048]));
     expect($res->get_data()['provider.api_key'])->toBe(Schema::MASK)

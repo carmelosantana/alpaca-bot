@@ -21,10 +21,15 @@ use AlpacaBot\Settings\Store;
  * what a client sends back when it has not touched the field: a PUT whose secret is MASK keeps
  * the stored value, one whose secret is '' clears it, and any other string is the new value. The
  * three cases are distinct on the wire, so "clear the key" is always reachable and an untouched
- * form never wipes it. A secret that is not a string at all (`null`, an array) keeps the stored
+ * form does not wipe it. A secret that is not a string at all (`null`, an array) keeps the stored
  * value too, and the reply shows the mask so the client can see it did: the rule and its reasons
  * are Schema::sanitize()'s, shared with every other writer of the option, and this route only
- * hands the body through. An MCP server's header value reads back the same way, MASK or '', in
+ * hands the body through. "Keeps" has one exception, the same as an MCP header value's below: a
+ * PUT that moves `provider.base_url` to another scheme, host or port clears the stored key unless
+ * it sends a new one, whether it sent the mask, a non-string or no key at all
+ * (Schema::providerKeyClearedByMove()). The write is not refused for it; the key reads back '',
+ * and the reply carries `X-Alpaca-Bot-Cleared: provider.api_key`, because '' alone cannot tell a
+ * key just dropped from one never set. An MCP server's header value reads back the same way, MASK or '', in
  * each row of `toolkits.mcp_servers` (masked()), and takes the same three values on the way in;
  * Mcp\ServerSettings leaves only MASK or '' there on each update_option() of the option once the
  * plugin has registered its filter, so masked() is for a row that reached the option any other
@@ -224,10 +229,14 @@ final class SettingsController extends Controller
             }
             $cleared = $check->cleared;
         }
+        $keyCleared = Schema::providerKeyClearedByMove($input, $this->store->all());
         $this->store->replace($input);
         $response = new \WP_REST_Response($this->masked($this->store->all()));
         if ($cleared !== []) {
             $response->header('X-Alpaca-Bot-Mcp-Cleared', implode(',', $cleared));
+        }
+        if ($keyCleared) {
+            $response->header('X-Alpaca-Bot-Cleared', 'provider.api_key');
         }
         return $response;
     }
