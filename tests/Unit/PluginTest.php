@@ -195,14 +195,17 @@ it('registers the wp alpaca-bot command and the raw option write when WP-CLI is 
         ->and(\WP_CLI::$commands[0][0])->toBe('alpaca-bot')
         ->and(\WP_CLI::$commands[0][1])->toBeInstanceOf(ChatCommand::class)
         ->and($migration)->toBeInstanceOf(Closure::class)
-        // Cli\RawOptionWrite: armed by WP-CLI before `wp option update|patch|add` of this option,
-        // disarmed after it, and by nothing else.
+        // Cli\RawOptionWrite: armed by WP-CLI before every `wp option update|patch|add`, whatever
+        // option its words name (the name can come from --prompt or wp-cli.yml instead, and the
+        // takeover reads it from WP-CLI's own call), disarmed after it, and by nothing else.
         ->and(array_keys(\WP_CLI::$hooks))->toBe(['before_run_command', 'before_invoke:option update', 'after_invoke:option update', 'before_invoke:option patch', 'after_invoke:option patch', 'before_invoke:option add', 'after_invoke:option add'])
         ->and(has_filter('sanitize_option_' . Plugin::OPTION))->toBeFalse();
     $hook = static fn(string $when, mixed ...$args) => (\WP_CLI::$hooks[$when][0])(...$args);
-    $hook('before_run_command', ['option', 'update', 'blogname', 'x'], [], []);
+    $hook('before_run_command', ['option', 'update'], [], []);
     $hook('before_invoke:option update');
-    $otherOption = has_filter('sanitize_option_' . Plugin::OPTION);
+    $noName = has_filter('sanitize_option_' . Plugin::OPTION);
+    $hook('after_invoke:option update');
+    $afterUpdate = has_filter('sanitize_option_' . Plugin::OPTION);
     $hook('before_run_command', ['option', 'patch', 'update', Plugin::OPTION, 'models.temperature', '0.3'], [], []);
     $hook('before_invoke:option patch');
     $ours = has_filter('sanitize_option_' . Plugin::OPTION);
@@ -212,7 +215,8 @@ it('registers the wp alpaca-bot command and the raw option write when WP-CLI is 
     $hook('before_invoke:option add');
     $hook('before_run_command', ['alpaca-bot', 'settings'], [], []);
     $next = has_filter('sanitize_option_' . Plugin::OPTION);
-    expect($otherOption)->toBeFalse()
+    expect($noName)->toBeTrue()
+        ->and($afterUpdate)->toBeFalse()
         ->and($ours)->toBeTrue()
         ->and($after)->toBeFalse()
         ->and($next)->toBeFalse();

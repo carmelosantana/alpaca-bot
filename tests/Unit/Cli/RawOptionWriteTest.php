@@ -20,12 +20,15 @@ use Brain\Monkey\Functions;
 /**
  * A RawOptionWrite over `$stored` (the settings row as the Store and get_option() see it) and
  * `$secrets` (Mcp\Secrets' option) and `$held` (Settings\ProviderKey's option, false for none), armed for `$command`. What it reports lands in the returned
- * object instead of going through WP_CLI; `halted` is the exit code halt() was handed.
+ * object instead of going through WP_CLI; `halted` is the exit code halt() was handed. Its call-stack
+ * check answers as WP-CLI's Option_Command would for `wp option <command> <$name> … <$assoc>`
+ * (patch's option name comes after its action), or null when `$inCommand` is false.
  *
  * @param array<string, mixed>  $stored
  * @param array<string, string> $secrets
+ * @param array<string, mixed>  $assoc
  */
-function rawWrite(array $stored, string $command = 'update', ?ServerSettings $servers = null, array $secrets = [], mixed $row = null, bool $inCommand = true, string|false $held = false): object
+function rawWrite(array $stored, string $command = 'update', ?ServerSettings $servers = null, array $secrets = [], mixed $row = null, bool $inCommand = true, string|false $held = false, array $assoc = [], string $name = Plugin::OPTION): object
 {
     $c = new class {
         public RawOptionWrite $subject;
@@ -61,7 +64,7 @@ function rawWrite(array $stored, string $command = 'update', ?ServerSettings $se
         halt: static function (int $code) use ($c): void {
             $c->halted = $code;
         },
-        inCommand: static fn(): bool => $inCommand,
+        inCommand: static fn(string $mode): ?array => $inCommand ? [$mode === 'patch' ? ['update', $name] : [$name], $assoc] : null,
     );
     $c->subject->arm($command);
     return $c;
@@ -334,17 +337,89 @@ it('takes nothing over outside the option command that armed it, and disarms', f
         ->and(has_filter('sanitize_option_' . Plugin::OPTION, [$c->subject, 'sanitize']))->toBeFalse();
 });
 
-it('names the option a command writes only for update, set, add and patch of alpaca_bot_settings', function (array $args, bool $named): void {
-    expect(RawOptionWrite::namesOption($args))->toBe($named);
+// 0.6.2 wave 3: armed for every `wp option update|patch|add`, whatever its words, so an option name
+// read from --prompt or wp-cli.yml cannot slip past. The takeover reads the name from WP-CLI's own
+// call, and a write of this option while that call writes another one is not a raw write of it.
+it('takes nothing over while WP-CLI\'s option command writes another option, and disarms', function (string $mode): void {
+    Functions\expect('update_option')->never();
+    $c = rawWrite([], $mode, row: $mode === 'add' ? false : null, name: 'blogname');
+
+    expect($c->subject->sanitize(['models.temperature' => 0.4]))->toBe(['models.temperature' => 0.4])
+        ->and($c->success)->toBe([])
+        ->and($c->halted)->toBeNull()
+        ->and(has_filter('sanitize_option_' . Plugin::OPTION, [$c->subject, 'sanitize']))->toBeFalse();
+})->with(['update', 'patch', 'add']);
+
+it('refuses --autoload set to anything but on, writes nothing, and disarms', function (mixed $autoload, string $shown): void {
+    Functions\expect('update_option')->never();
+    $c = rawWrite([], assoc: ['autoload' => $autoload]);
+
+    $c->subject->sanitize(['models.temperature' => 0.4]);
+
+    expect($c->errors)->toBe(["alpaca_bot_settings stays autoloaded, so --autoload={$shown} is refused and nothing was written. Leave --autoload out, or pass --autoload=on."])
+        ->and($c->success)->toBe([])
+        ->and($c->halted)->toBeNull()
+        ->and(has_filter('sanitize_option_' . Plugin::OPTION, [$c->subject, 'sanitize']))->toBeFalse();
 })->with([
-    'update' => [['option', 'update', 'alpaca_bot_settings', '{}'], true],
-    'set' => [['option', 'set', 'alpaca_bot_settings', '{}'], true],
-    'add' => [['option', 'add', 'alpaca_bot_settings', '{}'], true],
-    'patch update' => [['option', 'patch', 'update', 'alpaca_bot_settings', 'models.temperature', '0.3'], true],
-    'patch delete' => [['option', 'patch', 'delete', 'alpaca_bot_settings', 'models.temperature'], true],
-    'another option' => [['option', 'update', 'blogname', 'x'], false],
-    'patch of another option' => [['option', 'patch', 'update', 'blogname', 'k', 'v'], false],
-    'get' => [['option', 'get', 'alpaca_bot_settings'], false],
-    'another command' => [['alpaca-bot', 'settings', 'alpaca_bot_settings'], false],
-    'too short' => [['option', 'update'], false],
+    'off' => ['off', 'off'],
+    'no' => ['no', 'no'],
+    'false' => ['false', 'false'],
+    'false from wp-cli.yml' => [false, 'false'],
+    'something else' => ['auto', 'auto'],
 ]);
+
+// Refused before the stored row passes untouched: that pass would leave WP-CLI to call
+// update_option() with the autoload value, which moves the row off autoload.
+it('refuses --autoload=off on a write of exactly what is stored', function (): void {
+    $c = rawWrite([], assoc: ['autoload' => 'off']);
+
+    $c->subject->sanitize(get_option(Plugin::OPTION));
+
+    expect($c->errors)->toHaveCount(1)
+        ->and($c->halted)->toBeNull();
+});
+
+it('refuses --autoload=off on an add over no row', function (): void {
+    Functions\expect('update_option')->never();
+    $c = rawWrite([], 'add', row: false, assoc: ['autoload' => 'no']);
+
+    $c->subject->sanitize(['models.temperature' => 0.2]);
+
+    expect($c->errors)->toHaveCount(1)
+        ->and($c->halted)->toBeNull();
+});
+
+it('takes --autoload=on, yes or true as the no-op it is, and writes as without it', function (mixed $autoload): void {
+    Functions\expect('update_option')->once()->withArgs(static fn(mixed ...$a): bool => count($a) === 2 && $a[1]['models.temperature'] === 0.4)->andReturn(true);
+    $c = rawWrite([], assoc: ['autoload' => $autoload]);
+
+    $c->subject->sanitize(['models.temperature' => 0.4]);
+
+    expect($c->errors)->toBe([])
+        ->and($c->success)->toBe(["Updated 'alpaca_bot_settings' option."])
+        ->and($c->halted)->toBe(0);
+})->with(['on' => 'on', 'yes' => 'yes', 'true' => 'true', 'bare --autoload' => true]);
+
+// WP-CLI hands a write of what is stored with --autoload to update_option() instead of reporting it
+// unchanged; the row stays autoloaded, so there is nothing to write, and it says so as WP-CLI does.
+it('reports a write of what is stored with --autoload=on as unchanged, and writes nothing', function (): void {
+    Functions\expect('update_option')->never();
+    $c = rawWrite([], assoc: ['autoload' => 'on']);
+
+    $c->subject->sanitize(get_option(Plugin::OPTION));
+
+    expect($c->success)->toBe(["Value passed for 'alpaca_bot_settings' option is unchanged."])
+        ->and($c->halted)->toBe(0)
+        ->and(has_filter('sanitize_option_' . Plugin::OPTION, [$c->subject, 'sanitize']))->toBeFalse();
+});
+
+it('reports a write the schema cleans to what is stored as unchanged, as WP-CLI would', function (string $mode): void {
+    Functions\expect('update_option')->once()->andReturn(false);
+    $c = rawWrite(['models.temperature' => 0.3], $mode);
+
+    $c->subject->sanitize(['models.temperature' => '0.30'] + get_option(Plugin::OPTION));
+
+    expect($c->errors)->toBe([])
+        ->and($c->success)->toBe(["Value passed for 'alpaca_bot_settings' option is unchanged."])
+        ->and($c->halted)->toBe(0);
+})->with(['update', 'patch']);
