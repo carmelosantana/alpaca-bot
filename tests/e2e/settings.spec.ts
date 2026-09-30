@@ -1,4 +1,5 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
+import { login as signIn } from './login';
 
 /**
  * A refused Discover says so in the server's approvals cell (M-3, Task 26 review). htmx swaps no
@@ -17,8 +18,6 @@ import { expect, test, type Locator, type Page } from '@playwright/test';
  * those requests never leave the browser. The server is removed again at the end.
  */
 
-const ADMIN_USER = process.env.WP_ADMIN_USER ?? 'admin';
-const ADMIN_PASSWORD = process.env.WP_ADMIN_PASSWORD ?? 'password';
 const TOOLS = '/wp-admin/admin.php?page=alpaca-bot-settings&tab=toolkits';
 const PREFIX = 'efour';
 const REFUSED = "Discover tools got no list back: this page's session may have expired. Reload the page and try again.";
@@ -28,10 +27,7 @@ const FAILED = 'Discover tools failed. Try again in a moment.';
 const isDiscover = (url: URL): boolean => decodeURIComponent(url.toString()).includes('/view/mcp-tools/');
 
 async function login(page: Page): Promise<void> {
-  await page.goto('/wp-login.php');
-  await page.fill('#user_login', ADMIN_USER);
-  await page.fill('#user_pass', ADMIN_PASSWORD);
-  await Promise.all([page.waitForURL(/wp-admin/), page.click('#wp-submit')]);
+  await signIn(page);
 }
 
 /** The Tools tab's row for the server this test saved. */

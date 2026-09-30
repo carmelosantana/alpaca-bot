@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { login as signIn } from './login';
 
 /**
  * The admin-wide drawer (Admin\Drawer, resources/ts/drawer.ts) in a browser, against the wp-env
@@ -26,16 +27,11 @@ import { expect, test, type Page } from '@playwright/test';
  * what an earlier test or run left behind.
  */
 const REPLY = 'Hello from the Alpaca Bot end-to-end fake provider.';
-const ADMIN_USER = process.env.WP_ADMIN_USER ?? 'admin';
-const ADMIN_PASSWORD = process.env.WP_ADMIN_PASSWORD ?? 'password';
 
 type DrawerGlobals = { alpacaBot: { nonce: string }; alpacaBotMount: { prefs: string } };
 
 async function login(page: Page): Promise<void> {
-  await page.goto('/wp-login.php');
-  await page.fill('#user_login', ADMIN_USER);
-  await page.fill('#user_pass', ADMIN_PASSWORD);
-  await Promise.all([page.waitForURL(/wp-admin/), page.click('#wp-submit')]);
+  await signIn(page);
 }
 
 /** Stores the drawer's state through its own route, from an admin screen that carries the loader, and reloads. */
