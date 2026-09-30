@@ -10,7 +10,7 @@
  * finds when it runs and would find none if it ran first. A file that loaded is not added again,
  * and nor is htmx when the page already carries it under its handle (`htmxId`).
  * A host calls mountPanel() again only after a mount that failed; a mounted chat it shows and
- * hides (the sidebar moves it as well, and editor.ts says why), so a turn in flight is never
+ * hides (the sidebar moves it as well, and editor-start.ts says why), so a turn in flight is never
  * re-rendered.
  */
 import { fromHtml } from './dom.ts';
@@ -68,7 +68,7 @@ export function withQuery(base: string, query: Record<string, string>): string {
  * The query every fetch of GET /view/panel into `host` carries: the conversation to open, and
  * what the composer's context chips name, off the host's data attributes: the ones
  * Admin\Drawer::footer() prints on the drawer element (the post on the classic editor, the
- * screen's id and page title), or the post editor.ts sets on the sidebar's. An element without
+ * screen's id and page title), or the post editor-start.ts sets on the sidebar's. An element without
  * them asks for no chips.
  */
 export function panelQuery(host: HTMLElement, conversation: string): Record<string, string> {
@@ -159,7 +159,7 @@ export async function newChat(host: HTMLElement, cfg: MountSettings, nonce: stri
  * The post chip for the host's post (`data-post`, panelQuery()), taken from a fresh GET
  * /view/panel into the composer the chat already has, for a chat mounted before its post could
  * have one: the editor sidebar on a new post, whose auto-draft gets no chip until it is first
- * saved or autosaved (resources/ts/editor.ts). The chip is the server's whole: its label, its
+ * saved or autosaved (resources/ts/editor-start.ts). The chip is the server's whole: its label, its
  * hidden field and its escaping are View\Chat\Composer's, and whether there is one at all is
  * View\Chat\Shell's rule, so a post the user may not edit, or one still an auto-draft, comes back
  * with none and none is added. It goes first in the chips row, where Composer puts it, and a
@@ -168,7 +168,7 @@ export async function newChat(host: HTMLElement, cfg: MountSettings, nonce: stri
  * Answers whether the composer has a post chip now: true without a request when it has one
  * already, true without adding one when one arrived while it asked (a New chat whose fragment had
  * one, newChat()), false when the fragment was refused or had none. A request that fails outright
- * (a network error) rejects, as fetch() does; editor.ts, its caller, logs that and asks again
+ * (a network error) rejects, as fetch() does; editor-start.ts, its caller, logs that and asks again
  * after the next save.
  */
 export async function postChip(host: HTMLElement, cfg: MountSettings, nonce: string): Promise<boolean> {

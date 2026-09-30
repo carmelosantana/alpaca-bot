@@ -8,8 +8,6 @@
  * honoured too. Heartbeat's events are jQuery events on the document, so they are only
  * reachable through jQuery.
  */
-import type { Settings } from './boot.ts';
-
 type HeartbeatHandler = (event: unknown, data: Record<string, unknown>) => void;
 
 declare global {
@@ -29,7 +27,7 @@ export function watchNonce(onNonce: (nonce: string) => void): void {
 /**
  * The page's REST nonce (`alpacaBot.nonce`) as a getter, kept fresh on the heartbeat from this
  * call on, for a script that puts the chat into a page before the chat bundle is there: the
- * drawer's loader (drawer-start.ts) and the block editor's sidebar (editor.ts). Each signs
+ * drawer's loader (drawer-start.ts) and the block editor's sidebar (editor-start.ts). Each signs
  * requests of its own before the first open adds the bundle, and the bundle's own watchNonce()
  * starts only when it boots, so without this a tab left open past the nonce's life fails its
  * first open (Kanboard #4526).
@@ -38,11 +36,10 @@ export function watchNonce(onNonce: (nonce: string) => void): void {
  * the bundle boots on (chat.ts hands `window.alpacaBot` to boot()), so the chat starts with it.
  * Once the bundle has booted, its watchNonce() writes the same tick's nonce into the same object,
  * and both ask with the same `alpaca_bot_nonce: 1`, so the second registration changes nothing.
- * `Settings` is imported as a type only, which esbuild erases, so the loaders do not carry boot.ts.
  */
 export function pageNonce(): () => string {
   watchNonce((nonce) => {
-    const settings: Settings | undefined = window.alpacaBot;
+    const settings = window.alpacaBot;
     if (settings) settings.nonce = nonce;
   });
   return () => window.alpacaBot?.nonce ?? '';

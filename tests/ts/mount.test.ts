@@ -17,7 +17,7 @@ test('withQuery adds its query under either permalink form, keeping a ?rest_rout
 });
 
 /**
- * What the drawer's every fetch of GET /view/panel carries (resources/ts/drawer.ts): the first
+ * What the drawer's every fetch of GET /view/panel carries (resources/ts/drawer-start.ts): the first
  * mount, its retry, and "New chat" all build their query here, off the data attributes
  * Admin\Drawer::footer() prints on the drawer element.
  */
@@ -41,7 +41,7 @@ test('panelQuery names the conversation and what the drawer element says the chi
  * fragment into the chat it already has, so the composer the chat bundle is bound to stays:
  * newChat(), "New chat" in place (the drawer's and the editor sidebar's), which takes the
  * transcript, the history and the chips, and postChip(), the post chip the editor sidebar adds
- * once its new post has been saved (resources/ts/editor.ts).
+ * once its new post has been saved (resources/ts/editor-start.ts).
  * Every assertion compares a primitive, never a node (tests/ts/env.ts says why).
  */
 const CFG = { panel: 'https://alpaca-bot.test/wp-json/alpaca-bot/v1/view/panel', prefs: '', htmx: '', htmxId: '', chat: '', css: '', title: 'Alpaca Bot', failed: 'failed' };
