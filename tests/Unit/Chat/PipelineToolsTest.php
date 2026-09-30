@@ -1365,9 +1365,9 @@ it('asks each toolkit for its tools once on a tool turn, and for its guidelines 
 });
 
 it('raises a toolkit that stops the run before it starts in words of its own, not as a provider error', function (): void {
-    // Pipeline::agentTurn() asks every toolkit for its tools (Toolkit\FirstWins::over()) before
-    // it starts the fiber the agent runs in, so a TerminationException thrown there is not the
-    // library's to catch: it leaves agentTurn() into send()'s catch, where it used to become
+    // Pipeline::offered() asks every toolkit for its tools (Toolkit\FirstWins::over()) before
+    // agentTurn() starts the fiber the agent runs in, so a TerminationException thrown there is not
+    // the library's to catch: it leaves offered() into send()'s catch, where it used to become
     // "Provider error: ".
     $toolkit = new class implements ToolkitInterface {
         public function tools(): array
@@ -1397,11 +1397,113 @@ it('raises a toolkit that stops the run before it starts in words of its own, no
     expect($caught)->not->toBeNull()
         ->and($caught->getMessage())->toBe(TOOL_STOPPED)
         ->and($caught->getPrevious())->toBeInstanceOf(TerminationException::class)
-        // Thrown from FirstWins::over(), called by agentTurn(), and from no frame of the library.
+        // Thrown from FirstWins::over(), called by offered(), and from no frame of the library.
         ->and(array_map(static fn(array $f): string => ($f['class'] ?? '') . '::' . $f['function'], array_slice($caught->getPrevious()->getTrace(), 0, 3)))
-        ->toBe([$toolkit::class . '::tools', AlpacaBot\Toolkit\FirstWins::class . '::over', Pipeline::class . '::agentTurn'])
+        ->toBe([$toolkit::class . '::tools', AlpacaBot\Toolkit\FirstWins::class . '::over', Pipeline::class . '::offered'])
         // chat/failed still hears what was thrown, as it always has.
         ->and($failed)->toBeInstanceOf(TerminationException::class)
         // Nothing ran, so nothing is kept: the post made for this turn is taken back.
         ->and(array_map(static fn(array $w): array => [$w[0], $w[1]], $h->writes))->toBe([['wp_insert_post', 'chat_history'], ['wp_delete_post', 42]]);
+});
+
+/**
+ * An MCP toolkit for `trk` over a FakeClient listing `$listed`, with `search` approved at the
+ * fingerprint `$approvedAs` (the listed definition's own when null). The client is returned
+ * through `$client` so a test can read its `$listed` count.
+ *
+ * @param list<AlpacaBot\Mcp\ToolDefinition> $listed
+ */
+function pipelineMcpToolkit(array $listed, ?AlpacaBot\Tests\Integration\FakeClient &$client = null): AlpacaBot\Mcp\McpToolkit
+{
+    Brain\Monkey\Functions\when('wp_strip_all_tags')->alias(static fn(string $s): string => strip_tags($s));
+    $search = new AlpacaBot\Mcp\ToolDefinition('search', 'Search.', ['type' => 'object']);
+    $client = new AlpacaBot\Tests\Integration\FakeClient($listed, ['search' => ToolResult::success('hit')]);
+    $fake = $client;
+    $server = new AlpacaBot\Mcp\ServerConfig('trk', 'https://mcp.example.com/mcp', 'Authorization', 'Bearer t', 'trk', approved: ['search' => $search->fingerprint()]);
+    return new AlpacaBot\Mcp\McpToolkit(new AlpacaBot\Mcp\ClientFactory(static fn(AlpacaBot\Mcp\ServerConfig $s): AlpacaBot\Tests\Integration\FakeClient => $fake), $server, 3);
+}
+
+// Kanboard #4541 asked for the cost first: how many times one turn lists an MCP server. Once
+// when the model may call tools, whether the server offers an approved tool or nothing; never
+// when the model cannot take tools, since the registry's toolkits are not asked then.
+it('lists an MCP server once per turn when the model takes tools, whatever the server offers, and not at all when it cannot', function (array $catalog, array $listed, int $expected): void {
+    $kit = pipelineMcpToolkit($listed, $client);
+    $provider = agentProvider([[new Response('Hi.', ProviderFinishReason::Stop, usage: new Usage(1, 1, 2))]]);
+    $h = pipelineWith($provider, [], [], $catalog, null, registryWith(['mcp.trk' => $kit]));
+
+    $h->pipeline->complete(3, 'hello');
+
+    expect($client->listed)->toBe($expected);
+})->with([
+    '(a) tool-capable model, an approved tool listed' => [TOOL_MODEL, [new AlpacaBot\Mcp\ToolDefinition('search', 'Search.', ['type' => 'object'])], 1],
+    '(b) tool-capable model, nothing approved listed' => [TOOL_MODEL, [], 1],
+    '(c) a model that cannot take tools' => [[['id' => 'llama3.2', 'tools' => false]], [new AlpacaBot\Mcp\ToolDefinition('search', 'Search.', ['type' => 'object'])], 0],
+]);
+
+/** A toolkit that offers nothing, as abilities enabled with no ability ticked does; `$asked` counts tools() and guidelines(). */
+function emptyToolkit(): ToolkitInterface
+{
+    return new class implements ToolkitInterface {
+        /** @var array{tools: int, guidelines: int} */
+        public array $asked = ['tools' => 0, 'guidelines' => 0];
+
+        public function tools(): array
+        {
+            ++$this->asked['tools'];
+            return [];
+        }
+
+        public function guidelines(): string
+        {
+            ++$this->asked['guidelines'];
+            return 'Use nothing.';
+        }
+    };
+}
+
+// Kanboard #4541: a toolkit that is enabled but offers no tools (an MCP server that lists nothing
+// approved, or whose client cannot be had; abilities with nothing ticked) is not a reason to run
+// the agent loop. When no enabled toolkit offers a tool, the turn is a plain one: one provider
+// stream with no tools, `done` included, and no `tool_calls` on the reply.
+it('takes the plain path when every enabled toolkit offers no tools: no agent run and no done tool offered', function (): void {
+    $mcp = pipelineMcpToolkit([], $client);
+    $empty = emptyToolkit();
+    $provider = agentProvider([[new Response('Hi.', ProviderFinishReason::Stop, usage: new Usage(1, 1, 2))]], $calls);
+    $h = pipelineWith($provider, [], [], TOOL_MODEL, null, registryWith(['abilities' => $empty, 'mcp.trk' => $mcp]));
+    Actions\expectDone('alpaca_bot/chat/failed')->never();
+    // The listing happens after `chat/started`, as it did when agentTurn() asked: a stream
+    // client learns its conversation's id before any MCP server is contacted.
+    $listedAtStart = null;
+    Actions\expectDone('alpaca_bot/chat/started')->once()->whenHappen(function () use (&$listedAtStart, $client): void {
+        $listedAtStart = $client->listed;
+    });
+
+    $r = $h->pipeline->complete(3, 'hello');
+
+    expect($listedAtStart)->toBe(0)
+        ->and($calls)->toHaveCount(1)
+        ->and($calls[0]['tools'])->toBe([])
+        ->and($calls[0]['options'])->toBe(PLAIN_OPTIONS)
+        ->and($r->reply->content)->toBe('Hi.')
+        ->and($r->reply->meta)->not->toHaveKey('tool_calls')
+        ->and($client->listed)->toBe(1)
+        ->and($empty->asked)->toBe(['tools' => 1, 'guidelines' => 0]);
+});
+
+// The other half: a toolkit with tools still gets the agent loop, and the empty one beside it is
+// not handed to the agent (its guidelines are never asked for the system prompt).
+it('runs the agent loop with only the toolkits that offer tools when one enabled toolkit is empty', function (): void {
+    $empty = emptyToolkit();
+    $provider = agentProvider([
+        [new Response('', ProviderFinishReason::ToolUse, [new ToolCall('c1', 'echo_tool', ['text' => 'ping'])])],
+        [new Response('Done.', ProviderFinishReason::Stop, usage: new Usage(2, 2, 4))],
+    ], $calls);
+    $h = pipelineWith($provider, [], [], TOOL_MODEL, null, registryWith(['abilities' => $empty, 'echo' => echoToolkit('echo_tool', 'Use echo_tool to echo.')]));
+
+    $r = $h->pipeline->complete(3, 'ping');
+
+    expect(array_map(static fn(object $t): string => $t->name(), $calls[0]['tools']))->toBe(['echo_tool', 'done'])
+        ->and($calls[0]['messages'][0]->content())->toContain('Use echo_tool to echo.')->not->toContain('Use nothing.')
+        ->and($r->reply->meta['tool_calls'][0]['name'])->toBe('echo_tool')
+        ->and($empty->asked)->toBe(['tools' => 1, 'guidelines' => 0]);
 });

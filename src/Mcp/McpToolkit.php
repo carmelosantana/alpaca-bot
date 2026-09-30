@@ -23,10 +23,11 @@ use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Tool\ToolResult;
  * ToolResult; and a caller that never asks for tools (Registry::enabled() for the
  * `[alpacabot_agent]` shim or an ability's permission check) builds nothing.
  *
- * The tool list is fetched once per instance and kept: on a tool turn Toolkit\FirstWins::over()
- * asks tools() before the agent runs, and when that found tools, guidelines() asks it again for
- * the system prompt (FirstWins answers '' for a toolkit left with none), and each ask would
- * otherwise be a listing. It is not
+ * The tool list is fetched once per instance and kept: on a tool turn Chat\Pipeline::offered()
+ * asks tools() (through Toolkit\FirstWins::over()) before the agent runs, and when that found
+ * tools, guidelines() asks it again for the system prompt, and each ask would otherwise be a
+ * listing. A server that offers nothing is dropped there and its guidelines() is never asked;
+ * when no toolkit offers a tool the turn runs plain. It is not
  * kept across instances on purpose: Mcp\Toolkits builds a new one each time Registry::enabled()
  * asks, which is once per turn on the chat path, and the pin is checked against the definition
  * that listing returns, so a tool redefined on the server is withheld from the next turn that
