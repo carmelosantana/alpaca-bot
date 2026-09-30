@@ -235,13 +235,16 @@ test('taking the last chip off takes the chips row with it, and not before', asy
  * frames (Kanboard #4525). Every request is answered from here: the streaming bubble, the
  * finished reply's rendering (marked `.ab-rendered`, so a case can count whether one was swapped
  * in), the ticket, the stream itself, and GET /view/panel for mount.ts newChat(), whose fresh
- * transcript is on conversation 0. The ticket is answered once `ticket` settles, so a case can
- * switch while it is outstanding; this returns once it has been asked for. `window.htmx` is a
- * stub that records what boot() triggers.
- * `ids` collects every `ab:conversation` the form announces, in order.
+ * transcript is on conversation 0. The two bubble requests are answered once `hold.bubbles`
+ * settles and the ticket once `hold.ticket` does, so a case can switch while either is
+ * outstanding; this returns once what is held has been asked for (the bubbles when they are
+ * held, else the ticket). `window.htmx` is a stub that records what boot() triggers.
+ * `ids` collects every `ab:conversation` the form announces, in order, and `chat()` is the
+ * POST /chat body, once there is one.
  */
-async function heldTurn(t: TestContext, conversation: string, ticket: Promise<void> = Promise.resolve()): Promise<{
+async function heldTurn(t: TestContext, conversation: string, hold: { ticket?: Promise<void>; bubbles?: Promise<void> } = {}): Promise<{
   form: HTMLFormElement;
+  chat: () => Record<string, unknown> | null;
   push: (event: string, data: object) => void;
   close: () => void;
   ids: number[];
@@ -256,12 +259,15 @@ async function heldTurn(t: TestContext, conversation: string, ticket: Promise<vo
   const body = new ReadableStream<Uint8Array>({ start(c) { controller = c; } });
   const encoder = new TextEncoder();
   const seen: string[] = [];
+  let chat: Record<string, unknown> | null = null;
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input));
     const method = init?.method ?? 'GET';
     seen.push(`${method} ${url.pathname}`);
     const html = (markup: string): Response => new Response(markup, { headers: { 'content-type': 'text/html' } });
     if (url.pathname.endsWith('/view/bubble')) {
+      // Only the turn's own two: finish()'s rendering of the reply comes after them.
+      if (chat === null) await hold.bubbles;
       if (method === 'GET') return html('<article class="ab-msg ab-msg--assistant" data-streaming="1"><div class="ab-msg__content"></div></article>');
       const role = (JSON.parse(String(init?.body)) as { role: string }).role;
       return html(`<article class="ab-msg ab-msg--${role}${role === 'assistant' ? ' ab-rendered' : ''}"><div class="ab-msg__content">${role}</div></article>`);
@@ -270,7 +276,8 @@ async function heldTurn(t: TestContext, conversation: string, ticket: Promise<vo
       return html('<div><div id="ab-history"><select id="ab-history-select"><option data-id="0">New chat</option></select></div><div id="ab-messages" class="ab-messages" data-conversation="0"></div></div>');
     }
     if (url.pathname.endsWith('/alpaca-bot/v1/chat')) {
-      await ticket;
+      chat = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      await hold.ticket;
       return Response.json({ stream_url: `${REST}/chat/1/stream?token=t` });
     }
     if (url.pathname.includes('/chat/1/stream')) return new Response(body, { headers: { 'content-type': 'text/event-stream; charset=utf-8' } });
@@ -287,9 +294,12 @@ async function heldTurn(t: TestContext, conversation: string, ticket: Promise<vo
   const send = form.querySelector('[data-action="send"]') as HTMLButtonElement;
   (form.querySelector('#ab-message') as HTMLTextAreaElement).value = 'hello';
   form.dispatchEvent(new win.Event('submit', { cancelable: true }) as unknown as Event);
-  await until(() => seen.includes('POST /wp-json/alpaca-bot/v1/chat'));
+  await until(() => hold.bubbles
+    ? seen.filter((path) => path.endsWith('/view/bubble')).length === 2
+    : seen.includes('POST /wp-json/alpaca-bot/v1/chat'));
   return {
     form,
+    chat: () => chat,
     push: (event, data) => controller.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)),
     close: () => controller.close(),
     ids,
@@ -389,12 +399,13 @@ test('the drawer\'s New chat before the start frame: a new chat left for another
   assert.equal(document.querySelectorAll('.ab-msg--assistant').length, 0);
 });
 
-test('switching while the ticket is outstanding: the turn\'s bubbles stay out of the transcript now shown', async (t) => {
+test('switching while the ticket is outstanding: the turn\'s streaming bubble stays out of the transcript now shown', async (t) => {
   // The streaming bubble is appended after the ticket answers, which is after the switch here; it
   // belongs to the transcript the turn was sent from, not the one on screen, where nothing would
-  // ever finish it.
+  // ever finish it. The user bubble was appended before the ticket was asked for, so it left with
+  // the old transcript; the case that switches before it arrives is the next one.
   let answer!: () => void;
-  const turn = await heldTurn(t, '7', new Promise<void>((resolve) => { answer = resolve; }));
+  const turn = await heldTurn(t, '7', { ticket: new Promise<void>((resolve) => { answer = resolve; }) });
   historySwap(globalThis, '9');
   answer();
   await until(() => turn.seen.some((path) => path.includes('/chat/1/stream')));
@@ -405,7 +416,44 @@ test('switching while the ticket is outstanding: the turn\'s bubbles stay out of
 
   assert.equal(field(turn.form), '9');
   assert.deepEqual(turn.ids, [9]);
-  // Only conversation 9's own message: neither this turn's user bubble nor its assistant bubble.
+  // Only conversation 9's own message: not this turn's streaming bubble.
   assert.equal(document.querySelectorAll('#ab-messages .ab-msg').length, 1);
   assert.equal(document.querySelectorAll('[data-streaming]').length, 0);
+});
+
+/**
+ * A switch while the turn's two bubble requests are outstanding, which is before the ticket is
+ * asked for: the turn still belongs to the transcript it was sent from, so its ticket names that
+ * transcript's conversation, not the one opened meanwhile (or 0, which would start a conversation
+ * no transcript shows), and none of its bubbles lands in the transcript now shown.
+ */
+async function switchedBeforeTicket(t: TestContext, from: string, to: () => Promise<void> | void): Promise<Awaited<ReturnType<typeof heldTurn>>> {
+  let answer!: () => void;
+  const turn = await heldTurn(t, from, { bubbles: new Promise<void>((resolve) => { answer = resolve; }) });
+  await to();
+  answer();
+  await until(() => turn.chat() !== null);
+  turn.push('start', { conversation_id: Number(from) });
+  turn.push('done', { conversation_id: Number(from), message: { content: 'the reply', model: 'llama3.2' }, receipt: {} });
+  turn.close();
+  await turn.finished();
+  return turn;
+}
+
+test('switching through the history select before the ticket: the turn still goes to the conversation it was sent from', async (t) => {
+  const turn = await switchedBeforeTicket(t, '7', () => historySwap(globalThis, '9'));
+  assert.equal(turn.chat()?.conversation_id, 7);
+  assert.equal(field(turn.form), '9');
+  // Conversation 9's own message only: this turn's user bubble went to conversation 7's transcript.
+  assert.equal(document.querySelectorAll('#ab-messages .ab-msg').length, 1);
+  assert.equal(document.querySelectorAll('.ab-msg--assistant').length, 0);
+  // The turn ran, so the box is not given the message back.
+  assert.equal((turn.form.querySelector('#ab-message') as HTMLTextAreaElement).value, '');
+});
+
+test('the drawer\'s New chat before the ticket: the turn is not sent as a new conversation', async (t) => {
+  const turn = await switchedBeforeTicket(t, '7', drawerNewChat);
+  assert.equal(turn.chat()?.conversation_id, 7);
+  assert.equal(field(turn.form), '0');
+  assert.equal(document.querySelectorAll('#ab-messages .ab-msg').length, 0);
 });

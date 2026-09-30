@@ -162,9 +162,15 @@ export function boot(cfg: Settings, form: HTMLFormElement): void {
     // the conversation id because the id cannot tell two new chats apart: a first turn is sent
     // on 0, and a New chat before its `start` frame is on 0 too. Its bubbles go into that
     // element as well, shown or not, so a switch before they arrive cannot put this turn's
-    // messages, or a streaming bubble nothing will finish, into the transcript now shown.
+    // messages, or a streaming bubble nothing will finish, into the transcript now shown. And
+    // its ticket names that transcript's conversation, read here and not when the ticket is
+    // asked for: the bubble requests come first, and a switch while they are out would otherwise
+    // send the message to the conversation opened meanwhile, or as a new one (0) that no
+    // transcript shows. Going on rather than giving the draft back keeps the turn what the user
+    // sent: the message they wrote, to the conversation they wrote it in.
     const transcript = messages();
     const shown = (): boolean => messages() === transcript;
+    const conversation = asId(field('conversation_id').value) ?? 0;
     sendButton.disabled = true;
     notice('info', '');
     textarea.value = '';
@@ -195,7 +201,7 @@ export function boot(cfg: Settings, form: HTMLFormElement): void {
       user = fromHtml(await userRes.text());
       if (user) append(user, transcript);
       const ticketRes = await request('POST', api('/chat'), {
-        message: text, conversation_id: asId(field('conversation_id').value) ?? 0, model: field('model').value, images, context: contextFrom(form), stream: true,
+        message: text, conversation_id: conversation, model: field('model').value, images, context: contextFrom(form), stream: true,
       });
       if (!ticketRes.ok) return refused(ticketRes.status, await restError(ticketRes));
       const ticket = await ticketRes.json() as { stream_url: string };
