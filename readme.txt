@@ -105,8 +105,9 @@ There is a price as well as a symptom. `web_fetch`, `summarize` and `draft_post`
 == Screenshots ==
 
 1. The chat screen: two turns, each reply streamed as the model writes it, and under each the receipt -- the model, the tokens it spent and how long it took.
-2. Settings > Models: the default model, temperature, context window and keep-alive, with the per-model overrides table under them.
+2. The chat drawer, open over Posts. It opens on most admin screens, and the chip above the composer tells the model which screen you are on; a chip you take off is not sent.
 3. A turn that used the draft_post tool. The reply confirms the draft, and the receipt ends with the number of tools the turn ran.
+4. Settings > Access: who may use the chat, each tool, and the settings over REST, one capability per row. The launcher at the bottom right opens the drawer.
 
 == Changelog ==
 
