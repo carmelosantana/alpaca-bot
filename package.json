@@ -17,7 +17,7 @@
   "devDependencies": {
     "@playwright/test": "1.63.0",
     "@types/node": "~26.5.0",
-    "@wordpress/env": "11.14.0",
+    "@wordpress/env": "11.16.0",
     "esbuild": "~0.28.2",
     "happy-dom": "20.14.5",
     "htmx.org": "2.0.10",
