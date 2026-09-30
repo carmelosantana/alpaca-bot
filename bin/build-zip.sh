@@ -38,21 +38,21 @@ find dist/alpaca-bot -exec touch -h -d "@$SOURCE_DATE_EPOCH" {} +
 (cd dist && find alpaca-bot -print | LC_ALL=C sort | zip -qX alpaca-bot.zip -@)
 
 # The zip is the artifact everything downstream tests, so assert its contents rather than
-# eyeballing them: every runtime path present, nothing from the dev toolchain.
+# eyeballing them: it has entries at all, every runtime path is present, the vendored tree is
+# present, and nothing from the dev toolchain is.
 # The list is fed to grep by herestring, never `printf | grep -q`: -q exits on the first match
-# and closes the pipe, and the writer is killed if it is still writing. Not hypothetically, on
-# this artifact. When this was measured it listed 911 entries, 68,398 bytes against a
-# 65,536-byte pipe -- just over it -- and
-# `printf '%s\n' "$list" | grep -qxF alpaca-bot/alpaca-bot.php` still wins the race 40 times
-# out of 40, because grep finds its match and exits before the writer notices.
-# Six copies of the same listing, 410,388 bytes, loses it 20 times out of 20: `pipefail` hands
-# back 141 and a path that IS in the zip is reported MISSING. What decides it is bytes still in
-# flight, not how many entries matched. So there is no match count to reason from, and the
-# margin this build has is a few kilobytes of growth wide, not a design. The failure
-# arrives when the artifact grows rather than when this line is edited. A herestring has no
-# writer to kill.
+# and closes the pipe, and a writer still writing at that moment is killed by SIGPIPE, so
+# `pipefail` hands back 141 and a path that IS in the zip is reported MISSING. Whether the
+# writer is still writing turns on the bytes left in flight against the pipe buffer (65,536
+# bytes on Linux), not on how many entries matched, and the listing's size moves with every
+# file the plugin ships. So a pipe here can pass today and fail later, and the flip arrives
+# with the artifact's growth rather than with an edit to this line. A herestring has no writer
+# to kill.
 list=$(unzip -Z1 dist/alpaca-bot.zip)
 fail=0
+# First, so an empty zip is named as one cause before the path list reports it as every path
+# MISSING.
+[ -n "$list" ] || { echo "EMPTY the zip has no entries"; fail=1; }
 for path in \
   alpaca-bot/alpaca-bot.php \
   alpaca-bot/uninstall.php \
@@ -72,6 +72,13 @@ for path in \
 do
   grep -qxF -- "$path" <<<"$list" || { echo "MISSING $path"; fail=1; }
 done
+# vendor-prefixed/autoload.php alone does not prove the vendored tree shipped: the autoloader
+# is one file and says nothing about the packages behind it. So require a real package too, by
+# prefix rather than by a file name that moves between releases. symfony/http-client is the
+# HTTP transport php-agents is built on; src/Provider/Factory.php creates it. `[^/]$`
+# asks for a file under it, not only the directory entry zip records for an emptied directory.
+vendored=alpaca-bot/vendor-prefixed/symfony/http-client/
+grep -q -- "^$vendored.*[^/]\$" <<<"$list" || { echo "MISSING files under $vendored"; fail=1; }
 for pattern in \
   '^alpaca-bot/vendor/' \
   '^alpaca-bot/node_modules/' \
@@ -84,18 +91,14 @@ for pattern in \
 do
   if grep -qE -- "$pattern" <<<"$list"; then
     echo "UNEXPECTED entries matching $pattern:"
-    # Herestring again, and for the same reason. `grep ... | head` is the same race, and the ten
-    # lines head reads are not what decides it: head exits after them, and grep dies only if it
-    # is still writing by then. On the 68,398 bytes the listing measured then it survives; on
-    # six copies of it
-    # `grep -E '^alpaca-bot/vendor-prefixed/' | head` dies at 141 in 18 runs of 20. The flip
-    # moves with line width, not match count (measured elsewhere in this phase at 510 matches of
-    # 22 bytes, 339 of 40, 275 of 126) — a small pipeline is not safe by being small, it is safe
-    # by being under the pipe, and this one is not far under it. Because this is a plain command
-    # in an `if` body rather
-    # than a condition, `pipefail` plus `set -e` would abort the script on that 141 — skipping
-    # fail=1, the FAILED message and exit 1, inside the one branch whose whole job is to print
-    # a diagnostic.
+    # Herestring again, and for the same reason. `grep ... | head` is the same race: head exits
+    # after ten lines, and grep dies only if it is still writing by then, which turns on the
+    # bytes it has left to write against the pipe buffer (matches times line width), not on the
+    # match count alone. A small pipeline is not safe by being small, only by staying under the
+    # pipe, and nothing here holds it there. Because this is a plain command in an `if` body
+    # rather than a condition, `pipefail` plus `set -e` would abort the script on that 141 —
+    # skipping fail=1, the FAILED message and exit 1, inside the one branch whose whole job is to
+    # print a diagnostic.
     head <<<"$(grep -E -- "$pattern" <<<"$list")"
     fail=1
   fi
