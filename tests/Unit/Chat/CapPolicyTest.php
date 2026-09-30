@@ -85,3 +85,75 @@ it('bounds an anonymous request by the site cap alone', function (): void {
     expect(fn() => capPolicyWith(['governance.user_monthly_tokens' => 100, 'governance.site_monthly_tokens' => 10])->assertAllowed(0))
         ->toThrow(CapExceeded::class);
 });
+
+// Kanboard #4701: a tool turn is re-checked before each further provider call, with the tokens
+// it has already spent counted on top of the month's total, so one turn of several iterations
+// can overshoot a cap by at most the iteration that crossed it.
+it('counts the tokens the turn has already spent when it checks whether the turn may go on', function (): void {
+    capPolicyUsageCache(90, 500);
+    Filters\expectApplied('alpaca_bot/cap/allowed')->once()->with(false, 3, 'user', 100, 105)->andReturnFirstArg();
+    $policy = capPolicyWith(['governance.user_monthly_tokens' => 100, 'governance.site_monthly_tokens' => 1000]);
+    try {
+        $policy->assertMayContinue(3, 15);
+        $this->fail('CapExceeded was not thrown');
+    } catch (CapExceeded $e) {
+        expect($e->scope)->toBe('user')
+            ->and($e->limit)->toBe(100)
+            ->and($e->used)->toBe(105)
+            ->and($e->stopped)->toBeTrue()
+            ->and($e->getMessage())->toBe('This reply stopped because your monthly token cap was reached (105 of 100 tokens).');
+    }
+});
+
+it('says a mid-turn stop on the site cap without the site\'s figures', function (): void {
+    capPolicyUsageCache(0, 990);
+    Filters\expectApplied('alpaca_bot/cap/allowed')->once()->with(false, 3, 'site', 1000, 1010)->andReturnFirstArg();
+    $policy = capPolicyWith(['governance.site_monthly_tokens' => 1000]);
+    try {
+        $policy->assertMayContinue(3, 20);
+        $this->fail('CapExceeded was not thrown');
+    } catch (CapExceeded $e) {
+        expect($e->scope)->toBe('site')
+            ->and($e->stopped)->toBeTrue()
+            ->and($e->getMessage())->toBe('This reply stopped because the site\'s monthly token cap was reached.');
+    }
+});
+
+it('lets the turn go on while the month and the turn together stay under both caps, offering each verdict to the filter', function (): void {
+    capPolicyUsageCache(50, 500);
+    Filters\expectApplied('alpaca_bot/cap/allowed')->once()->with(true, 3, 'user', 100, 60)->andReturnFirstArg();
+    Filters\expectApplied('alpaca_bot/cap/allowed')->once()->with(true, 3, 'site', 1000, 510)->andReturnFirstArg();
+    capPolicyWith(['governance.user_monthly_tokens' => 100, 'governance.site_monthly_tokens' => 1000])->assertMayContinue(3, 10);
+    expect(true)->toBeTrue();
+});
+
+it('lets the filter carry a turn past the cap mid-way, as it can let one start', function (): void {
+    capPolicyUsageCache(90, 0);
+    Filters\expectApplied('alpaca_bot/cap/allowed')->once()->with(false, 3, 'user', 100, 150)->andReturn(true);
+    capPolicyWith(['governance.user_monthly_tokens' => 100])->assertMayContinue(3, 60);
+    expect(true)->toBeTrue();
+});
+
+it('reads nothing mid-turn when both caps are 0', function (): void {
+    Functions\expect('get_transient')->never();
+    Filters\expectApplied('alpaca_bot/cap/allowed')->never();
+    capPolicyWith([])->assertMayContinue(3, 1_000_000);
+    expect(true)->toBeTrue();
+});
+
+it('never counts a negative spend against the month', function (): void {
+    capPolicyUsageCache(10, 0);
+    Filters\expectApplied('alpaca_bot/cap/allowed')->once()->with(true, 3, 'user', 100, 10)->andReturnFirstArg();
+    capPolicyWith(['governance.user_monthly_tokens' => 100])->assertMayContinue(3, -5);
+    expect(true)->toBeTrue();
+});
+
+it('marks a refusal before the turn as not stopped', function (): void {
+    capPolicyUsageCache(150, 0);
+    try {
+        capPolicyWith(['governance.user_monthly_tokens' => 100])->assertAllowed(3);
+        $this->fail('CapExceeded was not thrown');
+    } catch (CapExceeded $e) {
+        expect($e->stopped)->toBeFalse()->and($e->conversationId)->toBe(0);
+    }
+});

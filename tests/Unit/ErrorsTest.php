@@ -49,6 +49,21 @@ it('capExceeded is alpaca_bot_cap_exceeded, 402, with the scope, the exception\'
         ->and($site->get_error_data())->toBe(['status' => 402, 'scope' => 'site']);
 });
 
+// Kanboard #4701: a turn stopped mid-way by the cap is the same 402 with the same code, and says
+// so: `stopped`, and the conversation its partial reply was stored on, so a buffered caller that
+// started a new conversation can find what the turn produced.
+it('capExceeded marks a turn the cap stopped mid-way, with the conversation its partial reply is on', function (): void {
+    $user = new CapExceeded('user', 100, 105, true);
+    $user->conversationId = 42;
+    $e = Errors::capExceeded($user);
+    expect($e->get_error_code())->toBe('alpaca_bot_cap_exceeded')
+        ->and($e->get_error_message())->toBe('This reply stopped because your monthly token cap was reached (105 of 100 tokens).')
+        ->and($e->get_error_data())->toBe(['status' => 402, 'scope' => 'user', 'limit' => 100, 'used' => 105, 'stopped' => true, 'conversation_id' => 42]);
+
+    $site = Errors::capExceeded(new CapExceeded('site', 1_000, 1_010, true));
+    expect($site->get_error_data())->toBe(['status' => 402, 'scope' => 'site', 'stopped' => true, 'conversation_id' => 0]);
+});
+
 it('notFound is alpaca_bot_not_found, 404, naming the kind of thing', function (): void {
     $e = Errors::notFound('Conversation');
     expect($e->get_error_code())->toBe('alpaca_bot_not_found')

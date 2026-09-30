@@ -103,12 +103,19 @@ final class Errors
      * month-to-date total are what `GET /usage` withholds from a non-administrator, and anyone
      * who may chat can reach this error by chatting once past the cap. `scope` is always there,
      * so a client can say whose cap it was.
+     *
+     * A turn the cap stopped between two provider calls (Kanboard #4701) is the same 402 with
+     * `stopped: true` and the `conversation_id` its partial reply was stored on: a buffered caller
+     * that started a new conversation learns of that id from nowhere else.
      */
     public static function capExceeded(CapExceeded $e): \WP_Error
     {
         $data = ['status' => 402, 'scope' => $e->scope];
         if ($e->scope === 'user') {
             $data += ['limit' => $e->limit, 'used' => $e->used];
+        }
+        if ($e->stopped) {
+            $data += ['stopped' => true, 'conversation_id' => $e->conversationId];
         }
         return new \WP_Error('alpaca_bot_cap_exceeded', $e->getMessage(), $data);
     }
