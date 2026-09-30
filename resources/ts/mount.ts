@@ -160,9 +160,9 @@ export function savePrefs(cfg: MountSettings, nonce: string, body: { open?: bool
  * A 4xx is not retried, since it would be refused again (a nonce the server no longer takes, a
  * capability filter on the route): the tab counts it as written, and writes again only when what
  * it shows changes, so a route that keeps refusing costs one POST per change and not one per
- * announcement. `data-conversation` still means the
- * conversation the host shows, updated on every announcement, written or not: a mount that failed
- * is tried again on it. The drawer's open flag is not touched.
+ * announcement. `data-conversation` still means the conversation the host shows, updated on every
+ * announcement, written or not: a mount that failed is tried again on it. The drawer's open flag
+ * is not touched.
  */
 export function rememberConversation(host: HTMLElement, cfg: MountSettings, nonce: () => string): (id: number) => void {
   let written: number | null = null;

@@ -46,7 +46,7 @@ export function startDrawer(cfg: MountSettings, launcher: HTMLElement, host: HTM
   function setOpen(open: boolean, byUser: boolean): void {
     host.hidden = !open;
     launcher.setAttribute('aria-expanded', String(open));
-    if (byUser) savePrefs(cfg, nonce(), { open });
+    if (byUser) void savePrefs(cfg, nonce(), { open });
     if (!open) {
       if (byUser) launcher.focus();
       return;

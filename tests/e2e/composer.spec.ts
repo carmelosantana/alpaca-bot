@@ -7,8 +7,8 @@ import { fileURLToPath } from 'node:url';
  * back, and the transcript is left with no record of a turn that never happened. Every case here
  * leaves the composer as the send left it, empty and on the same conversation, which is the only
  * composer the draft is given back to; a switch, or input typed or picked since, keeps the box as
- * the user left it and puts the message's text in the status line instead (Kanboard #4692,
- * tests/ts/chat.test.ts).
+ * the user left it, loses the image, and keeps the message's text in #ab-unsent instead
+ * (Kanboard #4692, tests/ts/chat.test.ts).
  *
  * This drives the real bundle (assets/js/chat.js, the `pnpm build` output of resources/ts/) in a
  * real browser, and nothing else: the page, the REST calls and the stream redemption are all

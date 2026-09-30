@@ -103,10 +103,10 @@ export function boot(cfg: Settings, form: HTMLFormElement): void {
    * (a stale nonce locks it until a reload, Kanboard #302); the colour is decided here.
    *
    * The concurrency refusal is "not yet", not a failure: the ticket is unspent, and send()'s
-   * finally gives the message and the image back as soon as this returns, so it says why and
-   * stays out of the error colour. The server's message already names how many streams are
-   * open, so it is shown as it stands; `data.limit` is the same number for a client that words
-   * its own.
+   * finally hands the draft to giveBack() as soon as this returns, which says where it goes, so
+   * this says why and stays out of the error colour. The server's message already names how many
+   * streams are open, so it is shown as it stands; `data.limit` is the same number for a client
+   * that words its own.
    */
   function refused(status: number, error: RestError): void {
     const decision = refusal(status, error, t);
