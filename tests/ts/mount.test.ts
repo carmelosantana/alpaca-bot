@@ -262,48 +262,90 @@ test('mountPanel uses the htmx the page carries under its handle id, whatever it
 
 /**
  * rememberConversation() dedups against what this tab last wrote to POST /view/drawer (Kanboard
- * #4693), and a write that failed is not what it last wrote: the memory does not hold it. So a
- * refused write (a nonce the server no longer takes) or one that never arrived (a network error)
- * leaves the next announcement of the same conversation to write again, and one that succeeded
- * does not. A failure that lands after a later write was sent forgets nothing of that later one.
+ * #4693). Each case holds every write open until it answers it, so the order in which writes are
+ * sent and the order in which they settle are the case's to choose. `answer(i, status)` settles
+ * the i-th write with that status, or with a network error for 0.
  */
-test('rememberConversation writes again after a write that failed, and not after one that succeeded (Kanboard #4693)', async (t) => {
-  installDom('<aside id="host" data-conversation="5"></aside>');
+function writes(t: { after(fn: () => void): void }): { sent: string[]; answer: (i: number, status: number) => Promise<void> } {
   const real = globalThis.fetch;
   t.after(() => { globalThis.fetch = real; });
-  const answers: (number | 'network')[] = [500, 'network', 200, 403, 200];
   const sent: string[] = [];
-  let settled = 0;
-  globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
-    sent.push(String(init?.body ?? ''));
-    const answer = answers.shift() ?? 200;
-    try {
-      if (answer === 'network') throw new TypeError('Failed to fetch');
-      return new Response('', { status: answer });
-    } finally {
-      settled++;
-    }
+  const pending: ((status: number) => void)[] = [];
+  globalThis.fetch = ((_input: RequestInfo | URL, init?: RequestInit) => {
+    sent.push(String((JSON.parse(String(init?.body ?? '{}')) as { conversation_id?: number }).conversation_id));
+    return new Promise<Response>((resolve, reject) => {
+      pending.push((status) => { if (status === 0) reject(new TypeError('Failed to fetch')); else resolve(new Response('', { status })); });
+    });
   }) as typeof fetch;
+  return {
+    sent,
+    answer: async (i, status) => {
+      pending[i]!(status);
+      // Lets savePrefs()'s then() and remember()'s after it run.
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    },
+  };
+}
+
+async function remembering(): Promise<{ remember: (id: number) => void; host: HTMLElement }> {
+  installDom('<aside id="host" data-conversation="5"></aside>');
   const { rememberConversation } = await import('../../resources/ts/mount.ts');
   const host = document.getElementById('host') as HTMLElement;
-  const remember = rememberConversation(host, { ...CFG, prefs: 'https://alpaca-bot.test/wp-json/alpaca-bot/v1/view/drawer' }, () => 'n');
-  const settle = async (): Promise<void> => { await new Promise((resolve) => setTimeout(resolve, 5)); };
+  return { host, remember: rememberConversation(host, { ...CFG, prefs: 'https://alpaca-bot.test/wp-json/alpaca-bot/v1/view/drawer' }, () => 'n') };
+}
 
-  remember(5); // 500
-  await settle();
-  remember(5); // a network error
-  await settle();
-  remember(5); // 200
-  await settle();
-  remember(5); // written already: nothing sent
-  assert.deepEqual(sent, ['{"conversation_id":5}', '{"conversation_id":5}', '{"conversation_id":5}']);
+test('rememberConversation sends one write for a conversation announced again while its write is in flight (Kanboard #4693)', async (t) => {
+  const { sent, answer } = writes(t);
+  const { remember, host } = await remembering();
+  // A turn's start frame, then its done frame before the start's write has answered.
+  remember(5);
+  remember(5);
+  assert.deepEqual(sent, ['5']);
+  await answer(0, 200);
+  remember(5);
+  assert.deepEqual(sent, ['5']);
+  assert.equal(host.dataset.conversation, '5');
+});
 
-  // 7 is refused, but only after 9 has been sent: 9 stays what this tab last wrote.
-  remember(7); // 403
-  remember(9); // 200
-  await settle();
+test('rememberConversation writes again after a 5xx or a network error, and not after a 2xx or a 4xx (Kanboard #4693)', async (t) => {
+  const { sent, answer } = writes(t);
+  const { remember } = await remembering();
+  remember(5);
+  await answer(0, 500);
+  remember(5);
+  await answer(1, 0);
+  remember(5);
+  await answer(2, 200);
+  remember(5);
+  assert.deepEqual(sent, ['5', '5', '5']);
+
+  // A refusal (a capability filter's 403, a nonce the server no longer takes) would be refused
+  // again, so it is not retried on each announcement.
+  remember(7);
+  await answer(3, 403);
+  remember(7);
+  assert.deepEqual(sent, ['5', '5', '5', '7']);
+});
+
+test('a write that fails clears the record only when it was the latest write this tab sent (Kanboard #4693)', async (t) => {
+  const { sent, answer } = writes(t);
+  const { remember, host } = await remembering();
+  // A, B: A fails once B has been sent, and B stays what this tab last wrote.
+  remember(7);
   remember(9);
-  assert.equal(settled, 5);
-  assert.deepEqual(sent.slice(3), ['{"conversation_id":7}', '{"conversation_id":9}']);
-  assert.equal(host.dataset.conversation, '9');
+  await answer(0, 500);
+  await answer(1, 200);
+  remember(9);
+  assert.deepEqual(sent, ['7', '9']);
+
+  // A, B, A: the first A fails after the second A has been sent (and taken), which it must not undo.
+  remember(5);
+  remember(8);
+  remember(5);
+  await answer(4, 200);
+  await answer(2, 500);
+  await answer(3, 200);
+  remember(5);
+  assert.deepEqual(sent, ['7', '9', '5', '8', '5']);
+  assert.equal(host.dataset.conversation, '5');
 });

@@ -700,3 +700,28 @@ test('a model chosen before the ticket: the turn sends the model it was sent wit
   turn.close();
   await turn.finished();
 });
+
+/**
+ * Whatever htmx swaps inside the shell re-announces the conversation the transcript shows
+ * (boot.ts's htmx:afterSwap listener), not only the history select's switch: the model select's
+ * answer into #ab-status (View\Chat\ModelSelect) and the history select's own refresh after a turn
+ * (View\Chat\HistorySelect, `ab:refresh`) each do. A host remembers each announcement (mount.ts
+ * rememberConversation()), so either can write the conversation to POST /view/drawer; docs/api.md
+ * says so.
+ */
+test('a model change and the history refresh, each an htmx swap inside the shell, announce the conversation shown', async () => {
+  const win = installDom(SHELL.replace('<div id="ab-chat"', '<div id="ab-history"><select id="ab-history-select"></select></div><div id="ab-chat"').replaceAll('data-conversation="0"', 'data-conversation="5"').replace('name="conversation_id" value="0"', 'name="conversation_id" value="5"'));
+  (win as unknown as Record<string, unknown>).htmx = { trigger: () => {}, ajax: async () => {}, process: () => {} };
+  const { boot } = await import('../../resources/ts/boot.ts');
+  const form = document.querySelector('#ab-form') as HTMLFormElement;
+  const ids: number[] = [];
+  form.addEventListener('ab:conversation', (e) => { ids.push((e as CustomEvent<{ id: number }>).detail.id); });
+  boot(CFG, form);
+  assert.deepEqual(ids, []);
+
+  // The model select's POST /view/default-model answer, swapped into #ab-status.
+  (document.querySelector('#ab-status') as HTMLElement).dispatchEvent(new CustomEvent('htmx:afterSwap', { bubbles: true }));
+  // The history select's refresh, which swaps the select itself (outerHTML).
+  (document.querySelector('#ab-history-select') as HTMLElement).dispatchEvent(new CustomEvent('htmx:afterSwap', { bubbles: true }));
+  assert.deepEqual(ids, [5, 5]);
+});

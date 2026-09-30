@@ -119,17 +119,17 @@ export async function mountPanel(host: HTMLElement, cfg: MountSettings, nonce: s
 /**
  * The user's drawer preferences, to POST /view/drawer (`cfg.prefs`): whether the drawer is open,
  * and the conversation last shown. Fire and forget: a preference that fails to save is not worth
- * a notice over the chat. It answers whether the write was taken (a 2xx), and never rejects, so a
- * caller that ignores it is left no unhandled rejection; rememberConversation() is the one that
- * reads it.
+ * a notice over the chat. It answers the response's status, or 0 when there was none (a network
+ * error), and never rejects, so a caller that ignores it is left no unhandled rejection;
+ * rememberConversation() is the one that reads it.
  */
-export function savePrefs(cfg: MountSettings, nonce: string, body: { open?: boolean; conversation_id?: number }): Promise<boolean> {
+export function savePrefs(cfg: MountSettings, nonce: string, body: { open?: boolean; conversation_id?: number }): Promise<number> {
   return fetch(cfg.prefs, {
     method: 'POST',
     credentials: 'same-origin',
     headers: { 'X-WP-Nonce': nonce, 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
-  }).then((res) => res.ok, () => false);
+  }).then((res) => res.status, () => 0);
 }
 
 /**
@@ -137,8 +137,9 @@ export function savePrefs(cfg: MountSettings, nonce: string, body: { open?: bool
  * which share the one memory (Kanboard #4527), so either reopens on the conversation last shown in
  * either. It is set on each `ab:conversation` the chat announces from inside the host
  * (resources/ts/boot.ts: a turn's `start` and `done` frames, and each htmx swap inside the chat,
- * which re-announces the transcript shown, a switch in the history select among them) and on the
- * id the returned function is called with (the host's New chat, with 0).
+ * which re-announces the transcript shown: a switch in the history select, a model change, the
+ * history's refresh after a turn) and on the id the returned function is called with (the host's
+ * New chat, with 0).
  *
  * The rule across tabs is that the last activity wins (Kanboard #4693): whichever tab last
  * announced a conversation owns the memory, since that is where the user was last. So a write is
@@ -152,20 +153,28 @@ export function savePrefs(cfg: MountSettings, nonce: string, body: { open?: bool
  * binds its listeners after the mount's swap), so it writes no conversation.
  *
  * The value counts as written from the moment it is sent, so a turn's `done` that arrives while
- * its `start`'s write is in flight sends nothing, and it is forgotten if that write fails (refused,
- * or never arriving), so the next announcement of it tries again; a failure that lands after a
- * later write was sent forgets nothing of that later one. `data-conversation` still means the
+ * its `start`'s write is in flight sends nothing. It is forgotten if that write fails in a way a
+ * retry may mend, a 5xx or no answer at all (a network error), so the next announcement of it
+ * tries again, but only when that write is still the latest this tab sent: an earlier write that
+ * fails after a later one was sent forgets nothing, even when both were of the same id (5, 8, 5).
+ * A 4xx is not retried, since it would be refused again (a nonce the server no longer takes, a
+ * capability filter on the route): the tab counts it as written, and writes again only when what
+ * it shows changes, so a route that keeps refusing costs one POST per change and not one per
+ * announcement. `data-conversation` still means the
  * conversation the host shows, updated on every announcement, written or not: a mount that failed
  * is tried again on it. The drawer's open flag is not touched.
  */
 export function rememberConversation(host: HTMLElement, cfg: MountSettings, nonce: () => string): (id: number) => void {
   let written: number | null = null;
+  // Counts the writes sent, so a failure can tell whether its write is still the latest.
+  let sends = 0;
   function remember(id: number): void {
     host.dataset.conversation = String(id);
     if (id === written) return;
     written = id;
-    void savePrefs(cfg, nonce(), { conversation_id: id }).then((ok) => {
-      if (!ok && written === id) written = null;
+    const send = ++sends;
+    void savePrefs(cfg, nonce(), { conversation_id: id }).then((status) => {
+      if (send === sends && (status === 0 || status >= 500)) written = null;
     });
   }
   document.addEventListener('ab:conversation', (e) => {
