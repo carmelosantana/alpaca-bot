@@ -16,7 +16,7 @@ import { installDom, until } from './env.ts';
  */
 const REST = 'https://alpaca-bot.test/wp-json/alpaca-bot/v1';
 const IMAGE = 'data:image/png;base64,iVBORw0KGgo=';
-const CFG = { rest: REST, nonce: 'n', offline: 'offline', i18n: { failed: 'The request failed. Try again.', thinking: 'Thinking...' } };
+const CFG = { rest: REST, nonce: 'n', offline: 'offline', i18n: { failed: 'The request failed. Try again.', thinking: 'Thinking...', notSent: 'Your message was not sent. Its text: {text}', notSentImage: 'The image attached to it was not sent. Attach it again to retry.' } };
 const SHELL = `<div class="ab-wrap">
   <div id="ab-chat" data-conversation="0">
     <div id="ab-status" class="ab-status" role="status" aria-live="polite"></div>
@@ -511,16 +511,59 @@ for (const [ending, end] of endings) {
   });
 }
 
-test('a turn that never ran still says so after a switch, because its draft comes back into the composer on screen', async (t) => {
+/**
+ * A turn that never ran gives its draft back only to the composer it came from, and only while
+ * that composer is empty (Kanboard #4692). Otherwise what is in the box is the user's since, and
+ * the status line says the message was not sent and carries its text, so nothing typed is lost.
+ */
+test('a turn that never ran after a switch leaves the composer on screen alone, and the status line carries its text', async (t) => {
   let fail!: (e: Error) => void;
   const turn = await heldTurn(t, '7', { ticket: new Promise<void>((_, reject) => { fail = reject; }) });
   t.mock.method(console, 'error', () => {});
   historySwap(globalThis, '9');
   fail(new TypeError('network error'));
   await turn.finished();
-  assert.equal(status(), 'The request failed. Try again.');
-  assert.equal((turn.form.querySelector('#ab-message') as HTMLTextAreaElement).value, 'hello');
+  assert.equal((turn.form.querySelector('#ab-message') as HTMLTextAreaElement).value, '');
+  assert.equal(status(), 'The request failed. Try again.Your message was not sent. Its text: hello');
+  assert.equal(document.querySelectorAll('#ab-status .notice-error p').length, 2);
   assert.equal(field(turn.form), '9');
+});
+
+test('a turn that never ran does not overwrite what was typed since, in the same conversation either', async (t) => {
+  let fail!: (e: Error) => void;
+  const turn = await heldTurn(t, '7', { ticket: new Promise<void>((_, reject) => { fail = reject; }) });
+  t.mock.method(console, 'error', () => {});
+  (turn.form.querySelector('#ab-message') as HTMLTextAreaElement).value = 'a new thought';
+  fail(new TypeError('network error'));
+  await turn.finished();
+  assert.equal((turn.form.querySelector('#ab-message') as HTMLTextAreaElement).value, 'a new thought');
+  assert.equal(status(), 'The request failed. Try again.Your message was not sent. Its text: hello');
+  // Its user bubble still leaves the transcript: the turn never happened.
+  assert.equal(document.querySelectorAll('#ab-messages .ab-msg').length, 0);
+});
+
+test('a turn that never ran does not overwrite an image picked since, and says its own image was not sent', async (t) => {
+  const OTHER = 'data:image/png;base64,T1RIRVI=';
+  const { setImage } = await import('../../resources/ts/composer.ts');
+  let fail!: (e: Error) => void;
+  const turn = await heldTurn(t, '7', { ticket: new Promise<void>((_, reject) => { fail = reject; }) }, { before: (form) => setImage(form, IMAGE) });
+  t.mock.method(console, 'error', () => {});
+  setImage(turn.form, OTHER);
+  fail(new TypeError('network error'));
+  await turn.finished();
+  assert.equal((turn.form.elements.namedItem('images') as HTMLInputElement).value, OTHER);
+  assert.equal((turn.form.querySelector('#ab-message') as HTMLTextAreaElement).value, '');
+  assert.equal(status(), 'The request failed. Try again.Your message was not sent. Its text: helloThe image attached to it was not sent. Attach it again to retry.');
+});
+
+test('a turn that never ran still gives its draft back to its own empty composer', async (t) => {
+  let fail!: (e: Error) => void;
+  const turn = await heldTurn(t, '7', { ticket: new Promise<void>((_, reject) => { fail = reject; }) });
+  t.mock.method(console, 'error', () => {});
+  fail(new TypeError('network error'));
+  await turn.finished();
+  assert.equal((turn.form.querySelector('#ab-message') as HTMLTextAreaElement).value, 'hello');
+  assert.equal(status(), 'The request failed. Try again.');
 });
 
 /**

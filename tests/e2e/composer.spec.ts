@@ -4,7 +4,11 @@ import { fileURLToPath } from 'node:url';
 
 /**
  * What the composer does when a send does not run: the typed message and any attached image come
- * back, and the transcript is left with no record of a turn that never happened.
+ * back, and the transcript is left with no record of a turn that never happened. Every case here
+ * leaves the composer as the send left it, empty and on the same conversation, which is the only
+ * composer the draft is given back to; a switch, or input typed or picked since, keeps the box as
+ * the user left it and puts the message's text in the status line instead (Kanboard #4692,
+ * tests/ts/chat.test.ts).
  *
  * This drives the real bundle (assets/js/chat.js, the `pnpm build` output of resources/ts/) in a
  * real browser, and nothing else: the page, the REST calls and the stream redemption are all

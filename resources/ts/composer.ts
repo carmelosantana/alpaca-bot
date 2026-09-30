@@ -20,9 +20,10 @@ export function setImage(form: HTMLFormElement, dataUrl: string): void {
 
 /**
  * A turn that never reached the model, undone: its bubbles out of the transcript and what was
- * typed and attached back in the box. send() calls this from its `finally`, once, for every exit
- * before the stream is redeemed; the comment there says why one place rather than one per exit.
- * A null bubble is one that was never appended, which is why the caller may pass both without
+ * typed and attached back in the box. send() reaches this from its `finally`, once, for an exit
+ * before the stream is redeemed, through boot.ts giveBack(), which calls it only while the box is
+ * still the turn's and empty (Kanboard #4692); the comment in send() says why one place rather
+ * than one per exit. A null bubble is one that was never appended, which is why the caller may pass both without
  * checking either.
  */
 export function restoreDraft(form: HTMLFormElement, draft: Draft, ...bubbles: (HTMLElement | null)[]): void {

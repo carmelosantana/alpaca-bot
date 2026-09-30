@@ -147,8 +147,8 @@ export function boot(cfg: Settings, form: HTMLFormElement): void {
 
   /**
    * What one turn sends, read off the composer in one go: everything POST /chat carries but the
-   * constant `stream`, and the draft (the text and the image) that goes back into the box if the
-   * turn never runs. send() takes it synchronously, before its first await, and nothing after
+   * constant `stream`, and the draft (the text and the image) that giveBack() returns to the user
+   * if the turn never runs. send() takes it synchronously, before its first await, and nothing after
    * that reads the form for the turn (Kanboard #4691). The bubble requests come first, and what
    * the user does while they are out belongs to the next turn, not this one: a host's New chat
    * (mount.ts newChat()) swaps in the fresh composer's chips and sets the conversation to 0, and
@@ -208,8 +208,8 @@ export function boot(cfg: Settings, form: HTMLFormElement): void {
     let assistant: HTMLElement | null = null;
     // Whether the turn reached the model. Until it does, what was typed still belongs to the
     // composer: every exit before that point has to take both bubbles back out of the
-    // transcript and put the text and the image back in the box, or they are gone with no
-    // record of the turn anywhere. Done once in the finally rather than at each `return`,
+    // transcript and give the text and the image back (giveBack() says where), or they are gone
+    // with no record of the turn anywhere. Done once in the finally rather than at each `return`,
     // because the exits kept forgetting one of the two -- the stream redemption that comes
     // back as something other than an event stream (StreamBudget's 429, an expired or replayed
     // ticket) took the assistant bubble out and left the typed message nowhere, while a
@@ -244,15 +244,43 @@ export function boot(cfg: Settings, form: HTMLFormElement): void {
     } catch (e) {
       console.error(e);
       // A turn that ran and failed after the user switched away is not the open conversation's
-      // failure (consume() says the same of its own exits). One that never ran is: its draft
-      // comes back into the composer on screen, and the notice says why.
+      // failure (consume() says the same of its own exits). One that never ran is reported
+      // wherever the user is: giveBack() either puts its draft back or adds its text to this
+      // notice, and either way the user has to be told why.
       if (!sent || shown()) notice('error', t('failed'));
     } finally {
-      if (!sent) restoreDraft(form, turn, assistant, user);
+      if (!sent) giveBack(turn, shown(), assistant, user);
       busy = false;
       if (!expired && navigator.onLine) sendButton.disabled = false;
       textarea.focus();
     }
+  }
+
+  /**
+   * Undoes a turn that never ran (Kanboard #4692). Its bubbles always leave the transcript, since
+   * the turn never happened. Its draft goes back into the box only when the composer still shows
+   * the turn's transcript (`shown`, send()'s) and holds nothing, neither text nor an image, the
+   * user put there since the send cleared it. Anything else is not the turn's to overwrite: after
+   * a switch the box is the conversation now open, and what is in it, typed or picked, is the
+   * user's newer input. There the draft is not put back; the status line keeps the notice that
+   * says why the turn failed and gains a line saying the message was not sent, with its text, so
+   * no typed text is lost. An attached image cannot be carried that way and is lost, so its own
+   * line says to attach it again. That is the least loss of the options: restoring over input
+   * loses the newer input, restoring into another conversation's composer sends the message
+   * where it was not written, and holding the draft for a later return to the conversation has
+   * nothing to hold it on, because a switch back brings a new transcript element.
+   */
+  function giveBack(turn: Draft, shown: boolean, ...bubbles: (HTMLElement | null)[]): void {
+    if (shown && textarea.value === '' && field('images').value === '') {
+      restoreDraft(form, turn, ...bubbles);
+      return;
+    }
+    for (const bubble of bubbles) bubble?.remove();
+    // A function replacement, so a "$&" in the message is not read as a pattern.
+    const lines = [...(turn.text !== '' ? [t('notSent').replace('{text}', () => turn.text)] : []), ...(turn.image !== '' ? [t('notSentImage')] : [])];
+    if (!$('#ab-status .notice')) notice('error', lines.shift() ?? '');
+    const shownNotice = $('#ab-status .notice');
+    for (const line of lines) shownNotice?.append(el('p', {}, line));
   }
 
   /**
