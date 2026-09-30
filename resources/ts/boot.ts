@@ -283,22 +283,33 @@ export function boot(cfg: Settings, form: HTMLFormElement): void {
    * there: connectivity() on `offline` and again on `online` (the drop that usually fails the
    * turn fires both), the next send, an attach or copy error, the model select's answer, and a
    * host's New chat, which empties it. The slot sits outside #ab-status and #ab-messages, so none of
-   * those, nor a history switch, touches it; it goes when the user dismisses it. What still loses
-   * the text is the user's dismissing it, or anything that takes the chat off the page, a reload
-   * included. An image cannot be shown back this way and is lost, so its line says to attach it
-   * again.
+   * those, nor a history switch, touches it; a notice goes when the user dismisses it. What still
+   * loses the text is the user's dismissing it, or anything that takes the chat off the page, a
+   * reload included. An image cannot be shown back this way and is lost, so its line says to
+   * attach it again.
+   *
+   * Several unsent turns stack, the newest first, rather than the newest replacing the rest:
+   * replacing would lose the older text, which is the one thing the slot is for. The slot's height
+   * is capped in alpaca-bot.css and it scrolls past that, so however many there are and however
+   * long, the transcript and the composer keep their room.
+   *
+   * The slot is a live region, and one made and filled in the same task may go unannounced, so
+   * boot() makes it once, empty (unsentSlot()), and this only fills it.
    */
   function keepUnsent(turn: Draft): void {
-    let slot = $('#ab-unsent', shell);
-    if (!slot) {
-      slot = el('div', { id: 'ab-unsent', class: 'ab-status ab-unsent', role: 'status', 'aria-live': 'polite' });
-      const status = $('#ab-status', shell);
-      if (status) status.after(slot);
-      else form.before(slot);
-    }
-    slot.append(el('div', { class: 'notice notice-warning inline' },
+    unsentSlot().prepend(el('div', { class: 'notice notice-warning inline' },
       el('div', { class: 'ab-unsent__text' }, ...unsentLines(turn, t).map((line) => el('p', {}, line))),
       el('button', { type: 'button', class: 'ab-btn ab-btn--icon', 'data-action': 'unsent-dismiss', 'aria-label': t('dismiss') }, icon('x'))));
+  }
+  /** keepUnsent()'s slot: the shell's, else a new empty one after the status line (or before the form, where there is none). */
+  function unsentSlot(): HTMLElement {
+    const existing = $('#ab-unsent', shell);
+    if (existing) return existing;
+    const slot = el('div', { id: 'ab-unsent', class: 'ab-status ab-unsent', role: 'status', 'aria-live': 'polite' });
+    const status = $('#ab-status', shell);
+    if (status) status.after(slot);
+    else form.before(slot);
+    return slot;
   }
 
   /**
@@ -494,14 +505,8 @@ export function boot(cfg: Settings, form: HTMLFormElement): void {
       // key for it; the last chip takes its row with it, which would otherwise stay as an empty
       // group with its margin. The button was focused and is gone, so the focus goes back to the box.
       case 'chip-remove': removeChip(button); textarea.focus(); break;
-      // One kept draft (keepUnsent()) goes, and the slot with its last one; the focus goes back to the box.
-      case 'unsent-dismiss': {
-        const slot = button.closest('#ab-unsent');
-        button.closest('.notice')?.remove();
-        if (slot && !slot.querySelector('.notice')) slot.remove();
-        textarea.focus();
-        break;
-      }
+      // One kept draft (keepUnsent()) goes; the slot stays, empty, for the next. The focus goes back to the box.
+      case 'unsent-dismiss': button.closest('.notice')?.remove(); textarea.focus(); break;
     }
   });
   document.addEventListener('change', (e) => {
@@ -538,6 +543,7 @@ export function boot(cfg: Settings, form: HTMLFormElement): void {
     const xhr = (e as CustomEvent<HtmxDetail>).detail.xhr;
     void restError(null, xhr?.responseText ?? '').then((error) => refused(xhr?.status ?? 0, error));
   });
+  unsentSlot(); // made now, empty, so its first notice lands in a live region already there (keepUnsent())
   window.addEventListener('online', connectivity);
   window.addEventListener('offline', connectivity);
   watchNonce((nonce) => { cfg.nonce = nonce; });

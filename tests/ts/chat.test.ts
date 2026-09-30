@@ -569,6 +569,13 @@ for (const order of ['offline, then the ticket fails, then online', 'the ticket 
     const turn = await heldTurn(t, '7', { ticket: new Promise<void>((_, reject) => { fail = reject; }) });
     t.mock.method(console, 'error', () => {});
     let online = true;
+    // An own property over the prototype's getter, taken off again after the case so nothing later
+    // in this file meets a navigator this case left offline.
+    const own = Object.getOwnPropertyDescriptor(navigator, 'onLine');
+    t.after(() => {
+      if (own) Object.defineProperty(navigator, 'onLine', own);
+      else delete (navigator as unknown as Record<string, unknown>).onLine;
+    });
     Object.defineProperty(navigator, 'onLine', { get: () => online, configurable: true });
     const go = (up: boolean): void => { online = up; window.dispatchEvent(new Event(up ? 'online' : 'offline')); };
     historySwap(globalThis, '9');
@@ -603,7 +610,9 @@ test('the kept text stays through the next notice and a New chat, and goes when 
   assert.equal(status(), '');
   assert.equal(unsent(), 'Your message was not sent. Its text: hello');
   (document.querySelector('#ab-unsent [data-action="unsent-dismiss"]') as HTMLElement).dispatchEvent(new MouseEvent('click', { bubbles: true }));
-  assert.equal(document.querySelectorAll('#ab-unsent').length, 0);
+  // The slot stays, empty, for the next one: it is a live region, and one made and filled at once may go unannounced.
+  assert.equal(document.querySelectorAll('#ab-unsent .notice').length, 0);
+  assert.equal(document.querySelectorAll('#ab-unsent').length, 1);
   assert.equal(document.activeElement?.id, 'ab-message');
 });
 
@@ -624,7 +633,34 @@ test('a turn that never ran still gives its draft back to its own empty composer
   await turn.finished();
   assert.equal((turn.form.querySelector('#ab-message') as HTMLTextAreaElement).value, 'hello');
   assert.equal(status(), 'The request failed. Try again.');
-  assert.equal(document.querySelectorAll('#ab-unsent').length, 0);
+  assert.equal(document.querySelectorAll('#ab-unsent .notice').length, 0);
+});
+
+test('boot makes the kept-text slot once, empty, right after the status line, so its first notice is announced', async () => {
+  installDom(SHELL);
+  const { boot } = await import('../../resources/ts/boot.ts');
+  boot(CFG, document.querySelector('#ab-form') as HTMLFormElement);
+  assert.equal(document.querySelectorAll('#ab-status + #ab-unsent[role="status"][aria-live="polite"]').length, 1);
+  assert.equal(document.querySelector('#ab-unsent')?.childNodes.length, 0);
+});
+
+test('several unsent turns stack, the newest first, and none replaces another', async (t) => {
+  let fail!: (e: Error) => void;
+  const turn = await heldTurn(t, '7', { ticket: new Promise<void>((_, reject) => { fail = reject; }) });
+  t.mock.method(console, 'error', () => {});
+  historySwap(globalThis, '9');
+  fail(new TypeError('network error'));
+  await turn.finished();
+  // A second turn, on 9, whose box the user types into while it is out: the held ticket fails it too.
+  const box = turn.form.querySelector('#ab-message') as HTMLTextAreaElement;
+  box.value = 'second';
+  turn.form.dispatchEvent(new Event('submit', { cancelable: true }));
+  box.value = 'typed meanwhile';
+  await until(() => document.querySelectorAll('#ab-unsent .notice').length === 2);
+  await turn.finished();
+  const kept = [...document.querySelectorAll('#ab-unsent .ab-unsent__text')].map((node) => node.textContent);
+  assert.deepEqual(kept, ['Your message was not sent. Its text: second', 'Your message was not sent. Its text: hello']);
+  assert.equal(box.value, 'typed meanwhile');
 });
 
 /**
