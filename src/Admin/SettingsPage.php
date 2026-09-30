@@ -280,10 +280,11 @@ final class SettingsPage
      *
      * The Chat row has no filter in Access, so overridden('chat') would answer false whatever a
      * site did. The menu's filter (Menu::capability(), which the chat screen, the drawer and the
-     * editor sidebar ask) is asked instead, and then each route key whose routes declare the Chat
-     * row (RouteCapability::chatRoutes() over the site's controllers), through its own
-     * `alpaca_bot/capability/{route}` with a request of that route's verb and path. The lines
-     * name the surfaces that moved. Listing the controllers is a site's code too (the
+     * editor sidebar ask) is asked instead, and then each route key and verb a route declaring the
+     * Chat row is registered under (RouteCapability::chatRoutes() over the site's controllers),
+     * through its own `alpaca_bot/capability/{route}` with a request of that verb and path, so a
+     * filter that answers by verb (only `DELETE /conversations`) is seen. The lines name the
+     * surfaces, verb and path, that moved. Listing the controllers is a site's code too (the
      * `alpaca_bot/rest/controllers` filter), so a throw there is reported like a throwing filter.
      *
      * @param Field $f
@@ -301,12 +302,13 @@ final class SettingsPage
                 $lines[] = self::setInCode(esc_html__('for the chat REST routes', 'alpaca-bot'), static fn(): never => throw $e, $stored, $f);
             }
             $asks = [];
-            foreach ($routes ?? [] as $key => $route) {
-                $asks['<code>' . esc_html($route['method'] . ' ' . $route['path']) . '</code>'] = static fn(): string => RouteCapability::filtered($key, $stored, new \WP_REST_Request($route['method'], '/' . Controller::NAMESPACE . $route['path']));
+            foreach ($routes ?? [] as $route) {
+                $asks['<code>' . esc_html($route['method'] . ' ' . $route['path']) . '</code>'] = static fn(): string => RouteCapability::filtered($route['key'], $stored, new \WP_REST_Request($route['method'], '/' . Controller::NAMESPACE . $route['path']));
             }
             $lines = [...$lines, ...self::setInCodeEach(
                 /* translators: %s: one chat REST route, such as POST /chat, or a comma-separated list of them */
                 static fn(int $n): string => _n('for the chat REST route (%s)', 'for the chat REST routes (%s)', $n, 'alpaca-bot'),
+                $row,
                 $asks,
                 $stored,
                 $f,
@@ -319,6 +321,7 @@ final class SettingsPage
             $lines = self::setInCodeEach(
                 /* translators: %s: one shortcode, such as [alpacabot], or a comma-separated list of them */
                 static fn(int $n): string => _n('for the shortcode %s', 'for the shortcodes %s', $n, 'alpaca-bot'),
+                $row,
                 $asks,
                 $stored,
                 $f,
@@ -342,15 +345,17 @@ final class SettingsPage
      * escaped HTML, => what resolves it) is called exactly once, and the surfaces whose answers
      * match share one line, named by `$surface`'s format for that many surfaces (translated and
      * not yet escaped, `%s` the label or the comma-separated labels). A surface whose resolver
-     * throws is grouped with the other failures. A surface that answers the stored value gets no
-     * line.
+     * throws is grouped with the other failures, and under WP_DEBUG leaves a line in the debug
+     * log naming `$row`, the surface and the message, as Access::overridden() does for a row it
+     * asks: a label that flips because of another plugin's exception must not do it silently.
+     * A surface that answers the stored value gets no line.
      *
      * @param \Closure(int): string $surface
      * @param array<string, \Closure(): string> $asks
      * @param Field $f
      * @return list<string>
      */
-    private static function setInCodeEach(\Closure $surface, array $asks, string $stored, array $f): array
+    private static function setInCodeEach(\Closure $surface, string $row, array $asks, string $stored, array $f): array
     {
         $groups = [];
         foreach ($asks as $label => $resolve) {
@@ -358,6 +363,10 @@ final class SettingsPage
                 $answer = $resolve();
             } catch (\Throwable $e) {
                 $answer = $e;
+                if (defined('WP_DEBUG') && WP_DEBUG) {
+                    // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log -- Deliberate diagnostic, gated on WP_DEBUG as Access::overridden()'s is: the note on the screen has nowhere to carry the reason.
+                    error_log(sprintf('[alpaca-bot] resolving the %s access row for %s threw, so it is reported as set in code: %s', $row, html_entity_decode(wp_strip_all_tags((string) $label), ENT_QUOTES), $e->getMessage()));
+                }
             }
             if ($answer !== $stored) {
                 $group = is_string($answer) ? 'cap:' . $answer : 'threw';

@@ -227,7 +227,7 @@ final class HelpTabs
             ))
             . self::p(sprintf(
                 /* translators: 1: alpaca_bot/admin/menu_capability, 2: alpaca_bot/capability/{route}, 3: alpaca_bot/capability/chat, 4: POST /chat */
-                esc_html__('The Chat row has no filter of that kind. The note under it asks %1$s, which filters the chat screen, its panel and the editor sidebar, and the filter of every chat REST route, %2$s (%3$s for the %4$s route, and one per route besides), and names each of them that moved it.', 'alpaca-bot'),
+                esc_html__('The Chat row has no filter of that kind. The note under it asks %1$s, which filters the chat screen, its panel and the editor sidebar, and the filter of every chat REST route, %2$s (%3$s for the %4$s route, and one per route besides), once for each method the route takes, such as GET and DELETE, and names each route and method that moved it.', 'alpaca-bot'),
                 '<code>alpaca_bot/admin/menu_capability</code>',
                 '<code>alpaca_bot/capability/{route}</code>',
                 '<code>alpaca_bot/capability/chat</code>',

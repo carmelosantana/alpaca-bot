@@ -360,7 +360,8 @@ final class SettingsPageTest extends TestCase
     {
         $admin = get_current_user_id();
         add_filter('alpaca_bot/capability/tool/web_fetch', static fn(string $cap, int $userId): string => $userId === $admin ? 'manage_options' : $cap, 10, 2);
-        add_filter('alpaca_bot/capability/shortcode', static fn(string $cap, int $postId, string $tag): string => $tag === 'alpacabot' ? 'edit_others_posts' : $cap, 10, 3);
+        // Throws for the other shortcode: its note says asking failed, and the debug log says why.
+        add_filter('alpaca_bot/capability/shortcode', static fn(string $cap, int $postId, string $tag): string => $tag === 'alpacabot' ? 'edit_others_posts' : throw new \RuntimeException('agent filter broke'), 10, 3);
         add_filter('alpaca_bot/capability/settings/write', static fn(string $cap, \WP_REST_Request $request): string => $request->get_method() === 'PUT' ? 'edit_others_posts' : $cap, 10, 2);
         add_filter('alpaca_bot/capability/chat', static fn(string $cap, \WP_REST_Request $request): string => $request->get_route() === '/alpaca-bot/v1/chat' ? 'read' : $cap, 10, 2);
         // Kanboard #4537: a chat route other than /chat is asked too, and named on its own.
@@ -380,6 +381,7 @@ final class SettingsPageTest extends TestCase
             unlink($log);
         }
         $this->assertStringContainsString('resolving the tool.summarize access row threw', $logged);
+        $this->assertStringContainsString('resolving the shortcode access row for [alpacabot_agent] threw, so it is reported as set in code: agent filter broke', $logged);
         $row = static function (string $id) use ($html): string {
             preg_match('#<tr[^>]*>(?:(?!<tr).)*id="' . preg_quote($id, '#') . '".*?</tr>#s', $html, $m);
             return $m[0] ?? '';
@@ -395,7 +397,7 @@ final class SettingsPageTest extends TestCase
         $this->assertStringNotContainsString('for the chat screen', $chat);
         $this->assertStringContainsString('for the chat REST route (<code>GET /view/history</code>): a filter changes this to Administrators (<code>manage_options</code>).', $chat);
         $this->assertStringContainsString('<strong>Set in code</strong> for the shortcode <code>[alpacabot]</code>: a filter changes this to Editors and up', $row('ab-access-shortcode'));
-        $this->assertStringNotContainsString('[alpacabot_agent]</code>:', $row('ab-access-shortcode'));
+        $this->assertStringContainsString('<strong>Set in code</strong> for the shortcode <code>[alpacabot_agent]</code>: a filter decides this, and asking it from this page failed', $row('ab-access-shortcode'));
         $this->assertStringNotContainsString('Set in code', $row('ab-access-tool-draft_post'));
         $this->assertStringContainsString('<input type="submit"', $html, 'the page rendered to its end');
     }

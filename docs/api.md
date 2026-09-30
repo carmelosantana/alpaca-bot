@@ -144,9 +144,11 @@ it is no longer applied, and the schema route asks `settings/read` with the rest
 These filters are not only called to authorise a request. The **Settings › Access** tab (section 7)
 asks some of them to show under a row whether code has moved it: `alpaca_bot/capability/settings`
 and `alpaca_bot/capability/settings/read` or `…/write` with a `GET` or `PUT /settings` request,
-and, for the Chat row, the key of every route that follows that row, once per key, with a request
-of the verb and path of the key's first route (`POST /chat`, `GET /chat/{id}/stream` with the
-placeholder as written, `GET /conversations`, and so on). The routes are read off the controllers
+and, for the Chat row, the key of every route that follows that row, once per key and verb, with a
+request of that verb and the path of the first route declaring it (`POST /chat`,
+`GET /chat/{id}/stream` with the placeholder as written, `GET /conversations` and
+`DELETE /conversations`, and so on), so a filter that answers by verb, as the example below does,
+gets a note for the verb it moved. The routes are read off the controllers
 `alpaca_bot/rest/controllers` returns, so the tab applies that filter too. The tab builds those
 requests itself; no client sent them and they authorise nothing, so a filter that logs or counts
 what it is handed sees them too.

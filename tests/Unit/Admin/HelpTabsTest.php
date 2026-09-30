@@ -157,7 +157,7 @@ it('says what each Settings › Access row decides and what "Set in code" under 
         ->toContain('as well as Chat')
         // The Chat row's surfaces, each behind a filter of its own: the menu's, and every chat
         // REST route's own key, each asked and named (Kanboard #4537).
-        ->toContain('alpaca_bot/admin/menu_capability')->toContain('alpaca_bot/capability/{route}')->toContain('every chat REST route')
+        ->toContain('alpaca_bot/admin/menu_capability')->toContain('alpaca_bot/capability/{route}')->toContain('every chat REST route')->toContain('once for each method the route takes')
         ->not->toContain('which the note does not ask')
         ->toContain('once no filter changes it')
         // Both shortcodes are asked, outside a post; what the note does not cover is a post or a user.

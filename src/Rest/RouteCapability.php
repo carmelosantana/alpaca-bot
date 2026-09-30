@@ -50,11 +50,12 @@ final class RouteCapability
          *
          * Settings › Access asks every key whose routes follow the Chat row as well (`chat`,
          * `chat/stream`, `conversations`, `models`, `usage` and the `view/…` keys but
-         * `view/mcp-tools`), once per key each time the tab is shown, to say under the Chat row
-         * whether code has changed it for that route: with the Chat row as `$capability` and a
-         * request built for that question, of the verb and path the key's first route declares
-         * (`POST /chat`, `GET /conversations`, `GET /chat/{id}/stream` with the placeholder
-         * as written), which no client sent and nothing is authorised by.
+         * `view/mcp-tools`), once per key and verb each time the tab is shown, to say under the
+         * Chat row whether code has changed it for that route: with the Chat row as `$capability`
+         * and a request built for that question, of that verb and the path of the first route
+         * declaring it (`POST /chat`, `GET /conversations`, `DELETE /conversations`,
+         * `GET /chat/{id}/stream` with the placeholder as written), which no client sent and
+         * nothing is authorised by.
          *
          * @since 0.5.0
          * @param string           $capability the route's default: its declared capability, or for a chat route the Chat row of Settings › Access (`edit_posts` unless the site changed it)
@@ -64,11 +65,15 @@ final class RouteCapability
     }
 
     /**
-     * The route keys whose routes follow the Chat row, read off `$controllers`' own route
-     * declarations: every route that declares Controller::CHAT, keyed by Controller::routeKey(),
-     * in declaration order, each key once with the first such route under it. `method` is the
-     * first verb of its `methods`, and `path` is its path with each named group written as
-     * `{name}`, so `/chat/(?P<id>\d+)/stream` is `/chat/{id}/stream`.
+     * The routes that follow the Chat row, read off `$controllers`' own route declarations: one
+     * entry per distinct pair of route key (Controller::routeKey()) and verb that a route
+     * declaring Controller::CHAT is registered under, in declaration order. A route whose
+     * `methods` names several verbs gives one pair per verb, since permission() is called with a
+     * request of whichever verb arrived and a filter may answer by verb (docs/api.md tightens
+     * only `DELETE /conversations`). The collection and its items share a key, so
+     * `GET /conversations` and `GET /conversations/{id}` are one pair, asked with the first
+     * route's path. `path` is that path with each named group written as `{name}`, so
+     * `/chat/(?P<id>\d+)/stream` is `/chat/{id}/stream`.
      *
      * Read from the declarations, not listed again here, so a route added to a controller, or a
      * site's controller appended through `alpaca_bot/rest/controllers`, is in it without anything
@@ -77,23 +82,30 @@ final class RouteCapability
      * it did not.
      *
      * @param iterable<Controller> $controllers
-     * @return array<string, array{method: string, path: string}>
+     * @return list<array{key: string, method: string, path: string}>
      */
     public static function chatRoutes(iterable $controllers): array
     {
         $routes = [];
         foreach ($controllers as $controller) {
             foreach ($controller->routes() as $route) {
-                $key = Controller::routeKey($route['path']);
-                if ($route['capability'] !== Controller::CHAT || isset($routes[$key])) {
+                if ($route['capability'] !== Controller::CHAT) {
                     continue;
                 }
-                $routes[$key] = [
-                    'method' => strtoupper(trim(explode(',', $route['methods'])[0])),
-                    'path' => (string) preg_replace('#\(\?P<([^>]+)>[^)]+\)#', '{$1}', $route['path']),
-                ];
+                $key = Controller::routeKey($route['path']);
+                foreach (explode(',', $route['methods']) as $method) {
+                    $method = strtoupper(trim($method));
+                    if ($method === '' || isset($routes[$key . ' ' . $method])) {
+                        continue;
+                    }
+                    $routes[$key . ' ' . $method] = [
+                        'key' => $key,
+                        'method' => $method,
+                        'path' => (string) preg_replace('#\(\?P<([^>]+)>[^)]+\)#', '{$1}', $route['path']),
+                    ];
+                }
             }
         }
-        return $routes;
+        return array_values($routes);
     }
 }

@@ -169,8 +169,9 @@ function settingsPage(array $settings = [], ?callable $exists = null, ?callable 
 
 /**
  * Admin\SettingsPageTest: what Plugin hands SettingsPage as the REST controllers, in their
- * shape: `POST /chat`, the `conversations` collection and item under both verbs, the stream route
- * with its id group, and one route that declares a capability of its own rather than the Chat row.
+ * shape: `POST /chat`, the `conversations` collection under GET and DELETE and its item under GET
+ * (one key, two verbs), the stream route with its id group, and one route that declares a
+ * capability of its own rather than the Chat row.
  *
  * @return Closure(): list<Controller>
  */
