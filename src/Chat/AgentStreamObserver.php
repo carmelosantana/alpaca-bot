@@ -20,7 +20,8 @@ use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Tool\ToolResult;
  * deltas go through a FakedToolCallStream on the way to the queue, which flags the pieces that
  * are a faked tool call's markup (`held`) and keeps back the few bytes of a marker split across
  * two deltas; `flush()` and `takeUnsent()` are the two ways those come back out.
- * `agent.iteration` (an int) marks where a paragraph break goes (separated()); `agent.tool_call`
+ * `agent.iteration` (an int) marks where a paragraph break goes (separated()), and after the
+ * first it runs the constructor's `$beforeCall` (the pipeline's mid-turn cap check); `agent.tool_call`
  * (a ToolCall) opens a record and queues an empty Delta, the heartbeat (below);
  * `agent.tool_result` (a ToolResult) closes the record; `agent.error` (a string) is kept as
  * error(). `agent.tool_error` is not read: the agent follows it with a ToolResult of status
@@ -136,7 +137,18 @@ final class AgentStreamObserver implements \SplObserver
     /** Says which streamed bytes are a faked tool call's markup (Kanboard #4329); the class docblock's event list says where it sits. */
     private FakedToolCallStream $faked;
 
-    public function __construct()
+    /**
+     * `$beforeCall` runs on `agent.iteration` for every iteration after the first: the moment
+     * between the previous provider call and the next one, which is where the pipeline re-checks
+     * the monthly cap (Kanboard #4701). AbstractAgent::run() notifies that event outside the try
+     * that turns a provider failure into an Output, immediately before it calls the provider, so
+     * what the callback throws leaves run() at once, with no further provider call made, and
+     * reaches the pipeline as it was thrown (PipelineToolsTest pins both). The first iteration
+     * is left out: the check before the turn has just been made for it.
+     *
+     * @param (\Closure(): void)|null $beforeCall
+     */
+    public function __construct(private ?\Closure $beforeCall = null)
     {
         $this->deltas = new \SplQueue();
         $this->faked = new FakedToolCallStream();
@@ -161,6 +173,9 @@ final class AgentStreamObserver implements \SplObserver
         switch ($subject->lastEvent()) {
             case 'agent.iteration':
                 $this->breakPending = $this->breakPending || (is_int($data) && $data > 1);
+                if (is_int($data) && $data > 1 && $this->beforeCall !== null) {
+                    ($this->beforeCall)();
+                }
                 break;
             case 'agent.text_delta':
                 $text = is_string($data) ? $data : '';

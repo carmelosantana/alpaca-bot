@@ -11,6 +11,7 @@ use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Contract\ProviderInterface;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Enum\ProviderFinishReason;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Provider\Response;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Provider\Usage;
+use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Tool\ToolCall;
 use Brain\Monkey\Actions;
 use Brain\Monkey\Functions;
 
@@ -241,6 +242,27 @@ it('reports the site-wide cap in its figure-less wording', function (): void {
     expect($c->errors)->toBe(["The site's monthly token cap has been reached."])
         ->and($c->out)->toBe('');
 });
+
+// Kanboard #4701: a tool turn the cap stops mid-way keeps its partial reply on a conversation,
+// and the CLI is a buffered caller that learns which one from the error alone.
+it('names the conversation a tool turn the cap stopped mid-way was saved on, in plain output and in --json', function (bool $json): void {
+    $h = pipelineWith(agentProvider([
+        [new Response('Checking.', ProviderFinishReason::Stop), new Response('', ProviderFinishReason::ToolUse, [new ToolCall('c1', 'echo_tool', ['text' => 'ping'])], usage: new Usage(5, 10, 15))],
+    ]), ['governance.user_monthly_tokens' => 100], [], [['id' => 'llama3.2', 'tools' => true]], null, registryWith(['echo' => echoToolkit('echo_tool')]));
+    $h->transients['alpaca_bot_usage_3_2024-08'] = ['tokens' => 90, 'requests' => 3];
+    cliUsers();
+    $c = cliCommand($h);
+
+    $c->command->chat(['hello'], ['user' => '3'] + ($json ? ['json' => true] : []));
+
+    $message = 'This reply stopped because your monthly token cap was reached (105 of 100 tokens).';
+    expect($c->errors)->toBe([$message . ' What it wrote so far is saved on conversation 42.']);
+    if ($json) {
+        expect(json_decode($c->out, true))->toBe(['error' => $message, 'conversation_id' => 42]);
+    } else {
+        expect($c->out)->toBe("Checking.\n");
+    }
+})->with(['plain' => false, 'json' => true]);
 
 it('reports a model the catalog does not list', function (): void {
     $h = pipelineWith(null);

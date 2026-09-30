@@ -4,8 +4,16 @@ declare(strict_types=1);
 
 namespace AlpacaBot\Tests\Integration;
 
+use AlpacaBot\Chat\UsageMeter;
 use AlpacaBot\Plugin;
+use AlpacaBot\Settings\Schema;
 use AlpacaBot\Settings\Store;
+use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Config\ModelDefinition;
+use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Contract\ProviderInterface;
+use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Enum\ProviderFinishReason;
+use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Provider\Response;
+use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Provider\Usage;
+use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Tool\ToolCall;
 
 /**
  * POST /chat and the /conversations routes over real core: real permission callbacks, real
@@ -167,6 +175,91 @@ final class ChatRoutesTest extends TestCase
         $this->assertSame(502, $admin->get_status());
         $this->assertSame('The model provider could not complete the request.', $admin->get_data()['message']);
         $this->assertSame('Provider error: ' . $raw, $admin->get_data()['data']['detail']);
+    }
+
+    /**
+     * Kanboard #4701 over real core: a tool turn is re-checked against the cap before its second
+     * provider call, with the real receipts and the real month cache behind the figure. The user
+     * has a receipt of 90 tokens against a cap of 100; the turn's first call spends 15, so the
+     * second is never made. The model calls a tool that does not exist, which the agent answers
+     * with an error result and goes on from, so no tool has a side effect here.
+     */
+    public function test_a_tool_turn_the_cap_stops_mid_way_is_a_402_that_keeps_its_partial_reply(): void
+    {
+        $admin = $this->asAdmin();
+        Plugin::instance()->get(Store::class)->replace([
+            'toolkits.enabled' => ['summarize'],
+            'models.overrides' => ['fake-model' => ['tools' => Schema::TOOLS_ON]],
+            'governance.user_monthly_tokens' => 100,
+        ]);
+        Plugin::instance()->get(UsageMeter::class)->record($admin, 'fake-model', 50, 40, 1);
+        $calls = 0;
+        add_filter('alpaca_bot/provider', static function () use (&$calls): ProviderInterface {
+            return new class ($calls) implements ProviderInterface {
+                public function __construct(private int &$calls) {}
+
+                public function chat(array $messages, array $tools = [], array $options = []): Response
+                {
+                    throw new \LogicException('not used');
+                }
+
+                public function stream(array $messages, array $tools = [], array $options = []): iterable
+                {
+                    ++$this->calls;
+                    yield new Response('Checking.', ProviderFinishReason::Stop);
+                    yield new Response('', ProviderFinishReason::ToolUse, [new ToolCall('c1', 'no_such_tool', ['q' => 'x'])], usage: new Usage(5, 10, 15));
+                }
+
+                public function structured(array $messages, string $schema, array $options = []): mixed
+                {
+                    return [];
+                }
+
+                public function models(): array
+                {
+                    return [new ModelDefinition('fake-model', 'Fake model', 'fake')];
+                }
+
+                public function isAvailable(): bool
+                {
+                    return true;
+                }
+
+                public function getModel(): string
+                {
+                    return 'fake-model';
+                }
+
+                public function withModel(string $model): static
+                {
+                    return $this;
+                }
+            };
+        });
+
+        $res = $this->rest('POST', '/chat', ['message' => 'Look it up.']);
+
+        $this->assertSame(402, $res->get_status(), (string) wp_json_encode($res->get_data()));
+        $this->assertSame(1, $calls, 'the second provider call was never made');
+        $body = $res->get_data();
+        $this->assertSame('alpaca_bot_cap_exceeded', $body['code']);
+        $this->assertSame('This reply stopped because your monthly token cap was reached (105 of 100 tokens).', $body['message']);
+        $id = $body['data']['conversation_id'];
+        $this->assertSame(['status' => 402, 'scope' => 'user', 'limit' => 100, 'used' => 105, 'stopped' => true, 'conversation_id' => $id], $body['data']);
+
+        // What the turn produced is on the conversation the 402 names, marked partial, with the call.
+        $messages = $this->rest('GET', '/conversations/' . $id)->get_data()['messages'];
+        $this->assertCount(2, $messages);
+        $this->assertSame('Checking.', $messages[1]['content']);
+        $meta = json_decode((string) wp_json_encode($messages[1]['meta']), true);
+        $this->assertTrue($meta['partial']);
+        $this->assertSame('no_such_tool', $meta['tool_calls'][0]['name']);
+        // And the call it made is billed: the month is now 105, which refuses the next turn outright.
+        $this->assertSame(105, Plugin::instance()->get(UsageMeter::class)->monthTotal($admin));
+        $next = $this->rest('POST', '/chat', ['message' => 'Again.']);
+        $this->assertSame(402, $next->get_status());
+        $this->assertSame('Your monthly token cap has been reached (105 of 100 tokens).', $next->get_data()['message']);
+        $this->assertSame(1, $calls);
     }
 
     public function test_stream_true_answers_a_ticket_without_chatting(): void

@@ -12,6 +12,7 @@ use AlpacaBot\Rest\StreamController;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Enum\ProviderFinishReason;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Provider\Response;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Provider\Usage;
+use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Tool\ToolCall;
 use Brain\Monkey\Actions;
 use Brain\Monkey\Filters;
 use Brain\Monkey\Functions;
@@ -401,6 +402,29 @@ it('writes one error frame, in the JSON route\'s error shape, when the pipeline 
         $frames[] = $f;
     });
     expect($frames)->toBe(["event: error\ndata: {\"code\":\"alpaca_bot_bad_request\",\"message\":\"Conversation 42 was not found.\",\"data\":{\"status\":400}}\n\n"]);
+});
+
+// Kanboard #4701: the same refusal after the deltas, for a tool turn the cap stopped between two
+// provider calls. The client has the text already (the chat screen keeps it as a partial bubble
+// and shows the message, as it does for any error frame after deltas); the frame says why it
+// stopped, in the 402's shape.
+it('writes the cap\'s error frame after the deltas when the cap stops a tool turn mid-way', function (): void {
+    $provider = agentProvider([
+        [new Response('Checking.', ProviderFinishReason::Stop), new Response('', ProviderFinishReason::ToolUse, [new ToolCall('c1', 'echo_tool', ['text' => 'ping'])], usage: new Usage(5, 10, 15))],
+    ]);
+    $h = pipelineWith($provider, ['governance.user_monthly_tokens' => 100], [], [['id' => 'llama3.2', 'tools' => true]], null, registryWith(['echo' => echoToolkit('echo_tool')]));
+    $h->transients['alpaca_bot_usage_3_2024-08'] = ['tokens' => 90, 'requests' => 3];
+    actionRuns('alpaca_bot/chat/started');
+    $frames = [];
+    (new StreamController($h->pipeline, $h->store))->stream(streamTicket(['conversation_id' => 0, 'options' => ['model' => 'llama3.2']]), function (string $f) use (&$frames): void {
+        $frames[] = $f;
+    });
+
+    expect(array_map(static fn(string $f): string => strtok($f, "\n"), $frames))->toBe(['event: start', 'event: delta', 'event: delta', 'event: error'])
+        ->and($frames[1])->toBe("event: delta\ndata: {\"text\":\"Checking.\",\"reasoning\":\"\",\"held\":false}\n\n")
+        ->and($frames[3])->toBe("event: error\ndata: {\"code\":\"alpaca_bot_cap_exceeded\",\"message\":\"This reply stopped because your monthly token cap was reached (105 of 100 tokens).\",\"data\":{\"status\":402,\"scope\":\"user\",\"limit\":100,\"used\":105,\"stopped\":true,\"conversation_id\":42}}\n\n")
+        ->and($h->meta[42]['ab_messages'][1]['content'])->toBe('Checking.')
+        ->and($h->meta[42]['ab_messages'][1]['meta']->partial)->toBeTrue();
 });
 
 it('keeps the provider\'s words out of an editor\'s error frame and hands them to an administrator as data.detail', function (): void {

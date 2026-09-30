@@ -375,6 +375,7 @@ function pipelineWith(mixed $provider, array $settings = [], array $contexts = [
         public Store $store;
         public ModelCatalog $catalog;
         public UsageMeter $meter;
+        public CapPolicy $caps;
         /** @var list<array{0: string, 1: int|string, 2: mixed}> */
         public array $writes = [];
         public ?string $model = null;
@@ -447,7 +448,7 @@ function pipelineWith(mixed $provider, array $settings = [], array $contexts = [
         $h->catalog,
         new ConversationStore($h->store),
         $h->meter,
-        new CapPolicy($h->store, $h->meter),
+        $h->caps = new CapPolicy($h->store, $h->meter),
         new Collector([collectorSource('test', $contexts)]),
         $prefs,
         $toolkits,

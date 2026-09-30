@@ -1,5 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { expect, test, type Locator, type Page, type Request } from '@playwright/test';
+import { login as signIn } from './login';
 
 /**
  * The chat in the block editor (Admin\Drawer::enqueueEditor(), resources/ts/editor-start.ts): a
@@ -32,8 +33,6 @@ import { expect, test, type Locator, type Page, type Request } from '@playwright
  * stderr only.
  */
 const REPLY = 'Hello from the Alpaca Bot end-to-end fake provider.';
-const ADMIN_USER = process.env.WP_ADMIN_USER ?? 'admin';
-const ADMIN_PASSWORD = process.env.WP_ADMIN_PASSWORD ?? 'password';
 
 type EditorGlobals = {
   wp: {
@@ -97,10 +96,7 @@ async function track(page: Page): Promise<void> {
  * dashboard, which carries the drawer's settings.
  */
 async function login(page: Page): Promise<void> {
-  await page.goto('/wp-login.php');
-  await page.fill('#user_login', ADMIN_USER);
-  await page.fill('#user_pass', ADMIN_PASSWORD);
-  await Promise.all([page.waitForURL(/wp-admin/), page.click('#wp-submit')]);
+  await signIn(page);
   await page.goto('/wp-admin/index.php');
   const status = await page.evaluate(async () => {
     const wp = window as unknown as EditorGlobals;

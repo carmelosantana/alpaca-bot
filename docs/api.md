@@ -356,8 +356,8 @@ $ curl -s -u "admin:$PW" "$B/conversations/163"
 
 `meta` is always an object, `{}` when there is none. A completed assistant reply carries
 `meta.duration_ms` (the samples above predate it). A reply cut short by a client that
-disconnected mid-stream, or by a failure after a tool had already run, is stored with
-`meta.partial: true`. A reply that ran tools (a toolkit is enabled and the model can call
+disconnected mid-stream, by a failure after a tool had already run, or by the monthly token cap
+between two provider calls of a tool turn, is stored with `meta.partial: true`. A reply that ran tools (a toolkit is enabled and the model can call
 tools) carries `meta.tool_calls`, one `{name, arguments, result_excerpt, ok, result_bytes}` per
 call in the order their results came back: the arguments as the model sent them with each string
 held to 1,000 characters, the first 200 characters of the result, whether the tool succeeded, and
@@ -759,7 +759,7 @@ data: {"conversation_id":169,"message":{"role":"assistant","content":"orange","m
 | `start` | `{conversation_id, model}` | Once the conversation exists (created on the spot for a ticket that named 0), before any text. This is where a new conversation's id arrives. |
 | `delta` | `{text, reasoning, held}` | One per fragment; `text` and `reasoning` may each be empty (see below), and `held` says the text is a faked tool call's markup (see below). A thinking model sends its reasoning as `reasoning` deltas with empty `text` first, then the answer as `text`. |
 | `done` | The exact body a direct `POST /chat` answers with: `{conversation_id, message, receipt, contexts}` | The turn finished. The connection closes after it. |
-| `error` | `{code, message, data}`, the same JSON body a non-streaming error would carry | The turn was refused or failed. A refusal (cap exceeded, bad request) is an `error` frame alone with no `start`; a provider that fails mid-reply sends its deltas first, then `error`; a turn that outran the site's stream budget ends the same way, with `alpaca_bot_stream_timeout` after the deltas that had arrived. The connection closes after it. |
+| `error` | `{code, message, data}`, the same JSON body a non-streaming error would carry | The turn was refused or failed. A refusal (cap exceeded, bad request) is an `error` frame alone with no `start`; a provider that fails mid-reply sends its deltas first, then `error`, and so does a tool turn the monthly cap stopped between two provider calls (`alpaca_bot_cap_exceeded` with `data.stopped: true`); a turn that outran the site's stream budget ends the same way, with `alpaca_bot_stream_timeout` after the deltas that had arrived. The connection closes after it. |
 
 A `delta` frame may be wholly empty — `{"text":"","reasoning":"","held":false}`, or the same
 with `held: true` when it falls inside a faked tool call (below) — and an empty one may
@@ -869,7 +869,7 @@ route the same object is the `error` frame's data.
 | 400 | `alpaca_bot_mcp_address` | A settings PUT whose `toolkits.mcp_servers` has a new or changed URL whose address is refused (private, loopback, link-local or special-purpose, or a name resolving to one); nothing is written, and the message names each URL and why | |
 | 400 | `rest_invalid_param`, `rest_missing_callback_param` | Core's schema validation: `limit` out of 0-200, `user` not `me`/`all`, `refresh` not a boolean, a stream GET with no `token` | `params`, `details` |
 | 401 | `rest_forbidden` | Not authenticated (no cookie+nonce, no Application Password) | |
-| 402 | `alpaca_bot_cap_exceeded` | The monthly token cap is spent (`governance.user_monthly_tokens` or `governance.site_monthly_tokens`) | `scope` (`user`/`site`); `limit` and `used` only when `scope` is `user` |
+| 402 | `alpaca_bot_cap_exceeded` | The monthly token cap is spent (`governance.user_monthly_tokens` or `governance.site_monthly_tokens`): before the turn, or between two provider calls of a tool turn, whose reply so far is then stored as a partial reply. On the stream route the second comes after the deltas that had arrived | `scope` (`user`/`site`); `limit` and `used` only when `scope` is `user`; `stopped: true` and `conversation_id` (where the partial reply was stored) only for a turn stopped mid-way |
 | 403 | `rest_forbidden` | Authenticated but lacking the capability; a stream token that is not yours, spent, or expired; a default model posted while `chat.user_can_change_model` is off | |
 | 404 | `alpaca_bot_not_found` | A conversation that does not exist or is not yours | |
 | 404 | `rest_no_route` | Core: no such route for that method (e.g. `POST` on the stream route) | |
@@ -892,6 +892,18 @@ anyone who may chat can reach this error. Per `ErrorsTest`:
 
 ```
 {"code":"alpaca_bot_cap_exceeded","message":"The site's monthly token cap has been reached.","data":{"status":402,"scope":"site"}}
+```
+
+A tool turn is checked again before each provider call after its first, with what the turn has
+spent so far counted in; a turn one of its tools starts (`summarize`) is checked with that spend
+counted too. So within one request no provider call is made once the cap is reached, and a turn
+overshoots a cap by at most the one call that crossed it; concurrent requests from one user are
+checked independently and can still overshoot by about their number. Stopped there, it keeps what it produced as a partial reply with its receipt, and answers with the same
+402, saying the reply stopped. Per `ChatControllerTest`, a new conversation (id 42) whose first
+call took the user from 90 to 105 of 100 tokens:
+
+```
+{"code":"alpaca_bot_cap_exceeded","message":"This reply stopped because your monthly token cap was reached (105 of 100 tokens).","data":{"status":402,"scope":"user","limit":100,"used":105,"stopped":true,"conversation_id":42}}
 ```
 
 The 429, produced by looping `GET /models` (see section 6 for the loop):

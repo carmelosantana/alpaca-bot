@@ -511,6 +511,30 @@ for (const [ending, end] of endings) {
   });
 }
 
+// Kanboard #4701: a tool turn the monthly cap stops between two provider calls ends on the cap's
+// own error frame after its deltas. The text already shown stays, as a partial reply, the status
+// line says in the server's words why it stopped, and the message is not offered back: it ran.
+test('a turn the cap stopped mid-way keeps its text as a partial reply and says why in the status line', async (t) => {
+  const turn = await heldTurn(t, '7');
+  turn.push('start', { conversation_id: 7 });
+  turn.push('delta', { text: 'Checking.', reasoning: '', held: false });
+  turn.push('error', {
+    code: 'alpaca_bot_cap_exceeded',
+    message: 'This reply stopped because your monthly token cap was reached (105 of 100 tokens).',
+    data: { status: 402, scope: 'user', limit: 100, used: 105, stopped: true, conversation_id: 7 },
+  });
+  turn.close();
+  await turn.finished();
+
+  const bubble = document.querySelector('#ab-messages .ab-msg--assistant') as HTMLElement;
+  assert.equal(bubble.dataset.partial, '1');
+  assert.equal(bubble.dataset.streaming, undefined);
+  assert.equal((bubble.querySelector('.ab-msg__content') as HTMLElement).textContent, 'Checking.');
+  assert.equal(status(), 'This reply stopped because your monthly token cap was reached (105 of 100 tokens).');
+  assert.equal(document.querySelectorAll('#ab-status .notice-error').length, 1);
+  assert.equal((turn.form.querySelector('#ab-message') as HTMLTextAreaElement).value, '');
+});
+
 /**
  * A turn that never ran gives its draft back only to the composer it came from, and only while
  * that composer is empty (Kanboard #4692). Otherwise what is in the box is the user's since, and

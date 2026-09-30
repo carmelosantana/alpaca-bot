@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { login as signIn } from './login';
 
 /**
  * One real turn through the admin chat screen, in a browser, against a real WordPress.
@@ -36,17 +37,12 @@ import { expect, test } from '@playwright/test';
 
 const REPLY = 'Hello from the Alpaca Bot end-to-end fake provider.';
 const MODEL = 'e2e-fake-model';
-const ADMIN_USER = process.env.WP_ADMIN_USER ?? 'admin';
-const ADMIN_PASSWORD = process.env.WP_ADMIN_PASSWORD ?? 'password';
 
 test('a turn on the admin chat screen streams the provider reply into an assistant bubble with a receipt', async ({ page }) => {
   // wp-env's own administrator. wp-login.php rather than a cookie: the screen is capability
   // gated and the REST calls the turn makes are nonce + cookie authenticated, so the test has to
   // hold the same session a person would.
-  await page.goto('/wp-login.php');
-  await page.fill('#user_login', ADMIN_USER);
-  await page.fill('#user_pass', ADMIN_PASSWORD);
-  await Promise.all([page.waitForURL(/wp-admin/), page.click('#wp-submit')]);
+  await signIn(page);
 
   await page.goto('/wp-admin/admin.php?page=alpaca-bot');
   await expect(page.locator('#ab-form')).toBeVisible();
@@ -89,10 +85,7 @@ test('a turn on the admin chat screen streams the provider reply into an assista
  * which is where a wrong field would send the message.
  */
 test('switching conversation through the history select mid-turn sends the next message to the conversation now open', async ({ page }) => {
-  await page.goto('/wp-login.php');
-  await page.fill('#user_login', ADMIN_USER);
-  await page.fill('#user_pass', ADMIN_PASSWORD);
-  await Promise.all([page.waitForURL(/wp-admin/), page.click('#wp-submit')]);
+  await signIn(page);
 
   const field = page.locator('#ab-form [name="conversation_id"]');
   const send = page.locator('#ab-form [data-action="send"]');

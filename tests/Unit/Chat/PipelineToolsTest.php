@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use AlpacaBot\Chat\AgentStreamObserver;
+use AlpacaBot\Chat\CapExceeded;
 use AlpacaBot\Chat\Conversation;
 use AlpacaBot\Chat\Delta;
 use AlpacaBot\Chat\Message;
@@ -1506,4 +1507,197 @@ it('runs the agent loop with only the toolkits that offer tools when one enabled
         ->and($calls[0]['messages'][0]->content())->toContain('Use echo_tool to echo.')->not->toContain('Use nothing.')
         ->and($r->reply->meta['tool_calls'][0]['name'])->toBe('echo_tool')
         ->and($empty->asked)->toBe(['tools' => 1, 'guidelines' => 0]);
+});
+
+// Kanboard #4701: the cap is checked before a turn and, on a tool turn, again before each further
+// provider call, with what the turn has spent counted in. Here the user has 90 of 100 tokens
+// spent this month when the turn starts, so it may start; its first call spends 15, so the
+// second call is never made. agentProvider() holds the provider to one stream() call: a second
+// would fail the test on its own.
+it('stops a tool turn before its next provider call once the tokens it has spent reach the cap, keeping what it produced', function (): void {
+    $toolkit = echoToolkit('draft_post', 'Use it.', static fn(array $a): ToolResult => ToolResult::success('{"id": 225}'));
+    $provider = agentProvider([
+        [new Response('Drafting.', ProviderFinishReason::Stop), new Response('', ProviderFinishReason::ToolUse, [new ToolCall('c1', 'draft_post', ['text' => 'Hello'])], usage: new Usage(5, 10, 15))],
+    ], $calls);
+    $h = pipelineWith($provider, ['governance.user_monthly_tokens' => 100], [], TOOL_MODEL, null, registryWith(['draft' => $toolkit]));
+    $h->transients['alpaca_bot_usage_3_2024-08'] = ['tokens' => 90, 'requests' => 3];
+    $failed = null;
+    Actions\expectDone('alpaca_bot/chat/failed')->once()->whenHappen(function (\Throwable $e, Conversation $c) use (&$failed): void {
+        $failed = [$e, $c];
+    });
+    Actions\expectDone('alpaca_bot/chat/completed')->never();
+
+    $seen = [];
+    $thrown = null;
+    try {
+        foreach ($h->pipeline->send(3, 'draft it') as $d) {
+            $seen[] = $d->text;
+        }
+    } catch (CapExceeded $e) {
+        $thrown = $e;
+    }
+
+    // Raised as the cap, not as a provider failure, so every route answers it as the 402 the
+    // refusal before a turn is; it says the reply stopped, and where the partial reply is.
+    expect($thrown)->toBeInstanceOf(CapExceeded::class)
+        ->and($thrown->stopped)->toBeTrue()
+        ->and($thrown->scope)->toBe('user')
+        ->and($thrown->used)->toBe(105)
+        ->and($thrown->conversationId)->toBe(42)
+        ->and($thrown->getMessage())->toBe('This reply stopped because your monthly token cap was reached (105 of 100 tokens).')
+        ->and($failed[0])->toBe($thrown)
+        // One provider call, and what it produced reached the consumer before the stop.
+        ->and($calls)->toHaveCount(1)
+        ->and($seen)->toBe(['Drafting.', '']);
+
+    // Stored as a turn that did not finish is: the partial reply with what streamed and the call
+    // it made, the receipt billing the call that completed, and the conversation kept.
+    $record = ['name' => 'draft_post', 'arguments' => ['text' => 'Hello'], 'result_excerpt' => '{"id": 225}', 'ok' => true, 'result_bytes' => 11];
+    expect($failed[1]->messages[1]->content)->toBe('Drafting.')
+        ->and($failed[1]->messages[1]->meta['partial'])->toBeTrue()
+        ->and($failed[1]->messages[1]->meta['tool_calls'])->toBe([$record])
+        ->and($failed[1]->messages[1]->usage)->toBe(['prompt_tokens' => 5, 'completion_tokens' => 10])
+        ->and(array_map(static fn(array $w): string => $w[0], $h->writes))->toBe(['wp_insert_post', 'update_post_meta', 'wp_update_post', 'wp_insert_post'])
+        ->and($h->writes[1][2][1]['meta']->partial)->toBeTrue()
+        ->and($h->writes[3][1])->toBe('chat_log')
+        ->and($h->writes[3][2]['meta_input']['total_tokens'])->toBe(15)
+        ->and($h->writes[3][2]['meta_input']['tool_result_bytes'])->toBe(11);
+});
+
+// The same stop with no tool run: an empty reply the agent nudges is a further provider call too,
+// and the reasoning it had streamed is kept. The usage arrives on a chunk of its own after the
+// last delta, as Ollama sends it, so the reading taken before that delta's yield is 0: the
+// receipt's 15 is the tally read again at the stop.
+it('stops before a nudge the same way, and stores the turn though no tool ran', function (): void {
+    $provider = agentProvider([
+        [new Response('', ProviderFinishReason::Stop, reasoning: 'hmm'), new Response('', ProviderFinishReason::Stop, usage: new Usage(7, 8, 15))],
+    ], $calls);
+    $h = pipelineWith($provider, ['governance.site_monthly_tokens' => 1000], [], TOOL_MODEL, null, registryWith(['echo' => echoToolkit('echo_tool')]));
+    $h->transients['alpaca_bot_usage_site_2024-08'] = ['tokens' => 990, 'requests' => 3];
+    Actions\expectDone('alpaca_bot/chat/failed')->once();
+
+    expect(fn() => $h->pipeline->complete(3, 'think'))->toThrow(CapExceeded::class, 'This reply stopped because the site\'s monthly token cap was reached.');
+    expect($calls)->toHaveCount(1)
+        ->and($h->meta[42]['ab_messages'][1]['meta']->partial)->toBeTrue()
+        ->and($h->meta[42]['ab_messages'][1]['meta']->reasoning)->toBe('hmm')
+        ->and($h->writes[3][2]['meta_input']['total_tokens'])->toBe(15);
+});
+
+// The filter decides mid-turn as it decides before the turn: one that lets a capped turn through
+// lets it go on, and it is asked once per call after the first, never twice for the first.
+it('asks alpaca_bot/cap/allowed before each further call with the turn\'s spend counted, and lets a filter carry the turn on', function (): void {
+    $provider = agentProvider([
+        [new Response('', ProviderFinishReason::ToolUse, [new ToolCall('c1', 'echo_tool', ['text' => 'ping'])], usage: new Usage(5, 10, 15))],
+        [new Response('Done.', ProviderFinishReason::Stop, usage: new Usage(20, 5, 25))],
+    ], $calls);
+    $h = pipelineWith($provider, ['governance.user_monthly_tokens' => 100], [], TOOL_MODEL, null, registryWith(['echo' => echoToolkit('echo_tool')]));
+    $h->transients['alpaca_bot_usage_3_2024-08'] = ['tokens' => 90, 'requests' => 3];
+    Filters\expectApplied('alpaca_bot/cap/allowed')->once()->with(true, 3, 'user', 100, 90)->andReturnFirstArg();
+    Filters\expectApplied('alpaca_bot/cap/allowed')->once()->with(false, 3, 'user', 100, 105)->andReturn(true);
+    Actions\expectDone('alpaca_bot/chat/failed')->never();
+
+    $r = $h->pipeline->complete(3, 'ping');
+
+    expect($calls)->toHaveCount(2)
+        ->and($r->reply->content)->toBe('Done.')
+        ->and($r->receipt['total_tokens'])->toBe(40);
+});
+
+it('raises a cap stop as CapExceeded even when a chat/failed listener throws', function (): void {
+    $provider = agentProvider([
+        [new Response('', ProviderFinishReason::ToolUse, [new ToolCall('c1', 'echo_tool', ['text' => 'ping'])], usage: new Usage(5, 10, 15))],
+    ]);
+    $h = pipelineWith($provider, ['governance.user_monthly_tokens' => 100], [], TOOL_MODEL, null, registryWith(['echo' => echoToolkit('echo_tool')]));
+    $h->transients['alpaca_bot_usage_3_2024-08'] = ['tokens' => 90, 'requests' => 3];
+    Actions\expectDone('alpaca_bot/chat/failed')->once()->whenHappen(static function (): void {
+        throw new \LogicException('a listener that throws');
+    });
+
+    expect(fn() => $h->pipeline->complete(3, 'ping'))->toThrow(CapExceeded::class, 'This reply stopped because your monthly token cap was reached (105 of 100 tokens).');
+});
+
+// The review probe (Kanboard #4701): a tool that runs a turn of its own, as SummarizeToolkit does
+// through complete(ephemeral). The month is at 90 of 100 and the outer turn's first call spends
+// 15, which no receipt holds yet; the inner turn's check before it starts must count that spend,
+// or a provider call goes out past the cap. agentProvider() allows one stream() call in all.
+it('refuses a turn a tool starts before its provider call when the enclosing turn\'s spend has reached the cap', function (): void {
+    $h = null;
+    $inner = null;
+    $toolkit = echoToolkit('summarize', 'Use it.', static function (array $a) use (&$h, &$inner): ToolResult {
+        try {
+            return ToolResult::success($h->pipeline->complete(3, $a['text'], ['ephemeral' => true])->reply->content);
+        } catch (\Throwable $e) {
+            $inner = $e;
+            return ToolResult::error($e->getMessage());
+        }
+    });
+    $provider = agentProvider([
+        [new Response('', ProviderFinishReason::ToolUse, [new ToolCall('c1', 'summarize', ['text' => 'long text'])], usage: new Usage(5, 10, 15))],
+    ], $calls);
+    $h = pipelineWith($provider, ['governance.user_monthly_tokens' => 100], [], TOOL_MODEL, null, registryWith(['summarize' => $toolkit]));
+    $h->transients['alpaca_bot_usage_3_2024-08'] = ['tokens' => 90, 'requests' => 3];
+
+    expect(fn() => $h->pipeline->complete(3, 'summarize this'))->toThrow(CapExceeded::class);
+    expect($inner)->toBeInstanceOf(CapExceeded::class)
+        ->and($inner->stopped)->toBeFalse()
+        ->and($inner->used)->toBe(105)
+        ->and($calls)->toHaveCount(1);
+});
+
+// Kanboard #4701 review: what a turn has spent counts toward the caps only while the turn runs.
+// Every way a tool turn ends lets go of it, so the next check in the same request reads the
+// month alone (here 90, since the stubbed month cache does not take the receipts in).
+it('lets go of the turn\'s running spend however the turn ends', function (string $ending): void {
+    $turns = [
+        'finished' => [[new Response('', ProviderFinishReason::ToolUse, [new ToolCall('c1', 'echo_tool', ['text' => 'ping'])], usage: new Usage(1, 1, 2))], [new Response('Done.', ProviderFinishReason::Stop, usage: new Usage(1, 1, 2))]],
+        'stopped by the cap' => [[new Response('', ProviderFinishReason::ToolUse, [new ToolCall('c1', 'echo_tool', ['text' => 'ping'])], usage: new Usage(5, 10, 15))]],
+        'failed' => [[new Response('', ProviderFinishReason::ToolUse, [new ToolCall('c1', 'echo_tool', ['text' => 'ping'])], usage: new Usage(1, 1, 2))], [new \RuntimeException('connection refused')]],
+        'abandoned' => [[new Response('Hi', ProviderFinishReason::Stop, usage: new Usage(1, 1, 2)), new Response('', ProviderFinishReason::ToolUse, [new ToolCall('c1', 'echo_tool', ['text' => 'ping'])])]],
+    ][$ending];
+    $h = pipelineWith(agentProvider($turns), ['governance.user_monthly_tokens' => 100], [], TOOL_MODEL, null, registryWith(['echo' => echoToolkit('echo_tool')]));
+    $h->transients['alpaca_bot_usage_3_2024-08'] = ['tokens' => 90, 'requests' => 3];
+
+    try {
+        $gen = $h->pipeline->send(3, 'ping');
+        foreach ($gen as $d) {
+            if ($ending === 'abandoned' && $d->text === '') {
+                break;
+            }
+        }
+        unset($gen);
+    } catch (\RuntimeException) {
+        // The cap stop and the provider failure end here; what matters is what they leave held.
+    }
+
+    Filters\expectApplied('alpaca_bot/cap/allowed')->once()->with(true, 3, 'user', 100, 90)->andReturnFirstArg();
+    $h->caps->assertAllowed(3);
+})->with(['finished', 'stopped by the cap', 'failed', 'abandoned']);
+
+// The catch records the receipt and then fires chat/failed, and a listener may start a turn of its
+// own; by then the failed turn's spend is the receipt's, so it is let go of before either.
+it('lets go of a failed turn\'s running spend before chat/failed fires', function (): void {
+    $provider = agentProvider([
+        [new Response('', ProviderFinishReason::ToolUse, [new ToolCall('c1', 'echo_tool', ['text' => 'ping'])], usage: new Usage(1, 1, 2))],
+        [new \RuntimeException('connection refused')],
+    ]);
+    $h = pipelineWith($provider, ['governance.user_monthly_tokens' => 100], [], TOOL_MODEL, null, registryWith(['echo' => echoToolkit('echo_tool')]));
+    $h->transients['alpaca_bot_usage_3_2024-08'] = ['tokens' => 90, 'requests' => 3];
+    Actions\expectDone('alpaca_bot/chat/failed')->once()->whenHappen(static function () use ($h): void {
+        Filters\expectApplied('alpaca_bot/cap/allowed')->once()->with(true, 3, 'user', 100, 90)->andReturnFirstArg();
+        $h->caps->assertAllowed(3);
+    });
+
+    expect(fn() => $h->pipeline->complete(3, 'ping'))->toThrow(\RuntimeException::class, 'Provider error: connection refused');
+});
+
+it('checks nothing mid-turn when no cap is set', function (): void {
+    $provider = agentProvider([
+        [new Response('', ProviderFinishReason::ToolUse, [new ToolCall('c1', 'echo_tool', ['text' => 'ping'])], usage: new Usage(5, 10, 15))],
+        [new Response('Done.', ProviderFinishReason::Stop, usage: new Usage(20, 5, 25))],
+    ], $calls);
+    $h = pipelineWith($provider, [], [], TOOL_MODEL, null, registryWith(['echo' => echoToolkit('echo_tool')]));
+    Filters\expectApplied('alpaca_bot/cap/allowed')->never();
+
+    expect($h->pipeline->complete(3, 'ping')->reply->content)->toBe('Done.')
+        ->and($calls)->toHaveCount(2);
 });

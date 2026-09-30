@@ -8,6 +8,7 @@ use AlpacaBot\Rest\Controller;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Enum\ProviderFinishReason;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Provider\Response;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Provider\Usage;
+use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Tool\ToolCall;
 use Brain\Monkey\Filters;
 use Brain\Monkey\Functions;
 
@@ -126,6 +127,26 @@ it('maps CapExceeded to 402 and rejects an empty message with 400 before the pip
         ->and($bad->get_error_code())->toBe('alpaca_bot_bad_request')
         ->and($bad->get_error_data()['status'])->toBe(400)
         ->and($h->writes)->toBe([]);
+});
+
+// Kanboard #4701: a tool turn the cap stops mid-way answers as the refusal does, 402 and the same
+// code, and names the conversation its partial reply was stored on: this new conversation's id
+// is in no other part of the response.
+it('answers a tool turn the cap stopped mid-way with the 402, stopped, and the conversation it stored the partial reply on', function (): void {
+    $provider = agentProvider([
+        [new Response('Checking.', ProviderFinishReason::Stop), new Response('', ProviderFinishReason::ToolUse, [new ToolCall('c1', 'echo_tool', ['text' => 'ping'])], usage: new Usage(5, 10, 15))],
+    ]);
+    $h = pipelineWith($provider, ['governance.user_monthly_tokens' => 100], [], [['id' => 'llama3.2', 'tools' => true]], null, registryWith(['echo' => echoToolkit('echo_tool')]));
+    $h->transients['alpaca_bot_usage_3_2024-08'] = ['tokens' => 90, 'requests' => 3];
+
+    $err = (new ChatController($h->pipeline))->create(restRequest('POST', '/alpaca-bot/v1/chat', ['message' => 'hi']));
+
+    expect($err)->toBeInstanceOf(WP_Error::class)
+        ->and($err->get_error_code())->toBe('alpaca_bot_cap_exceeded')
+        ->and($err->get_error_message())->toBe('This reply stopped because your monthly token cap was reached (105 of 100 tokens).')
+        ->and($err->get_error_data())->toBe(['status' => 402, 'scope' => 'user', 'limit' => 100, 'used' => 105, 'stopped' => true, 'conversation_id' => 42])
+        ->and($h->meta[42]['ab_messages'][1]['content'])->toBe('Checking.')
+        ->and($h->meta[42]['ab_messages'][1]['meta']->partial)->toBeTrue();
 });
 
 it('accepts an images-only turn with no message parameter at all, as the pipeline does', function (): void {
