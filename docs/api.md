@@ -651,8 +651,8 @@ total is. Both are `SettingsRoutesTest::test_usage_route_reports_the_month`.
 
 The chat screen (section 7) is server-rendered, and these routes render its pieces again on
 demand: htmx swaps the selects, the screen's script asks for the bubbles, and `/view/panel`
-renders the whole chat for the admin-wide drawer, whose state `/view/drawer` stores, and for
-the block editor's sidebar; `/view/mcp-tools` renders one MCP server's approval list for the
+renders the whole chat for the admin-wide drawer and for the block editor's sidebar, whose
+state `/view/drawer` stores; `/view/mcp-tools` renders one MCP server's approval list for the
 settings page's Tools tab. They are for the plugin's own screens. A client
 that wants data reads the JSON routes above; these answer HTML, escaped where
 it is built, under `Content-Type: text/html; charset=utf-8` and an `X-Alpaca-Bot-View: 1`
@@ -667,7 +667,7 @@ header. An error is still core's JSON error shape.
 | `GET /view/bubble` | An empty bubble for the screen to stream into | `role` (`user`\|`assistant`, default `assistant`), `streaming` (boolean: a polite live region) |
 | `POST /view/bubble` | A finished bubble, an assistant's content rendered as markdown; a user turn with its images is the optimistic bubble the screen shows while the turn runs | `role` (required), `content`, `model`, `usage` (`{prompt_tokens, completion_tokens}` or null), `duration_ms`, `images` (array of `data:` URLs; a user turn only), `tool_calls` (the reply's `meta.tool_calls`; the receipt ends `· 2 tools`) |
 | `GET /view/panel` | The whole chat (header, transcript and composer) in the drawer's panel, with its close button, which the block editor's sidebar hides in favour of its own | `conversation_id`: one of your own to open; 0, a missing one or anyone else's is a new chat, as `?conversation=` is on the chat screen. `post_id`: the post being edited, rendered as the composer's post chip when you may edit it and it is not an `auto-draft`, as `&post=` is on the chat screen. `screen_id` and `screen_title`: the screen's id and page title, cleaned as `POST /chat` cleans `context.screen` and rendered as the composer's screen chip; either one empty, or cleaned to nothing, is no chip. A chip's hidden fields are what the chat bundle sends as `context` |
-| `POST /view/drawer` | Nothing (an empty fragment); stores what the admin-wide drawer shows for you, as user meta `alpaca_bot_drawer_open` and `alpaca_bot_drawer_conversation` | `open` (boolean), `conversation_id` (integer, 0 or more). A parameter you leave out is left as it was; the conversation is not checked here, and one that is not yours opens as a new chat when `/view/panel` is asked for it |
+| `POST /view/drawer` | Nothing (an empty fragment); stores what the admin-wide drawer shows for you, as user meta `alpaca_bot_drawer_open` and `alpaca_bot_drawer_conversation`. The block editor's sidebar writes the conversation too, never `open`, so the two reopen on the conversation last shown in either | `open` (boolean), `conversation_id` (integer, 0 or more). A parameter you leave out is left as it was; the conversation is not checked here, and one that is not yours opens as a new chat when `/view/panel` is asked for it |
 | `GET /view/mcp-tools/{id}` | The tools the stored MCP server `{id}` lists, as the Tools tab's approval list: a checkbox per tool whose value is the fingerprint of the definition shown, ticked when the tool is approved at that fingerprint, or new and not annotated `destructiveHint: true`; a tool approved at another fingerprint is marked "changed since approval: review" and starts clear. Under each tool its input schema, pretty-printed, with every character outside ASCII as its `\uXXXX` escape, cut at 4000 characters of that text, HTML-escaped, in a collapsed `<details>`. The name, title, description and schema are HTML-escaped with every `&` encoded again, so an entity the server wrote, such as `&#x202E;`, shows as its letters and not as the character it spells. A tool whose name a save could not keep, or whose name the listing repeats, is listed with no checkbox and a line saying why. Listing the server rewrites or clears its drift marker (below). `manage_options`, asked again by the callback whatever `alpaca_bot/capability/view/mcp-tools` answers, and rate limited in the `chat` bucket. 404 for an id the settings do not hold. A server that cannot be listed answers 200 with an error notice (the reason, escaped, with the server's header value, and the credential after its scheme word, replaced by `••••` where either is 8 characters or more, cut to 500 characters) and what the approvals cell held: a hidden input per stored approval, how many there are, and the "changed since approval: review" line for the approved tools the drift marker names | `index` (integer, 0 or more, default 0): the server's row on the Tools tab, which decides the names the checkboxes post under, `alpaca_bot_settings[toolkits.mcp_servers][<index>][approved][<tool>]` |
 
 Saving the Tools tab with those boxes is the approval: a ticked box pins its tool to the
@@ -1013,7 +1013,10 @@ library itself.
 In the block editor, on a post's screen, the same `GET /view/panel` fragment is mounted in a
 `PluginSidebar` instead, which the editor opens from the Alpaca Bot button in its top bar, with
 `post_id` taken from `core/editor`, so a turn started there carries the post being edited. It
-starts on a new chat. It is fetched the first time the sidebar is opened, and closing the sidebar
+opens on the conversation you last had open in the drawer or the sidebar: the two share the
+drawer's `alpaca_bot_drawer_conversation`, which the sidebar is handed on the page and writes
+through `POST /view/drawer` as the drawer does, whenever the conversation it shows changes (a
+**New chat** included). It is fetched the first time the sidebar is opened, and closing the sidebar
 keeps the chat, a turn in flight included. On a new post, which is an `auto-draft` until it is
 first saved or autosaved, the composer shows no post chip; once the editor has saved the post,
 the sidebar fetches `GET /view/panel` for it again and takes only the post chip from it, into the

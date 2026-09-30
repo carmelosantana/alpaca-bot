@@ -50,7 +50,9 @@ use AlpacaBot\Chat\UserPrefs;
  * on the classic editor's Add New screen, and counts enqueueEditor() on a block editor screen.
  *
  * Open or closed, and the conversation shown, are the user's (Chat\UserPrefs), stored through
- * `POST /view/drawer`, so the drawer comes back the way it was left on the next screen. A drawer
+ * `POST /view/drawer`, so the drawer comes back the way it was left on the next screen. The
+ * conversation is the editor sidebar's too, which opens on it and stores the one it shows
+ * (enqueueEditor(), Kanboard #4527). A drawer
  * left open fetches `GET /view/panel` again on each screen it is reopened on, and that fragment
  * renders the model select, which asks the provider when the model cache is cold
  * (ViewController::routes() says so).

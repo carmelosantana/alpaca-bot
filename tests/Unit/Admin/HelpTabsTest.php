@@ -86,8 +86,12 @@ it('describes what the chat screen does now, and points support at the wordpress
     expect($chat)->toContain('New chat')->toContain('Enter')->toContain('Shift')->toContain('image')->toContain('Copy')->toContain('Edit and resend')
         // The drawer (Admin\Drawer): where it is, and the image button it lacks where the screen has no media library.
         ->toContain('round button')->toContain('screens that have the button')->toContain('already loads the media library')
-        // The block editor's sidebar (resources/ts/editor.ts) in the drawer's place, and when it names the post.
-        ->toContain('In the block editor the same chat is a sidebar')->toContain('starts on a new chat')->toContain('once that post has been saved or autosaved')
+        // The block editor's sidebar (resources/ts/editor-start.ts) in the drawer's place, and when it names the post.
+        ->toContain('In the block editor the same chat is a sidebar')->toContain('once that post has been saved or autosaved')
+        // The two share one memory of the conversation last open (Kanboard #4527).
+        ->toContain('opens on the one you last had open in it or in the block editor')
+        ->toContain('it opens on the conversation you last had open in it or in the panel')
+        ->not->toContain('starts on a new chat')
         // The image cap is Assets::maxImageBytes(), which reads post_max_size alone; the tab must name that setting, not the upload limit that has no say.
         ->toContain('post_max_size')->not->toMatch('/is the site.s own upload limit/');
     // A question goes to the wordpress.org forum, premium help is a call booked on

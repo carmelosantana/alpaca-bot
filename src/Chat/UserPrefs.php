@@ -12,7 +12,8 @@ use AlpacaBot\Settings\Store;
  * which the chat screen's model select stores on change and which a turn that names no model runs
  * on; and the admin-wide drawer's two (Admin\Drawer), whether it was left open and which
  * conversation it last showed, which POST /view/drawer stores so the drawer comes back on the
- * next admin screen the way it was left.
+ * next admin screen the way it was left. The block editor's sidebar shares the conversation: it
+ * opens on it and stores the one it shows (Admin\Drawer::enqueueEditor(), Kanboard #4527).
  *
  * modelFor() is the one rule for when the preference applies, shared by the pipeline (the turn),
  * the chat screen (the select and the composer's hidden field on load) and the model-select
@@ -29,7 +30,7 @@ final class UserPrefs
     /** Whether the admin-wide drawer was left open: '1' is open, and anything else reads as closed. */
     public const META_DRAWER_OPEN = 'alpaca_bot_drawer_open';
 
-    /** The conversation the drawer last showed, as a string of digits; '0', or anything unreadable, is a new chat. */
+    /** The conversation the drawer or the editor sidebar last showed, as a string of digits; '0', or anything unreadable, is a new chat. */
     public const META_DRAWER_CONVERSATION = 'alpaca_bot_drawer_conversation';
 
     public function defaultModel(int $userId): string
