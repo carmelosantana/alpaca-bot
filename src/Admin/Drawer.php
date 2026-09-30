@@ -86,7 +86,7 @@ final class Drawer
      * `heartbeat` is a dependency because the chat bundle refreshes its nonce on core's heartbeat
      * (resources/ts/nonce.ts), and a script the loader adds to the page by hand cannot declare
      * one. wp_enqueue_media() is not called: where the screen has not loaded the media library
-     * itself, resources/ts/drawer.ts marks the drawer and this stylesheet hides the image button.
+     * itself, resources/ts/drawer-start.ts marks the drawer and this stylesheet hides the image button.
      */
     public function enqueue(): void
     {

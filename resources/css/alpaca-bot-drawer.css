@@ -12,7 +12,7 @@
 @media screen and (max-width: 782px) { .ab-drawer { top: 46px; } }
 
 /*
- * No image button where the screen has not loaded the media library (drawer.ts sets
+ * No image button where the screen has not loaded the media library (drawer-start.ts sets
  * `data-media`, and says why this is a rule rather than the button's `hidden`). It outranks
  * alpaca-bot.css's `display: inline-flex` on `.ab-btn`, a single class, wherever either stylesheet loads.
  */

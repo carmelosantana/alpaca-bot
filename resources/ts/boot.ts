@@ -20,7 +20,7 @@
  * decorated the whole page. And it tells whatever hosts the shell two things, as events on the
  * form: `ab:conversation` (`detail.id`) whenever the conversation the transcript shows is set, and
  * `ab:new-chat`, cancelable, before the history select's "New chat" leaves the page.
- * resources/ts/drawer.ts listens for both, and resources/ts/editor.ts for `ab:new-chat`.
+ * resources/ts/drawer-start.ts listens for both, and resources/ts/editor.ts for `ab:new-chat`.
  *
  * boot() is exported rather than run on import, so node:test can drive it against a document of
  * its own (tests/ts/chat.test.ts, Kanboard #4334); chat.ts is the entry that finds the shell and
