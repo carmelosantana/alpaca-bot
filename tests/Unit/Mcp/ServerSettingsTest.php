@@ -127,7 +127,7 @@ it('writes the secrets option only when what it holds changes', function (): voi
     expect($stored['__writes__'] ?? 0)->toBe(0);
 });
 
-// A writer that goes round Schema::sanitize() (update_option() from code, `wp option update`)
+// A writer that goes round Schema::sanitize() (update_option() from other code, a hand edit)
 // can hand this a row with no id. Its value has no key to be kept under, so it is dropped rather
 // than left in the autoloaded row.
 it('drops a header value it has no id to keep it under, rather than leave it in the row', function (): void {

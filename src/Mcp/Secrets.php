@@ -12,11 +12,12 @@ use AlpacaBot\Settings\Schema;
  *
  * A second option rather than the row itself because `alpaca_bot_settings` is autoloaded.
  * Store::replace() and core's options.php, which the settings page saves through, both call
- * update_option() with no `$autoload`, so a site's first save takes the add_option() branch with
- * none, wp_determine_option_autoload_value() answers `auto` for an option under core's 150000-byte
- * `wp_max_autoloaded_option_size`, and the whole option is in `alloptions` on every request, front
- * end included. A header value put there would be too. The provider API key is kept out of it
- * the same way since 0.6.1, in an option of its own (Settings\ProviderKey). This option is read
+ * update_option() with no `$autoload`, so a save with no row yet (a site's first, or the first
+ * after the row was deleted) takes the add_option() branch with none,
+ * wp_determine_option_autoload_value() answers `auto` for an option under core's 150000-byte
+ * `wp_max_autoloaded_option_size`, and the whole option is in `alloptions` on every request,
+ * front end included. A header value put there would be too. The provider API key is kept out of
+ * it the same way since 0.6.1, in an option of its own (Settings\ProviderKey). This option is read
  * only when something asks for a value: at most one query in a request that asks, and none in one
  * that does not.
  *

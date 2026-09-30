@@ -15,12 +15,13 @@ use AlpacaBot\Plugin;
  * The settings row carries Schema::MASK when a key is kept here and '' when none is.
  * beforeSave() writes both, on `pre_update_option_alpaca_bot_settings`, which core applies to
  * every update_option() of the row whoever calls it (the settings page, the REST route, Store,
- * `wp option update`) before the branch that turns a site's first save into add_option(). A posted
- * MASK, or a value that is not a string, keeps the held key; '' deletes the option; any other
- * string replaces it. This option is written from inside the row's update_option(), before core
- * writes the row, as Mcp\Secrets is. add_option() called on its own (`wp option add`) runs no
- * `pre_update_option_*` filter, so a key written that way stays in the row until migrate() lifts
- * it on the next request.
+ * which `wp option update|patch|add` write through: Cli\RawOptionWrite) before the branch that
+ * turns a save with no row yet (a site's first, or the first after the row was deleted) into
+ * add_option(). A posted MASK, or a value that is not a string, keeps the held key; '' deletes
+ * the option; any other string replaces it. This option is written from inside the row's
+ * update_option(), before core writes the row, as Mcp\Secrets is. add_option() called on its own
+ * (from code; `wp option add` writes through Store instead) runs no `pre_update_option_*` filter,
+ * so a key written that way stays in the row until migrate() lifts it on the next request.
  *
  * Everything that needs the key itself asks resolve() with what the row holds: the provider
  * factory (the one sender), the REST route's reveal and `wp alpaca-bot settings provider.api_key`.
@@ -58,6 +59,36 @@ final class ProviderKey
             return self::held();
         }
         return is_string($stored) ? $stored : '';
+    }
+
+    /**
+     * Whether a row's `provider.api_key` stands for a key: true when resolve() finds one, so a row
+     * that says MASK while the option is gone holds none, as it sends none. Schema::shown() asks
+     * this for the field, and the settings page (Admin\Fields), the REST read and the
+     * `wp alpaca-bot settings` dump show what that answers. It reads the option only for MASK
+     * (resolve()), so it costs those three one option read and the front end, which shows none of
+     * them, nothing extra.
+     */
+    public static function holds(#[\SensitiveParameter] mixed $stored): bool
+    {
+        return self::resolve($stored) !== '';
+    }
+
+    /**
+     * Schema::providerKeyClearedByMove(), for a writer that says so: true only when that answers
+     * true and `$current`'s key resolves to one, so a row that says MASK with no key held names no
+     * cleared key. The settings page asks this before it writes, and the REST route,
+     * `wp alpaca-bot settings` and Cli\RawOptionWrite ask it through Settings\Writer::write().
+     * Schema::sanitize() asks Schema's own, which reads no option, and clears the MASK all the
+     * same; with nothing held that stores what beforeSave() would have stored anyway.
+     * The option is read only on a move over a row that says MASK.
+     *
+     * @param array<string, mixed> $input   what the write sends
+     * @param array<string, mixed> $current the stored settings this write replaces
+     */
+    public static function clearedByMove(#[\SensitiveParameter] array $input, #[\SensitiveParameter] array $current): bool
+    {
+        return Schema::providerKeyClearedByMove($input, $current) && self::resolve($current['provider.api_key'] ?? '') !== '';
     }
 
     /** Stores `$key`, autoload off; '' deletes the option, so a site with no key has no row. */

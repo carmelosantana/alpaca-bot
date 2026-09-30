@@ -15,11 +15,13 @@ use AlpacaBot\Toolkit\AddressRefused;
  *
  * beforeSave() is the split, on `pre_update_option_alpaca_bot_settings`. It is a filter rather
  * than something in Store for the reason Plugin::register() gives for its catalog bust: every
- * update_option() of the option runs it, and only one writer goes through Store. Core applies it
- * in update_option() before the branch that turns a site's first save into add_option(), so that
- * save is covered too. add_option() called on its own (`wp option add`) runs no
- * `pre_update_option_*` filter, so a row written that way keeps whatever it was given; the read
- * side masks it all the same (Schema::maskedServers()).
+ * update_option() of the option runs it, and not every writer goes through Store (the settings
+ * page saves through core's options.php, and any other code can call update_option()). Core
+ * applies it in update_option() before the branch that turns a save with no row yet (a site's
+ * first, or the first after the row was deleted) into add_option(), so that save is covered too.
+ * add_option() called on its own (from code; `wp option add` writes through Store instead,
+ * Cli\RawOptionWrite) runs no `pre_update_option_*` filter, so a row written that way keeps
+ * whatever it was given; the read side masks it all the same (Schema::maskedServers()).
  *
  * For each row, a header value of Schema::MASK keeps the value Secrets holds for that id, '' removes
  * it, and any other string replaces it; the row is rewritten to carry MASK when a value is kept and
@@ -41,9 +43,10 @@ use AlpacaBot\Toolkit\AddressRefused;
  *
  * refusals() is the address check, and it is deliberately not in the filter: it resolves a host,
  * and a writer that has somewhere to put an error should be told rather than silently lose a row.
- * The REST route (Rest\SettingsController::update()) and `wp alpaca-bot settings`
- * (Cli\ChatCommand::settings()) run it through check(), with the check for rows the schema would
- * drop, and refuse the write whole: a 400, or an error and a non-zero exit, and nothing written.
+ * The REST route (Rest\SettingsController::update()), `wp alpaca-bot settings`
+ * (Cli\ChatCommand::settings()) and a raw `wp option update|patch|add` of the option
+ * (Cli\RawOptionWrite) run it through check(), with the check for rows the schema would drop, and
+ * refuse the write whole: a 400, or an error and a non-zero exit, and nothing written.
  * The settings page's sanitize callback (Admin\SettingsPage) keeps the stored row for a refused
  * edit, drops a refused new row, and says which address and why. Anything else that writes the
  * option gets no check at all. Mcp\Egress checks the address again whenever it builds a client,
@@ -162,9 +165,11 @@ final class ServerSettings
 
     /**
      * The check a writer that stores nothing on a refusal runs before it writes
-     * `toolkits.mcp_servers`: the REST route (Rest\SettingsController::update()) and
-     * `wp alpaca-bot settings` (Cli\ChatCommand::settings()). `$posted` is the list as the writer
-     * was handed it and `$stored` the stored `toolkits.mcp_servers`. Two refusals, in this order:
+     * `toolkits.mcp_servers`: the REST route (Rest\SettingsController::update()),
+     * `wp alpaca-bot settings` (Cli\ChatCommand::settings()) and a raw `wp option update|patch|add`
+     * of the option (Cli\RawOptionWrite), each through Settings\Writer::write(). `$posted` is the
+     * list as the writer was handed it and `$stored` the stored `toolkits.mcp_servers`. Two
+     * refusals, in this order:
      * - `alpaca_bot_mcp_row`: a row the schema would drop (Schema::droppedMcpRows()) that names a
      *   stored server's id, or that is new and has a URL (droppedRows()). The message names each
      *   such row, by its URL without any user name or password, or as `row N` when it has none,

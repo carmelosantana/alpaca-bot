@@ -56,7 +56,7 @@ it('reads the stored server and merges in the header value the option does not c
         ->and(mcpDiscovery([])->server('')?->id)->toBeNull();
 });
 
-// M7 (R101): a row written round the schema (a hand edit, `wp option update`) is not a server here
+// M7 (R101): a row written round the schema (a hand edit, update_option() from other code) is not a server here
 // unless its id is one Schema::isMcpId() admits, and one ServerConfig::fromSettings() cannot read
 // (an object where a string belongs) is no server either, rather than an Error out of the route.
 it('finds no server for an id the schema would not admit, or for a row it cannot read', function (): void {

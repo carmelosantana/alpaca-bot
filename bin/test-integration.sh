@@ -27,7 +27,9 @@
 # and could, but one place is better than two), which is also why PHPUnit's cache is under /tmp
 # (phpunit.integration.xml).
 #
-# Arguments are passed to phpunit: `composer test:integration -- --filter Smoke`.
+# Arguments are passed to phpunit, the same in both modes: `composer test:integration -- --filter
+# Smoke`, or `bin/test-integration.sh --filter Smoke`. One leading `--` is dropped first, so
+# `bin/test-integration.sh -- --filter Smoke` works too.
 #
 # WP_MULTISITE=1 runs the suite on a network: core's test bootstrap reads it and installs the
 # test database as one. It is passed into the container in both modes, and only 0, 1 or unset is
@@ -62,6 +64,10 @@
 # directory is derived rather than assumed -- on a runner it is the repository name, in a git
 # worktree it is the worktree's. `wp-env run` passes no environment through, so the settings the
 # suite reads arrive as a shell prefix inside the container instead of as `docker run -e`.
+#
+# Both modes set WPH_MODE inside the container (the literal mode, never a value from outside), so
+# a test can tell it runs under this script: RawOptionWriteTest fails rather than skips there when
+# it cannot load WP-CLI's Option_Command, since both containers ship WP-CLI.
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
@@ -116,6 +122,14 @@ if [[ ! "$DOMAIN" =~ ^[A-Za-z0-9.-]+(:[0-9]+)?$ ]]; then
     exit 1
 fi
 
+# Composer consumes the `--` of `composer test:integration -- --filter X` itself, but a direct
+# `bin/test-integration.sh -- --filter X` keeps it, and phpunit reads it as the end of its
+# options, so --filter became a test file name (Cannot open file "--filter"). Dropped here, once,
+# before either mode builds its command line (Kanboard #4697).
+if [ "${1:-}" = "--" ]; then
+    shift
+fi
+
 composer install --working-dir=tools/integration --no-interaction
 
 if [ "$MODE" = "wp-env" ]; then
@@ -138,7 +152,7 @@ if [ "$MODE" = "wp-env" ]; then
         PHP_ARGS="$PHP_ARGS '${arg//\'/\'\\\'\'}'"
     done
     exec pnpm exec wp-env run tests-cli --env-cwd="wp-content/plugins/$SLUG" -- \
-        sh -c "WP_TESTS_DB_NAME='$DB_NAME' WP_TESTS_DOMAIN='$DOMAIN' WP_MULTISITE='$MULTISITE' \
+        sh -c "WPH_MODE=wp-env WP_TESTS_DB_NAME='$DB_NAME' WP_TESTS_DOMAIN='$DOMAIN' WP_MULTISITE='$MULTISITE' \
             php$PHP_ARGS tools/integration/vendor/bin/phpunit -c phpunit.integration.xml$ARGS"
 fi
 
@@ -163,5 +177,5 @@ docker compose -f "$COMPOSE" exec -T -e DB_NAME="$DB_NAME" db sh -c \
     'mariadb -uroot -p"$MARIADB_ROOT_PASSWORD" -e "CREATE DATABASE IF NOT EXISTS \`$DB_NAME\`; GRANT ALL ON \`$DB_NAME\`.* TO \"$MARIADB_USER\"@\"%\";"'
 
 docker compose -f "$COMPOSE" run --rm -T -w "$PLUGIN" \
-    -e WP_TESTS_DB_NAME="$DB_NAME" -e WP_TESTS_DOMAIN="$DOMAIN" -e WP_MULTISITE="$MULTISITE" \
+    -e WPH_MODE=harness -e WP_TESTS_DB_NAME="$DB_NAME" -e WP_TESTS_DOMAIN="$DOMAIN" -e WP_MULTISITE="$MULTISITE" \
     cli php ${PHP_FLAGS[@]+"${PHP_FLAGS[@]}"} tools/integration/vendor/bin/phpunit -c phpunit.integration.xml "$@"

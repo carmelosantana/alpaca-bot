@@ -407,6 +407,11 @@ final class AbilitiesTest extends TestCase
             $this->assertCount(1, $this->posts(UsageMeter::POST_TYPE, $admin));
             $this->assertFalse(has_filter('wp_pre_execute_ability', [AbilitiesToolkit::class, 'preExecute']));
             $this->assertFalse(has_action('wp_before_execute_ability', [AbilitiesToolkit::class, 'beforeExecute']));
+            // Before 7.1 the guard's throw leaves `wp_before_execute_ability` on core's running list
+            // (do_action() pops it with no `finally`), and AbilitiesToolkit::mend() takes it off. On
+            // 7.1 nothing threw from it, and the list is as clean.
+            $this->assertFalse(doing_action('wp_before_execute_ability'));
+            $this->assertNotContains('wp_before_execute_ability', $GLOBALS['wp_current_filter'] ?? []);
 
             // Outside the toolkit nothing is guarded: both run, summarize its turn.
             $calls = [];

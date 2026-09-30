@@ -11,6 +11,7 @@ use AlpacaBot\Plugin;
 use AlpacaBot\Provider\ModelCatalog;
 use AlpacaBot\Rest\Controller;
 use AlpacaBot\Rest\RouteCapability;
+use AlpacaBot\Settings\ProviderKey;
 use AlpacaBot\Settings\Schema;
 use AlpacaBot\Settings\Store;
 use AlpacaBot\Shortcodes\AgentShim;
@@ -46,7 +47,7 @@ use AlpacaBot\View\Settings\McpTools;
  * a sanitize callback should compare against what is in the database at the moment of the write.
  * The mask keeps the key only while the Base URL keeps its origin: a save that moves it to another
  * scheme, host or port clears the key unless a new one is typed with it, and the callback adds a
- * notice saying so (Schema::providerKeyClearedByMove()), as heldServers() does for an MCP
+ * notice saying so when there was a key to clear (Settings\ProviderKey::clearedByMove()), as heldServers() does for an MCP
  * server's header value.
  *
  * Per-model overrides are a table with a row per model the catalog knows, posted as
@@ -129,7 +130,7 @@ final class SettingsPage
                     $input = [];
                 }
                 $input = is_array($input) ? $input : [];
-                if (Schema::providerKeyClearedByMove($input, $stored)) {
+                if (ProviderKey::clearedByMove($input, $stored)) {
                     add_settings_error(Plugin::OPTION, 'provider_key_cleared', esc_html__('The API key was cleared, because the Base URL moved to another host, port or scheme. Enter it again.', 'alpaca-bot'));
                 }
                 return self::heldServers(Schema::sanitize($input, $stored), $input, $stored, $servers);

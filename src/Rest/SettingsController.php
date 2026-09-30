@@ -11,14 +11,16 @@ use AlpacaBot\Mcp\ServerSettings;
 use AlpacaBot\Settings\ProviderKey;
 use AlpacaBot\Settings\Schema;
 use AlpacaBot\Settings\Store;
+use AlpacaBot\Settings\Writer;
 
 /**
  * The `alpaca_bot_settings` option over REST, for administrators by default: `GET /settings` is
  * the full array (every Schema key, defaults filled in), `PUT /settings` a partial update of it,
  * and `GET /settings/schema` the field list a client renders a form from.
  *
- * Secrets (Schema::SECRETS, today the provider API key) read back as Schema::MASK when set and
- * as '' when not, so a client can show "there is a key" without holding it. The mask is also
+ * Secrets (Schema::SECRETS, today the provider API key) read back as Schema::shown() answers: Schema::MASK
+ * when one is held and '' when not (for the provider key, a row that says MASK with the key option
+ * gone reads ''), so a client can show "there is a key" without holding it. The mask is also
  * what a client sends back when it has not touched the field: a PUT whose secret is MASK keeps
  * the stored value, one whose secret is '' clears it, and any other string is the new value. The
  * three cases are distinct on the wire, so "clear the key" is always reachable and an untouched
@@ -29,7 +31,8 @@ use AlpacaBot\Settings\Store;
  * PUT that moves `provider.base_url` to another scheme, host or port clears the stored key unless
  * it sends a new one, whether it sent the mask, a non-string or no key at all
  * (Schema::providerKeyClearedByMove()). The write is not refused for it; the key reads back '',
- * and the reply carries `X-Alpaca-Bot-Cleared: provider.api_key`, because '' alone cannot tell a
+ * and the reply carries `X-Alpaca-Bot-Cleared: provider.api_key` when there was a key
+ * to clear (Settings\ProviderKey::clearedByMove()), because '' alone cannot tell a
  * key just dropped from one never set. An MCP server's header value reads back the same way, MASK or '', in
  * each row of `toolkits.mcp_servers` (masked()), and takes the same three values on the way in;
  * Mcp\ServerSettings leaves only MASK or '' there on each update_option() of the option once the
@@ -82,7 +85,8 @@ use AlpacaBot\Settings\Store;
  *
  * A PUT carrying `toolkits.mcp_servers` is refused whole, 400 and nothing written, the other keys
  * of the same PUT included, in two cases, both checked before anything is stored by
- * Mcp\ServerSettings::check(), which `wp alpaca-bot settings` runs too:
+ * Mcp\ServerSettings::check(), which `wp alpaca-bot settings` runs too (both through
+ * Settings\Writer::write()):
  * - `alpaca_bot_mcp_row`: a row the schema would drop (Schema::droppedMcpRows()) that names a
  *   stored server's id, or that is new and has a URL. A client that sends a row for a server means
  *   to keep it, so a 200 that had quietly deleted it, its header value and its Access entry with
@@ -135,10 +139,13 @@ final class SettingsController extends Controller
 {
     private ServerSettings $servers;
 
+    private Writer $writer;
+
     /** @param ServerSettings|null $servers the address check a PUT of `toolkits.mcp_servers` runs; one over AddressCheck by default */
     public function __construct(private Store $store, ?ServerSettings $servers = null)
     {
         $this->servers = $servers ?? new ServerSettings();
+        $this->writer = new Writer($store, $this->servers);
     }
 
     public function routes(): array
@@ -224,21 +231,15 @@ final class SettingsController extends Controller
         if ($input === []) {
             return Errors::badRequest(__('No settings were sent. Send a JSON body of dotted keys, e.g. {"models.temperature": 0.7}.', 'alpaca-bot'));
         }
-        $cleared = [];
-        if (array_key_exists('toolkits.mcp_servers', $input)) {
-            $check = $this->servers->check($input['toolkits.mcp_servers'], $this->store->get('toolkits.mcp_servers'));
-            if ($check->isRefused()) {
-                return Errors::badRequest($check->message, (string) $check->code, $check->data);
-            }
-            $cleared = $check->cleared;
+        $written = $this->writer->write($input);
+        if ($written->refusal !== null) {
+            return Errors::badRequest($written->refusal->message, (string) $written->refusal->code, $written->refusal->data);
         }
-        $keyCleared = Schema::providerKeyClearedByMove($input, $this->store->all());
-        $this->store->replace($input);
         $response = new \WP_REST_Response($this->masked($this->store->all()));
-        if ($cleared !== []) {
-            $response->header('X-Alpaca-Bot-Mcp-Cleared', implode(',', $cleared));
+        if ($written->mcpCleared !== []) {
+            $response->header('X-Alpaca-Bot-Mcp-Cleared', implode(',', $written->mcpCleared));
         }
-        if ($keyCleared) {
+        if ($written->keyCleared) {
             $response->header('X-Alpaca-Bot-Cleared', 'provider.api_key');
         }
         return $response;
@@ -273,9 +274,7 @@ final class SettingsController extends Controller
     private function masked(array $settings): array
     {
         foreach (Schema::SECRETS as $key) {
-            if (($settings[$key] ?? '') !== '') {
-                $settings[$key] = Schema::MASK;
-            }
+            $settings[$key] = Schema::shown($key, $settings[$key] ?? '');
         }
         if (array_key_exists('toolkits.mcp_servers', $settings)) {
             $settings['toolkits.mcp_servers'] = Schema::maskedServers($settings['toolkits.mcp_servers']);

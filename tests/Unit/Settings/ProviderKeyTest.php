@@ -74,7 +74,7 @@ it('writes the mask only when a key is held, so the mask over nothing is nothing
         ->and($stored)->not->toHaveKey(ProviderKey::OPTION);
 });
 
-// A raw write (`wp option update`) of the mask over a row that still carries its plaintext key,
+// A raw update_option() of the mask over a row that still carries its plaintext key,
 // before the migration has run: the key it keeps is that plaintext, lifted, not nothing.
 it('keeps a plaintext key the old row still carries when the mask is written over it', function (): void {
     $stored = [];
@@ -102,6 +102,48 @@ it('resolves the mask to the held key, and a plaintext key a row still carries t
         ->and(ProviderKey::resolve(['x']))->toBe('');
     unset($stored[ProviderKey::OPTION]);
     expect(ProviderKey::resolve(Schema::MASK))->toBe('');
+});
+
+// #4699: what a screen shows follows what is sent. The option is read only for MASK, so a row
+// with no key, or one still carrying its key in plaintext, costs no read.
+it('holds a key only when one resolves, and reads the option only for the mask', function (): void {
+    $reads = 0;
+    Functions\when('get_option')->alias(static function (string $name, mixed $default = false) use (&$reads): mixed {
+        ++$reads;
+        return $name === ProviderKey::OPTION ? 'sk-FAKE-held' : $default;
+    });
+    expect(ProviderKey::holds(''))->toBeFalse()
+        ->and(ProviderKey::holds(null))->toBeFalse()
+        ->and(ProviderKey::holds('sk-FAKE-plain'))->toBeTrue()
+        ->and($reads)->toBe(0)
+        ->and(ProviderKey::holds(Schema::MASK))->toBeTrue()
+        ->and($reads)->toBe(1);
+    Functions\when('get_option')->justReturn('');
+    expect(ProviderKey::holds(Schema::MASK))->toBeFalse();
+});
+
+// #4699 over #4539: a move clears a key only when there was one to clear. The option is read only
+// on a move over a row that says MASK.
+it('names a key cleared by a move only when the row\'s key resolves to one', function (): void {
+    $reads = 0;
+    $held = 'sk-FAKE-held';
+    Functions\when('get_option')->alias(static function (string $name, mixed $default = false) use (&$reads, &$held): mixed {
+        ++$reads;
+        return $name === ProviderKey::OPTION ? $held : $default;
+    });
+    $move = ['provider.base_url' => 'https://steal.example.net/v1'];
+    $stay = ['provider.base_url' => 'https://openrouter.ai/v2'];
+    $row = static fn(string $key): array => ['provider.api_key' => $key, 'provider.base_url' => 'https://openrouter.ai/api/v1'];
+    expect(ProviderKey::clearedByMove($stay, $row(Schema::MASK)))->toBeFalse()
+        ->and(ProviderKey::clearedByMove($move, $row('sk-FAKE-plain')))->toBeTrue()
+        ->and(ProviderKey::clearedByMove($move, $row('')))->toBeFalse()
+        ->and($reads)->toBe(0)
+        ->and(ProviderKey::clearedByMove($move, $row(Schema::MASK)))->toBeTrue()
+        ->and($reads)->toBe(1);
+    $held = '';
+    expect(ProviderKey::clearedByMove($move, $row(Schema::MASK)))->toBeFalse()
+        // Schema's own still says the move clears the MASK, and sanitize() stores '' for it.
+        ->and(Schema::providerKeyClearedByMove($move, $row(Schema::MASK)))->toBeTrue();
 });
 
 it('reads a held value that is not a string, or is the mask, as no key, so resolve() never answers the mask', function (): void {

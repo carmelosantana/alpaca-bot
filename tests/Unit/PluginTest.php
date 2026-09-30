@@ -47,7 +47,7 @@ it('exposes a version and boots once', function (): void {
     $b = Plugin::boot();
     expect($a)->toBe($b)
         ->and($a->version())->toBe(Plugin::VERSION)
-        ->and(Plugin::VERSION)->toMatch('/^0\.6\.1/');
+        ->and(Plugin::VERSION)->toMatch('/^0\.6\.2/');
 });
 
 it('registers the settings store, provider factory, model catalog, conversation store, usage meter, cap policy, context collector and chat pipeline, hooks both post types on init, and runs the 0.4 migration on init after them, never on admin_init', function (): void {
@@ -151,19 +151,28 @@ it('registers the settings store, provider factory, model catalog, conversation 
     expect($plugin->get(Store::class)->get('provider.base_url'))->toBe('http://localhost:11434/v1');
 });
 
-it('registers the wp alpaca-bot command when WP-CLI is the running process, and the 0.4 migration reaches that process through init', function (): void {
+it('registers the wp alpaca-bot command and the raw option write when WP-CLI is the running process, and the 0.4 migration reaches that process through init', function (): void {
     // WP_CLI (the constant and the class) is process-wide once defined, and Pest runs every test
     // in one process, so this test is the one place that defines it. The stand-in records what
-    // add_command() was given; every later register() in the run goes through it harmlessly.
+    // add_command() and add_hook() were given; every later register() in the run goes through it
+    // harmlessly.
     if (!class_exists('WP_CLI', false)) {
         class_alias(get_class(new class {
             /** @var list<array{0: string, 1: mixed}> */
             public static array $commands = [];
 
+            /** @var array<string, list<callable>> */
+            public static array $hooks = [];
+
             public static function add_command(string $name, mixed $callable): bool
             {
                 self::$commands[] = [$name, $callable];
                 return true;
+            }
+
+            public static function add_hook(string $when, callable $callback): void
+            {
+                self::$hooks[$when][] = $callback;
             }
         }), 'WP_CLI');
     }
@@ -185,7 +194,32 @@ it('registers the wp alpaca-bot command when WP-CLI is the running process, and 
     expect(\WP_CLI::$commands)->toHaveCount(1)
         ->and(\WP_CLI::$commands[0][0])->toBe('alpaca-bot')
         ->and(\WP_CLI::$commands[0][1])->toBeInstanceOf(ChatCommand::class)
-        ->and($migration)->toBeInstanceOf(Closure::class);
+        ->and($migration)->toBeInstanceOf(Closure::class)
+        // Cli\RawOptionWrite: armed by WP-CLI before every `wp option update|patch|add`, whatever
+        // option its words name (the name can come from --prompt or wp-cli.yml instead, and the
+        // takeover reads it from WP-CLI's own call), disarmed after it, and by nothing else.
+        ->and(array_keys(\WP_CLI::$hooks))->toBe(['before_run_command', 'before_invoke:option update', 'after_invoke:option update', 'before_invoke:option patch', 'after_invoke:option patch', 'before_invoke:option add', 'after_invoke:option add'])
+        ->and(has_filter('sanitize_option_' . Plugin::OPTION))->toBeFalse();
+    $hook = static fn(string $when, mixed ...$args) => (\WP_CLI::$hooks[$when][0])(...$args);
+    $hook('before_run_command', ['option', 'update'], [], []);
+    $hook('before_invoke:option update');
+    $noName = has_filter('sanitize_option_' . Plugin::OPTION);
+    $hook('after_invoke:option update');
+    $afterUpdate = has_filter('sanitize_option_' . Plugin::OPTION);
+    $hook('before_run_command', ['option', 'patch', 'update', Plugin::OPTION, 'models.temperature', '0.3'], [], []);
+    $hook('before_invoke:option patch');
+    $ours = has_filter('sanitize_option_' . Plugin::OPTION);
+    $hook('after_invoke:option patch');
+    $after = has_filter('sanitize_option_' . Plugin::OPTION);
+    $hook('before_run_command', ['option', 'add', Plugin::OPTION, '{}'], [], []);
+    $hook('before_invoke:option add');
+    $hook('before_run_command', ['alpaca-bot', 'settings'], [], []);
+    $next = has_filter('sanitize_option_' . Plugin::OPTION);
+    expect($noName)->toBeTrue()
+        ->and($afterUpdate)->toBeFalse()
+        ->and($ours)->toBeTrue()
+        ->and($after)->toBeFalse()
+        ->and($next)->toBeFalse();
 
     $legacy = ['alpaca_bot_api_url' => 'http://ollama.internal:11434', 'alpaca_bot_default_model' => 'qwen3:8b'];
     Functions\when('get_option')->alias(fn(string $k, mixed $d = false) => $legacy[$k] ?? ($k === Plugin::OPTION ? [] : $d));

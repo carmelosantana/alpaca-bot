@@ -30,4 +30,16 @@ class WP_CLI
     public static function warning($message): void
     {
     }
+
+    public static function success(string $message): void
+    {
+    }
+
+    public static function add_hook(string $when, callable $callback): void
+    {
+    }
+
+    public static function halt(int $return_code): void
+    {
+    }
 }

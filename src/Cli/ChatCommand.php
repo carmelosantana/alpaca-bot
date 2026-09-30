@@ -12,6 +12,7 @@ use AlpacaBot\Provider\ModelCatalog;
 use AlpacaBot\Settings\ProviderKey;
 use AlpacaBot\Settings\Schema;
 use AlpacaBot\Settings\Store;
+use AlpacaBot\Settings\Writer;
 
 /**
  * Alpaca Bot from the command line: `wp alpaca-bot chat|models|usage|settings`.
@@ -39,7 +40,7 @@ final class ChatCommand
     /** @var callable(string): void */
     private $warn;
 
-    private ServerSettings $servers;
+    private Writer $writer;
 
     /** Whether the last thing emitted left stdout mid-line (a streamed delta does). */
     private bool $midLine = false;
@@ -60,7 +61,7 @@ final class ChatCommand
         ?ServerSettings $servers = null,
         ?callable $warn = null,
     ) {
-        $this->servers = $servers ?? new ServerSettings();
+        $this->writer = new Writer($store, $servers ?? new ServerSettings());
         $this->warn = $warn ?? static function (string $message): void {
             \WP_CLI::warning($message);
         };
@@ -292,19 +293,19 @@ final class ChatCommand
     {
         if (!isset($args[0])) {
             $all = $this->store->all();
-            // Schema::SECRETS is the list of top-level credential-holding keys, and Schema::MASK
-            // the one stand-in for a stored one: the settings screen (Admin\Fields::display()),
-            // the REST read (Rest\SettingsController::masked()) and this dump all read them, so a
-            // second secret added to that list is hidden here too. The whole dump is what ends
-            // up in CI logs and shell history; asking for one by name
+            // Schema::SECRETS is the list of top-level credential-holding keys, and Schema::shown()
+            // what each reads as: Schema::MASK when one is held and '' when not (for the provider
+            // key, a row that says MASK with the key option gone reads ''). The settings screen
+            // (Admin\Fields::display()), the REST read (Rest\SettingsController::masked()) and this
+            // dump all read them, so a second secret added to that list is hidden here too once
+            // Schema::shown() has its resolver, and the dump throws until it does. The whole dump
+            // is what ends up in CI logs and shell history; asking for one by name
             // (`wp alpaca-bot settings provider.api_key`) still prints it, since that is an
             // operator deliberately asking. An MCP server's header value is the other credential,
             // nested in its row; Schema::maskedServers() masks it here and read by name alike.
             foreach (Schema::SECRETS as $secret) {
                 // An unset key stays visibly empty: "is one configured?" is still answerable.
-                if (($all[$secret] ?? '') !== '') {
-                    $all[$secret] = Schema::MASK;
-                }
+                $all[$secret] = Schema::shown($secret, $all[$secret] ?? '');
             }
             $all['toolkits.mcp_servers'] = Schema::maskedServers($all['toolkits.mcp_servers'] ?? []);
             $this->json($all);
@@ -327,16 +328,13 @@ final class ChatCommand
                     return;
                 }
             }
-            if ($key === 'toolkits.mcp_servers') {
-                $check = $this->servers->check($value, $this->store->get($key));
-                if ($check->isRefused()) {
-                    $this->error($check->message);
-                    return;
-                }
-                $cleared = $check->cleared;
+            $written = $this->writer->write([$key => $value]);
+            if ($written->refusal !== null) {
+                $this->error($written->refusal->message);
+                return;
             }
-            $keyCleared = Schema::providerKeyClearedByMove([$key => $value], $this->store->all());
-            $this->store->set($key, $value);
+            $cleared = $written->mcpCleared;
+            $keyCleared = $written->keyCleared;
         }
         $stored = $this->store->get($key);
         // The row carries the mask for a kept provider key; asked for by name, the key itself is
@@ -347,16 +345,8 @@ final class ChatCommand
             default => $stored,
         };
         $this->emit(wp_json_encode($stored, self::JSON) . "\n");
-        if ($cleared !== []) {
-            ($this->warn)(sprintf(
-                count($cleared) === 1
-                    ? 'The header value of MCP server %s was cleared, because its address moved to another host or port. Send it again.'
-                    : 'The header values of MCP servers %s were cleared, because their addresses moved to another host or port. Send them again.',
-                implode(', ', $cleared),
-            ));
-        }
-        if ($keyCleared) {
-            ($this->warn)('provider.api_key was cleared, because provider.base_url moved to another host, port or scheme. Set it again: wp alpaca-bot settings provider.api_key <key>');
+        foreach (ClearedWarnings::lines($cleared, $keyCleared) as $line) {
+            ($this->warn)($line);
         }
     }
 

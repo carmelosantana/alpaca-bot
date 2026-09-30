@@ -9,7 +9,7 @@ use AlpacaBot\Settings\Store;
 
 final class Plugin
 {
-    public const VERSION = '0.6.1';
+    public const VERSION = '0.6.2';
     public const OPTION = 'alpaca_bot_settings';
     public const TEXT_DOMAIN = 'alpaca-bot';
 
@@ -78,7 +78,9 @@ final class Plugin
         // on every turn for the transient's lifetime. Removing this bust needs a per-kind
         // default (or an eager re-list) to go in with it.
         // On `update_option_*` rather than in Store: every writer (the settings page, the REST
-        // route, WP-CLI, a filter) goes through the option, and only one of them through Store.
+        // route, WP-CLI, a filter) goes through the option, and not every writer goes through
+        // Store: the settings page saves through core's options.php, and any other code can call
+        // update_option().
         // Neither closure is `static`, for the reason the receipt-retention hook below gives.
         add_action('admin_notices', function () use ($factory): void {
             $notice = $factory->fallbackNotice();
@@ -90,7 +92,7 @@ final class Plugin
         add_action('update_option_' . self::OPTION, function (mixed $old, mixed $new): void {
             if (is_array($old) && is_array($new)) {
                 $changed = false;
-                foreach (['provider.kind', 'provider.base_url'] as $key) {
+                foreach (['provider.kind', 'provider.base_url', 'provider.api_key'] as $key) {
                     $changed = $changed || ($old[$key] ?? null) !== ($new[$key] ?? null);
                 }
                 if (!$changed) {
@@ -108,16 +110,24 @@ final class Plugin
         // save kept the previous one's models for the transient's five minutes — which, by the
         // argument above, means every turn in that window refused by name on `wp-ai`.
         // Unconditional: an add has no old value to compare the three keys against, and the one
-        // deleted transient it can cost is on the first settings save a site ever makes.
+        // deleted transient it can cost is on a save that creates the row: a site's first, or the
+        // first after the row was deleted.
         add_action('add_option_' . self::OPTION, function (): void {
             delete_transient(Provider\ModelCatalog::TRANSIENT);
         });
-        // The key is not in the row (Settings\ProviderKey): the row reads MASK before and after a
-        // change of key, so the row's update_option() can change nothing and fire neither hook
-        // above. Its own option is written, added or deleted whenever the key changes, and each
-        // of the three busts the list the old key was answered with. It is also written once when a
-        // plaintext key moves out of the row (migrate(), or beforeSave() over a row migrate() has
-        // not reached), with the key unchanged, which costs one bust of that list more.
+        // The list is flushed whenever a write through the options API changes the key the site
+        // uses (Settings\ProviderKey::resolve() of the row's `provider.api_key`). The key is not
+        // in the row: the row reads MASK before and after a change of key, so the row's
+        // update_option() can change nothing and fire neither hook above. The key's own option is
+        // added, updated or deleted on every change of a held key, and each of the three busts the
+        // list the old key was answered with. The rest of the changes move the row's own value
+        // and bust on it: a row still carrying a plaintext key (one migrate() has not reached)
+        // that is saved with '' holds no option to delete, so the row's `provider.api_key` going
+        // from the plaintext to '' is what the update hook above sees (it compares that key too);
+        // a row deleted outright reads back as the defaults, whose key is '', so its delete busts
+        // as well; a row's first write is the add above. A plaintext key moving out of the row
+        // (migrate(), or beforeSave() over a row migrate() has not reached), with the key
+        // unchanged, busts twice, on the option's add and on the row's plaintext going to MASK.
         $providerKey = new Settings\ProviderKey();
         $providerKey->register();
         foreach (['add_option_', 'update_option_', 'delete_option_'] as $hook) {
@@ -125,6 +135,9 @@ final class Plugin
                 delete_transient(Provider\ModelCatalog::TRANSIENT);
             });
         }
+        add_action('delete_option_' . self::OPTION, function (): void {
+            delete_transient(Provider\ModelCatalog::TRANSIENT);
+        });
         // An MCP server's header value is taken out of its row on every update_option() of the
         // option, whoever calls it (Mcp\ServerSettings says why that is a filter, and what
         // add_option() on its own does instead). The settings page and
@@ -272,6 +285,9 @@ final class Plugin
         // process running us, and the class itself never references WP_CLI until then.
         if (defined('WP_CLI') && constant('WP_CLI')) {
             \WP_CLI::add_command('alpaca-bot', new Cli\ChatCommand($this->get(Chat\Pipeline::class), $this->get(Provider\ModelCatalog::class), $meter, $store, servers: $this->get(Mcp\ServerSettings::class)));
+            // A raw `wp option update|patch|add` of the option goes through the same Store and
+            // checks (Cli\RawOptionWrite says how, and why it has to end the command itself).
+            (new Cli\RawOptionWrite($store, $this->get(Mcp\ServerSettings::class)))->register();
         }
     }
 

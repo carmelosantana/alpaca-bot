@@ -28,8 +28,9 @@ use AlpacaBot\Plugin;
  * `wp alpaca-bot settings`'s echo) should see what was stored, not what was asked for.
  * replace() learns that value from a filter of its own, last on that hook, added for the one
  * call, not by reading the option back. It is not always byte for byte what the row holds: core
- * applies the generic `pre_update_option` filter after the named one, and on a site's first save
- * add_option() runs the option's sanitize callbacks once more; neither is seen here.
+ * applies the generic `pre_update_option` filter after the named one, and on a save with no row
+ * yet (a site's first, or the first after the row was deleted) add_option() runs the option's
+ * sanitize callbacks once more; neither is seen here.
  */
 final class Store
 {
