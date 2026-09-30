@@ -466,7 +466,8 @@ final class RawOptionWriteTest extends TestCase
 
         $this->assertSame('halt 0', $ended);
         $this->assertSame(0.25, get_option(Plugin::OPTION)['models.temperature']);
-        // 'on', as core's update_option() writes it when WP-CLI hands it --autoload=on.
+        // 'on', as wp_set_option_autoload() writes it (and as core's update_option() would under
+        // --autoload=on).
         $this->assertSame('on', $this->autoloadOf(Plugin::OPTION));
         $this->assertSame(["Success: Updated 'alpaca_bot_settings' option."], $this->said);
 

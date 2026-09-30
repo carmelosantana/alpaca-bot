@@ -248,7 +248,9 @@ final class RawOptionWrite
     /**
      * refuseSpelling()'s test, and the refusal when it holds. The database is asked only while
      * armed, only inside WP-CLI's command, only for a name that is not this option byte for byte,
-     * and once per name it answers; when it cannot answer, the write is refused.
+     * and once per name it answers. It cannot answer (null) only for a name that is this option
+     * by trim and ASCII case, and that write is refused; a failed query for any other name
+     * answers false, and that write passes (the class docblock).
      */
     private function refusesSpelling(mixed $option): bool
     {
