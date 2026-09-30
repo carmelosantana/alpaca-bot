@@ -974,7 +974,8 @@ function abilityHooksRun(): void
  * validation and the permission check: on 7.1 `wp_pre_execute_ability` first, returning what it
  * answers when that is not the sentinel; then `wp_before_execute_ability`; then the callback,
  * which from 7.0 has a throw caught and answered as `ability_callback_exception` quoting its
- * message, and on 6.9 has it propagate. Each run of the callback is recorded by name in
+ * message, and on 6.9 has it propagate. The action is wrapped as core's do_action() wraps it:
+ * the name pushed onto $GLOBALS['wp_current_filter'] and popped after, not in a `finally`. Each run of the callback is recorded by name in
  * $GLOBALS['abCallbackRuns'], so a test can see a refused callback never ran. Pair it with
  * abilityHooksRun().
  *
@@ -991,7 +992,11 @@ function coreAbility(string $name, string $core, \Closure $callback): Mockery\Mo
                 return $pre;
             }
         }
+        // Core's do_action() pushes the hook's name onto $wp_current_filter and pops it after the
+        // listeners, with no try/finally, so a listener's throw leaves the name there.
+        $GLOBALS['wp_current_filter'][] = 'wp_before_execute_ability';
         do_action('wp_before_execute_ability', $name, $input);
+        array_pop($GLOBALS['wp_current_filter']);
         $run = static function () use ($name, $input, $callback): mixed {
             $GLOBALS['abCallbackRuns'][] = $name;
             return $callback($input);

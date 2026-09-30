@@ -230,6 +230,7 @@ function metaSite(string $core, array $others): array
     $GLOBALS['abCallbackRuns'] = [];
     abilityHooksRun();
     $GLOBALS['abNested'] = null;
+    $GLOBALS['wp_current_filter'] = ['init'];
     $site = ['x/meta' => coreAbility('x/meta', $core, static fn(mixed $in): mixed => $GLOBALS['abNested'] = wp_get_ability((string) $in['ability'])->execute([]))];
     foreach ($others as $name) {
         $site[$name] = coreAbility($name, $core, static fn(): array => ['ran' => $name]);
@@ -263,7 +264,10 @@ it('refuses a nested ability the allowlist leaves out before its callback runs o
     expect($result->status)->toBe(ToolResultStatus::Error)
         ->and($result->content)->toBe('The ability__x__meta tool failed before it could answer.')
         ->and($GLOBALS['abCallbackRuns'])->toBe(['x/meta'])
-        ->and(get_current_user_id())->toBe(1);
+        ->and(get_current_user_id())->toBe(1)
+        // The throw unwound through core's do_action(), which pops nothing on the way out: run()
+        // takes off what it left, and only that.
+        ->and($GLOBALS['wp_current_filter'])->toBe(['init']);
 })->with(['6.9', '7.0']);
 
 it('runs a nested ability the allowlist names', function (string $core): void {
