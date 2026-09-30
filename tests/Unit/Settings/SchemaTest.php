@@ -231,7 +231,11 @@ it('names no clearing when no key is stored, or when the write clears the key it
 it('compares against the default URL when nothing is stored for it', function (): void {
     $stored = ['provider.api_key' => 'sk-FAKE-stored'];
     expect(Schema::providerKeyClearedByMove(['provider.base_url' => 'http://localhost:11434/other'], $stored))->toBeFalse()
-        ->and(Schema::providerKeyClearedByMove(['provider.base_url' => 'http://ollama.example.net:11434/v1'], $stored))->toBeTrue();
+        ->and(Schema::providerKeyClearedByMove(['provider.base_url' => 'http://ollama.example.net:11434/v1'], $stored))->toBeTrue()
+        // The URL compared is the one sanitize() would store: '' stores the default, which is
+        // where this site already is, so nothing moved.
+        ->and(Schema::providerKeyClearedByMove(['provider.base_url' => ''], $stored))->toBeFalse()
+        ->and(Schema::sanitize(['provider.base_url' => ''], $stored)['provider.api_key'])->toBe('sk-FAKE-stored');
 });
 
 it('clamps per-model overrides to the same bounds as the global fields', function (): void {
