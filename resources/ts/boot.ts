@@ -217,7 +217,10 @@ export function boot(cfg: Settings, form: HTMLFormElement): void {
       await consume(redeemed.stream, bubble, shown);
     } catch (e) {
       console.error(e);
-      notice('error', t('failed'));
+      // A turn that ran and failed after the user switched away is not the open conversation's
+      // failure (consume() says the same of its own exits). One that never ran is: its draft
+      // comes back into the composer on screen, and the notice says why.
+      if (!sent || shown()) notice('error', t('failed'));
     } finally {
       if (!sent) restoreDraft(form, draft, assistant, user);
       busy = false;
@@ -226,7 +229,13 @@ export function boot(cfg: Settings, form: HTMLFormElement): void {
     }
   }
 
-  /** Reads one turn's frames into the streaming bubble (docs/api.md section 4); `shown` is send()'s, and says whether the frames still speak for the page. */
+  /**
+   * Reads one turn's frames into the streaming bubble (docs/api.md section 4). `shown` is
+   * send()'s, and says whether the frames still speak for the page: once the user has switched
+   * away, the turn neither records its conversation nor reports how it ended in the status line,
+   * which belongs to the conversation now open (a dropped connection is send()'s to report, and
+   * it asks the same).
+   */
   async function consume(res: Response, bubble: HTMLElement, shown: () => boolean): Promise<void> {
     const content = $('.ab-msg__content', bubble) as HTMLElement;
     let reasoning: HTMLElement | null = null;
@@ -254,11 +263,11 @@ export function boot(cfg: Settings, form: HTMLFormElement): void {
         } else if (event === 'done') {
           return finish(d, bubble, shown);
         } else if (event === 'error') {
-          notice('error', typeof d.message === 'string' && d.message ? d.message : t('failed'));
+          if (shown()) notice('error', typeof d.message === 'string' && d.message ? d.message : t('failed'));
           return settle(bubble, answered);
         }
       }
-      notice('error', t('failed'));
+      if (shown()) notice('error', t('failed'));
     } catch (e) {
       // The connection dropped mid-stream (the server stores what it sent as a partial reply).
       settle(bubble, answered);

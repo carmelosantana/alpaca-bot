@@ -247,6 +247,7 @@ async function heldTurn(t: TestContext, conversation: string, hold: { ticket?: P
   chat: () => Record<string, unknown> | null;
   push: (event: string, data: object) => void;
   close: () => void;
+  drop: () => void;
   ids: number[];
   seen: string[];
   triggers: string[];
@@ -302,6 +303,8 @@ async function heldTurn(t: TestContext, conversation: string, hold: { ticket?: P
     chat: () => chat,
     push: (event, data) => controller.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)),
     close: () => controller.close(),
+    // The connection failing mid-stream: the body's read rejects.
+    drop: () => controller.error(new TypeError('network error')),
     ids,
     seen,
     triggers,
@@ -456,4 +459,53 @@ test('the drawer\'s New chat before the ticket: the turn is not sent as a new co
   assert.equal(turn.chat()?.conversation_id, 7);
   assert.equal(field(turn.form), '0');
   assert.equal(document.querySelectorAll('#ab-messages .ab-msg').length, 0);
+});
+
+const status = (): string => (document.querySelector('#ab-status')?.textContent ?? '').trim();
+
+/**
+ * How a turn can end without `done`, each fed after the turn's `start`: an `error` frame, a
+ * stream the server closed early, and a connection that failed mid-read.
+ */
+const endings: [string, (turn: Awaited<ReturnType<typeof heldTurn>>) => void][] = [
+  ['an error frame', (turn) => { turn.push('error', { message: 'The model went away.' }); turn.close(); }],
+  ['a stream closed without done', (turn) => turn.close()],
+  ['a dropped connection', (turn) => turn.drop()],
+];
+
+for (const [ending, end] of endings) {
+  test(`${ending} on the conversation still open is shown in the status line`, async (t) => {
+    const turn = await heldTurn(t, '7');
+    t.mock.method(console, 'error', () => {});
+    turn.push('start', { conversation_id: 7 });
+    await until(() => turn.ids.length === 1);
+    end(turn);
+    await turn.finished();
+    assert.notEqual(status(), '');
+    assert.equal(document.querySelectorAll('#ab-status .notice-error').length, 1);
+  });
+
+  test(`${ending} on a turn the user switched away from is not shown as the open conversation's error`, async (t) => {
+    const turn = await heldTurn(t, '7');
+    t.mock.method(console, 'error', () => {});
+    turn.push('start', { conversation_id: 7 });
+    await until(() => turn.ids.length === 1);
+    historySwap(globalThis, '9');
+    end(turn);
+    await turn.finished();
+    assert.equal(status(), '');
+    assert.equal(field(turn.form), '9');
+  });
+}
+
+test('a turn that never ran still says so after a switch, because its draft comes back into the composer on screen', async (t) => {
+  let fail!: (e: Error) => void;
+  const turn = await heldTurn(t, '7', { ticket: new Promise<void>((_, reject) => { fail = reject; }) });
+  t.mock.method(console, 'error', () => {});
+  historySwap(globalThis, '9');
+  fail(new TypeError('network error'));
+  await turn.finished();
+  assert.equal(status(), 'The request failed. Try again.');
+  assert.equal((turn.form.querySelector('#ab-message') as HTMLTextAreaElement).value, 'hello');
+  assert.equal(field(turn.form), '9');
 });
