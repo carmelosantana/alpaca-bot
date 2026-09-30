@@ -259,11 +259,12 @@ final class Schema
      *
      * sanitize() clears the key when this answers true, so every writer of the option goes
      * through the same decision, and the writers that can tell someone (the REST route's
-     * `X-Alpaca-Bot-Cleared` header, the settings page's notice, `wp alpaca-bot settings`'s
-     * warning) ask it with the same two arrays before they write. The reason is the one
-     * Mcp\ServerSettings gives for a header value: the `settings.write` row can be lowered below
-     * `manage_options`, and a writer who may change the URL but not reveal the key could otherwise
-     * point the URL at their own host, send the mask, and be sent the key on the next turn.
+     * `X-Alpaca-Bot-Cleared` header, the settings page's notice, the warning from
+     * `wp alpaca-bot settings` and from a raw `wp option update|patch|add`) ask it with the same
+     * two arrays before they write. The reason is the one Mcp\ServerSettings gives for a header
+     * value: the `settings.write` row can be lowered below `manage_options`, and a writer who may
+     * change the URL but not reveal the key could otherwise point the URL at their own host, send
+     * the mask, and be sent the key on the next turn.
      *
      * @param array<string, mixed> $input   what the write sends
      * @param array<string, mixed> $current the stored settings this write replaces

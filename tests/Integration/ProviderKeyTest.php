@@ -125,7 +125,7 @@ final class ProviderKeyTest extends TestCase
         $this->assertSame($autoload, $this->autoloadOf(ProviderKey::OPTION));
     }
 
-    // `wp option add` runs no pre_update_option_* filter: the key stays in the row until the next
+    // add_option() called from code runs no pre_update_option_* filter: the key stays in the row until the next
     // request's migration lifts it.
     public function test_a_key_added_round_the_filter_stays_in_the_row_until_the_migration(): void
     {
@@ -166,7 +166,7 @@ final class ProviderKeyTest extends TestCase
         $this->assertSame(Schema::MASK, $store->get('provider.api_key'));
         $store->replace(['provider.api_key' => Schema::MASK, 'models.num_ctx' => 2048]);
         $this->assertKeyKeptOutOfTheRow('sk-FAKE-store');
-        // A raw update_option(), as `wp option update` makes, goes through the same filter.
+        // A raw update_option() from other code goes through the same filter.
         update_option(Plugin::OPTION, ['provider.api_key' => 'sk-FAKE-raw'] + $store->all());
         $this->assertKeyKeptOutOfTheRow('sk-FAKE-raw');
 

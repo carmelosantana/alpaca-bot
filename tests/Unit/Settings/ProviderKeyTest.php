@@ -74,7 +74,7 @@ it('writes the mask only when a key is held, so the mask over nothing is nothing
         ->and($stored)->not->toHaveKey(ProviderKey::OPTION);
 });
 
-// A raw write (`wp option update`) of the mask over a row that still carries its plaintext key,
+// A raw update_option() of the mask over a row that still carries its plaintext key,
 // before the migration has run: the key it keeps is that plaintext, lifted, not nothing.
 it('keeps a plaintext key the old row still carries when the mask is written over it', function (): void {
     $stored = [];
