@@ -160,6 +160,24 @@ it('names the secret fields and the mask that stands in for them', function (): 
         ->and(Schema::fields())->toHaveKey('provider.api_key');
 });
 
+// What a screen shows for a secret is generic (MASK when one is held, '' when not); whether one
+// is held is the field's own question, asked through the resolver Schema::shown() keys by the
+// field's name. Every SECRETS entry must have one: a second secret added without it fails here
+// rather than being shown through the provider key's resolver.
+it('shows each secret through the held resolver named for it, MASK when one is held and \'\' when not', function (): void {
+    Functions\when('get_option')->justReturn(false);
+    foreach (Schema::SECRETS as $secret) {
+        expect(Schema::shown($secret, ''))->toBe('', $secret);
+    }
+    expect(Schema::shown('provider.api_key', 'sk-FAKE-plain'))->toBe(Schema::MASK)
+        ->and(Schema::shown('provider.api_key', Schema::MASK))->toBe('');
+});
+
+it('refuses to show a field it has no held resolver for, rather than guess', function (): void {
+    expect(static fn(): string => Schema::shown('models.default', 'llama3.2'))
+        ->toThrow(LogicException::class, 'models.default');
+});
+
 it('keeps a stored secret when handed the mask, clears it on an empty string, replaces it on any other string', function (): void {
     $stored = ['provider.api_key' => 'sk-stored'];
     expect(Schema::sanitize(['provider.api_key' => Schema::MASK], $stored)['provider.api_key'])->toBe('sk-stored')

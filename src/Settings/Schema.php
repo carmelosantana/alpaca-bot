@@ -15,8 +15,8 @@ use AlpacaBot\Toolkit\AbilitiesToolkit;
  * consumed by the settings screen that arrives in a later phase.
  *
  * SECRETS are the fields whose stored value must never be shown back or lost by accident
- * (today the provider API key). They read out as MASK wherever they are shown while the row's key
- * resolves to one (Settings\ProviderKey::shown(); '' when it does not), and a write that
+ * (today the provider API key). They read out as MASK wherever they are shown while one is held
+ * (shown(); '' when none is), and a write that
  * carries MASK back means "keep what is stored"; sanitize() owns that rule so every writer of the
  * option (the REST route, the Settings API's sanitize callback, Store) resolves it the same way.
  * The key itself is kept out of this option, in Settings\ProviderKey's, which takes it out on
@@ -40,7 +40,7 @@ final class Schema
     /** What a secret reads back as when one is stored, and what a writer sends to leave it alone. */
     public const MASK = '••••';
 
-    /** @var list<string> the fields sanitize() applies the mask rule to */
+    /** @var list<string> the fields sanitize() applies the mask rule to, and the ones shown() shows */
     public const SECRETS = ['provider.api_key'];
 
     /** @var list<string> the `array` fields whose value is a list; every other `array` field is a map */
@@ -183,6 +183,23 @@ final class Schema
             // option (Mcp\ServerSettings::beforeSave()), which this pure function cannot do for it.
             'access.mcp' => ['type' => 'array', 'default' => [], 'section' => 'access', 'label' => __('Per-server access', 'alpaca-bot'), 'sanitize' => [self::class, 'sanitizeAccessMcp']],
         ];
+    }
+
+    /**
+     * What a screen shows for a SECRETS field's stored value: MASK when the value stands for a
+     * secret that is held, '' when it stands for none. Whether one is held is the field's own
+     * question, so each secret is asked through the resolver named for it here
+     * (`provider.api_key`: Settings\ProviderKey::holds()); a field with none, a secret added to
+     * SECRETS without one included, throws rather than being answered by another field's. The
+     * settings page (Admin\Fields), the REST read and the `wp alpaca-bot settings` dump show this.
+     */
+    public static function shown(string $key, #[\SensitiveParameter] mixed $stored): string
+    {
+        $held = match ($key) {
+            'provider.api_key' => ProviderKey::holds($stored),
+            default => throw new \LogicException(sprintf('No held resolver for the secret "%s".', $key)),
+        };
+        return $held ? self::MASK : '';
     }
 
     /** @return array<string, mixed> key => default */

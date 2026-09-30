@@ -106,20 +106,20 @@ it('resolves the mask to the held key, and a plaintext key a row still carries t
 
 // #4699: what a screen shows follows what is sent. The option is read only for MASK, so a row
 // with no key, or one still carrying its key in plaintext, costs no read.
-it('shows the mask only when a key resolves, and reads the option only for the mask', function (): void {
+it('holds a key only when one resolves, and reads the option only for the mask', function (): void {
     $reads = 0;
     Functions\when('get_option')->alias(static function (string $name, mixed $default = false) use (&$reads): mixed {
         ++$reads;
         return $name === ProviderKey::OPTION ? 'sk-FAKE-held' : $default;
     });
-    expect(ProviderKey::shown(''))->toBe('')
-        ->and(ProviderKey::shown(null))->toBe('')
-        ->and(ProviderKey::shown('sk-FAKE-plain'))->toBe(Schema::MASK)
+    expect(ProviderKey::holds(''))->toBeFalse()
+        ->and(ProviderKey::holds(null))->toBeFalse()
+        ->and(ProviderKey::holds('sk-FAKE-plain'))->toBeTrue()
         ->and($reads)->toBe(0)
-        ->and(ProviderKey::shown(Schema::MASK))->toBe(Schema::MASK)
+        ->and(ProviderKey::holds(Schema::MASK))->toBeTrue()
         ->and($reads)->toBe(1);
     Functions\when('get_option')->justReturn('');
-    expect(ProviderKey::shown(Schema::MASK))->toBe('');
+    expect(ProviderKey::holds(Schema::MASK))->toBeFalse();
 });
 
 // #4699 over #4539: a move clears a key only when there was one to clear. The option is read only

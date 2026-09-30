@@ -17,8 +17,8 @@ use AlpacaBot\Settings\Store;
  * the full array (every Schema key, defaults filled in), `PUT /settings` a partial update of it,
  * and `GET /settings/schema` the field list a client renders a form from.
  *
- * Secrets (Schema::SECRETS, today the provider API key) read back as Schema::MASK when the row's
- * key resolves to one and as '' when not (Settings\ProviderKey::shown(): a row that says MASK with the key option
+ * Secrets (Schema::SECRETS, today the provider API key) read back as Schema::shown() answers: Schema::MASK
+ * when one is held and '' when not (for the provider key, a row that says MASK with the key option
  * gone reads ''), so a client can show "there is a key" without holding it. The mask is also
  * what a client sends back when it has not touched the field: a PUT whose secret is MASK keeps
  * the stored value, one whose secret is '' clears it, and any other string is the new value. The
@@ -275,7 +275,7 @@ final class SettingsController extends Controller
     private function masked(array $settings): array
     {
         foreach (Schema::SECRETS as $key) {
-            $settings[$key] = ProviderKey::shown($settings[$key] ?? '');
+            $settings[$key] = Schema::shown($key, $settings[$key] ?? '');
         }
         if (array_key_exists('toolkits.mcp_servers', $settings)) {
             $settings['toolkits.mcp_servers'] = Schema::maskedServers($settings['toolkits.mcp_servers']);

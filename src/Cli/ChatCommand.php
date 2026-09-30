@@ -292,18 +292,19 @@ final class ChatCommand
     {
         if (!isset($args[0])) {
             $all = $this->store->all();
-            // Schema::SECRETS is the list of top-level credential-holding keys, and Schema::MASK
-            // the one stand-in for a key the row resolves to (ProviderKey::shown(): '' when the row
-            // says MASK but no key is held): the settings screen (Admin\Fields::display()), the REST read
+            // Schema::SECRETS is the list of top-level credential-holding keys, and Schema::shown()
+            // what each reads as (Schema::MASK when one is held, '' when not, for the provider key
+            // also when the row says MASK but no key is held): the settings screen (Admin\Fields::display()), the REST read
             // (Rest\SettingsController::masked()) and this dump all read them, so a second secret
-            // added to that list is hidden here too. The whole dump is what ends
+            // added to that list is hidden here too once Schema::shown() has its resolver, and the
+            // dump throws until it does. The whole dump is what ends
             // up in CI logs and shell history; asking for one by name
             // (`wp alpaca-bot settings provider.api_key`) still prints it, since that is an
             // operator deliberately asking. An MCP server's header value is the other credential,
             // nested in its row; Schema::maskedServers() masks it here and read by name alike.
             foreach (Schema::SECRETS as $secret) {
                 // An unset key stays visibly empty: "is one configured?" is still answerable.
-                $all[$secret] = ProviderKey::shown($all[$secret] ?? '');
+                $all[$secret] = Schema::shown($secret, $all[$secret] ?? '');
             }
             $all['toolkits.mcp_servers'] = Schema::maskedServers($all['toolkits.mcp_servers'] ?? []);
             $this->json($all);

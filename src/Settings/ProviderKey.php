@@ -62,15 +62,16 @@ final class ProviderKey
     }
 
     /**
-     * What a screen shows for a row's `provider.api_key`: MASK when resolve() finds a key, '' when
-     * it finds none, so a row that says MASK while the option is gone reads as no key, as it
-     * sends none. The settings page (Admin\Fields), the REST read and the `wp alpaca-bot settings`
-     * dump show this. It reads the option only for MASK (resolve()), so it costs those three one
-     * option read and the front end, which shows none of them, nothing extra.
+     * Whether a row's `provider.api_key` stands for a key: true when resolve() finds one, so a row
+     * that says MASK while the option is gone holds none, as it sends none. Schema::shown() asks
+     * this for the field, and the settings page (Admin\Fields), the REST read and the
+     * `wp alpaca-bot settings` dump show what that answers. It reads the option only for MASK
+     * (resolve()), so it costs those three one option read and the front end, which shows none of
+     * them, nothing extra.
      */
-    public static function shown(#[\SensitiveParameter] mixed $stored): string
+    public static function holds(#[\SensitiveParameter] mixed $stored): bool
     {
-        return self::resolve($stored) !== '' ? Schema::MASK : '';
+        return self::resolve($stored) !== '';
     }
 
     /**
