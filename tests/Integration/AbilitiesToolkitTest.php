@@ -227,4 +227,86 @@ final class AbilitiesToolkitTest extends TestCase
         update_option('alpaca_bot_settings', ['toolkits.abilities' => ['']] + Schema::defaults());
         $this->assertSame([], get_option('alpaca_bot_settings')['toolkits.abilities']);
     }
+
+    /**
+     * Kanboard #4538, the throw path on real core. A listener hooked at PHP_INT_MAX during the call
+     * runs after the guard's `wp_pre_execute_ability`, and this one puts core's sentinel back (it
+     * captured it at PHP_INT_MIN), so the refused call goes on to `wp_before_execute_ability`,
+     * where the guard throws, as it always does before 7.1. The secret still does not run, and the
+     * throw, which unwound through core's do_action() and WP_Hook without either tidying up, leaves
+     * no hook state behind: $wp_current_filter is as it was, doing_action() is false, and the hook
+     * a listener of another plugin keeps is back at nesting level 0 and fires as usual.
+     */
+    public function test_a_refusal_that_has_to_throw_leaves_the_hook_state_as_it_found_it(): void
+    {
+        if (!class_exists('WP_Filter_Sentinel')) {
+            $this->markTestSkipped('wp_pre_execute_ability is new in WordPress 7.1.');
+        }
+        $admin = self::factory()->user->create(['role' => 'administrator']);
+        $secretRuns = 0;
+        $sentinel = null;
+        $capture = static function (mixed $pre, string $name) use (&$sentinel): mixed {
+            if ($name === 'alpaca-bot-test/secret') {
+                $sentinel = $pre;
+            }
+            return $pre;
+        };
+        $restore = static function (mixed $pre, string $name) use (&$sentinel): mixed {
+            return $name === 'alpaca-bot-test/secret' ? $sentinel : $pre;
+        };
+        self::during('wp_abilities_api_init', static function () use (&$secretRuns, $restore): void {
+            wp_register_ability('alpaca-bot-test/meta', [
+                'label' => 'Execute ability',
+                'description' => 'Runs any ability by name.',
+                'category' => 'site',
+                'input_schema' => ['type' => 'object', 'properties' => ['ability' => ['type' => 'string']], 'required' => ['ability']],
+                'execute_callback' => static function (array $in) use ($restore): mixed {
+                    add_filter('wp_pre_execute_ability', $restore, PHP_INT_MAX, 2);
+                    return wp_get_ability((string) $in['ability'])->execute();
+                },
+                'permission_callback' => static fn(): bool => current_user_can('manage_options'),
+            ]);
+            wp_register_ability('alpaca-bot-test/secret', [
+                'label' => 'Secret',
+                'description' => 'Not on the allowlist.',
+                'category' => 'site',
+                'execute_callback' => static function () use (&$secretRuns): string {
+                    ++$secretRuns;
+                    return 'the secret';
+                },
+                'permission_callback' => static fn(): bool => current_user_can('manage_options'),
+            ]);
+        });
+        $heard = [];
+        $listen = static function (string $name) use (&$heard): void {
+            $heard[] = $name;
+        };
+        add_filter('wp_pre_execute_ability', $capture, PHP_INT_MIN, 2);
+        add_action('wp_before_execute_ability', $listen);
+        try {
+            $stack = $GLOBALS['wp_current_filter'];
+            $result = $this->toolkit(['alpaca-bot-test/meta'], $admin)->tools()[0]->execute(['ability' => 'alpaca-bot-test/secret']);
+            $this->assertSame(ToolResultStatus::Error, $result->status, $result->content);
+            $this->assertSame('The ' . AbilitiesToolkit::toolName('alpaca-bot-test/meta') . ' tool failed before it could answer.', $result->content);
+            $this->assertInstanceOf(\WP_Filter_Sentinel::class, $sentinel);
+            $this->assertSame(0, $secretRuns);
+            // The listener heard the refused call before the guard threw: the path really was the throw.
+            $this->assertSame(['alpaca-bot-test/meta', 'alpaca-bot-test/secret'], $heard);
+            $this->assertSame($stack, $GLOBALS['wp_current_filter']);
+            $this->assertFalse(doing_action('wp_before_execute_ability'));
+            $hook = $GLOBALS['wp_filter']['wp_before_execute_ability'];
+            $this->assertSame(0, (new \ReflectionProperty(\WP_Hook::class, 'nesting_level'))->getValue($hook));
+            $this->assertFalse((new \ReflectionProperty(\WP_Hook::class, 'doing_action'))->getValue($hook));
+            $this->assertSame(10, has_action('wp_before_execute_ability', $listen));
+            $heard = [];
+            do_action('wp_before_execute_ability', 'probe', null);
+            $this->assertSame(['probe'], $heard);
+        } finally {
+            remove_filter('wp_pre_execute_ability', $capture, PHP_INT_MIN);
+            remove_filter('wp_pre_execute_ability', $restore, PHP_INT_MAX);
+            remove_action('wp_before_execute_ability', $listen);
+            wp_unregister_ability('alpaca-bot-test/meta');
+            wp_unregister_ability('alpaca-bot-test/secret');
+        }
+    }
 }

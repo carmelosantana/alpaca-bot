@@ -20,3 +20,7 @@ _org/
 
 # Local PHPCS override; phpcs.xml.dist is the committed ruleset.
 phpcs.xml
+# Local PHPStan override; phpstan.neon.dist is the committed config.
+phpstan.neon
+# PHPStan's per-checkout cache (tmpDir in phpstan.neon.dist).
+.phpstan-cache/

@@ -117,10 +117,11 @@ function pinnedTransport(HttpClientInterface $pinned): HttpClientInterface
     return (fn(): HttpClientInterface => $this->client)->call($pinned);
 }
 
-// R28-9: the pin is laid only over a transport Egress can vouch for. HttpClient::create() answers
-// with Amp's client where the unprefixed amphp/http-client is loaded, and Amp's resolver lets a
-// lookup past the map (AmpResolver.php:42-43, :58-59), so anything create() answers other than the
-// Curl or the Native client is replaced with a Native client, which is handed the first address.
+// R28-9: the pin is laid only over a transport Egress can vouch for. The default transport is
+// HttpTransport::create(), which is HttpClient::create() wherever cURL is usable, and that can
+// answer with Amp's client where the unprefixed amphp/http-client is loaded; Amp's resolver lets a
+// lookup past the map (AmpResolver.php:42-43, :58-59), so anything the default answers other than
+// the Curl or the Native client is replaced with a Native client, which is handed the first address.
 it('replaces a default transport it cannot vouch for with Symfony\'s Native client, pinned to the first address', function (): void {
     $pinned = (new Egress(static fn(string $host, string $url): array => ['93.184.216.34', '2606:2800:220:1::1'], null, static fn(): int => 0x080500, static fn(): HttpClientInterface => new MockHttpClient()))->client(mcpServerConfig());
     $native = pinnedTransport($pinned);

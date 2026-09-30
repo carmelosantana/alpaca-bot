@@ -60,6 +60,50 @@ final class SettingsRoutesTest extends TestCase
     }
 
     /**
+     * The masked read masks only the secrets: `provider.base_url` is answered as stored, its user
+     * name, password and query string included, to the role a lowered `settings.read` row admits.
+     */
+    public function test_the_masked_read_answers_the_base_url_as_stored_userinfo_and_query_included(): void
+    {
+        $this->asAdmin();
+        $url = 'https://fakeuser:fakepass@api.example.net/v1?token=FAKE';
+        $res = $this->rest('PUT', '/settings', ['provider.base_url' => $url, 'provider.api_key' => 'sk-FAKE-read', 'access.settings.read' => 'edit_posts']);
+        $this->assertSame($url, get_option(Plugin::OPTION)['provider.base_url']);
+        $this->assertSame($url, $res->get_data()['provider.base_url']);
+        wp_set_current_user(self::factory()->user->create(['role' => 'editor']));
+
+        $read = $this->rest('GET', '/settings')->get_data();
+        $this->assertSame($url, $read['provider.base_url']);
+        $this->assertSame(Schema::MASK, $read['provider.api_key']);
+    }
+
+    /**
+     * #4539, the reviewer's case: `settings.write` lowered to editors, an editor PUTs a base URL of
+     * their own and the mask. The write goes through, the administrator's key is not kept for the
+     * new host, and the reply says it was cleared.
+     */
+    public function test_an_editor_who_may_write_the_settings_cannot_move_the_api_key_to_their_host(): void
+    {
+        $this->asAdmin();
+        $this->rest('PUT', '/settings', ['provider.base_url' => 'https://openrouter.ai/api/v1', 'provider.api_key' => 'sk-FAKE-admin', 'access.settings.write' => 'edit_posts']);
+        $this->assertStoredProviderKey('sk-FAKE-admin', get_option(Plugin::OPTION));
+        wp_set_current_user(self::factory()->user->create(['role' => 'editor']));
+
+        $res = $this->rest('PUT', '/settings', ['provider.base_url' => 'https://steal.example.net/v1', 'provider.api_key' => Schema::MASK]);
+        $this->assertSame(200, $res->get_status(), print_r($res->get_data(), true));
+        $this->assertSame('provider.api_key', $res->get_headers()['X-Alpaca-Bot-Cleared'] ?? null);
+        $this->assertSame('', $res->get_data()['provider.api_key']);
+        $this->assertSame('https://steal.example.net/v1', get_option(Plugin::OPTION)['provider.base_url']);
+        $this->assertStoredProviderKey('', get_option(Plugin::OPTION));
+
+        // A path change on the new host keeps a key typed for it, and says nothing.
+        $this->rest('PUT', '/settings', ['provider.api_key' => 'sk-FAKE-editor']);
+        $res = $this->rest('PUT', '/settings', ['provider.base_url' => 'https://steal.example.net/v2', 'provider.api_key' => Schema::MASK]);
+        $this->assertArrayNotHasKey('X-Alpaca-Bot-Cleared', $res->get_headers());
+        $this->assertStoredProviderKey('sk-FAKE-editor', get_option(Plugin::OPTION));
+    }
+
+    /**
      * The one thing this split may not do: change what a site that already filters 0.5's
      * `alpaca_bot/capability/settings` gets. It is the default both rows' own keys receive, on
      * all three routes — the schema route included, which in 0.5 was behind
@@ -161,7 +205,7 @@ final class SettingsRoutesTest extends TestCase
         $this->asAdmin();
         $res = $this->rest('PUT', '/settings', ['provider.api_key' => 'sk-live-1234']);
         $this->assertSame(Schema::MASK, $res->get_data()['provider.api_key']);
-        $this->assertSame('sk-live-1234', get_option('alpaca_bot_settings')['provider.api_key']);
+        $this->assertStoredProviderKey('sk-live-1234', get_option('alpaca_bot_settings'));
         $this->assertSame(Schema::MASK, $this->rest('GET', '/settings')->get_data()['provider.api_key']);
         $this->assertStringNotContainsString('sk-live', (string) wp_json_encode($this->rest('GET', '/settings')->get_data()));
 
@@ -170,7 +214,7 @@ final class SettingsRoutesTest extends TestCase
         $this->assertSame('no-store', $revealed->get_headers()['Cache-Control']);
 
         $this->rest('PUT', '/settings', ['provider.api_key' => Schema::MASK, 'models.num_ctx' => 2048]);
-        $this->assertSame('sk-live-1234', get_option('alpaca_bot_settings')['provider.api_key']);
+        $this->assertStoredProviderKey('sk-live-1234', get_option('alpaca_bot_settings'));
         $this->assertSame(2048, get_option('alpaca_bot_settings')['models.num_ctx']);
 
         // Not a string at all (a typed client's null, an untouched form control serialised as
@@ -181,14 +225,14 @@ final class SettingsRoutesTest extends TestCase
         $res = rest_get_server()->dispatch($request);
         $this->assertSame(200, $res->get_status(), print_r($res->get_data(), true));
         $this->assertSame(Schema::MASK, $res->get_data()['provider.api_key']);
-        $this->assertSame('sk-live-1234', get_option('alpaca_bot_settings')['provider.api_key']);
+        $this->assertStoredProviderKey('sk-live-1234', get_option('alpaca_bot_settings'));
         $this->assertSame(4096, get_option('alpaca_bot_settings')['models.num_ctx']);
         $this->rest('PUT', '/settings', ['provider.api_key' => ['sk-live-9999']]);
-        $this->assertSame('sk-live-1234', get_option('alpaca_bot_settings')['provider.api_key']);
+        $this->assertStoredProviderKey('sk-live-1234', get_option('alpaca_bot_settings'));
 
         $res = $this->rest('PUT', '/settings', ['provider.api_key' => '']);
         $this->assertSame('', $res->get_data()['provider.api_key']);
-        $this->assertSame('', get_option('alpaca_bot_settings')['provider.api_key']);
+        $this->assertStoredProviderKey('', get_option('alpaca_bot_settings'));
         $this->assertSame('', $this->rest('GET', '/settings')->get_data()['provider.api_key']);
     }
 

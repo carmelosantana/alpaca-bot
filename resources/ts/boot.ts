@@ -20,7 +20,9 @@
  * decorated the whole page. And it tells whatever hosts the shell two things, as events on the
  * form: `ab:conversation` (`detail.id`) whenever the conversation the transcript shows is set, and
  * `ab:new-chat`, cancelable, before the history select's "New chat" leaves the page.
- * resources/ts/drawer.ts listens for both, and resources/ts/editor.ts for `ab:new-chat`.
+ * resources/ts/drawer-start.ts and resources/ts/editor-start.ts each act on both: `ab:conversation`
+ * through mount.ts rememberConversation(), which saves it as the conversation to reopen, and
+ * `ab:new-chat` by starting over in place (mount.ts newChat()).
  *
  * boot() is exported rather than run on import, so node:test can drive it against a document of
  * its own (tests/ts/chat.test.ts, Kanboard #4334); chat.ts is the entry that finds the shell and
@@ -32,7 +34,7 @@ import { readSse } from './stream.ts';
 import { watchNonce } from './nonce.ts';
 import { ImageTooLarge, ImagesTooLarge, fetchDataUrl, formatBytes, imageLimit } from './image.ts';
 import { $, $$, asId, el, fromHtml, icon, notice } from './dom.ts';
-import { grow, restoreDraft, setImage } from './composer.ts';
+import { grow, restoreDraft, setImage, unsentLines, type Draft } from './composer.ts';
 import { redeem, restError } from './redeem.ts';
 import { refusal } from './refusal.ts';
 import { appendText, releaseHeld } from './held.ts';
@@ -101,10 +103,10 @@ export function boot(cfg: Settings, form: HTMLFormElement): void {
    * (a stale nonce locks it until a reload, Kanboard #302); the colour is decided here.
    *
    * The concurrency refusal is "not yet", not a failure: the ticket is unspent, and send()'s
-   * finally gives the message and the image back as soon as this returns, so it says why and
-   * stays out of the error colour. The server's message already names how many streams are
-   * open, so it is shown as it stands; `data.limit` is the same number for a client that words
-   * its own.
+   * finally hands the draft to giveBack() as soon as this returns, which says where it goes, so
+   * this says why and stays out of the error colour. The server's message already names how many
+   * streams are open, so it is shown as it stands; `data.limit` is the same number for a client
+   * that words its own.
    */
   function refused(status: number, error: RestError): void {
     const decision = refusal(status, error, t);
@@ -135,32 +137,79 @@ export function boot(cfg: Settings, form: HTMLFormElement): void {
     mutate();
     if (stuck) s.scrollTop = s.scrollHeight;
   }
-  function append(node: HTMLElement): void {
+  /** Adds a turn's bubble to the transcript the turn was sent from (send() says why not the one shown). */
+  function append(node: HTMLElement, transcript: HTMLElement): void {
     withScroll(() => {
-      $('.ab-welcome', messages())?.remove();
-      messages().append(node);
+      $('.ab-welcome', transcript)?.remove();
+      transcript.append(node);
     });
   }
 
-  async function send(): Promise<void> {
-    const text = textarea.value.trim();
+  /**
+   * What one turn sends, read off the composer in one go: everything POST /chat carries but the
+   * constant `stream`, and the draft (the text and the image) that giveBack() returns to the user
+   * if the turn never runs. send() takes it synchronously, before its first await, and nothing after
+   * that reads the form for the turn (Kanboard #4691). The bubble requests come first, and what
+   * the user does while they are out belongs to the next turn, not this one: a host's New chat
+   * (mount.ts newChat()) swaps in the fresh composer's chips and sets the conversation to 0, and
+   * the model select writes the model field, so a ticket that read either after awaiting the
+   * bubbles sent the fresh chips, or the model chosen meanwhile. The nonce is not
+   * here: it is the session's, not the turn's, and request() and redeem() are handed cfg.nonce
+   * as each is made, which watchNonce() keeps current.
+   */
+  interface Turn extends Draft {
+    images: string[];
+    conversation: number;
+    model: string;
+    context: Record<string, unknown>;
+  }
+  function snapshot(): Turn {
     const image = field('images').value;
-    const images = image ? [image] : [];
-    if (busy || expired || !navigator.onLine || (text === '' && image === '')) return;
+    return {
+      text: textarea.value.trim(),
+      image,
+      images: image ? [image] : [],
+      conversation: asId(field('conversation_id').value) ?? 0,
+      model: field('model').value,
+      context: contextFrom(form),
+    };
+  }
+
+  async function send(): Promise<void> {
+    const turn = snapshot();
+    if (busy || expired || !navigator.onLine || (turn.text === '' && turn.image === '')) return;
     busy = true;
+    // The transcript this turn belongs to, and whether it is still the one shown (Kanboard
+    // #4525). A turn outlives what the user does meanwhile: the history select swaps #ab-messages
+    // whole (HistorySelect's outerHTML swap) and a host's New chat replaces it (mount.ts
+    // newChat()), and either then sets the conversation field for the transcript it brought in.
+    // Every switch replaces the element, and nothing else does (setConversation() only rewrites
+    // its data attribute), so "the element this turn was sent from is still #ab-messages" is
+    // exactly "the user has not moved on". Once it is not, the turn's frames stop speaking for
+    // the page: `start` and `done` would put the old conversation's id back in the field (and
+    // announce it as `ab:conversation`, which the drawer remembers), so the next message would
+    // land in a conversation the transcript does not show. The element is the key rather than
+    // the conversation id because the id cannot tell two new chats apart: a first turn is sent
+    // on 0, and a New chat before its `start` frame is on 0 too. Its bubbles go into that
+    // element as well, shown or not, so a switch before they arrive cannot put this turn's
+    // messages, or a streaming bubble nothing will finish, into the transcript now shown. Its
+    // ticket is `turn`, taken above for the same reason (snapshot() says what a switch would
+    // otherwise change). Going on rather than giving the draft back keeps the turn what the user
+    // sent: the message they wrote, to the conversation they wrote it in.
+    const transcript = messages();
+    const shown = (): boolean => messages() === transcript;
     sendButton.disabled = true;
     notice('info', '');
     textarea.value = '';
     grow(textarea);
     setImage(form, '');
     textarea.focus();
-    const draft = { text, image };
     let user: HTMLElement | null = null;
     let assistant: HTMLElement | null = null;
     // Whether the turn reached the model. Until it does, what was typed still belongs to the
     // composer: every exit before that point has to take both bubbles back out of the
-    // transcript and put the text and the image back in the box, or they are gone with no
-    // record of the turn anywhere. Done once in the finally rather than at each `return`,
+    // transcript and give the text and the image back (giveBack() says where), or they are gone
+    // with no record of the turn anywhere. Done once in the finally rather than at each `return`,
     // because the exits kept forgetting one of the two -- the stream redemption that comes
     // back as something other than an event stream (StreamBudget's 429, an expired or replayed
     // ticket) took the assistant bubble out and left the typed message nowhere, while a
@@ -170,41 +219,107 @@ export function boot(cfg: Settings, form: HTMLFormElement): void {
     let sent = false;
     try {
       const [userRes, emptyRes] = await Promise.all([
-        request('POST', api('/view/bubble'), { role: 'user', content: text, images }),
+        request('POST', api('/view/bubble'), { role: 'user', content: turn.text, images: turn.images }),
         request('GET', api('/view/bubble', { role: 'assistant', streaming: '1' })),
       ]);
       const bad = userRes.ok ? (emptyRes.ok ? null : emptyRes) : userRes;
       if (bad) return refused(bad.status, await restError(bad));
       user = fromHtml(await userRes.text());
-      if (user) append(user);
+      if (user) append(user, transcript);
       const ticketRes = await request('POST', api('/chat'), {
-        message: text, conversation_id: asId(field('conversation_id').value) ?? 0, model: field('model').value, images, context: contextFrom(form), stream: true,
+        message: turn.text, conversation_id: turn.conversation, model: turn.model, images: turn.images, context: turn.context, stream: true,
       });
       if (!ticketRes.ok) return refused(ticketRes.status, await restError(ticketRes));
       const ticket = await ticketRes.json() as { stream_url: string };
       const bubble = fromHtml(await emptyRes.text());
       if (!bubble) throw new Error('No streaming bubble.');
-      append(bubble);
+      append(bubble, transcript);
       assistant = bubble;
       const redeemed = await redeem(ticket.stream_url, cfg.nonce);
       if (!redeemed.ok) return refused(redeemed.status, redeemed.error);
       // From here the turn is the server's: a stream that then drops mid-reply is stored as a
       // partial reply, and the composer must not offer the message back as if nothing ran.
       sent = true;
-      await consume(redeemed.stream, bubble);
+      await consume(redeemed.stream, bubble, shown);
     } catch (e) {
       console.error(e);
-      notice('error', t('failed'));
+      // A turn that ran and failed after the user switched away is not the open conversation's
+      // failure (consume() says the same of its own exits). One that never ran is reported
+      // wherever the user is: giveBack() either puts its draft back or keeps its text beside
+      // this notice, and either way the user has to be told why.
+      if (!sent || shown()) notice('error', t('failed'));
     } finally {
-      if (!sent) restoreDraft(form, draft, assistant, user);
+      if (!sent) giveBack(turn, shown(), assistant, user);
       busy = false;
       if (!expired && navigator.onLine) sendButton.disabled = false;
       textarea.focus();
     }
   }
 
-  /** Reads one turn's frames into the streaming bubble (docs/api.md section 4). */
-  async function consume(res: Response, bubble: HTMLElement): Promise<void> {
+  /**
+   * Undoes a turn that never ran (Kanboard #4692). Its bubbles always leave the transcript, since
+   * the turn never happened. Its draft goes back into the box only when the composer still shows
+   * the turn's transcript (`shown`, send()'s) and holds nothing, neither text nor an image, the
+   * user put there since the send cleared it. Anything else is not the turn's to overwrite: after
+   * a switch the box is the conversation now open, and what is in it, typed or picked, is the
+   * user's newer input. There the draft is not put back, and keepUnsent() holds its text instead.
+   * That is the least loss of the options: restoring over input loses the newer input, restoring
+   * into another conversation's composer sends the message where it was not written, and holding
+   * the draft for a later return to the conversation has nothing to hold it on, because a switch
+   * back brings a new transcript element.
+   */
+  function giveBack(turn: Draft, shown: boolean, ...bubbles: (HTMLElement | null)[]): void {
+    if (shown && textarea.value === '' && field('images').value === '') {
+      restoreDraft(form, turn, ...bubbles);
+      return;
+    }
+    for (const bubble of bubbles) bubble?.remove();
+    keepUnsent(turn);
+  }
+  /**
+   * Shows a draft giveBack() could not put back, in #ab-unsent: a slot of its own after the status
+   * line, one notice per unsent turn, each with a dismiss button. The status line is the wrong
+   * place for it, because notice() replaces the whole line and so does everything else that writes
+   * there: connectivity() on `offline` and again on `online` (the drop that usually fails the
+   * turn fires both), the next send, an attach or copy error, the model select's answer, and a
+   * host's New chat, which empties it. The slot sits outside #ab-status and #ab-messages, so none of
+   * those, nor a history switch, touches it; a notice goes when the user dismisses it. What still
+   * loses the text is the user's dismissing it, or anything that takes the chat off the page, a
+   * reload included. An image cannot be shown back this way and is lost, so its line says to
+   * attach it again.
+   *
+   * Several unsent turns stack, the newest first, rather than the newest replacing the rest:
+   * replacing would lose the older text, which is the one thing the slot is for. The slot's height
+   * is capped in alpaca-bot.css and it scrolls past that, so however many there are and however
+   * long, the transcript and the composer keep their room.
+   *
+   * The slot is a live region, and one made and filled in the same task may go unannounced, so
+   * boot() makes it once, empty (unsentSlot()), and this only fills it.
+   */
+  function keepUnsent(turn: Draft): void {
+    unsentSlot().prepend(el('div', { class: 'notice notice-warning inline' },
+      el('div', { class: 'ab-unsent__text' }, ...unsentLines(turn, t).map((line) => el('p', {}, line))),
+      el('button', { type: 'button', class: 'ab-btn ab-btn--icon', 'data-action': 'unsent-dismiss', 'aria-label': t('dismiss') }, icon('x'))));
+  }
+  /** keepUnsent()'s slot: the shell's, else a new empty one after the status line (or before the form, where there is none). */
+  function unsentSlot(): HTMLElement {
+    const existing = $('#ab-unsent', shell);
+    if (existing) return existing;
+    const slot = el('div', { id: 'ab-unsent', class: 'ab-status ab-unsent', role: 'status', 'aria-live': 'polite' });
+    const status = $('#ab-status', shell);
+    if (status) status.after(slot);
+    else form.before(slot);
+    return slot;
+  }
+
+  /**
+   * Reads one turn's frames into the streaming bubble (docs/api.md section 4). `shown` is
+   * send()'s, and says whether the frames still speak for the page: once the user has switched
+   * away, the turn neither records its conversation nor reports how it ended in the status line,
+   * which belongs to the conversation now open (a dropped connection is send()'s to report, and
+   * it asks the same).
+   */
+  async function consume(res: Response, bubble: HTMLElement, shown: () => boolean): Promise<void> {
     const content = $('.ab-msg__content', bubble) as HTMLElement;
     let reasoning: HTMLElement | null = null;
     let answered = false;
@@ -212,7 +327,7 @@ export function boot(cfg: Settings, form: HTMLFormElement): void {
       for await (const { event, data } of readSse(res)) {
         const d = data as Json;
         if (event === 'start') {
-          setConversation(d.conversation_id);
+          if (shown()) setConversation(d.conversation_id);
         } else if (event === 'delta') {
           withScroll(() => {
             if (typeof d.reasoning === 'string' && d.reasoning !== '') {
@@ -229,13 +344,13 @@ export function boot(cfg: Settings, form: HTMLFormElement): void {
             }
           });
         } else if (event === 'done') {
-          return finish(d, bubble);
+          return finish(d, bubble, shown);
         } else if (event === 'error') {
-          notice('error', typeof d.message === 'string' && d.message ? d.message : t('failed'));
+          if (shown()) notice('error', typeof d.message === 'string' && d.message ? d.message : t('failed'));
           return settle(bubble, answered);
         }
       }
-      notice('error', t('failed'));
+      if (shown()) notice('error', t('failed'));
     } catch (e) {
       // The connection dropped mid-stream (the server stores what it sent as a partial reply).
       settle(bubble, answered);
@@ -256,8 +371,18 @@ export function boot(cfg: Settings, form: HTMLFormElement): void {
     bubble.dataset.partial = '1';
     $('.ab-msg__content', bubble)?.removeAttribute('aria-live');
   }
-  /** Swaps the streamed text for the server's rendering of the finished reply and reloads the history. */
-  async function finish(d: Json, bubble: HTMLElement): Promise<void> {
+  /**
+   * Swaps the streamed text for the server's rendering of the finished reply and reloads the
+   * history. A turn the user moved away from (send()'s `shown`) records nothing and renders
+   * nothing: its bubble is in a transcript no longer in the document. The history is reloaded
+   * either way, because the conversation it finished in has a new reply (or, for a new chat, is
+   * new), and the reload asks with the field, which is the conversation now shown.
+   */
+  async function finish(d: Json, bubble: HTMLElement, shown: () => boolean): Promise<void> {
+    if (!shown()) {
+      window.htmx?.trigger(document.body, 'ab:refresh');
+      return;
+    }
     const m = (d.message ?? {}) as Json;
     const receipt = (d.receipt ?? {}) as Json;
     setConversation(d.conversation_id);
@@ -380,6 +505,8 @@ export function boot(cfg: Settings, form: HTMLFormElement): void {
       // key for it; the last chip takes its row with it, which would otherwise stay as an empty
       // group with its margin. The button was focused and is gone, so the focus goes back to the box.
       case 'chip-remove': removeChip(button); textarea.focus(); break;
+      // One kept draft (keepUnsent()) goes; the slot stays, empty, for the next. The focus goes back to the box.
+      case 'unsent-dismiss': button.closest('.notice')?.remove(); textarea.focus(); break;
     }
   });
   document.addEventListener('change', (e) => {
@@ -416,6 +543,7 @@ export function boot(cfg: Settings, form: HTMLFormElement): void {
     const xhr = (e as CustomEvent<HtmxDetail>).detail.xhr;
     void restError(null, xhr?.responseText ?? '').then((error) => refused(xhr?.status ?? 0, error));
   });
+  unsentSlot(); // made now, empty, so its first notice lands in a live region already there (keepUnsent())
   window.addEventListener('online', connectivity);
   window.addEventListener('offline', connectivity);
   watchNonce((nonce) => { cfg.nonce = nonce; });

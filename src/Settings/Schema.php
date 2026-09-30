@@ -17,8 +17,14 @@ use AlpacaBot\Toolkit\AbilitiesToolkit;
  * SECRETS are the fields whose stored value must never be shown back or lost by accident
  * (today the provider API key). They read out as MASK wherever they are shown, and a write that
  * carries MASK back means "keep what is stored"; sanitize() owns that rule so every writer of the
- * option (the REST route, the Settings API's sanitize callback, Store) resolves it the same way
- * and none can store the literal mask as the key.
+ * option (the REST route, the Settings API's sanitize callback, Store) resolves it the same way.
+ * The key itself is kept out of this option, in Settings\ProviderKey's, which takes it out on
+ * every update_option() and leaves MASK or '' in the row; MASK in the row is that class's mark
+ * for "a key is kept", never a key, since ProviderKey::resolve() never answers it as one. "Keep"
+ * holds only while the key's URL keeps its
+ * origin: a write that moves `provider.base_url` to another scheme, host or port clears the key
+ * unless it sends a new one (providerKeyClearedByMove()), so no write that goes through sanitize()
+ * can hand the key to a server it was not set for.
  *
  * An MCP server's header value is a secret too, but a nested one, and SECRETS is a list of
  * top-level keys. sanitizeMcpServers() applies the same three-valued rule to it, with MASK kept as
@@ -124,7 +130,7 @@ final class Schema
             // stored value stands; the factory falls back and an admin notice names the fallback.
             'provider.kind' => ['type' => 'select', 'default' => 'ollama', 'section' => 'provider', 'label' => __('Provider', 'alpaca-bot'), 'description' => __('Ollama talks to your Ollama server directly, using the settings below, and streams replies as they are produced. WordPress AI provider routes every turn through the AI client built into WordPress 7.0 and later, to whichever AI provider plugin this site has installed and configured (Settings → Connectors); the settings below are not used, the models offered are that provider\'s, and a reply arrives whole rather than streamed, since the WordPress client does not stream.', 'alpaca-bot'), 'options' => ['ollama' => 'Ollama', 'wp-ai' => __('WordPress AI provider', 'alpaca-bot')]],
             'provider.base_url' => ['type' => 'string', 'default' => 'http://localhost:11434/v1', 'section' => 'provider', 'label' => __('Base URL', 'alpaca-bot'), 'description' => __('OpenAI-compatible endpoint. For Ollama this ends in /v1.', 'alpaca-bot'), 'sanitize' => [self::class, 'sanitizeUrl']],
-            'provider.api_key' => ['type' => 'string', 'default' => '', 'section' => 'provider', 'label' => __('API key', 'alpaca-bot'), 'description' => __('Optional. Sent as a Bearer token.', 'alpaca-bot')],
+            'provider.api_key' => ['type' => 'string', 'default' => '', 'section' => 'provider', 'label' => __('API key', 'alpaca-bot'), 'description' => __('Optional. Sent as a Bearer token. Changing the Base URL to another host, port or scheme clears it, so it is not sent to a server it was not set for; enter it again in the same save.', 'alpaca-bot')],
             'provider.timeout' => ['type' => 'integer', 'default' => 60, 'section' => 'provider', 'label' => __('Timeout (seconds)', 'alpaca-bot'), 'description' => __('How long one request may wait for the provider before it fails. The first request after a restart loads the model from cold, and a large model can take longer than the 60 seconds default to load; raise this if that first request times out and the next one works. Leave it low otherwise, so a provider that has stopped answering fails quickly instead of holding every chat open.', 'alpaca-bot'), 'min' => 5, 'max' => 600],
             'models.default' => ['type' => 'string', 'default' => '', 'section' => 'models', 'label' => __('Default model', 'alpaca-bot'), 'description' => __('Used when a request names no model. A thinking model (qwen3, deepseek-r1, gpt-oss) reasons before it answers; the reasoning is returned as message.meta.reasoning and its tokens count as completion tokens under the monthly caps.', 'alpaca-bot')],
             'models.temperature' => ['type' => 'number', 'default' => 0.7, 'section' => 'models', 'label' => __('Temperature', 'alpaca-bot'), 'min' => 0, 'max' => 2],
@@ -155,7 +161,7 @@ final class Schema
             'toolkits.abilities' => ['type' => 'array', 'default' => [], 'section' => 'toolkits', 'label' => __('Abilities the model may call', 'alpaca-bot'), 'description' => __('The WordPress abilities that WordPress and other plugins register on this site. Each one you tick becomes a tool of the abilities tool, which is offered only while it is on under Enabled tools, and only to users its Access row admits. Two ticked abilities that would reach the model under the same tool name are marked, and neither is offered. A call runs as the user whose turn it is, through the ability\'s own permission check. Alpaca Bot\'s own abilities are never offered.', 'alpaca-bot'), 'sanitize' => [self::class, 'sanitizeAbilities']],
             'toolkits.mcp_servers' => ['type' => 'array', 'default' => [], 'section' => 'toolkits', 'label' => __('MCP servers', 'alpaca-bot'), 'description' => sprintf(
                 /* translators: %1$s: the rule a header name has to meet (Schema::mcpHeaderNameRule()) */
-                __('Remote MCP servers, and the tools of each you approve for the model. The address must be https, with no user name or password in it: a credential goes in the header, never in the address. The address, its query string included, is stored in the clear and read back by this screen and by GET /settings, so it is no place for a secret. The header name has to be %1$s. The header value is sent as typed, with nothing put in front of it: for Authorization type the scheme and the key (Bearer …), and for a header such as X-API-Key the bare key. The address is checked when it is saved from this screen or over the REST API, and again each time Alpaca Bot builds a connection to it: on Discover tools, and on a chat turn that lists its tools. A private or other special-purpose address is refused, even when it is the site\'s own host. Moving a server to another host or port clears its header value, so it is never sent to an address it was not set for; type it again. A connection to an MCP server never goes through a proxy, neither one set for WordPress nor one set in the server\'s environment, so a site whose outbound traffic has to use a proxy cannot reach one. The header value is kept in an option of its own that WordPress does not load on every page, and this screen only shows whether one is set.', 'alpaca-bot'),
+                __('Remote MCP servers, and the tools of each you approve for the model. The address must be https, with no user name or password in it: a credential goes in the header, never in the address. The address, its query string included, is stored in the clear and read back by this screen and by GET /settings, so it is no place for a secret. The header name has to be %1$s. The header value is sent as typed, with nothing put in front of it: for Authorization type the scheme and the key (Bearer …), and for a header such as X-API-Key the bare key. The address is checked when it is saved from this screen, over the REST API or with wp alpaca-bot settings, and again each time Alpaca Bot builds a connection to it: on Discover tools, and on a chat turn that lists its tools. A private or other special-purpose address is refused, even when it is the site\'s own host. Moving a server to another host or port clears its header value, so it is never sent to an address it was not set for; type it again. A connection to an MCP server never goes through a proxy, neither one set for WordPress nor one set in the server\'s environment, so a site whose outbound traffic has to use a proxy cannot reach one. The header value is kept in an option of its own that WordPress does not load on every page, and this screen only shows whether one is set.', 'alpaca-bot'),
                 self::mcpHeaderNameRule(),
             )],
             'access.chat' => self::access('chat', __('Chat', 'alpaca-bot'), __('Who may open the chat screen and use the chat REST routes. A tool needs its own row as well as this one.', 'alpaca-bot')),
@@ -164,7 +170,7 @@ final class Schema
             'access.tool.draft_post' => self::access('tool.draft_post', __('Tool: draft a post', 'alpaca-bot'), __('Who may run a turn that can write a draft. The tool also asks the post type\'s own capability of the same user, so this row can only narrow that.', 'alpaca-bot')),
             'access.tool.abilities' => self::access('tool.abilities', __('Tool: the site\'s abilities', 'alpaca-bot'), __('Who may run a turn that can call the abilities allowlisted under Tools. An ability runs with its own permission callback as well.', 'alpaca-bot')),
             'access.settings.read' => self::access('settings.read', __('Read settings over REST', 'alpaca-bot'), __('Who may read GET /settings and GET /settings/schema. The provider API key is never included; revealing it always needs an administrator.', 'alpaca-bot')),
-            'access.settings.write' => self::access('settings.write', __('Write settings over REST', 'alpaca-bot'), __('Who may send PUT /settings. provider.base_url is a settable field, so this row decides who can point every turn at another server. So is an MCP server\'s URL: moving one to another host drops its header value rather than send it there, and this row decides who can do that. The Settings screen itself is always administrators.', 'alpaca-bot')),
+            'access.settings.write' => self::access('settings.write', __('Write settings over REST', 'alpaca-bot'), __('Who may send PUT /settings. provider.base_url is a settable field, so this row decides who can point every turn at another server; moving it to another host, port or scheme clears provider.api_key unless the same PUT sends a new one. So is an MCP server\'s URL: moving one to another host drops its header value rather than send it there, and this row decides who can do that. The Settings screen itself is always administrators.', 'alpaca-bot')),
             'access.shortcode' => self::access('shortcode', __('Shortcodes', 'alpaca-bot'), __('Who triggers a generation by viewing a page carrying [alpacabot], or the deprecated [alpacabot_agent], which generates through the same rules. A visitor never does, whatever this says.', 'alpaca-bot')),
             // Every MCP server's row in one map, server id => capability, and not a key per
             // server: sanitize() rebuilds the option from this list and drops whatever is not in
@@ -186,19 +192,25 @@ final class Schema
 
     /**
      * Full, validated settings array: every schema key, in schema order, nothing else. A key the
-     * input names is taken from the input; one it leaves out keeps what `$current` holds; only
-     * when `$current` has nothing for it either does the default apply. Kept or new, every value
+     * input names is taken from the input; one it leaves out keeps what `$current` holds, the
+     * provider key aside when the write moves the base URL (below); only when `$current` has
+     * nothing for it either does the default apply. Kept or new, every value
      * goes through its field's coercion, so a stored value outside the schema is corrected on the
      * way back rather than carried.
      *
      * Absent-keeps-stored is what makes a write partial at the top level (Store::replace(), the
      * REST PUT), and it is the guarantee under the settings page: PHP's max_input_vars drops the
      * tail of a large form post with no notice to userland, and a post can only lose what it
-     * failed to carry, never a field it did not mention. Clearing is always explicit ('' for a
-     * string, the secret included; 0 for a checkbox, which its hidden input posts).
+     * failed to carry, never a field it did not mention. Clearing is explicit ('' for a string,
+     * the secret included; 0 for a checkbox, which its hidden input posts), with one exception:
+     * the provider key, when the write moves `provider.base_url` to another origin.
      *
      * `$current` is also where a SECRETS field keeps its value from: a secret sent as MASK, or as
-     * anything that is not a string, resolves to `$current`'s value (secret()). There is no
+     * anything that is not a string, resolves to `$current`'s value (secret()), and so does one
+     * left out; MASK over a `$current` that holds none stays MASK (secret() says why). The
+     * provider key is the exception: when providerKeyClearedByMove() says the write
+     * moves `provider.base_url` to another scheme, host or port and sends no new key, the key is
+     * cleared instead of kept, whichever way the write said "keep". There is no
      * default for it on purpose. `[]` would turn an echoed mask into a cleared key, and reading
      * the option here would hide a database read inside a pure function; every caller knows what
      * it is writing over (Store has its memo, a `register_setting()` sanitize callback has
@@ -210,13 +222,17 @@ final class Schema
      * @param array<string, mixed> $current the stored settings this write replaces
      * @return array<string, mixed>
      */
-    public static function sanitize(#[\SensitiveParameter] array $input, array $current): array
+    public static function sanitize(#[\SensitiveParameter] array $input, #[\SensitiveParameter] array $current): array
     {
         $out = [];
+        $keyMoved = self::providerKeyClearedByMove($input, $current);
         foreach (self::fields() as $key => $f) {
             $raw = array_key_exists($key, $input) ? $input[$key] : ($current[$key] ?? $f['default']);
             if (in_array($key, self::SECRETS, true)) {
                 $raw = self::secret($raw, $current[$key] ?? '');
+            }
+            if ($key === 'provider.api_key' && $keyMoved) {
+                $raw = '';
             }
             if ($key === 'toolkits.mcp_servers') {
                 // The one sanitizer handed something other than its field: the stored list, whose
@@ -231,19 +247,67 @@ final class Schema
     }
 
     /**
+     * Whether this write clears the stored provider API key because it moves `provider.base_url`
+     * to another origin (#4539): true when `$current` holds a key (a non-empty string: MASK, for a
+     * key Settings\ProviderKey keeps, or a plaintext key a row not yet migrated carries), `$input`
+     * sends `provider.base_url`, the URL sanitizeUrl() would store from it has another scheme,
+     * host or port than `$current`'s (Origin::moved(); the default when `$current` has none), and
+     * `$input` sends no new key with it. A new key is a string other than '' and MASK; MASK, a
+     * key left out and one that is not a string all read as "keep", and "keep" does not survive
+     * a move. '' is not counted: the write clears the key itself, and nothing is cleared by the
+     * move. A path or query change is not a move.
+     *
+     * sanitize() clears the key when this answers true, so every writer of the option goes
+     * through the same decision, and the writers that can tell someone (the REST route's
+     * `X-Alpaca-Bot-Cleared` header, the settings page's notice, `wp alpaca-bot settings`'s
+     * warning) ask it with the same two arrays before they write. The reason is the one
+     * Mcp\ServerSettings gives for a header value: the `settings.write` row can be lowered below
+     * `manage_options`, and a writer who may change the URL but not reveal the key could otherwise
+     * point the URL at their own host, send the mask, and be sent the key on the next turn.
+     *
+     * @param array<string, mixed> $input   what the write sends
+     * @param array<string, mixed> $current the stored settings this write replaces
+     */
+    public static function providerKeyClearedByMove(#[\SensitiveParameter] array $input, #[\SensitiveParameter] array $current): bool
+    {
+        $stored = $current['provider.api_key'] ?? '';
+        if (!is_string($stored) || $stored === '' || !array_key_exists('provider.base_url', $input)) {
+            return false;
+        }
+        $posted = $input['provider.api_key'] ?? null;
+        if (is_string($posted) && $posted !== self::MASK) {
+            return false;
+        }
+        $field = self::fields()['provider.base_url'];
+        $from = $current['provider.base_url'] ?? $field['default'];
+        return Origin::moved(is_string($from) ? $from : '', self::sanitizeUrl($input['provider.base_url'], $field));
+    }
+
+    /**
      * The three-valued rule for a secret on the way in: '' clears it, MASK keeps what is stored,
      * any other string is the new value. A value that is not a string is read as "keep" too. It
      * cannot be the new key, and it is not the one spelling of "clear", so the only safe reading
      * is the one that loses nothing: a typed client's `null`, an untouched password control a
      * form serialised as `null`, a stray array, all leave the stored key as it was. The reply to
      * a write shows the mask when a key is stored, so a client that meant "clear" sees it did not.
+     *
+     * MASK over nothing stored stays MASK, as an MCP header value's does (sanitizeMcpServers()):
+     * the key is kept out of the row (Settings\ProviderKey), so '' in `$stored` does not say there
+     * is no key. A site's first save is where it shows: core's add_option() runs the settings
+     * page's sanitize callback a second time, over the row ProviderKey::beforeSave() has already
+     * left MASK in, with nothing stored yet. ProviderKey::beforeSave() writes '' for a MASK when no
+     * key is held and the stored row carries no plaintext key either (over one that does, it keeps
+     * that key and writes MASK), and ProviderKey::resolve() never answers MASK as a key.
      */
     private static function secret(mixed $raw, mixed $stored): string
     {
         if (is_string($raw) && $raw !== self::MASK) {
             return $raw;
         }
-        return is_string($stored) ? $stored : '';
+        if (is_string($stored) && $stored !== '') {
+            return $stored;
+        }
+        return $raw === self::MASK ? self::MASK : '';
     }
 
     /** @param Field $f */
@@ -461,8 +525,8 @@ final class Schema
      *   stored, and answered by `GET /settings`, as it is written, while the header value is kept
      *   apart and read back masked, so a credential goes there.
      *   Whether the *address* is public is not asked here: that is a DNS lookup, and this is a
-     *   pure function. Mcp\ServerSettings asks it when the settings page or the REST route saves
-     *   a URL that is new or changed. Mcp\Egress::client() asks it again whenever a client is
+     *   pure function. Mcp\ServerSettings asks it when the settings page, the REST route or
+     *   `wp alpaca-bot settings` saves a URL that is new or changed. Mcp\Egress::client() asks it again whenever a client is
      *   built, and the ClientFactory the plugin constructs builds every client through it.
      * - `prefix` matches MCP_TOOL_PREFIX, is not `ability` (AbilitiesToolkit names its tools
      *   `ability__…`), and is not already taken by an earlier row; a row failing any of that is

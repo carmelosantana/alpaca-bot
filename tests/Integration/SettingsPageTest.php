@@ -9,6 +9,7 @@ use AlpacaBot\Admin\Menu;
 use AlpacaBot\Admin\SettingsPage;
 use AlpacaBot\Plugin;
 use AlpacaBot\Provider\Model;
+use AlpacaBot\Settings\ProviderKey;
 use AlpacaBot\Settings\Schema;
 use AlpacaBot\Settings\Store;
 
@@ -77,13 +78,27 @@ final class SettingsPageTest extends TestCase
     public function test_saving_the_mask_keeps_the_stored_key_and_an_empty_string_clears_it(): void
     {
         update_option('alpaca_bot_settings', array_merge(Schema::defaults(), ['provider.api_key' => 'sk-integration']));
-        $this->assertSame('sk-integration', get_option('alpaca_bot_settings')['provider.api_key']);
+        $this->assertStoredProviderKey('sk-integration', get_option('alpaca_bot_settings'));
         update_option('alpaca_bot_settings', ['provider.api_key' => Schema::MASK, 'models.temperature' => '1.1'] + Schema::defaults());
         $saved = get_option('alpaca_bot_settings');
-        $this->assertSame('sk-integration', $saved['provider.api_key']);
+        $this->assertStoredProviderKey('sk-integration', $saved);
         $this->assertSame(1.1, $saved['models.temperature']);
         update_option('alpaca_bot_settings', ['provider.api_key' => ''] + Schema::defaults());
-        $this->assertSame('', get_option('alpaca_bot_settings')['provider.api_key']);
+        $this->assertStoredProviderKey('', get_option('alpaca_bot_settings'));
+    }
+
+    // A site's first save takes core's add_option() branch, which runs this sanitize callback a
+    // second time over the value the filters left: the mask, with nothing stored yet and the
+    // default Base URL to compare against. The key must survive that pass, and the Base URL that
+    // differs from the default must not read as a move that clears it.
+    public function test_a_sites_first_save_with_a_key_keeps_it(): void
+    {
+        delete_option(Plugin::OPTION);
+        delete_option(ProviderKey::OPTION);
+        update_option(Plugin::OPTION, ['provider.api_key' => 'sk-FAKE-first', 'provider.base_url' => 'https://openrouter.ai/api/v1'] + Schema::defaults());
+        $this->assertSame(Schema::MASK, get_option(Plugin::OPTION)['provider.api_key']);
+        $this->assertSame('sk-FAKE-first', get_option(ProviderKey::OPTION));
+        $this->assertSame([], get_settings_errors(Plugin::OPTION));
     }
 
     public function test_menu_pages_are_registered(): void
@@ -180,7 +195,7 @@ final class SettingsPageTest extends TestCase
             'privacy.usage_retention_days' => 0,
         ]));
         $before = get_option('alpaca_bot_settings');
-        $this->assertSame('sk-secret-integration', $before['provider.api_key']);
+        $this->assertStoredProviderKey('sk-secret-integration', $before);
         $this->assertSame(['github' => 'read'], $before['access.mcp']);
         $this->assertSame(['search' => str_repeat('c', 64)], $before['toolkits.mcp_servers'][0]['approved']);
         $this->assertSame(Schema::MASK, $before['toolkits.mcp_servers'][0]['header_value']);
@@ -211,6 +226,33 @@ final class SettingsPageTest extends TestCase
         $this->assertTrue($after['chat.spellcheck']);
         unset($before['chat.welcome'], $after['chat.welcome'], $before['chat.spellcheck'], $after['chat.spellcheck']);
         $this->assertSame($before, $after);
+    }
+
+    /**
+     * #4539 on the settings page: the Provider tab posts the key as the mask, so moving the Base URL
+     * to another host clears it and the screen says so; a path change on the same host keeps it
+     * and says nothing.
+     */
+    public function test_moving_the_base_url_from_the_provider_tab_clears_the_key_and_says_so(): void
+    {
+        Plugin::instance()->get(Store::class)->replace(['provider.api_key' => 'sk-FAKE-page', 'provider.base_url' => 'https://openrouter.ai/api/v1']);
+        $_GET['tab'] = 'provider';
+        set_current_screen('alpaca-bot_page_alpaca-bot-settings');
+        ob_start();
+        Plugin::instance()->get(SettingsPage::class)->render();
+        $posted = self::formPost((string) ob_get_clean());
+        $this->assertSame(Schema::MASK, $posted['provider.api_key']);
+
+        $posted['provider.base_url'] = 'https://openrouter.ai/v2';
+        self::save($posted);
+        $this->assertStoredProviderKey('sk-FAKE-page', get_option(Plugin::OPTION));
+        $this->assertSame([], get_settings_errors(Plugin::OPTION));
+
+        $posted['provider.base_url'] = 'https://steal.example.net/v1';
+        self::save($posted);
+        $this->assertStoredProviderKey('', get_option(Plugin::OPTION));
+        $this->assertSame('https://steal.example.net/v1', get_option(Plugin::OPTION)['provider.base_url']);
+        $this->assertSame(['provider_key_cleared'], array_column(get_settings_errors(Plugin::OPTION), 'code'));
     }
 
     /**
@@ -253,7 +295,10 @@ final class SettingsPageTest extends TestCase
     {
         unregister_setting(SettingsPage::GROUP, Plugin::OPTION);
         $store = new Store();
-        $page = new SettingsPage($store, Plugin::instance()->get(\AlpacaBot\Provider\ModelCatalog::class), new Access($store));
+        // The controllers the plugin hands its own page (Plugin::controllers()), so the Chat row
+        // asks the routes the REST API registers.
+        $controllers = static fn(): array => (new \ReflectionMethod(Plugin::class, 'controllers'))->invoke(Plugin::instance());
+        $page = new SettingsPage($store, Plugin::instance()->get(\AlpacaBot\Provider\ModelCatalog::class), new Access($store), null, null, $controllers);
         $page->register();
         $_GET['tab'] = $tab;
         set_current_screen('alpaca-bot_page_alpaca-bot-settings');
@@ -350,21 +395,24 @@ final class SettingsPageTest extends TestCase
      * Merge point 5, over real core hooks: a listener registered for its row's arguments is
      * asked with them from this page, and one that cannot be called with them (core raises an
      * ArgumentCountError when it declares more than its row fires with) is reported as set in
-     * code without a figure, rather than taking the page down. The Chat row is asked of both its
+     * code without a figure, rather than taking the page down. The Chat row is asked of each of its
      * surfaces, each through its own hook, and the note says which one moved.
      */
     public function test_the_access_tab_asks_each_filter_with_its_rows_arguments_and_survives_one_that_cannot_be_called(): void
     {
         $admin = get_current_user_id();
         add_filter('alpaca_bot/capability/tool/web_fetch', static fn(string $cap, int $userId): string => $userId === $admin ? 'manage_options' : $cap, 10, 2);
-        add_filter('alpaca_bot/capability/shortcode', static fn(string $cap, int $postId, string $tag): string => $tag === 'alpacabot' ? 'edit_others_posts' : $cap, 10, 3);
+        // Throws for the other shortcode: its note says asking failed, and the debug log says why.
+        add_filter('alpaca_bot/capability/shortcode', static fn(string $cap, int $postId, string $tag): string => $tag === 'alpacabot' ? 'edit_others_posts' : throw new \RuntimeException('agent filter broke'), 10, 3);
         add_filter('alpaca_bot/capability/settings/write', static fn(string $cap, \WP_REST_Request $request): string => $request->get_method() === 'PUT' ? 'edit_others_posts' : $cap, 10, 2);
         add_filter('alpaca_bot/capability/chat', static fn(string $cap, \WP_REST_Request $request): string => $request->get_route() === '/alpaca-bot/v1/chat' ? 'read' : $cap, 10, 2);
+        // Kanboard #4537: a chat route other than /chat is asked too, and named on its own.
+        add_filter('alpaca_bot/capability/view/history', static fn(string $cap, \WP_REST_Request $request): string => $request->get_method() === 'GET' ? 'manage_options' : $cap, 10, 2);
         // Declares one argument more than its row fires with.
         add_filter('alpaca_bot/capability/tool/summarize', static fn(string $cap, int $userId, string $extra): string => 'read', 10, 3);
 
-        // Access::overridden() leaves a line in the debug log when resolving a row throws; the
-        // page asks it first so that a row flipping to "set in code" is never silent there.
+        // The page leaves a line in the debug log when resolving a row throws (SettingsPage::ask()),
+        // so a row flipping to "set in code" is never silent there.
         $log = (string) tempnam(sys_get_temp_dir(), 'ab-access-log');
         $previous = ini_set('error_log', $log);
         try {
@@ -375,6 +423,7 @@ final class SettingsPageTest extends TestCase
             unlink($log);
         }
         $this->assertStringContainsString('resolving the tool.summarize access row threw', $logged);
+        $this->assertStringContainsString('resolving the shortcode access row for [alpacabot_agent] threw, so it is reported as set in code: agent filter broke', $logged);
         $row = static function (string $id) use ($html): string {
             preg_match('#<tr[^>]*>(?:(?!<tr).)*id="' . preg_quote($id, '#') . '".*?</tr>#s', $html, $m);
             return $m[0] ?? '';
@@ -388,7 +437,65 @@ final class SettingsPageTest extends TestCase
         $chat = $row('ab-access-chat');
         $this->assertStringContainsString('for the chat REST route (<code>POST /chat</code>): a filter changes this to Any logged-in user (<code>read</code>).', $chat);
         $this->assertStringNotContainsString('for the chat screen', $chat);
+        $this->assertStringContainsString('for the chat REST route (<code>GET /view/history</code>): a filter changes this to Administrators (<code>manage_options</code>).', $chat);
+        $this->assertStringContainsString('<strong>Set in code</strong> for the shortcode <code>[alpacabot]</code>: a filter changes this to Editors and up', $row('ab-access-shortcode'));
+        $this->assertStringContainsString('<strong>Set in code</strong> for the shortcode <code>[alpacabot_agent]</code>: a filter decides this, and asking it from this page failed', $row('ab-access-shortcode'));
         $this->assertStringNotContainsString('Set in code', $row('ab-access-tool-draft_post'));
+        $this->assertStringContainsString('<input type="submit"', $html, 'the page rendered to its end');
+        // Asked once, it threw once: one line (Kanboard #4694).
+        $this->assertSame(1, substr_count($logged, 'resolving the tool.summarize access row threw, so it is reported as set in code:'));
+        $this->assertSame(1, substr_count($logged, 'agent filter broke'));
+    }
+
+    /**
+     * Kanboard #4694: a row with one surface is asked once per render, as each surface of the
+     * Chat and Shortcodes rows is, so a listener with side effects runs once each time the tab
+     * is shown, and one that moves the row still gets its note.
+     */
+    public function test_a_single_surface_rows_listener_runs_once_per_render(): void
+    {
+        $calls = 0;
+        add_filter('alpaca_bot/capability/tool/web_fetch', static function (string $cap) use (&$calls): string {
+            $calls++;
+            return 'manage_options';
+        });
+        $html = $this->renderAccessPage('access');
+
+        $this->assertSame(1, $calls);
+        $this->assertStringContainsString('<strong>Set in code</strong>: a filter changes this to Administrators (<code>manage_options</code>).', $html);
+    }
+
+    /**
+     * Kanboard #4694: the Chat row's other two surfaces are a site's code as well, the menu's
+     * `alpaca_bot/admin/menu_capability` and the listing of the REST controllers through
+     * `alpaca_bot/rest/controllers`. A throw from either still degrades to the "asking it failed"
+     * note, and under WP_DEBUG leaves one line in the debug log naming the row, the hook and the
+     * message, as a throwing surface of the Shortcodes row does.
+     */
+    public function test_a_throwing_menu_filter_or_controllers_filter_leaves_one_debug_log_line_each(): void
+    {
+        add_filter('alpaca_bot/admin/menu_capability', static fn(): never => throw new \RuntimeException('menu filter broke'));
+        add_filter('alpaca_bot/rest/controllers', static fn(): never => throw new \RuntimeException('controllers filter broke'));
+
+        $log = (string) tempnam(sys_get_temp_dir(), 'ab-access-log');
+        $previous = ini_set('error_log', $log);
+        try {
+            $html = $this->renderAccessPage('access');
+            $logged = (string) file_get_contents($log);
+        } finally {
+            ini_set('error_log', (string) $previous);
+            unlink($log);
+        }
+
+        $this->assertSame(1, substr_count($logged, 'menu filter broke'));
+        $this->assertStringContainsString('[alpaca-bot] resolving the chat access row for alpaca_bot/admin/menu_capability threw, so it is reported as set in code: menu filter broke', $logged);
+        $this->assertSame(1, substr_count($logged, 'controllers filter broke'));
+        $this->assertStringContainsString('[alpaca-bot] resolving the chat access row for alpaca_bot/rest/controllers threw, so it is reported as set in code: controllers filter broke', $logged);
+
+        preg_match('#<tr[^>]*>(?:(?!<tr).)*id="ab-access-chat".*?</tr>#s', $html, $m);
+        $chat = $m[0] ?? '';
+        $this->assertStringContainsString('<strong>Set in code</strong> for the chat screen, its panel on other admin screens and the block editor sidebar: a filter decides this, and asking it from this page failed', $chat);
+        $this->assertStringContainsString('<strong>Set in code</strong> for the chat REST routes: a filter decides this, and asking it from this page failed', $chat);
         $this->assertStringContainsString('<input type="submit"', $html, 'the page rendered to its end');
     }
 
@@ -455,7 +562,7 @@ final class SettingsPageTest extends TestCase
         $_POST[SettingsPage::END_MARKER] = '1';
         update_option('alpaca_bot_settings', $posted);
         $this->assertSame('changed-on-the-models-tab', get_option('alpaca_bot_settings')['models.default']);
-        $this->assertSame('sk-REVIEW-SENTINEL-9f3a', get_option('alpaca_bot_settings')['provider.api_key']);
+        $this->assertStoredProviderKey('sk-REVIEW-SENTINEL-9f3a', get_option('alpaca_bot_settings'));
 
         // Layer two, the schema alone: no $_POST, the guard is inert, and the post is the old
         // layout's truncation, the Models fields with the whole carry-over dropped.
@@ -466,7 +573,7 @@ final class SettingsPageTest extends TestCase
         update_option('alpaca_bot_settings', $cut);
         $after = get_option('alpaca_bot_settings');
         $this->assertSame('changed-again', $after['models.default']);
-        $this->assertSame('sk-REVIEW-SENTINEL-9f3a', $after['provider.api_key']);
+        $this->assertStoredProviderKey('sk-REVIEW-SENTINEL-9f3a', $after);
         $this->assertSame('https://openrouter.ai/api/v1', $after['provider.base_url']);
         $this->assertSame(array_keys(Schema::fields()), array_keys($after));
     }

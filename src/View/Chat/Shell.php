@@ -27,18 +27,18 @@ use AlpacaBot\View\Markdown;
  *
  * `$home` and `$drawer` say where the shell is. `$home` is the "New chat" link's href (Header):
  * null is the wp-admin chat screen, `admin.php?page=alpaca-bot`, and a URL is a front-end page
- * (Shortcodes\Chat passes the page's own permalink), so a visitor is not sent out of the site
- * into wp-admin. `$drawer` marks the admin-wide drawer's shell (View\Chat\Drawer), which the
- * block editor's sidebar mounts too, and which leaves `$home` null: its link points at the chat
- * screen, but neither host follows it, and each starts the new chat in place
- * (resources/ts/drawer.ts, resources/ts/editor.ts). The wrapper's class follows from the
- * two, `$drawer` first: the drawer's shell is `ab-wrap--drawer`; with `$home` null the shell is
- * the chat screen's and keeps core's `.wrap`, whose margins the screen is laid out inside; with a
- * URL it is `ab-wrap--front`. Neither modifier comes with `.wrap`. On a front-end page it is an
- * admin class the front end does not style, and a class name themes use for their own layout;
- * in the drawer, core's `.wrap` rule sets the admin screen's margins, and the drawer's panel is
- * not that screen. The stylesheet's front-end and drawer blocks are what the two modifiers
- * select, and each replaces the height .ab-wrap computes from wp-admin's chrome.
+ * (Shortcodes\Chat passes the page's own permalink), so a visitor is not sent out of the site into
+ * wp-admin. `$drawer` marks the admin-wide drawer's shell (View\Chat\Drawer), which the block
+ * editor's sidebar mounts too, and which leaves `$home` null: its link points at the chat screen,
+ * but neither host follows it, and each starts the new chat in place (resources/ts/drawer-start.ts,
+ * resources/ts/editor-start.ts). The wrapper's class follows from the two, `$drawer` first: the
+ * drawer's shell is `ab-wrap--drawer`; with `$home` null the shell is the chat screen's and keeps
+ * core's `.wrap`, whose margins the screen is laid out inside; with a URL it is `ab-wrap--front`.
+ * Neither modifier comes with `.wrap`. On a front-end page it is an admin class the front end does
+ * not style, and a class name themes use for their own layout; in the drawer, core's `.wrap` rule
+ * sets the admin screen's margins, and the drawer's panel is not that screen. The stylesheet's
+ * front-end and drawer blocks are what the two modifiers select, and each replaces the height
+ * .ab-wrap computes from wp-admin's chrome.
  */
 final class Shell extends Component
 {

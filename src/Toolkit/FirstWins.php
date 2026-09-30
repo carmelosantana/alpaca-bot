@@ -15,8 +15,9 @@ use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Contract\ToolkitInterface;
  * (AbstractAgent::collectAllToolsIndexed()). Registry::enabled() hands the built-ins over first,
  * in the order they were registered, then the MCP servers, then whatever `alpaca_bot/toolkits`
  * adds; left to the agent, a later toolkit could take a built-in tool's name, and the model's
- * calls to it, arguments and all. Chat\Pipeline::agentTurn() runs its toolkits through over(),
- * so the earlier one keeps the name and the later one's tool is not offered. A filter that
+ * calls to it, arguments and all. Chat\Pipeline::offered() runs its toolkits through over()
+ * before the agent is handed them, so the earlier one keeps the name and the later one's tool is
+ * not offered; a wrapper left with no tools is not handed to the agent at all. A filter that
  * reorders what it returns decides the order this goes by.
  *
  * Within one toolkit nothing is left out: two tools of one toolkit under one name are that

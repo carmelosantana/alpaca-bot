@@ -2,11 +2,16 @@ includes:
     - vendor/szepeviktor/phpstan-wordpress/extension.neon
 parameters:
     level: 6
+    # Per checkout, not the shared sys_get_temp_dir()/phpstan. The result cache records absolute
+    # paths, so with one shared cache every checkout on the machine with a different file set
+    # overwrites and invalidates the others' entries; Kanboard #4469 measured that contention as
+    # worker OOMs. Relative paths resolve against this file's directory.
+    tmpDir: .phpstan-cache
     paths: [src, uninstall.php, bin/hooks-doc.php, bin/readme-sync.php]
     scanFiles:
         - alpaca-bot.php
         # WP-CLI is not a dependency and php-stubs/wp-cli-stubs conflicts with wordpress-stubs ^7.1,
-        # so the two WP_CLI methods the plugin calls are declared here.
+        # so the WP_CLI methods the plugin calls are declared here.
         - tests/stubs/wp-cli-stubs.php
     scanDirectories: [vendor-prefixed]
     bootstrapFiles: [vendor/php-stubs/wordpress-stubs/wordpress-stubs.php]

@@ -9,7 +9,7 @@ use AlpacaBot\Settings\Store;
 
 final class Plugin
 {
-    public const VERSION = '0.6.0';
+    public const VERSION = '0.6.1';
     public const OPTION = 'alpaca_bot_settings';
     public const TEXT_DOMAIN = 'alpaca-bot';
 
@@ -90,7 +90,7 @@ final class Plugin
         add_action('update_option_' . self::OPTION, function (mixed $old, mixed $new): void {
             if (is_array($old) && is_array($new)) {
                 $changed = false;
-                foreach (['provider.kind', 'provider.base_url', 'provider.api_key'] as $key) {
+                foreach (['provider.kind', 'provider.base_url'] as $key) {
                     $changed = $changed || ($old[$key] ?? null) !== ($new[$key] ?? null);
                 }
                 if (!$changed) {
@@ -112,6 +112,19 @@ final class Plugin
         add_action('add_option_' . self::OPTION, function (): void {
             delete_transient(Provider\ModelCatalog::TRANSIENT);
         });
+        // The key is not in the row (Settings\ProviderKey): the row reads MASK before and after a
+        // change of key, so the row's update_option() can change nothing and fire neither hook
+        // above. Its own option is written, added or deleted whenever the key changes, and each
+        // of the three busts the list the old key was answered with. It is also written once when a
+        // plaintext key moves out of the row (migrate(), or beforeSave() over a row migrate() has
+        // not reached), with the key unchanged, which costs one bust of that list more.
+        $providerKey = new Settings\ProviderKey();
+        $providerKey->register();
+        foreach (['add_option_', 'update_option_', 'delete_option_'] as $hook) {
+            add_action($hook . Settings\ProviderKey::OPTION, function (): void {
+                delete_transient(Provider\ModelCatalog::TRANSIENT);
+            });
+        }
         // An MCP server's header value is taken out of its row on every update_option() of the
         // option, whoever calls it (Mcp\ServerSettings says why that is a filter, and what
         // add_option() on its own does instead). The settings page and
@@ -202,6 +215,9 @@ final class Plugin
             if ($migration->needed()) {
                 $migration->run();
             }
+            // Its own class, not a step of Migrate04: that class's steps are flagged, and this one
+            // needs no flag, since the row it reads is already in alloptions (ProviderKey::migrate()).
+            Settings\ProviderKey::migrate();
         }, 20);
         add_action('rest_api_init', function (): void {
             foreach ($this->controllers() as $controller) {
@@ -213,7 +229,9 @@ final class Plugin
         // are built, and it would decide wrong where is_admin() is false at plugins_loaded but a
         // test (wp-phpunit sets no screen until a test does) later fires the actions itself.
         // options.php, which every save posts to, is wp-admin and fires admin_init as any screen.
-        $settingsPage = new Admin\SettingsPage($store, $this->get(Provider\ModelCatalog::class), $this->get(Access::class), null, $servers);
+        // The page is handed controllers() itself, uncalled, so the Chat row's note asks the routes
+        // the REST API registers (Kanboard #4537), and lists them only when that row is rendered.
+        $settingsPage = new Admin\SettingsPage($store, $this->get(Provider\ModelCatalog::class), $this->get(Access::class), null, $servers, $this->controllers(...));
         $this->set(Admin\SettingsPage::class, $settingsPage);
         add_action('admin_init', [$settingsPage, 'register']);
         $chatScreen = new Admin\ChatScreen($store, $this->get(Provider\ModelCatalog::class), $conversations, $prefs);
@@ -253,7 +271,7 @@ final class Plugin
         // WP-CLI is not a dependency: the command is only registered when WP-CLI is the
         // process running us, and the class itself never references WP_CLI until then.
         if (defined('WP_CLI') && constant('WP_CLI')) {
-            \WP_CLI::add_command('alpaca-bot', new Cli\ChatCommand($this->get(Chat\Pipeline::class), $this->get(Provider\ModelCatalog::class), $meter, $store));
+            \WP_CLI::add_command('alpaca-bot', new Cli\ChatCommand($this->get(Chat\Pipeline::class), $this->get(Provider\ModelCatalog::class), $meter, $store, servers: $this->get(Mcp\ServerSettings::class)));
         }
     }
 
@@ -275,20 +293,22 @@ final class Plugin
      * rest_api_init, not at register(), so a filter added on plugins_loaded or init is seen, and
      * the controllers are built then too: they hold the container's services, which all exist by
      * plugins_loaded, but building them only for a REST request keeps every other request free
-     * of them. Anything that is not a Controller is dropped rather than left to fatal inside
-     * register(). Every controller that survives is handed the container's Access, a third
-     * party's included, so a route registered *through this filter* may declare
-     * Rest\Controller::CHAT and resolve to the Chat row this site saved. A controller registered
-     * outside it — built and register()ed on rest_api_init by hand — is never handed one, and its
-     * CHAT routes resolve to Access::defaults() instead, the shipped `edit_posts`, whatever the
-     * site saved.
+     * of them. The one other caller is Settings › Access, which lists them when it renders the
+     * Chat row, to ask each route that follows that row (Admin\SettingsPage::renderAccess()).
+     * Anything that is not a Controller is dropped rather than left to fatal inside register().
+     * Every controller that survives is handed the container's Access, a third party's included,
+     * so a route registered *through this filter* may declare Rest\Controller::CHAT and resolve
+     * to the Chat row this site saved. A controller registered outside it — built and
+     * register()ed on rest_api_init by hand — is never handed one, and its CHAT routes resolve to
+     * Access::defaults() instead, the shipped `edit_posts`, whatever the site saved.
      *
      * @return list<Rest\Controller>
      */
     private function controllers(): array
     {
         /**
-         * Filters the REST controllers registered under `alpaca-bot/v1`, on `rest_api_init`. Append
+         * Filters the REST controllers registered under `alpaca-bot/v1`, on `rest_api_init`, and
+         * on Settings › Access, which lists their Chat-row routes to ask each one's filter. Append
          * a Rest\Controller subclass to get the namespace, the `alpaca_bot/capability/{route}`
          * permission filters and the rate limit without writing them, and the Chat row for a route
          * that declares `Controller::CHAT` — or drop one of the plugin's to unregister its routes

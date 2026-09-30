@@ -17,7 +17,7 @@ test('withQuery adds its query under either permalink form, keeping a ?rest_rout
 });
 
 /**
- * What the drawer's every fetch of GET /view/panel carries (resources/ts/drawer.ts): the first
+ * What the drawer's every fetch of GET /view/panel carries (resources/ts/drawer-start.ts): the first
  * mount, its retry, and "New chat" all build their query here, off the data attributes
  * Admin\Drawer::footer() prints on the drawer element.
  */
@@ -41,7 +41,7 @@ test('panelQuery names the conversation and what the drawer element says the chi
  * fragment into the chat it already has, so the composer the chat bundle is bound to stays:
  * newChat(), "New chat" in place (the drawer's and the editor sidebar's), which takes the
  * transcript, the history and the chips, and postChip(), the post chip the editor sidebar adds
- * once its new post has been saved (resources/ts/editor.ts).
+ * once its new post has been saved (resources/ts/editor-start.ts).
  * Every assertion compares a primitive, never a node (tests/ts/env.ts says why).
  */
 const CFG = { panel: 'https://alpaca-bot.test/wp-json/alpaca-bot/v1/view/panel', prefs: '', htmx: '', htmxId: '', chat: '', css: '', title: 'Alpaca Bot', failed: 'failed' };
@@ -258,4 +258,94 @@ test('mountPanel uses the htmx the page carries under its handle id, whatever it
   const second = await mountPanel(document.getElementById('host') as HTMLElement, cfg, 'n', {}).then(() => 'mounted', () => 'failed');
   assert.equal(second, 'failed');
   assert.equal(asked.length, 1);
+});
+
+/**
+ * rememberConversation() dedups against what this tab last wrote to POST /view/drawer (Kanboard
+ * #4693). Each case holds every write open until it answers it, so the order in which writes are
+ * sent and the order in which they settle are the case's to choose. `answer(i, status)` settles
+ * the i-th write with that status, or with a network error for 0.
+ */
+function writes(t: { after(fn: () => void): void }): { sent: string[]; answer: (i: number, status: number) => Promise<void> } {
+  const real = globalThis.fetch;
+  t.after(() => { globalThis.fetch = real; });
+  const sent: string[] = [];
+  const pending: ((status: number) => void)[] = [];
+  globalThis.fetch = ((_input: RequestInfo | URL, init?: RequestInit) => {
+    sent.push(String((JSON.parse(String(init?.body ?? '{}')) as { conversation_id?: number }).conversation_id));
+    return new Promise<Response>((resolve, reject) => {
+      pending.push((status) => { if (status === 0) reject(new TypeError('Failed to fetch')); else resolve(new Response('', { status })); });
+    });
+  }) as typeof fetch;
+  return {
+    sent,
+    answer: async (i, status) => {
+      pending[i]!(status);
+      // Lets savePrefs()'s then() and remember()'s after it run.
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    },
+  };
+}
+
+async function remembering(): Promise<{ remember: (id: number) => void; host: HTMLElement }> {
+  installDom('<aside id="host" data-conversation="5"></aside>');
+  const { rememberConversation } = await import('../../resources/ts/mount.ts');
+  const host = document.getElementById('host') as HTMLElement;
+  return { host, remember: rememberConversation(host, { ...CFG, prefs: 'https://alpaca-bot.test/wp-json/alpaca-bot/v1/view/drawer' }, () => 'n') };
+}
+
+test('rememberConversation sends one write for a conversation announced again while its write is in flight (Kanboard #4693)', async (t) => {
+  const { sent, answer } = writes(t);
+  const { remember, host } = await remembering();
+  // A turn's start frame, then its done frame before the start's write has answered.
+  remember(5);
+  remember(5);
+  assert.deepEqual(sent, ['5']);
+  await answer(0, 200);
+  remember(5);
+  assert.deepEqual(sent, ['5']);
+  assert.equal(host.dataset.conversation, '5');
+});
+
+test('rememberConversation writes again after a 5xx or a network error, and not after a 2xx or a 4xx (Kanboard #4693)', async (t) => {
+  const { sent, answer } = writes(t);
+  const { remember } = await remembering();
+  remember(5);
+  await answer(0, 500);
+  remember(5);
+  await answer(1, 0);
+  remember(5);
+  await answer(2, 200);
+  remember(5);
+  assert.deepEqual(sent, ['5', '5', '5']);
+
+  // A refusal (a capability filter's 403, a nonce the server no longer takes) would be refused
+  // again, so it is not retried on each announcement.
+  remember(7);
+  await answer(3, 403);
+  remember(7);
+  assert.deepEqual(sent, ['5', '5', '5', '7']);
+});
+
+test('a write that fails clears the record only when it was the latest write this tab sent (Kanboard #4693)', async (t) => {
+  const { sent, answer } = writes(t);
+  const { remember, host } = await remembering();
+  // A, B: A fails once B has been sent, and B stays what this tab last wrote.
+  remember(7);
+  remember(9);
+  await answer(0, 500);
+  await answer(1, 200);
+  remember(9);
+  assert.deepEqual(sent, ['7', '9']);
+
+  // A, B, A: the first A fails after the second A has been sent (and taken), which it must not undo.
+  remember(5);
+  remember(8);
+  remember(5);
+  await answer(4, 200);
+  await answer(2, 500);
+  await answer(3, 200);
+  remember(5);
+  assert.deepEqual(sent, ['7', '9', '5', '8', '5']);
+  assert.equal(host.dataset.conversation, '5');
 });

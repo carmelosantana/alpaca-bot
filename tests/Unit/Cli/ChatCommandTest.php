@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use AlpacaBot\Chat\Result;
 use AlpacaBot\Plugin;
+use AlpacaBot\Settings\ProviderKey;
 use AlpacaBot\Settings\Schema;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Config\ModelDefinition;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Contract\ProviderInterface;
@@ -466,6 +467,24 @@ it('masks the API key in the whole dump but prints it when asked for by name', f
         ->and($c->out)->toBe("\"sk-secret\"\n");
 });
 
+// Since Kanboard #4384 the row carries the mask and the key is in Settings\ProviderKey's option:
+// asked for by name, the command still prints the key itself, and the dump still the mask.
+it('prints the kept API key when asked for by name while the row carries the mask', function (): void {
+    $h = pipelineWith(null, ['provider.api_key' => Schema::MASK]);
+    Functions\when('get_option')->alias(static fn(string $name, mixed $default = false): mixed => $name === ProviderKey::OPTION ? 'sk-FAKE-held' : $default);
+    $c = cliCommand($h);
+
+    $c->command->settings([], []);
+    $dump = $c->out;
+    $c->out = '';
+    $c->command->settings(['provider.api_key'], []);
+
+    expect($c->errors)->toBe([])
+        ->and($dump)->not->toContain('sk-FAKE-held')
+        ->and(json_decode($dump, true)['provider.api_key'])->toBe(Schema::MASK)
+        ->and($c->out)->toBe("\"sk-FAKE-held\"\n");
+});
+
 // An MCP server's header value is not in the option at all (Mcp\ServerSettings keeps it in an
 // option of its own and leaves the mask in the row), so the dump and a read by name show the row
 // as it is stored. A row that reached the option with the value in it, some other way, is masked
@@ -530,3 +549,154 @@ it('refuses a key the schema does not know', function (): void {
     expect($c->out)->toBe('')
         ->and($c->errors)->toBe(['Unknown setting "nope". Run `wp alpaca-bot settings` to list them.']);
 });
+
+// #4540: a write of toolkits.mcp_servers runs the check REST PUT /settings runs
+// (Mcp\ServerSettings::check()), so a row the schema cannot keep, or an address the egress check
+// refuses, fails the command with the message REST answers, and nothing is written. Each refusal
+// is compared against the REST route's own answer to the same rows over the same stored list,
+// which is what "the same message" means.
+function cliMcpStored(): array
+{
+    return [
+        ['id' => 'aa', 'url' => 'https://aa.example.com/mcp', 'header_name' => 'Authorization', 'header_value' => Schema::MASK, 'prefix' => 'aa', 'timeout' => 30.0, 'max_bytes' => 1048576, 'approved' => []],
+        ['id' => 'bb', 'url' => 'https://bb.example.com/mcp', 'header_name' => 'Authorization', 'header_value' => Schema::MASK, 'prefix' => 'bb', 'timeout' => 30.0, 'max_bytes' => 1048576, 'approved' => []],
+    ];
+}
+
+it('refuses an MCP server row the schema cannot keep, names it as REST does, and writes nothing', function (array $rows, string $named): void {
+    $h = pipelineWith(null, ['toolkits.mcp_servers' => cliMcpStored()]);
+    Functions\expect('update_option')->never();
+    $noLookup = static fn(string $host, string $url): array => throw new RuntimeException('no lookup was expected');
+    $c = cliCommand($h, new AlpacaBot\Mcp\ServerSettings($noLookup));
+    $rest = (new AlpacaBot\Rest\SettingsController(new AlpacaBot\Settings\Store(['toolkits.mcp_servers' => cliMcpStored()]), new AlpacaBot\Mcp\ServerSettings($noLookup)))
+        ->update(restRequest('PUT', '/settings', ['toolkits.mcp_servers' => $rows]));
+
+    $c->command->settings(['toolkits.mcp_servers', json_encode($rows)], []);
+
+    expect($rest)->toBeInstanceOf(WP_Error::class)
+        ->and($rest->get_error_code())->toBe('alpaca_bot_mcp_row')
+        ->and($c->errors)->toBe([$rest->get_error_message()])
+        ->and($c->errors[0])->toStartWith('Nothing was saved: an MCP server row could not be kept.')
+        ->and($c->errors[0])->toContain($named . ': ')
+        ->and($c->errors[0])->not->toContain('Bearer typed')
+        ->and($c->errors[0])->not->toContain('hunter2')
+        ->and($c->out)->toBe('')
+        ->and($h->store->get('toolkits.mcp_servers'))->toBe(cliMcpStored());
+})->with([
+    'a stored server given an http URL' => [[['id' => 'aa', 'url' => 'http://aa.example.com/mcp', 'prefix' => 'aa', 'header_value' => 'Bearer typed'], ['id' => 'bb', 'url' => 'https://bb.example.com/mcp', 'prefix' => 'bb']], 'http://aa.example.com/mcp'],
+    'a stored server sent with no URL, named by its row' => [[['id' => 'aa', 'url' => '', 'prefix' => 'aa'], ['id' => 'bb', 'url' => 'https://bb.example.com/mcp', 'prefix' => 'bb']], 'row 0'],
+    'a new row whose URL carries a password' => [[['id' => 'aa', 'url' => 'https://aa.example.com/mcp', 'prefix' => 'aa'], ['id' => 'bb', 'url' => 'https://bb.example.com/mcp', 'prefix' => 'bb'], ['url' => 'https://me:hunter2@new.example.com/mcp', 'prefix' => 'nw', 'header_value' => 'Bearer typed']], 'https://new.example.com/mcp'],
+    'a new row whose prefix a stored server holds' => [[['id' => 'aa', 'url' => 'https://aa.example.com/mcp', 'prefix' => 'aa'], ['id' => 'bb', 'url' => 'https://bb.example.com/mcp', 'prefix' => 'bb'], ['url' => 'https://new.example.com/mcp', 'prefix' => 'aa', 'header_value' => 'Bearer typed']], 'https://new.example.com/mcp'],
+    'a stored server given a header name the rule refuses' => [[['id' => 'aa', 'url' => 'https://aa.example.com/mcp', 'prefix' => 'aa', 'header_name' => 'X Key', 'header_value' => 'Bearer typed'], ['id' => 'bb', 'url' => 'https://bb.example.com/mcp', 'prefix' => 'bb']], 'https://aa.example.com/mcp'],
+    'a stored server given a prefix the rule refuses' => [[['id' => 'aa', 'url' => 'https://aa.example.com/mcp', 'prefix' => 'Aa'], ['id' => 'bb', 'url' => 'https://bb.example.com/mcp', 'prefix' => 'bb']], 'https://aa.example.com/mcp'],
+]);
+
+it('refuses an MCP server whose address does not pass the check, says why as REST does, and writes nothing', function (): void {
+    $h = pipelineWith(null, ['toolkits.mcp_servers' => cliMcpStored()]);
+    Functions\expect('update_option')->never();
+    $refuse = static fn(string $host, string $url): array => throw new AlpacaBot\Toolkit\AddressRefused("{$host} resolves to 10.0.0.7, a private, local or other special-purpose address.");
+    $rows = [...cliMcpStored(), ['url' => 'https://internal.example.com/mcp', 'prefix' => 'in', 'header_value' => 'Bearer do-not-echo']];
+    $c = cliCommand($h, new AlpacaBot\Mcp\ServerSettings($refuse));
+    $rest = (new AlpacaBot\Rest\SettingsController(new AlpacaBot\Settings\Store(['toolkits.mcp_servers' => cliMcpStored()]), new AlpacaBot\Mcp\ServerSettings($refuse)))
+        ->update(restRequest('PUT', '/settings', ['toolkits.mcp_servers' => $rows]));
+
+    $c->command->settings(['toolkits.mcp_servers', json_encode($rows)], []);
+
+    expect($rest->get_error_code())->toBe('alpaca_bot_mcp_address')
+        ->and($c->errors)->toBe([$rest->get_error_message()])
+        ->and($c->errors[0])->toContain('https://internal.example.com/mcp: internal.example.com resolves to 10.0.0.7')
+        ->and($c->errors[0])->not->toContain('do-not-echo')
+        ->and($c->out)->toBe('')
+        ->and($h->store->get('toolkits.mcp_servers'))->toBe(cliMcpStored());
+});
+
+it('still stores a valid MCP server list, echoes it masked, and warns of nothing', function (): void {
+    $h = pipelineWith(null, ['toolkits.mcp_servers' => cliMcpStored()]);
+    Functions\when('get_option')->alias(static fn(string $name, mixed $default = false): mixed => $name === AlpacaBot\Mcp\Secrets::OPTION ? ['aa' => 'Bearer a', 'bb' => 'Bearer b'] : $default);
+    Functions\expect('update_option')->once()->andReturn(true);
+    $c = cliCommand($h, new AlpacaBot\Mcp\ServerSettings(static fn(string $host, string $url): array => ['93.184.216.34']));
+
+    $c->command->settings(['toolkits.mcp_servers', json_encode([...cliMcpStored(), ['url' => 'https://new.example.com/mcp', 'prefix' => 'nw', 'header_value' => 'Bearer typed']])], []);
+
+    $echo = json_decode($c->out, true);
+    expect($c->errors)->toBe([])
+        ->and($c->warnings)->toBe([])
+        ->and(array_column($echo, 'id'))->toBe(['aa', 'bb', 'nw'])
+        ->and($echo[2]['header_value'])->toBe(Schema::MASK)
+        ->and($c->out)->not->toContain('Bearer typed');
+});
+
+it('warns, naming each server, when a URL move cleared the header value it kept', function (): void {
+    $h = pipelineWith(null, ['toolkits.mcp_servers' => cliMcpStored()]);
+    Functions\when('get_option')->alias(static fn(string $name, mixed $default = false): mixed => $name === AlpacaBot\Mcp\Secrets::OPTION ? ['aa' => 'Bearer a', 'bb' => 'Bearer b'] : $default);
+    Functions\expect('update_option')->once()->andReturn(true);
+    $c = cliCommand($h, new AlpacaBot\Mcp\ServerSettings(static fn(string $host, string $url): array => ['93.184.216.34']));
+    $rows = cliMcpStored();
+    $rows[0]['url'] = 'https://elsewhere.example.net/mcp';
+    $rows[1]['url'] = 'https://bb.example.com/v2';
+
+    $c->command->settings(['toolkits.mcp_servers', json_encode($rows)], []);
+
+    expect($c->errors)->toBe([])
+        ->and($c->warnings)->toBe(['The header value of MCP server aa was cleared, because its address moved to another host or port. Send it again.'])
+        ->and(array_column(json_decode($c->out, true), 'url'))->toBe(['https://elsewhere.example.net/mcp', 'https://bb.example.com/v2']);
+});
+
+it('names every server in one warning when a write moved more than one', function (): void {
+    $h = pipelineWith(null, ['toolkits.mcp_servers' => cliMcpStored()]);
+    Functions\when('get_option')->alias(static fn(string $name, mixed $default = false): mixed => $name === AlpacaBot\Mcp\Secrets::OPTION ? ['aa' => 'Bearer a', 'bb' => 'Bearer b'] : $default);
+    Functions\when('update_option')->justReturn(true);
+    $c = cliCommand($h, new AlpacaBot\Mcp\ServerSettings(static fn(string $host, string $url): array => ['93.184.216.34']));
+    $rows = cliMcpStored();
+    $rows[0]['url'] = 'https://elsewhere.example.net/mcp';
+    $rows[1]['url'] = 'https://bb.example.com:8443/mcp';
+
+    $c->command->settings(['toolkits.mcp_servers', json_encode($rows)], []);
+
+    expect($c->errors)->toBe([])
+        ->and($c->warnings)->toBe(['The header values of MCP servers aa, bb were cleared, because their addresses moved to another host or port. Send them again.']);
+});
+
+it('does not warn for a moved server whose header value the write sends again', function (): void {
+    $h = pipelineWith(null, ['toolkits.mcp_servers' => cliMcpStored()]);
+    Functions\when('get_option')->alias(static fn(string $name, mixed $default = false): mixed => $name === AlpacaBot\Mcp\Secrets::OPTION ? ['aa' => 'Bearer a', 'bb' => 'Bearer b'] : $default);
+    Functions\expect('update_option')->once()->andReturn(true);
+    $c = cliCommand($h, new AlpacaBot\Mcp\ServerSettings(static fn(string $host, string $url): array => ['93.184.216.34']));
+    $rows = cliMcpStored();
+    $rows[0]['url'] = 'https://elsewhere.example.net/mcp';
+    $rows[0]['header_value'] = 'Bearer again';
+
+    $c->command->settings(['toolkits.mcp_servers', json_encode($rows)], []);
+
+    expect($c->errors)->toBe([])->and($c->warnings)->toBe([]);
+});
+
+// #4539, ruling T4-c: the command writes one key at a time, so a base URL moved to another origin
+// never carries a key with it; the stored key is cleared and the command says so, and how to put
+// it back. A same-origin change, or a URL with no key stored, clears nothing and says nothing.
+it('warns that the API key was cleared when a base URL move took it', function (): void {
+    $h = pipelineWith(null, ['provider.base_url' => 'https://openrouter.ai/api/v1', 'provider.api_key' => 'sk-FAKE-stored']);
+    Functions\expect('update_option')->once()->with(Plugin::OPTION, Mockery::on(static fn(array $v): bool => $v['provider.api_key'] === ''))->andReturn(true);
+    $c = cliCommand($h);
+
+    $c->command->settings(['provider.base_url', 'https://steal.example.net/v1'], []);
+
+    expect($c->errors)->toBe([])
+        ->and($c->out)->toBe("\"https://steal.example.net/v1\"\n")
+        ->and($c->warnings)->toBe(['provider.api_key was cleared, because provider.base_url moved to another host, port or scheme. Set it again: wp alpaca-bot settings provider.api_key <key>']);
+});
+
+it('does not warn when the base URL keeps its origin, or no key is stored', function (array $settings, string $url): void {
+    $h = pipelineWith(null, $settings);
+    Functions\expect('update_option')->once()->andReturn(true);
+    $c = cliCommand($h);
+
+    $c->command->settings(['provider.base_url', $url], []);
+
+    expect($c->errors)->toBe([])
+        ->and($c->warnings)->toBe([])
+        ->and($h->store->get('provider.api_key'))->toBe($settings['provider.api_key']);
+})->with([
+    'only the path changed' => [['provider.base_url' => 'https://openrouter.ai/api/v1', 'provider.api_key' => 'sk-FAKE-stored'], 'https://openrouter.ai/v2'],
+    'no key stored' => [['provider.base_url' => 'https://openrouter.ai/api/v1', 'provider.api_key' => ''], 'https://elsewhere.example.net/v1'],
+]);

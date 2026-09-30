@@ -161,10 +161,27 @@ function freshProcess(string $script, array $args): string
  * @param array<string, mixed> $settings
  * @param (callable(string): bool)|null $exists
  */
-function settingsPage(array $settings = [], ?callable $exists = null): AlpacaBot\Admin\SettingsPage
+function settingsPage(array $settings = [], ?callable $exists = null, ?callable $controllers = null): AlpacaBot\Admin\SettingsPage
 {
     $store = new Store($settings);
-    return new AlpacaBot\Admin\SettingsPage($store, new ModelCatalog(new Factory($store)), new AlpacaBot\Access($store), $exists);
+    return new AlpacaBot\Admin\SettingsPage($store, new ModelCatalog(new Factory($store)), new AlpacaBot\Access($store), $exists, null, $controllers);
+}
+
+/**
+ * Admin\SettingsPageTest: what Plugin hands SettingsPage as the REST controllers, in their
+ * shape: `POST /chat`, the `conversations` collection under GET and DELETE and its item under GET
+ * (one key, two verbs), the stream route with its id group, and one route that declares a
+ * capability of its own rather than the Chat row.
+ *
+ * @return Closure(): list<Controller>
+ */
+function chatRouteControllers(): Closure
+{
+    $route = static fn(string $path, string $methods, string $capability = Controller::CHAT): array => ['path' => $path, 'methods' => $methods, 'callback' => '__return_null', 'capability' => $capability];
+    return static fn(): array => [
+        restController([$route('/chat', 'POST')]),
+        restController([$route('/chat/(?P<id>\d+)/stream', 'GET'), $route('/conversations', 'GET, DELETE'), $route('/conversations/(?P<id>\d+)', 'GET'), $route('/view/mcp-tools/(?P<id>[a-z]+)', 'GET', 'manage_options')]),
+    ];
 }
 
 /** core's selected() with $echo false: the attribute when the two values match as strings, else ''. */
@@ -181,9 +198,10 @@ function stubSelected(): void
  *
  * @param array<string, mixed> $settings
  * @param (callable(string): bool)|null $exists passed to settingsPage()
+ * @param (callable(): list<Controller>)|null $controllers passed to settingsPage(): the REST controllers whose Chat-row routes the Chat row asks
  * @return array<string, array{title: string, render: Closure(): string}>
  */
-function settingsFields(array $settings = [], ?callable $exists = null): array
+function settingsFields(array $settings = [], ?callable $exists = null, ?callable $controllers = null): array
 {
     $fields = [];
     Functions\when('register_setting')->justReturn(null);
@@ -195,7 +213,7 @@ function settingsFields(array $settings = [], ?callable $exists = null): array
             return (string) ob_get_clean();
         }];
     });
-    settingsPage($settings, $exists)->register();
+    settingsPage($settings, $exists, $controllers)->register();
     return $fields;
 }
 
@@ -619,16 +637,19 @@ function agentSubject(): AbstractAgent
 /**
  * ChatCommandTest: a ChatCommand over a pipelineWith() harness `$h`, sharing its pipeline,
  * catalog, meter and store: the same four instances, as Plugin::register() hands the command
- * the container's. Stdout lands in `$c->out` and failures in `$c->errors` instead of going
- * through WP_CLI::error().
+ * the container's. Stdout lands in `$c->out`, failures in `$c->errors` instead of going through
+ * WP_CLI::error(), and warnings in `$c->warnings` instead of going through WP_CLI::warning().
+ * `$servers` is the MCP write check `settings` runs; one over AddressCheck when not given.
  */
-function cliCommand(object $h): object
+function cliCommand(object $h, ?AlpacaBot\Mcp\ServerSettings $servers = null): object
 {
     $c = new class {
         public ChatCommand $command;
         public string $out = '';
         /** @var list<string> */
         public array $errors = [];
+        /** @var list<string> */
+        public array $warnings = [];
     };
     $c->command = new ChatCommand(
         $h->pipeline,
@@ -640,6 +661,10 @@ function cliCommand(object $h): object
         },
         static function (string $message) use ($c): void {
             $c->errors[] = $message;
+        },
+        servers: $servers,
+        warn: static function (string $message) use ($c): void {
+            $c->warnings[] = $message;
         },
     );
     return $c;
@@ -910,4 +935,87 @@ function abilitiesToolkit(array $abilities, array $allowed, bool $api = true, in
     abilitiesRegistry($abilities, $unlisted);
     cliUsers([1, 3], 1);
     return new AlpacaBot\Toolkit\AbilitiesToolkit(new Store(['toolkits.abilities' => $allowed]), static fn(): int => $userId, static fn(string $fn): bool => $api && $fn !== 'wp_prepare_json_schema_for_client');
+}
+
+/**
+ * AbilitiesToolkitTest: makes core's two execute hooks, `wp_pre_execute_ability` (a filter, 7.1)
+ * and `wp_before_execute_ability` (an action, 6.9), run what is added to them, as actionRuns()
+ * does for one action. A listener runs only while Brain Monkey still has it added, so one the
+ * code under test removed is not heard from again; a listener added twice is kept once.
+ * Priorities are ignored: the toolkit is the only listener in these tests.
+ */
+function abilityHooksRun(): void
+{
+    $filters = [];
+    $actions = [];
+    Filters\expectAdded('wp_pre_execute_ability')->zeroOrMoreTimes()->whenHappen(static function (callable $callback) use (&$filters): void {
+        if (!in_array($callback, $filters, true)) {
+            $filters[] = $callback;
+        }
+    });
+    Filters\expectApplied('wp_pre_execute_ability')->zeroOrMoreTimes()->andReturnUsing(static function (mixed $pre, mixed ...$args) use (&$filters): mixed {
+        foreach ($filters as $filter) {
+            if (has_filter('wp_pre_execute_ability', $filter) !== false) {
+                $pre = $filter($pre, ...$args);
+            }
+        }
+        return $pre;
+    });
+    Actions\expectAdded('wp_before_execute_ability')->zeroOrMoreTimes()->whenHappen(static function (callable $callback) use (&$actions): void {
+        if (!in_array($callback, $actions, true)) {
+            $actions[] = $callback;
+        }
+    });
+    Actions\expectDone('wp_before_execute_ability')->zeroOrMoreTimes()->whenHappen(static function (mixed ...$args) use (&$actions): void {
+        foreach ($actions as $action) {
+            if (has_action('wp_before_execute_ability', $action) !== false) {
+                $action(...$args);
+            }
+        }
+    });
+}
+
+/**
+ * AbilitiesToolkitTest: a siteAbility() whose execute() does what core's WP_Ability::execute()
+ * does around its callback on `$core` ('6.9', '7.0' or '7.1'), less input and output
+ * validation and the permission check: on 7.1 `wp_pre_execute_ability` first, returning what it
+ * answers when that is not the sentinel; then `wp_before_execute_ability`; then the callback,
+ * which from 7.0 has a throw caught and answered as `ability_callback_exception` quoting its
+ * message, and on 6.9 has it propagate. The action is wrapped as core's do_action() wraps it:
+ * the name pushed onto $GLOBALS['wp_current_filter'] and popped after, not in a `finally`. Each run of the callback is recorded by name in
+ * $GLOBALS['abCallbackRuns'], so a test can see a refused callback never ran. Pair it with
+ * abilityHooksRun().
+ *
+ * @param \Closure(mixed): mixed $callback
+ */
+function coreAbility(string $name, string $core, \Closure $callback): Mockery\MockInterface
+{
+    $ability = siteAbility($name);
+    $ability->shouldReceive('execute')->andReturnUsing(static function (mixed $input = null) use ($name, $core, $callback, $ability): mixed {
+        if ($core === '7.1') {
+            $sentinel = new stdClass();
+            $pre = apply_filters('wp_pre_execute_ability', $sentinel, $name, $input, $ability);
+            if ($pre !== $sentinel) {
+                return $pre;
+            }
+        }
+        // Core's do_action() pushes the hook's name onto $wp_current_filter and pops it after the
+        // listeners, with no try/finally, so a listener's throw leaves the name there.
+        $GLOBALS['wp_current_filter'][] = 'wp_before_execute_ability';
+        do_action('wp_before_execute_ability', $name, $input);
+        array_pop($GLOBALS['wp_current_filter']);
+        $run = static function () use ($name, $input, $callback): mixed {
+            $GLOBALS['abCallbackRuns'][] = $name;
+            return $callback($input);
+        };
+        if ($core === '6.9') {
+            return $run();
+        }
+        try {
+            return $run();
+        } catch (Throwable $e) {
+            return new WP_Error('ability_callback_exception', sprintf('Ability "%1$s" callback threw an exception: %2$s', $name, $e->getMessage()));
+        }
+    });
+    return $ability;
 }

@@ -10,13 +10,18 @@
  * finds when it runs and would find none if it ran first. A file that loaded is not added again,
  * and nor is htmx when the page already carries it under its handle (`htmxId`).
  * A host calls mountPanel() again only after a mount that failed; a mounted chat it shows and
- * hides (the sidebar moves it as well, and editor.ts says why), so a turn in flight is never
+ * hides (the sidebar moves it as well, and editor-start.ts says why), so a turn in flight is never
  * re-rendered.
  */
 import { fromHtml } from './dom.ts';
 
-/** What Admin\Assets::mount() localises; `title` is the chat's name, for a host that titles the panel it mounts the chat in. */
-export interface MountSettings { panel: string; prefs: string; htmx: string; htmxId: string; chat: string; css: string; title: string; failed: string }
+/**
+ * What Admin\Assets::mount() localises; `title` is the chat's name, for a host that titles the
+ * panel it mounts the chat in. `conversation` is the editor sidebar's alone
+ * (Admin\Drawer::enqueueEditor()): the conversation the drawer remembers, which the drawer reads
+ * off its own element instead.
+ */
+export interface MountSettings { panel: string; prefs: string; htmx: string; htmxId: string; chat: string; css: string; title: string; failed: string; conversation?: string }
 
 declare global {
   interface Window { alpacaBotMount?: MountSettings }
@@ -68,8 +73,8 @@ export function withQuery(base: string, query: Record<string, string>): string {
  * The query every fetch of GET /view/panel into `host` carries: the conversation to open, and
  * what the composer's context chips name, off the host's data attributes: the ones
  * Admin\Drawer::footer() prints on the drawer element (the post on the classic editor, the
- * screen's id and page title), or the post editor.ts sets on the sidebar's. An element without
- * them asks for no chips.
+ * screen's id and page title), or the post editor-start.ts sets on the sidebar's. An element
+ * without them asks for no chips.
  */
 export function panelQuery(host: HTMLElement, conversation: string): Record<string, string> {
   return {
@@ -109,6 +114,73 @@ export async function mountPanel(host: HTMLElement, cfg: MountSettings, nonce: s
     host.textContent = cfg.failed;
     throw e;
   }
+}
+
+/**
+ * The user's drawer preferences, to POST /view/drawer (`cfg.prefs`): whether the drawer is open,
+ * and the conversation last shown. Fire and forget: a preference that fails to save is not worth
+ * a notice over the chat. It answers the response's status, or 0 when there was none (a network
+ * error), and never rejects, so a caller that ignores it is left no unhandled rejection;
+ * rememberConversation() is the one that reads it.
+ */
+export function savePrefs(cfg: MountSettings, nonce: string, body: { open?: boolean; conversation_id?: number }): Promise<number> {
+  return fetch(cfg.prefs, {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { 'X-WP-Nonce': nonce, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  }).then((res) => res.status, () => 0);
+}
+
+/**
+ * The conversation `host` shows, remembered for the user: the drawer's, and the editor sidebar's,
+ * which share the one memory (Kanboard #4527), so either reopens on the conversation last shown in
+ * either. It is set on each `ab:conversation` the chat announces from inside the host
+ * (resources/ts/boot.ts: a turn's `start` and `done` frames, and each htmx swap inside the chat,
+ * which re-announces the transcript shown: a switch in the history select, a model change, the
+ * history's refresh after a turn) and on the id the returned function is called with (the host's
+ * New chat, with 0).
+ *
+ * The rule across tabs is that the last activity wins (Kanboard #4693): whichever tab last
+ * announced a conversation owns the memory, since that is where the user was last. So a write is
+ * skipped only when it is the value this tab last wrote, which before its first write is nothing,
+ * and never because it is the host's `data-conversation`. That attribute starts at what the page
+ * was printed with (Admin\Drawer::footer() for the drawer, `alpacaBotMount.conversation` for the
+ * sidebar), which another tab may have moved the memory on from since: tab A loads on 5, tab B
+ * moves to 7, and tab A's turns in 5 must still write 5, or the next screen opens 7. Each tab
+ * then writes once for its first announcement and once per change of what it shows, however
+ * many times a turn announces the same id. A mount or an open announces nothing (the chat bundle
+ * binds its listeners after the mount's swap), so it writes no conversation.
+ *
+ * The value counts as written from the moment it is sent, so a turn's `done` that arrives while
+ * its `start`'s write is in flight sends nothing. It is forgotten if that write fails in a way a
+ * retry may mend, a 5xx or no answer at all (a network error), so the next announcement of it
+ * tries again, but only when that write is still the latest this tab sent: an earlier write that
+ * fails after a later one was sent forgets nothing, even when both were of the same id (5, 8, 5).
+ * A 4xx is not retried, since it would be refused again (a nonce the server no longer takes, a
+ * capability filter on the route): the tab counts it as written, and writes again only when what
+ * it shows changes, so a route that keeps refusing costs one POST per change and not one per
+ * announcement. `data-conversation` still means the conversation the host shows, updated on every
+ * announcement, written or not: a mount that failed is tried again on it. The drawer's open flag
+ * is not touched.
+ */
+export function rememberConversation(host: HTMLElement, cfg: MountSettings, nonce: () => string): (id: number) => void {
+  let written: number | null = null;
+  // Counts the writes sent, so a failure can tell whether its write is still the latest.
+  let sends = 0;
+  function remember(id: number): void {
+    host.dataset.conversation = String(id);
+    if (id === written) return;
+    written = id;
+    const send = ++sends;
+    void savePrefs(cfg, nonce(), { conversation_id: id }).then((status) => {
+      if (send === sends && (status === 0 || status >= 500)) written = null;
+    });
+  }
+  document.addEventListener('ab:conversation', (e) => {
+    if (host.contains(e.target as Node)) remember((e as CustomEvent<{ id: number }>).detail.id);
+  });
+  return remember;
 }
 
 /**
@@ -159,7 +231,7 @@ export async function newChat(host: HTMLElement, cfg: MountSettings, nonce: stri
  * The post chip for the host's post (`data-post`, panelQuery()), taken from a fresh GET
  * /view/panel into the composer the chat already has, for a chat mounted before its post could
  * have one: the editor sidebar on a new post, whose auto-draft gets no chip until it is first
- * saved or autosaved (resources/ts/editor.ts). The chip is the server's whole: its label, its
+ * saved or autosaved (resources/ts/editor-start.ts). The chip is the server's whole: its label, its
  * hidden field and its escaping are View\Chat\Composer's, and whether there is one at all is
  * View\Chat\Shell's rule, so a post the user may not edit, or one still an auto-draft, comes back
  * with none and none is added. It goes first in the chips row, where Composer puts it, and a
@@ -168,7 +240,7 @@ export async function newChat(host: HTMLElement, cfg: MountSettings, nonce: stri
  * Answers whether the composer has a post chip now: true without a request when it has one
  * already, true without adding one when one arrived while it asked (a New chat whose fragment had
  * one, newChat()), false when the fragment was refused or had none. A request that fails outright
- * (a network error) rejects, as fetch() does; editor.ts, its caller, logs that and asks again
+ * (a network error) rejects, as fetch() does; editor-start.ts, its caller, logs that and asks again
  * after the next save.
  */
 export async function postChip(host: HTMLElement, cfg: MountSettings, nonce: string): Promise<boolean> {

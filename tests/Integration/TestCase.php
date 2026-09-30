@@ -48,6 +48,18 @@ abstract class TestCase extends \WP_UnitTestCase
     /** What the plugin's own ClientFactory answers in this suite (bootstrap.php, the MCP guard). */
     public const OFFLINE_MCP = 'The integration suite connects to no MCP server: hand this test a ClientFactory with a builder of its own.';
 
+    /**
+     * The provider key as stored since Kanboard #4384: the settings row carries Schema::MASK and
+     * the key is in Settings\ProviderKey's option, or the row carries '' and there is no such
+     * option. `$row` is a settings row read with get_option().
+     */
+    protected function assertStoredProviderKey(string $expected, mixed $row): void
+    {
+        $this->assertIsArray($row);
+        $this->assertSame($expected === '' ? '' : Schema::MASK, $row['provider.api_key'] ?? null, 'the row carries the mask or nothing, never the key');
+        $this->assertSame($expected === '' ? false : $expected, get_option(\AlpacaBot\Settings\ProviderKey::OPTION), 'the key option holds the key, or is gone');
+    }
+
     public function set_up(): void
     {
         parent::set_up();

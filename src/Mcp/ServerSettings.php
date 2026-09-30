@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace AlpacaBot\Mcp;
 
 use AlpacaBot\Plugin;
+use AlpacaBot\Settings\Origin;
 use AlpacaBot\Settings\Schema;
 use AlpacaBot\Toolkit\AddressRefused;
 
@@ -27,9 +28,9 @@ use AlpacaBot\Toolkit\AddressRefused;
  * - a server is new when the stored list has no row with its id, and a new server's MASK keeps
  *   nothing, so a row that does not bring a stored server's id cannot pick up that server's value
  *   (Schema::sanitize() never gives a row without an id one the stored list holds);
- * - a stored server whose URL now has another scheme, host or port (moved()) keeps nothing
- *   either. The `settings.write` row can be lowered below `manage_options`, and a user who
- *   may write the settings but not reveal them could otherwise post a stored id, a URL of their
+ * - a stored server whose URL now has another scheme, host or port (Settings\Origin::moved())
+ *   keeps nothing either. The `settings.write` row can be lowered below `manage_options`, and a
+ *   user who may write the settings but not reveal them could otherwise post a stored id, a URL of their
  *   own and the mask, and have the stored token sent to their host. A path is not part of it, so
  *   an administrator moving an endpoint on the same host keeps the value; moving host means
  *   typing it again. clearedByMove() names the servers this is about to happen to, for a writer
@@ -40,14 +41,15 @@ use AlpacaBot\Toolkit\AddressRefused;
  *
  * refusals() is the address check, and it is deliberately not in the filter: it resolves a host,
  * and a writer that has somewhere to put an error should be told rather than silently lose a row.
- * The REST route (Rest\SettingsController::update()) answers a 400 and writes nothing; the
- * settings page's sanitize callback (Admin\SettingsPage) keeps the stored row for a refused edit,
- * drops a refused new row, and says which address and why. `wp alpaca-bot settings` writes through
- * Store and gets no check at all, and nor does anything else that writes the option. Mcp\Egress
- * checks the address again whenever it builds a client, and pins the connection to what it
- * checked: the ClientFactory the plugin constructs (for Mcp\Discovery and Mcp\Toolkits) builds
- * every MCP client through it, so a row that skipped this check still meets that one before
- * anything is sent. The check is AddressCheck::resolve(), which does not let the site's own host
+ * The REST route (Rest\SettingsController::update()) and `wp alpaca-bot settings`
+ * (Cli\ChatCommand::settings()) run it through check(), with the check for rows the schema would
+ * drop, and refuse the write whole: a 400, or an error and a non-zero exit, and nothing written.
+ * The settings page's sanitize callback (Admin\SettingsPage) keeps the stored row for a refused
+ * edit, drops a refused new row, and says which address and why. Anything else that writes the
+ * option gets no check at all. Mcp\Egress checks the address again whenever it builds a client,
+ * and pins the connection to what it checked: the ClientFactory the plugin constructs (for
+ * Mcp\Discovery and Mcp\Toolkits) builds every MCP client through it, so a row that skipped this
+ * check still meets that one before anything is sent. The check is AddressCheck::resolve(), which does not let the site's own host
  * through (AddressCheck says why).
  *
  * @since 0.6.0
@@ -58,7 +60,7 @@ final class ServerSettings
     private \Closure $resolve;
 
     /**
-     * URLs that passed the check since the option was last written or a PUT was refused. Core's
+     * URLs that passed the check since the option was last written or check() refused a write. Core's
      * add_option() runs the settings page's sanitize callback a second time on a site's first
      * save, with nothing stored yet, so every row reads as new there; this is what keeps that
      * second pass from looking each host up again, and from refusing a row whose value
@@ -66,7 +68,7 @@ final class ServerSettings
      *
      * forgetPassed() empties it: on `update_option_alpaca_bot_settings` and
      * `add_option_alpaca_bot_settings`, which core fires once the row is written (after that second
-     * pass), and when the REST route refuses a PUT for an address, which writes nothing. So a URL
+     * pass), and when check() refuses a write for an address, which writes nothing. So a URL
      * is not taken as passed by a later save that the same process makes, which may run after the
      * site's opt-in or the DNS answer has changed. A save that ends up changing nothing fires
      * neither action (update_option() returns before them), and what it looked up stays until the
@@ -159,6 +161,86 @@ final class ServerSettings
     }
 
     /**
+     * The check a writer that stores nothing on a refusal runs before it writes
+     * `toolkits.mcp_servers`: the REST route (Rest\SettingsController::update()) and
+     * `wp alpaca-bot settings` (Cli\ChatCommand::settings()). `$posted` is the list as the writer
+     * was handed it and `$stored` the stored `toolkits.mcp_servers`. Two refusals, in this order:
+     * - `alpaca_bot_mcp_row`: a row the schema would drop (Schema::droppedMcpRows()) that names a
+     *   stored server's id, or that is new and has a URL (droppedRows()). The message names each
+     *   such row, by its URL without any user name or password, or as `row N` when it has none,
+     *   and says why; `data` carries `rows`.
+     * - `alpaca_bot_mcp_address`: a row whose URL is new or changed fails the address check
+     *   (refusals()), each row checked under the id Schema::sanitizeMcpServers() gives it. The
+     *   message names each refused URL and why. What passed on the way is forgotten
+     *   (forgetPassed()), since no write follows to fire the action that would.
+     * Otherwise it passes, carrying clearedByMove()'s ids for the rows the write will store.
+     */
+    public function check(#[\SensitiveParameter] mixed $posted, mixed $stored): WriteCheck
+    {
+        $dropped = self::droppedRows($posted, $stored);
+        if ($dropped !== []) {
+            $lines = [];
+            foreach ($dropped as $row) {
+                /* translators: %s: the row's index in the posted list */
+                $name = $row['url'] === '' ? sprintf(__('row %s', 'alpaca-bot'), $row['index']) : $row['url'];
+                /* translators: 1: an MCP server's URL, or which row it is, 2: why the row cannot be kept */
+                $lines[] = sprintf(__('%1$s: %2$s', 'alpaca-bot'), $name, $row['reason']);
+            }
+            return WriteCheck::refused('alpaca_bot_mcp_row', __('Nothing was saved: an MCP server row could not be kept.', 'alpaca-bot') . ' ' . implode(' ', $lines), ['rows' => $dropped]);
+        }
+        $rows = Schema::sanitizeMcpServers($posted, $stored);
+        $refused = $this->refusals($rows, $stored);
+        if ($refused !== []) {
+            $this->forgetPassed();
+            $reasons = [];
+            foreach ($refused as $i => $reason) {
+                /* translators: 1: an MCP server's URL, 2: why its address was refused */
+                $reasons[] = sprintf(__('%1$s: %2$s', 'alpaca-bot'), $rows[$i]['url'], $reason);
+            }
+            return WriteCheck::refused('alpaca_bot_mcp_address', __('Nothing was saved: an MCP server\'s address did not pass the check.', 'alpaca-bot') . ' ' . implode(' ', $reasons));
+        }
+        return WriteCheck::passed($this->clearedByMove($rows, $stored));
+    }
+
+    /**
+     * The rows of a posted `toolkits.mcp_servers` that the schema would drop and that a write must
+     * not lose quietly: one that names a stored server's id, and a new one with a URL. A row whose
+     * `remove` is ticked, and a blank row, are not among them (Schema::droppedMcpRows()). Each is
+     * `{index, id, url, reason}`: its key in the posted list, the id it posted when that is a
+     * string, the URL it posted with any user name and password taken out
+     * (Schema::withoutUserinfo()), so a refused credential is not answered back, and why. The
+     * header value is not read.
+     *
+     * @return list<array{index: array-key, id: string|null, url: string, reason: string}>
+     */
+    private static function droppedRows(#[\SensitiveParameter] mixed $raw, mixed $stored): array
+    {
+        $storedIds = Schema::serverIds($stored);
+        $out = [];
+        foreach (Schema::droppedMcpRows($raw) as $key => $fault) {
+            /** @var array<array-key, mixed> $row droppedMcpRows() lists arrays only */
+            $row = is_array($raw) ? $raw[$key] : [];
+            $id = is_string($row['id'] ?? null) ? $row['id'] : null;
+            $url = is_string($row['url'] ?? null) ? Schema::withoutUserinfo($row['url']) : '';
+            if (!in_array($id, $storedIds, true) && trim($url) === '') {
+                continue;
+            }
+            $prefix = is_string($row['prefix'] ?? null) ? $row['prefix'] : '';
+            $out[] = ['index' => $key, 'id' => $id, 'url' => $url, 'reason' => match ($fault) {
+                'url' => __('the URL has to be https with a host.', 'alpaca-bot'),
+                'userinfo' => __('the URL may not carry a user name or password; send a credential as the header value, which reads back masked.', 'alpaca-bot'),
+                /* translators: %s: what a header name has to be (Schema::mcpHeaderNameRule()) */
+                'header' => sprintf(__('the header name has to be %s.', 'alpaca-bot'), Schema::mcpHeaderNameRule()),
+                /* translators: %s: what a prefix has to be (Schema::mcpPrefixRule()) */
+                'prefix' => sprintf(__('the prefix has to be %s.', 'alpaca-bot'), Schema::mcpPrefixRule()),
+                /* translators: %s: a tool-name prefix */
+                'taken' => sprintf(__('the prefix %s is already used by an earlier row of this request.', 'alpaca-bot'), $prefix),
+            }];
+        }
+        return $out;
+    }
+
+    /**
      * The ids of the rows in `$rows` whose posted header value is the mask (or not a string, which
      * reads the same), whose URL has another scheme, host or port than the stored row of that id,
      * and for which Secrets holds a value: the servers beforeSave() is about to take a value from.
@@ -178,7 +260,7 @@ final class ServerSettings
                 continue;
             }
             $posted = $row['header_value'] ?? '';
-            if (($posted === Schema::MASK || !is_string($posted)) && self::moved($urls[$row['id']], is_string($row['url'] ?? null) ? $row['url'] : '')) {
+            if (($posted === Schema::MASK || !is_string($posted)) && Origin::moved($urls[$row['id']], is_string($row['url'] ?? null) ? $row['url'] : '')) {
                 $out[] = $row['id'];
             }
         }
@@ -190,7 +272,7 @@ final class ServerSettings
      * changed against the row of the same id in `$stored`. A URL the stored list already has
      * under that id is not looked up again, so saving another tab costs no lookup; whether that
      * address still passes is Egress's question when it builds a client. Nor is a URL that
-     * passed since the option was last written or a PUT was refused (`$passed`).
+     * passed since the option was last written or check() refused a write (`$passed`).
      *
      * `$rows` are rows Schema::sanitizeMcpServers() made, so each URL is https with a host; the
      * host is handed to the check as wp_parse_url() gives it, brackets and all for an IPv6
@@ -235,29 +317,6 @@ final class ServerSettings
             }
         }
         return $urls;
-    }
-
-    /**
-     * Whether `$to` is another origin than `$from`: scheme, host or port. Scheme and host are
-     * compared lowercase and the host without the dots a name may end in, as Egress reads it; a
-     * port left out is the scheme's own (443 for https, 80 for http), so `:443` written out is
-     * the same origin. A URL that does not parse has no origin, and is another one.
-     */
-    private static function moved(string $from, string $to): bool
-    {
-        return self::origin($from) === null || self::origin($from) !== self::origin($to);
-    }
-
-    /** `scheme://host:port` of `$url`, normalised as moved() says, or null when it has no scheme or host. */
-    private static function origin(string $url): ?string
-    {
-        $scheme = strtolower((string) wp_parse_url($url, PHP_URL_SCHEME));
-        $host = strtolower(trim((string) wp_parse_url($url, PHP_URL_HOST), '.'));
-        if ($scheme === '' || $host === '') {
-            return null;
-        }
-        $port = wp_parse_url($url, PHP_URL_PORT);
-        return $scheme . '://' . $host . ':' . (is_int($port) ? $port : ($scheme === 'https' ? 443 : 80));
     }
 
     /**

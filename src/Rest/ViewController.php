@@ -55,7 +55,8 @@ use AlpacaBot\View\Settings\McpTools;
  *   of the user's conversations or a new chat, as the chat screen answers `?conversation=`, with
  *   the post and the screen as the composer's context chips.
  * - `POST /view/drawer {open, conversation_id}`: stores what the admin-wide drawer shows
- *   (Admin\Drawer) and answers an empty fragment.
+ *   (Admin\Drawer), and the conversation the block editor's sidebar shows, which shares it
+ *   (Kanboard #4527), and answers an empty fragment.
  * - `GET /view/mcp-tools/{id}?index=`: a stored MCP server's tools as the settings form's
  *   approval list (View\Settings\McpTools), declared only when the controller was handed a
  *   Mcp\Discovery, which Plugin::controllers() does.

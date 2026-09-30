@@ -167,8 +167,12 @@ it('keeps a stored secret when handed the mask, clears it on an empty string, re
         ->and(Schema::sanitize(['provider.api_key' => ' sk-new '], $stored)['provider.api_key'])->toBe('sk-new')
         // Absent keeps what is stored, as for any field: only '' clears.
         ->and(Schema::sanitize([], $stored)['provider.api_key'])->toBe('sk-stored')
-        // The mask over nothing stored is nothing stored, never the literal mask.
-        ->and(Schema::sanitize(['provider.api_key' => Schema::MASK], [])['provider.api_key'])->toBe('');
+        // The mask over nothing stored stays the mask: the key is kept out of the row
+        // (Settings\ProviderKey), so "nothing stored here" is not "no key", and a site's first
+        // save sanitizes the row a second time after the key has been lifted out of it. The
+        // filter that lifts it writes '' when nothing is held, and ProviderKey::resolve() never
+        // answers the mask as a key.
+        ->and(Schema::sanitize(['provider.api_key' => Schema::MASK], [])['provider.api_key'])->toBe(Schema::MASK);
 });
 
 it('keeps a stored secret when handed anything that is not a string, rather than clearing it', function (): void {
@@ -179,6 +183,63 @@ it('keeps a stored secret when handed anything that is not a string, rather than
     // With nothing stored there is nothing to keep, and a non-string is still not a key.
     expect(Schema::sanitize(['provider.api_key' => null], [])['provider.api_key'])->toBe('')
         ->and(Schema::sanitize(['provider.api_key' => null], ['provider.api_key' => 7])['provider.api_key'])->toBe('');
+});
+
+// #4539, ruling T4-a: the stored API key does not follow provider.base_url to another scheme,
+// host or port. A writer the `settings.write` row admits could otherwise point the URL at their
+// own host, send the key back as the mask (or leave it out) and receive it on the next turn.
+// Keep (MASK, left out, not a string) does not survive a move; a new key sent with it does.
+it('clears the stored key when the base URL moves to another origin and the write only keeps it', function (array $input): void {
+    $stored = ['provider.api_key' => 'sk-FAKE-stored', 'provider.base_url' => 'https://openrouter.ai/api/v1'];
+    expect(Schema::providerKeyClearedByMove($input, $stored))->toBeTrue()
+        ->and(Schema::sanitize($input, $stored)['provider.api_key'])->toBe('');
+})->with([
+    'host changed, mask sent' => [['provider.base_url' => 'https://steal.example.net/api/v1', 'provider.api_key' => Schema::MASK]],
+    'host changed, key left out' => [['provider.base_url' => 'https://steal.example.net/api/v1']],
+    'host changed, key not a string' => [['provider.base_url' => 'https://steal.example.net/api/v1', 'provider.api_key' => null]],
+    'port changed' => [['provider.base_url' => 'https://openrouter.ai:8443/api/v1', 'provider.api_key' => Schema::MASK]],
+    'scheme changed' => [['provider.base_url' => 'http://openrouter.ai/api/v1', 'provider.api_key' => Schema::MASK]],
+    // sanitizeUrl() stores the default for an empty URL, and the default is another origin.
+    'emptied, so the default' => [['provider.base_url' => '', 'provider.api_key' => Schema::MASK]],
+]);
+
+it('keeps the stored key when the base URL keeps its origin, or is not sent', function (array $input): void {
+    $stored = ['provider.api_key' => 'sk-FAKE-stored', 'provider.base_url' => 'https://openrouter.ai/api/v1'];
+    expect(Schema::providerKeyClearedByMove($input, $stored))->toBeFalse()
+        ->and(Schema::sanitize($input, $stored)['provider.api_key'])->toBe('sk-FAKE-stored');
+})->with([
+    'no URL sent, mask sent' => [['provider.api_key' => Schema::MASK]],
+    'same URL, mask sent' => [['provider.base_url' => 'https://openrouter.ai/api/v1', 'provider.api_key' => Schema::MASK]],
+    'only the path and query changed' => [['provider.base_url' => 'https://openrouter.ai/v2?x=1', 'provider.api_key' => Schema::MASK]],
+    'default port written out, capitals, trailing slash' => [['provider.base_url' => 'https://OpenRouter.AI:443/api/v1/']],
+]);
+
+it('stores a new key sent with the move, and says nothing was cleared', function (): void {
+    $stored = ['provider.api_key' => 'sk-FAKE-stored', 'provider.base_url' => 'https://openrouter.ai/api/v1'];
+    $input = ['provider.base_url' => 'https://api.example.net/v1', 'provider.api_key' => 'sk-FAKE-new'];
+    expect(Schema::providerKeyClearedByMove($input, $stored))->toBeFalse()
+        ->and(Schema::sanitize($input, $stored))->toMatchArray(['provider.base_url' => 'https://api.example.net/v1', 'provider.api_key' => 'sk-FAKE-new']);
+});
+
+// Nothing to lose is nothing cleared: the notices name a key that was there, and '' is the
+// writer's own "clear", not the move's.
+it('names no clearing when no key is stored, or when the write clears the key itself', function (): void {
+    $move = ['provider.base_url' => 'https://steal.example.net/v1', 'provider.api_key' => Schema::MASK];
+    expect(Schema::providerKeyClearedByMove($move, ['provider.base_url' => 'https://openrouter.ai/api/v1']))->toBeFalse()
+        ->and(Schema::providerKeyClearedByMove($move, ['provider.api_key' => '', 'provider.base_url' => 'https://openrouter.ai/api/v1']))->toBeFalse()
+        ->and(Schema::providerKeyClearedByMove(['provider.api_key' => ''] + $move, ['provider.api_key' => 'sk-FAKE-stored', 'provider.base_url' => 'https://openrouter.ai/api/v1']))->toBeFalse();
+});
+
+// The stored URL is compared as it is held, and an array without one is on the default, as
+// Store::all() and the stored row read it.
+it('compares against the default URL when nothing is stored for it', function (): void {
+    $stored = ['provider.api_key' => 'sk-FAKE-stored'];
+    expect(Schema::providerKeyClearedByMove(['provider.base_url' => 'http://localhost:11434/other'], $stored))->toBeFalse()
+        ->and(Schema::providerKeyClearedByMove(['provider.base_url' => 'http://ollama.example.net:11434/v1'], $stored))->toBeTrue()
+        // The URL compared is the one sanitize() would store: '' stores the default, which is
+        // where this site already is, so nothing moved.
+        ->and(Schema::providerKeyClearedByMove(['provider.base_url' => ''], $stored))->toBeFalse()
+        ->and(Schema::sanitize(['provider.base_url' => ''], $stored)['provider.api_key'])->toBe('sk-FAKE-stored');
 });
 
 it('clamps per-model overrides to the same bounds as the global fields', function (): void {
@@ -524,7 +585,7 @@ it('tells an administrator the URL is not a secret and a custom header takes the
 // calls reuse the client its listing built, so the check is not run per request (R28-11).
 it('tells an administrator the address is checked at save and again each time a connection is built', function (): void {
     expect(Schema::fields()['toolkits.mcp_servers']['description'])
-        ->toContain('The address is checked when it is saved from this screen or over the REST API, and again each time Alpaca Bot builds a connection to it: on Discover tools, and on a chat turn that lists its tools.')
+        ->toContain('The address is checked when it is saved from this screen, over the REST API or with wp alpaca-bot settings, and again each time Alpaca Bot builds a connection to it: on Discover tools, and on a chat turn that lists its tools.')
         ->not->toContain('each time Alpaca Bot connects');
 });
 

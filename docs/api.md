@@ -144,9 +144,14 @@ it is no longer applied, and the schema route asks `settings/read` with the rest
 These filters are not only called to authorise a request. The **Settings › Access** tab (section 7)
 asks some of them to show under a row whether code has moved it: `alpaca_bot/capability/settings`
 and `alpaca_bot/capability/settings/read` or `…/write` with a `GET` or `PUT /settings` request,
-and `alpaca_bot/capability/chat` with a `POST /chat` request. The tab builds those requests
-itself; no client sent them and they authorise nothing, so a filter that logs or counts what it
-is handed sees them too.
+and, for the Chat row, the key of every route that follows that row, once per key and verb, with a
+request of that verb and the path of the first route declaring it (`POST /chat`,
+`GET /chat/{id}/stream` with the placeholder as written, `GET /conversations` and
+`DELETE /conversations`, and so on), so a filter that answers by verb, as the example below does,
+gets a note for the verb it moved. The routes are read off the controllers
+`alpaca_bot/rest/controllers` returns, so the tab applies that filter too. The tab builds those
+requests itself; no client sent them and they authorise nothing, so a filter that logs or counts
+what it is handed sees them too.
 
 ```php
 // Let Authors chat and read their own history, but keep settings to administrators.
@@ -486,6 +491,14 @@ Rules worth knowing before you write:
   is not a string at all (`null`, an array) keeps the stored key too, and the reply shows the
   mask so you can see it did. A PUT never reveals the key, whatever its body says.
 
+  The key belongs to the server it was set for. A PUT that moves `provider.base_url` to another
+  scheme, host or port clears the stored key unless the same PUT sends a new one: the mask, a
+  value that is not a string, and leaving the key out all mean "keep", and "keep" does not
+  survive the move. A new path or query on the same scheme, host and port keeps it. When a key was
+  cleared that way the reply carries `X-Alpaca-Bot-Cleared: provider.api_key`, and the key reads
+  `""`. `wp alpaca-bot settings provider.base_url …` does the same and prints a warning, so set
+  the URL first and the key after it.
+
   ```
   $ curl -s -u "admin:$PW" -H 'Content-Type: application/json' -X PUT -d '{"provider.api_key": "sk-test-1234"}' "$B/settings" | jq -c '{"provider.api_key"}'
   {"provider.api_key": "••••"}
@@ -621,7 +634,7 @@ callables are left out. Three of the fields:
 
 ```
 $ curl -s -u "admin:$PW" "$B/settings/schema"
-{"sections":{"provider":{"label":"Provider","description":"Where models run. Ollama by default; WordPress AI providers when WordPress 7.0+ has them registered."}, …},"fields":{"provider.api_key":{"type":"string","default":"","section":"provider","label":"API key","description":"Optional. Sent as a Bearer token.","secret":true},"models.temperature":{"type":"number","default":0.7,"section":"models","label":"Temperature","min":0,"max":2},"privacy.usage_retention_days":{"type":"integer","default":90,"section":"privacy","label":"Keep usage receipts for (days)","description":"A daily cleanup deletes receipts older than this. 0 keeps them forever; 3650 (ten years) is the most, and a larger number is stored as 3650. Conversations are never touched. A receipt is counted toward the caps until its month ends, so keep this at 31 or more while a cap is set.","min":0,"max":3650}, …},"mask":"••••"}
+{"sections":{"provider":{"label":"Provider","description":"Where models run. Ollama by default; WordPress AI providers when WordPress 7.0+ has them registered."}, …},"fields":{"provider.api_key":{"type":"string","default":"","section":"provider","label":"API key","description":"Optional. Sent as a Bearer token. Changing the Base URL to another host, port or scheme clears it, so it is not sent to a server it was not set for; enter it again in the same save.","secret":true},"models.temperature":{"type":"number","default":0.7,"section":"models","label":"Temperature","min":0,"max":2},"privacy.usage_retention_days":{"type":"integer","default":90,"section":"privacy","label":"Keep usage receipts for (days)","description":"A daily cleanup deletes receipts older than this. 0 keeps them forever; 3650 (ten years) is the most, and a larger number is stored as 3650. Conversations are never touched. A receipt is counted toward the caps until its month ends, so keep this at 31 or more while a cap is set.","min":0,"max":3650}, …},"mask":"••••"}
 ```
 
 ### `GET /usage`
@@ -651,8 +664,8 @@ total is. Both are `SettingsRoutesTest::test_usage_route_reports_the_month`.
 
 The chat screen (section 7) is server-rendered, and these routes render its pieces again on
 demand: htmx swaps the selects, the screen's script asks for the bubbles, and `/view/panel`
-renders the whole chat for the admin-wide drawer, whose state `/view/drawer` stores, and for
-the block editor's sidebar; `/view/mcp-tools` renders one MCP server's approval list for the
+renders the whole chat for the admin-wide drawer and for the block editor's sidebar, whose
+state `/view/drawer` stores; `/view/mcp-tools` renders one MCP server's approval list for the
 settings page's Tools tab. They are for the plugin's own screens. A client
 that wants data reads the JSON routes above; these answer HTML, escaped where
 it is built, under `Content-Type: text/html; charset=utf-8` and an `X-Alpaca-Bot-View: 1`
@@ -667,7 +680,7 @@ header. An error is still core's JSON error shape.
 | `GET /view/bubble` | An empty bubble for the screen to stream into | `role` (`user`\|`assistant`, default `assistant`), `streaming` (boolean: a polite live region) |
 | `POST /view/bubble` | A finished bubble, an assistant's content rendered as markdown; a user turn with its images is the optimistic bubble the screen shows while the turn runs | `role` (required), `content`, `model`, `usage` (`{prompt_tokens, completion_tokens}` or null), `duration_ms`, `images` (array of `data:` URLs; a user turn only), `tool_calls` (the reply's `meta.tool_calls`; the receipt ends `· 2 tools`) |
 | `GET /view/panel` | The whole chat (header, transcript and composer) in the drawer's panel, with its close button, which the block editor's sidebar hides in favour of its own | `conversation_id`: one of your own to open; 0, a missing one or anyone else's is a new chat, as `?conversation=` is on the chat screen. `post_id`: the post being edited, rendered as the composer's post chip when you may edit it and it is not an `auto-draft`, as `&post=` is on the chat screen. `screen_id` and `screen_title`: the screen's id and page title, cleaned as `POST /chat` cleans `context.screen` and rendered as the composer's screen chip; either one empty, or cleaned to nothing, is no chip. A chip's hidden fields are what the chat bundle sends as `context` |
-| `POST /view/drawer` | Nothing (an empty fragment); stores what the admin-wide drawer shows for you, as user meta `alpaca_bot_drawer_open` and `alpaca_bot_drawer_conversation` | `open` (boolean), `conversation_id` (integer, 0 or more). A parameter you leave out is left as it was; the conversation is not checked here, and one that is not yours opens as a new chat when `/view/panel` is asked for it |
+| `POST /view/drawer` | Nothing (an empty fragment); stores what the admin-wide drawer shows for you, as user meta `alpaca_bot_drawer_open` and `alpaca_bot_drawer_conversation`. The block editor's sidebar writes the conversation too, never `open`, so the two reopen on the conversation last shown in either. Across tabs the last activity wins: each tab writes the conversation the first time its chat announces one and again whenever that changes, and never merely because the drawer or the sidebar was opened. The chat announces it on a turn and a switch in the history, and on anything else that re-renders part of the chat, such as a model change or the history's refresh after a turn, so any of those can write, and the host writes 0 on **New chat**. A write the server refuses (a 4xx) is not retried until the conversation changes; one that fails with a 5xx or never arrives is tried again on the next announcement. So the next screen opens where you last were even when another tab had moved the memory on since this one loaded | `open` (boolean), `conversation_id` (integer, 0 or more). A parameter you leave out is left as it was; the conversation is not checked here, and one that is not yours opens as a new chat when `/view/panel` is asked for it |
 | `GET /view/mcp-tools/{id}` | The tools the stored MCP server `{id}` lists, as the Tools tab's approval list: a checkbox per tool whose value is the fingerprint of the definition shown, ticked when the tool is approved at that fingerprint, or new and not annotated `destructiveHint: true`; a tool approved at another fingerprint is marked "changed since approval: review" and starts clear. Under each tool its input schema, pretty-printed, with every character outside ASCII as its `\uXXXX` escape, cut at 4000 characters of that text, HTML-escaped, in a collapsed `<details>`. The name, title, description and schema are HTML-escaped with every `&` encoded again, so an entity the server wrote, such as `&#x202E;`, shows as its letters and not as the character it spells. A tool whose name a save could not keep, or whose name the listing repeats, is listed with no checkbox and a line saying why. Listing the server rewrites or clears its drift marker (below). `manage_options`, asked again by the callback whatever `alpaca_bot/capability/view/mcp-tools` answers, and rate limited in the `chat` bucket. 404 for an id the settings do not hold. A server that cannot be listed answers 200 with an error notice (the reason, escaped, with the server's header value, and the credential after its scheme word, replaced by `••••` where either is 8 characters or more, cut to 500 characters) and what the approvals cell held: a hidden input per stored approval, how many there are, and the "changed since approval: review" line for the approved tools the drift marker names | `index` (integer, 0 or more, default 0): the server's row on the Tools tab, which decides the names the checkboxes post under, `alpaca_bot_settings[toolkits.mcp_servers][<index>][approved][<tool>]` |
 
 Saving the Tools tab with those boxes is the approval: a ticked box pins its tool to the
@@ -1013,7 +1026,11 @@ library itself.
 In the block editor, on a post's screen, the same `GET /view/panel` fragment is mounted in a
 `PluginSidebar` instead, which the editor opens from the Alpaca Bot button in its top bar, with
 `post_id` taken from `core/editor`, so a turn started there carries the post being edited. It
-starts on a new chat. It is fetched the first time the sidebar is opened, and closing the sidebar
+opens on the conversation you last had open in the drawer or the sidebar: the two share the
+drawer's `alpaca_bot_drawer_conversation`, which the sidebar is handed on the page and writes
+through `POST /view/drawer` as the drawer does: the first time its chat announces a conversation,
+and whenever the conversation it shows changes (a **New chat** included), so of two tabs the one
+you last used wins. It is fetched the first time the sidebar is opened, and closing the sidebar
 keeps the chat, a turn in flight included. On a new post, which is an `auto-draft` until it is
 first saved or autosaved, the composer shows no post chip; once the editor has saved the post,
 the sidebar fetches `GET /view/panel` for it again and takes only the post chip from it, into the
@@ -1032,9 +1049,10 @@ sidebar, whose chat does not load.
 ## 8. Adding routes
 
 `alpaca_bot/rest/controllers` receives the plugin's `Rest\Controller` instances on
-`rest_api_init`. Append a subclass to register routes in the same namespace with the same
-permission callback, capability filters and (with `'rate_limit' => true`) the same limiter;
-anything that is not a `Rest\Controller` is dropped.
+`rest_api_init`, and when **Settings › Access** lists the routes that follow the Chat row. Append
+a subclass to register routes in the same namespace with the same permission callback,
+capability filters and (with `'rate_limit' => true`) the same limiter; anything that is not a
+`Rest\Controller` is dropped.
 
 ```php
 add_filter('alpaca_bot/rest/controllers', static function (array $controllers): array {

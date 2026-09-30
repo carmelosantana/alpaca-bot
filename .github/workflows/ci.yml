@@ -265,6 +265,17 @@ jobs:
         if: matrix.wp == 'latest'
         run: WPH_MODE=wp-env WP_MULTISITE=1 WP_TESTS_DOMAIN=example.org bash bin/test-integration.sh --group uninstall --fail-on-skipped
 
+      # web_fetch refuses where WordPress would not send a request through cURL, and the runs above
+      # have cURL, where that test group skips. So the no-curl group runs again with curl_init and
+      # curl_exec in disable_functions, the way shared hosts ship PHP: on the latest leg only, since
+      # the refusal does not turn on the core version, and the group alone.
+      # disable_functions because the image's PHP has cURL compiled in, not as a shared extension
+      # that could be left out (bin/test-integration.sh). --fail-on-skipped makes a run where the
+      # functions were still there fail rather than pass.
+      - name: web_fetch without cURL
+        if: matrix.wp == 'latest'
+        run: WPH_MODE=wp-env WP_NO_CURL=1 bash bin/test-integration.sh --group no-curl --fail-on-skipped
+
       - run: pnpm exec playwright install --with-deps chromium
 
       - name: Chat end-to-end smoke test

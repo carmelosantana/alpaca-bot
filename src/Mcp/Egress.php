@@ -4,10 +4,10 @@ declare(strict_types=1);
 
 namespace AlpacaBot\Mcp;
 
+use AlpacaBot\HttpTransport;
 use AlpacaBot\Toolkit\AddressRefused;
 use AlpacaBot\Toolkit\CurlPin;
 use AlpacaBot\Vendor\Symfony\Component\HttpClient\CurlHttpClient;
-use AlpacaBot\Vendor\Symfony\Component\HttpClient\HttpClient;
 use AlpacaBot\Vendor\Symfony\Component\HttpClient\NativeHttpClient;
 use AlpacaBot\Vendor\Symfony\Contracts\HttpClient\HttpClientInterface;
 
@@ -43,14 +43,18 @@ use AlpacaBot\Vendor\Symfony\Contracts\HttpClient\HttpClientInterface;
  *   alone as well. Handing one in is a test's seam; the plugin hands none (Plugin and
  *   ClientFactory build `new Mcp\Egress()`).
  *
- * The client under the pin is HttpClient::create() (vendor-prefixed HttpClient.php:31-66), which
+ * The client under the pin is AlpacaBot\HttpTransport::create(): Symfony's Native client where
+ * its Curl client cannot run or web_fetch's cURL question says no (curl_init or curl_exec missing
+ * or disabled, the answer web_fetch goes by, or any cURL function that client calls; HttpTransport
+ * lists them), and
+ * HttpClient::create() (vendor-prefixed HttpClient.php:31-66) everywhere else, which
  * answers with Curl, Native or Amp. Amp is a candidate only where the unprefixed
  * amphp/http-client classes are loaded (HttpClient.php:14, :33), which the plugin does not ship
- * and another plugin could; it is then chosen over Curl when ext-curl is missing, or when PHP's
- * curl lacks HTTP/2 push or its libcurl HTTP/2 or 7.61 (:34-49), and over Native whenever Curl
- * is not chosen (:60-62). Curl is chosen where ext-curl is loaded, except on Windows with none
- * of `curl.cainfo`, `openssl.cafile` or `openssl.capath` set (:52-55), and Native otherwise.
- * The pin is laid only over the two it can vouch for: anything else create() answers is
+ * and another plugin could; it is then chosen over Curl when PHP's curl lacks HTTP/2 push or its
+ * libcurl HTTP/2 or 7.61 (:38-49), and over Native whenever Curl is not chosen (:60-62). Curl is
+ * chosen where ext-curl is loaded, except on Windows with none of `curl.cainfo`,
+ * `openssl.cafile` or `openssl.capath` set (:52-55), and Native otherwise.
+ * The pin is laid only over the two it can vouch for: anything else that answers is
  * replaced with a new NativeHttpClient, pinned to the first address. Amp's
  * client is not one of them, because its resolver does not hold to the map: resolve() looks the
  * name up for real whenever the pinned address's family is not the one asked for
@@ -71,9 +75,9 @@ final class Egress
 {
     /**
      * @param null|\Closure(string, string): list<string> $resolve   the address check, host and URL in, every checked address out, AddressRefused when refused; AddressCheck::resolve() by default
-     * @param HttpClientInterface|null                    $transport the client the pin is laid over; HttpClient::create() by default, a test hands in Symfony's MockHttpClient
+     * @param HttpClientInterface|null                    $transport the client the pin is laid over; HttpTransport::create() by default, a test hands in Symfony's MockHttpClient
      * @param null|\Closure(): int                        $version   libcurl's version_number, for CurlPin::carried(); the loaded libcurl's by default, a test hands in its own
-     * @param null|\Closure(): HttpClientInterface         $create    where the transport comes from when none is handed in; HttpClient::create() by default, a test hands in its own
+     * @param null|\Closure(): HttpClientInterface         $create    where the transport comes from when none is handed in; HttpTransport::create() by default, a test hands in its own
      */
     public function __construct(
         private ?\Closure $resolve = null,
@@ -103,7 +107,7 @@ final class Egress
         if (wp_parse_url($server->url, PHP_URL_USER) !== null) {
             throw new AddressRefused(__('An MCP server\'s URL may not carry a user name or password. Put a credential in the header instead.', 'alpaca-bot'));
         }
-        $transport = $this->transport ?? ($this->create ?? HttpClient::create(...))();
+        $transport = $this->transport ?? ($this->create ?? HttpTransport::create(...))();
         if ($this->transport === null && !$transport instanceof CurlHttpClient && !$transport instanceof NativeHttpClient) {
             $transport = new NativeHttpClient();
         }

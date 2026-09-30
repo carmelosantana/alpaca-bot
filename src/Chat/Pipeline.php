@@ -69,9 +69,9 @@ use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Message\UserMessage;
  * conversation that already has a post; ephemeral is the caller's statement that this turn is
  * not part of anyone's history at all, whatever the setting says.
  *
- * A tool turn: when the registry enables a toolkit for the user and the catalogue says the
- * model can call tools, the reply is produced by the Assistant agent (the vendored tool loop)
- * instead of one provider stream, and the branch is exactly that: everything else on the way
+ * A tool turn: when the registry enables a toolkit for the user, the catalogue says the model
+ * can call tools, and at least one of those toolkits offers a tool (offered()), the reply is
+ * produced by the Assistant agent (the vendored tool loop) instead of one provider stream, and the branch is exactly that: everything else on the way
  * in and out (the caps, the hooks, the receipt, what is stored, what an abandoned turn leaves
  * behind) is the same code. The model gets the same generation options a plain turn sends
  * (Provider\BoundOptionsProvider), the text streams as it is produced (agentTurn() says how),
@@ -127,8 +127,9 @@ final class Pipeline
      * (complete() and every consumer go through it) until that turn has ended, whether it was
      * drained, refused, thrown or abandoned, and counted, so a turn started inside another (the
      * summarize tool's) ending does not end the outer one. Abilities\Register asks it before it
-     * starts a turn of its own, which is what keeps a turn from starting another through an
-     * "execute any ability" tool (Kanboard #4538). It is the instance's count, and one instance
+     * starts a turn of its own, which is what keeps a turn from starting another through any
+     * tool that runs abilities (Kanboard #4538); the abilities toolkit refuses `alpaca-bot/*`
+     * before this is asked. It is the instance's count, and one instance
      * serves the request: Plugin::register() hands every consumer the container's.
      */
     public function running(): bool
@@ -286,6 +287,7 @@ final class Pipeline
             $streamEnded = false;
             try {
                 $provider = $this->factory->make($model);
+                $toolkits = self::offered($toolkits);
                 if ($toolkits !== []) {
                     $observer = new AgentStreamObserver();
                     $bound = new BoundOptionsProvider($provider, $providerOptions);
@@ -669,8 +671,8 @@ final class Pipeline
      *
      * A RunFailure is failure()'s, for a tool run whose Error finish nobody announced, and its
      * message is raised as it is. A TerminationException that reaches here never met the
-     * agent's catch: agentTurn() asks every toolkit for its tools (Toolkit\FirstWins::over())
-     * before it starts the fiber the agent runs in, so a toolkit that stops the run from there is
+     * agent's catch: offered() asks every toolkit for its tools (Toolkit\FirstWins::over())
+     * before agentTurn() starts the fiber the agent runs in, so a toolkit that stops the run from there is
      * not caught by the library the way a tool that stops it from execute() is (that one is a
      * finished turn: failure()). It says what the tool said, or that a tool stopped the run when
      * it said nothing.
@@ -688,8 +690,9 @@ final class Pipeline
     }
 
     /**
-     * The toolkits this turn runs with: what the registry enables for the user, provided the
-     * model may call tools; none when either says no.
+     * The toolkits this turn may run with: what the registry enables for the user, provided the
+     * model may call tools; none when either says no. offered() then keeps only those that offer
+     * a tool, and nothing here asks a toolkit for its tools.
      *
      * Whether it may is the operator's to settle first (`models.overrides[<model>][tools]`,
      * Store::toolsOverride()), and only where they have not is it the catalogue's
@@ -726,6 +729,37 @@ final class Pipeline
         }
         $listed = $this->catalog->find($model);
         return $listed !== null && $listed->tools ? $toolkits : [];
+    }
+
+    /**
+     * The toolkits a tool turn hands the agent, out of the ones toolkitsFor() allowed: each
+     * wrapped by Toolkit\FirstWins::over(), so a tool name stays with the first toolkit that
+     * offered it, and every one left with no tools dropped. None left means the turn takes the
+     * plain path, so an enabled toolkit that offers nothing (an MCP server whose client cannot be
+     * had or that lists nothing approved, abilities with none ticked) does not put the turn
+     * through the agent loop with `done` as its only tool (Kanboard #4541).
+     *
+     * Here, not in Registry::enabled(): the registry is also asked by the `[alpacabot_agent]`
+     * shim and by abilities' permission checks, which list nothing (Mcp\McpToolkit's docblock
+     * rests on that). And after toolkitsFor(), so a model that cannot take tools lists nothing.
+     * send() calls it inside the try that fires `alpaca_bot/chat/failed`, after
+     * `alpaca_bot/chat/started`, where agentTurn() used to ask: asking a toolkit for its tools can
+     * reach a remote server, and a toolkit that throws from tools() is a failed turn raised as
+     * raised() says. Each toolkit is asked once; the wrappers answer from that list from then on,
+     * and they are what agentTurn() is handed.
+     *
+     * @param array<string, ToolkitInterface> $toolkits
+     * @return list<FirstWins>
+     */
+    private static function offered(array $toolkits): array
+    {
+        $offered = [];
+        foreach (FirstWins::over($toolkits) as $toolkit) {
+            if ($toolkit->tools() !== []) {
+                $offered[] = $toolkit;
+            }
+        }
+        return $offered;
     }
 
     /**
@@ -777,7 +811,7 @@ final class Pipeline
      * what the turn leaves behind before raising it, since that depends on whether a tool had
      * already run.
      *
-     * @param array<string, ToolkitInterface> $toolkits
+     * @param list<FirstWins> $toolkits as offered() left them: each offers at least one tool, and no name is offered by two of them
      * @param MessageInterface[] $messages as buildMessages() built them: the system message, if any, then the turns, the one being sent last
      * @return \Generator<int, Delta, mixed, Output>
      */
@@ -794,8 +828,7 @@ final class Pipeline
             $history->add($message);
         }
         $agent = new Assistant($provider, $system);
-        // A tool name stays with the first toolkit that offered it (Toolkit\FirstWins).
-        foreach (FirstWins::over($toolkits) as $toolkit) {
+        foreach ($toolkits as $toolkit) {
             $agent->addToolkit($toolkit);
         }
         $agent->attach($observer);

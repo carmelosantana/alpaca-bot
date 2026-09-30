@@ -9,3 +9,7 @@ allowBuilds:
 minimumReleaseAge: 1440
 minimumReleaseAgeStrict: true
 blockExoticSubdeps: true
+# brace-expansion 2.1.4 (via @wordpress/env > rimraf > glob > minimatch) carries
+# GHSA-q2hr-2g5m-vwhr; 2.1.7 is the patched release in the same 2.x line.
+overrides:
+  brace-expansion@2: 2.1.7

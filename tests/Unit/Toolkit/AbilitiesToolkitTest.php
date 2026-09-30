@@ -211,3 +211,127 @@ it('has guidelines only when a tool is offered', function (): void {
         ->and(abilitiesToolkit([], ['gone/missing'])->guidelines())->toBe('')
         ->and(abilitiesToolkit(['x/y' => siteAbility('x/y')], ['x/y'])->guidelines())->toContain('ability__')->toContain('cut at ' . SchemaTool::RESULT_CHARS . ' characters');
 });
+
+// Kanboard #4538. An allowlisted ability that runs other abilities itself (the MCP Adapter's
+// "execute any ability") must not reach one the allowlist leaves out. The helpers stand in for
+// core's execute() on each version: 7.1 asks `wp_pre_execute_ability` first; 6.9 and 7.0 have
+// only `wp_before_execute_ability`, and 7.0 catches a throw from the callback where 6.9 does not.
+
+/**
+ * The site's registry with `x/meta`, which runs the ability its input names and answers what that
+ * answers (kept in $GLOBALS['abNested'] too), and each of `$others` answering
+ * `['ran' => its name]`, all on `$core`.
+ *
+ * @param list<string> $others
+ * @return array<string, Mockery\MockInterface>
+ */
+function metaSite(string $core, array $others): array
+{
+    $GLOBALS['abCallbackRuns'] = [];
+    abilityHooksRun();
+    $GLOBALS['abNested'] = null;
+    $GLOBALS['wp_current_filter'] = ['init'];
+    $site = ['x/meta' => coreAbility('x/meta', $core, static fn(mixed $in): mixed => $GLOBALS['abNested'] = wp_get_ability((string) $in['ability'])->execute([]))];
+    foreach ($others as $name) {
+        $site[$name] = coreAbility($name, $core, static fn(): array => ['ran' => $name]);
+    }
+    return $site;
+}
+
+function notAllowed(string $name): string
+{
+    return 'The ' . $name . ' ability was not run: an ability run from a chat may only run the abilities ticked under Settings › Tools.';
+}
+
+it('refuses a nested ability the allowlist leaves out before its callback runs, answering the refusal on 7.1', function (): void {
+    $kit = abilitiesToolkit(metaSite('7.1', ['x/secret']), ['x/meta']);
+    $result = $kit->tools()[0]->execute(['ability' => 'x/secret']);
+    expect($result->status)->toBe(ToolResultStatus::Error)
+        ->and($result->content)->toBe(notAllowed('x/secret'))
+        ->and($GLOBALS['abNested'])->toBeInstanceOf(WP_Error::class)
+        ->and($GLOBALS['abNested']->get_error_code())->toBe('alpaca_bot_ability_not_allowed')
+        ->and($GLOBALS['abCallbackRuns'])->toBe(['x/meta'])
+        ->and(get_current_user_id())->toBe(1);
+});
+
+// Before 7.1 there is no filter to answer through, so the guard throws from
+// `wp_before_execute_ability`: 7.0 wraps the throw that comes out of the meta-ability's callback
+// as `ability_callback_exception`, which run() gives the fixed text, and on 6.9 nothing catches it
+// until SchemaTool::execute(), which answers the same fixed text.
+it('refuses a nested ability the allowlist leaves out before its callback runs on 6.9 and 7.0, answering the fixed error', function (string $core): void {
+    $kit = abilitiesToolkit(metaSite($core, ['x/secret']), ['x/meta']);
+    $result = $kit->tools()[0]->execute(['ability' => 'x/secret']);
+    expect($result->status)->toBe(ToolResultStatus::Error)
+        ->and($result->content)->toBe('The ability__x__meta tool failed before it could answer.')
+        ->and($GLOBALS['abCallbackRuns'])->toBe(['x/meta'])
+        ->and(get_current_user_id())->toBe(1)
+        // The throw unwound through core's do_action(), which pops nothing on the way out: run()
+        // takes off what it left, and only that.
+        ->and($GLOBALS['wp_current_filter'])->toBe(['init']);
+})->with(['6.9', '7.0']);
+
+it('runs a nested ability the allowlist names', function (string $core): void {
+    $kit = abilitiesToolkit(metaSite($core, ['x/ok']), ['x/meta', 'x/ok']);
+    $result = $kit->tools()[0]->execute(['ability' => 'x/ok']);
+    expect($result->status)->toBe(ToolResultStatus::Success)
+        ->and(json_decode($result->content, true))->toBe(['ran' => 'x/ok'])
+        ->and($GLOBALS['abCallbackRuns'])->toBe(['x/meta', 'x/ok']);
+})->with(['6.9', '7.0', '7.1']);
+
+it('refuses a nested alpaca-bot ability even when the stored list names it', function (string $core): void {
+    $kit = abilitiesToolkit(metaSite($core, ['alpaca-bot/chat']), ['x/meta', 'alpaca-bot/chat']);
+    $result = $kit->tools()[0]->execute(['ability' => 'alpaca-bot/chat']);
+    expect($result->status)->toBe(ToolResultStatus::Error)
+        ->and($GLOBALS['abCallbackRuns'])->toBe(['x/meta']);
+})->with(['6.9', '7.0', '7.1']);
+
+it('leaves no guard behind once run() has returned, or thrown', function (string $core): void {
+    $site = metaSite($core, ['x/secret', 'x/ok']);
+    $site['x/throws'] = coreAbility('x/throws', $core, static fn(): never => throw new RuntimeException('boom'));
+    [$meta, $ok, $throws] = abilitiesToolkit($site, ['x/meta', 'x/ok', 'x/throws'])->tools();
+    $meta->execute(['ability' => 'x/ok']);
+    $throws->execute([]);
+    expect(has_filter('wp_pre_execute_ability'))->toBeFalse()
+        ->and(has_action('wp_before_execute_ability'))->toBeFalse()
+        ->and(wp_get_ability('x/secret')->execute([]))->toBe(['ran' => 'x/secret']);
+})->with(['6.9', '7.0', '7.1']);
+
+// run() inside run(): a meta-ability that runs another toolkit tool first. The inner call's
+// finally must not take away the guard the outer call still needs.
+it('keeps the guard for the rest of an outer call after a nested run() ends', function (): void {
+    $site = metaSite('7.1', ['x/ok', 'x/secret']);
+    $inner = null;
+    $site['x/twice'] = coreAbility('x/twice', '7.1', static function () use (&$inner): mixed {
+        $inner->execute(['ability' => 'x/ok']);
+        return wp_get_ability('x/secret')->execute([]);
+    });
+    $tools = abilitiesToolkit($site, ['x/meta', 'x/ok', 'x/twice'])->tools();
+    $inner = $tools[0];
+    $result = $tools[2]->execute([]);
+    expect($result->content)->toBe(notAllowed('x/secret'))
+        ->and($GLOBALS['abCallbackRuns'])->toBe(['x/twice', 'x/meta', 'x/ok'])
+        ->and(has_filter('wp_pre_execute_ability'))->toBeFalse();
+});
+
+it('guards every depth of nesting, not only the first', function (string $core): void {
+    $site = metaSite($core, ['x/secret']);
+    $site['x/outer'] = coreAbility('x/outer', $core, static fn(): mixed => wp_get_ability('x/meta')->execute(['ability' => 'x/secret']));
+    $result = abilitiesToolkit($site, ['x/outer', 'x/meta'])->tools()[0]->execute([]);
+    expect($result->status)->toBe(ToolResultStatus::Error)
+        ->and($GLOBALS['abCallbackRuns'])->toBe(['x/outer', 'x/meta']);
+})->with(['6.9', '7.0', '7.1']);
+
+// Two guards up at once hold two allowlists (in practice the same one read twice), and a name has
+// to be on both: an inner run() from a toolkit with a longer list does not widen the outer one's.
+it('lets a nested run() narrow what may run but never widen it', function (): void {
+    $site = metaSite('7.1', ['x/secret']);
+    $wide = null;
+    $site['x/outer'] = coreAbility('x/outer', '7.1', static function () use (&$wide): mixed {
+        return $wide->execute(['ability' => 'x/secret'])->content;
+    });
+    $narrow = abilitiesToolkit($site, ['x/outer'])->tools()[0];
+    $wide = (new AbilitiesToolkit(new AlpacaBot\Settings\Store(['toolkits.abilities' => ['x/meta', 'x/secret']]), static fn(): int => 3, static fn(string $fn): bool => $fn !== 'wp_prepare_json_schema_for_client'))->tools()[0];
+    $result = $narrow->execute([]);
+    expect($result->content)->toBe(notAllowed('x/meta'))
+        ->and($GLOBALS['abCallbackRuns'])->toBe(['x/outer']);
+});

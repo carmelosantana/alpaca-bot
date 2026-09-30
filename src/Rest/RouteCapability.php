@@ -8,8 +8,8 @@ use AlpacaBot\Capability;
 
 /**
  * Where `alpaca_bot/capability/{route}` is applied: Controller::capability() asks it for every
- * request a route authorises, and Admin\SettingsPage asks it of the `chat` key to show whether
- * code changed the Chat row for the `/chat` route.
+ * request a route authorises, and Admin\SettingsPage asks it of each route key chatRoutes()
+ * lists, to show whether code changed the Chat row for that route.
  *
  * A final class of its own rather than a method on Controller, because Controller is the class a
  * site extends (docs/api.md), and a method added there can clash with one a subclass already
@@ -48,15 +48,64 @@ final class RouteCapability
          * the operator-facing version of this, with what the address pinning covers for
          * `web_fetch` and what it does not.
          *
-         * Settings › Access asks the `chat` key as well, to say under the Chat row whether code
-         * has changed it for the `/chat` route: with the Chat row as `$capability` and a
-         * `POST /chat` request built for that question, which no client sent and nothing is
-         * authorised by.
+         * Settings › Access asks every key whose routes follow the Chat row as well (`chat`,
+         * `chat/stream`, `conversations`, `models`, `usage` and the `view/…` keys but
+         * `view/mcp-tools`), once per key and verb each time the tab is shown, to say under the
+         * Chat row whether code has changed it for that route: with the Chat row as `$capability`
+         * and a request built for that question, of that verb and the path of the first route
+         * declaring it (`POST /chat`, `GET /conversations`, `DELETE /conversations`,
+         * `GET /chat/{id}/stream` with the placeholder as written), which no client sent and
+         * nothing is authorised by.
          *
          * @since 0.5.0
          * @param string           $capability the route's default: its declared capability, or for a chat route the Chat row of Settings › Access (`edit_posts` unless the site changed it)
-         * @param \WP_REST_Request $request    the request being authorised, or the `POST /chat` one Settings › Access built to ask
+         * @param \WP_REST_Request $request    the request being authorised, or one Settings › Access built to ask
          */
         return Capability::filtered("alpaca_bot/capability/{$route}", $default, $request);
+    }
+
+    /**
+     * The routes that follow the Chat row, read off `$controllers`' own route declarations: one
+     * entry per distinct pair of route key (Controller::routeKey()) and verb that a route
+     * declaring Controller::CHAT is registered under, in declaration order. A route whose
+     * `methods` names several verbs gives one pair per verb, since permission() is called with a
+     * request of whichever verb arrived and a filter may answer by verb (docs/api.md tightens
+     * only `DELETE /conversations`). The collection and its items share a key, so
+     * `GET /conversations` and `GET /conversations/{id}` are one pair, asked with the first
+     * route's path. `path` is that path with each named group written as `{name}`, so
+     * `/chat/(?P<id>\d+)/stream` is `/chat/{id}/stream`.
+     *
+     * Read from the declarations, not listed again here, so a route added to a controller, or a
+     * site's controller appended through `alpaca_bot/rest/controllers`, is in it without anything
+     * else changing. It lists what a route declares, not what a subclass's capability() override
+     * may make of it: a controller that resolves a Chat-row route some other way is listed as if
+     * it did not.
+     *
+     * @param iterable<Controller> $controllers
+     * @return list<array{key: string, method: string, path: string}>
+     */
+    public static function chatRoutes(iterable $controllers): array
+    {
+        $routes = [];
+        foreach ($controllers as $controller) {
+            foreach ($controller->routes() as $route) {
+                if ($route['capability'] !== Controller::CHAT) {
+                    continue;
+                }
+                $key = Controller::routeKey($route['path']);
+                foreach (explode(',', $route['methods']) as $method) {
+                    $method = strtoupper(trim($method));
+                    if ($method === '' || isset($routes[$key . ' ' . $method])) {
+                        continue;
+                    }
+                    $routes[$key . ' ' . $method] = [
+                        'key' => $key,
+                        'method' => $method,
+                        'path' => (string) preg_replace('#\(\?P<([^>]+)>[^)]+\)#', '{$1}', $route['path']),
+                    ];
+                }
+            }
+        }
+        return array_values($routes);
     }
 }

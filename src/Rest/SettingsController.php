@@ -8,6 +8,7 @@ use AlpacaBot\Access;
 use AlpacaBot\Errors;
 use AlpacaBot\Mcp\Secrets;
 use AlpacaBot\Mcp\ServerSettings;
+use AlpacaBot\Settings\ProviderKey;
 use AlpacaBot\Settings\Schema;
 use AlpacaBot\Settings\Store;
 
@@ -21,15 +22,21 @@ use AlpacaBot\Settings\Store;
  * what a client sends back when it has not touched the field: a PUT whose secret is MASK keeps
  * the stored value, one whose secret is '' clears it, and any other string is the new value. The
  * three cases are distinct on the wire, so "clear the key" is always reachable and an untouched
- * form never wipes it. A secret that is not a string at all (`null`, an array) keeps the stored
+ * form does not wipe it. A secret that is not a string at all (`null`, an array) keeps the stored
  * value too, and the reply shows the mask so the client can see it did: the rule and its reasons
  * are Schema::sanitize()'s, shared with every other writer of the option, and this route only
- * hands the body through. An MCP server's header value reads back the same way, MASK or '', in
+ * hands the body through. "Keeps" has one exception, the same as an MCP header value's below: a
+ * PUT that moves `provider.base_url` to another scheme, host or port clears the stored key unless
+ * it sends a new one, whether it sent the mask, a non-string or no key at all
+ * (Schema::providerKeyClearedByMove()). The write is not refused for it; the key reads back '',
+ * and the reply carries `X-Alpaca-Bot-Cleared: provider.api_key`, because '' alone cannot tell a
+ * key just dropped from one never set. An MCP server's header value reads back the same way, MASK or '', in
  * each row of `toolkits.mcp_servers` (masked()), and takes the same three values on the way in;
  * Mcp\ServerSettings leaves only MASK or '' there on each update_option() of the option once the
  * plugin has registered its filter, so masked() is for a row that reached the option any other
  * way. `?reveal=1` on the GET answers the raw secrets
- * instead of the mask: the provider key from the option, and each header value from
+ * instead of the mask: the provider key from its own option (Settings\ProviderKey::resolve(), which
+ * also reads a plaintext key a row not yet migrated still carries), and each header value from
  * Mcp\Secrets. Only the flag is on the URL, and the secrets are in the body. A PUT never
  * reveals, whatever its body says.
  *
@@ -43,8 +50,8 @@ use AlpacaBot\Settings\Store;
  * field is answered as stored. Two of those can hold a credential a site wrote into them. An MCP
  * server's URL keeps its query string (`?api_key=…`); a user name or password in it is refused
  * at save (Schema::sanitizeMcpServers()), so the header is where a server's credential goes.
- * `provider.base_url` keeps all of itself, a user name, password and query string included
- * (masking it is Kanboard #4539). A site that lowers the `settings.read` row answers those to
+ * `provider.base_url` is answered as stored, a user name, password and query string included:
+ * nothing masks it. A site that lowers the `settings.read` row answers those to
  * the role it admits. The write, which 0.5 gated with the read, now has a row and a key of its
  * own, so admitting a role to the read no longer admits it to the PUT.
  *
@@ -74,12 +81,13 @@ use AlpacaBot\Settings\Store;
  * reply too.
  *
  * A PUT carrying `toolkits.mcp_servers` is refused whole, 400 and nothing written, the other keys
- * of the same PUT included, in two cases, both checked before anything is stored:
+ * of the same PUT included, in two cases, both checked before anything is stored by
+ * Mcp\ServerSettings::check(), which `wp alpaca-bot settings` runs too:
  * - `alpaca_bot_mcp_row`: a row the schema would drop (Schema::droppedMcpRows()) that names a
  *   stored server's id, or that is new and has a URL. A client that sends a row for a server means
  *   to keep it, so a 200 that had quietly deleted it, its header value and its Access entry with
  *   it, would say the write went as asked. The error's data carries `rows`, each
- *   `{index, id, url, reason}` (droppedRows()). Leaving a server out of the list, or sending its
+ *   `{index, id, url, reason}`. Leaving a server out of the list, or sending its
  *   row with `remove`, still deletes it, and a row with neither a stored id nor a URL is still
  *   ignored.
  * - `alpaca_bot_mcp_address`: the address of a server whose URL is new or changed does not pass
@@ -195,6 +203,7 @@ final class SettingsController extends Controller
     {
         if ((bool) $request->get_param('reveal') && current_user_can('manage_options')) {
             $settings = $this->store->all();
+            $settings['provider.api_key'] = ProviderKey::resolve($settings['provider.api_key'] ?? '');
             if (is_array($settings['toolkits.mcp_servers'] ?? null)) {
                 foreach ($settings['toolkits.mcp_servers'] as $i => $row) {
                     if (is_array($row)) {
@@ -217,76 +226,22 @@ final class SettingsController extends Controller
         }
         $cleared = [];
         if (array_key_exists('toolkits.mcp_servers', $input)) {
-            $stored = $this->store->get('toolkits.mcp_servers');
-            $dropped = self::droppedRows($input['toolkits.mcp_servers'], $stored);
-            if ($dropped !== []) {
-                $lines = [];
-                foreach ($dropped as $row) {
-                    /* translators: %s: the row's index in the posted list */
-                    $name = $row['url'] === '' ? sprintf(__('row %s', 'alpaca-bot'), $row['index']) : $row['url'];
-                    /* translators: 1: an MCP server's URL, or which row it is, 2: why the row cannot be kept */
-                    $lines[] = sprintf(__('%1$s: %2$s', 'alpaca-bot'), $name, $row['reason']);
-                }
-                return Errors::badRequest(__('Nothing was saved: an MCP server row could not be kept.', 'alpaca-bot') . ' ' . implode(' ', $lines), 'alpaca_bot_mcp_row', ['rows' => $dropped]);
+            $check = $this->servers->check($input['toolkits.mcp_servers'], $this->store->get('toolkits.mcp_servers'));
+            if ($check->isRefused()) {
+                return Errors::badRequest($check->message, (string) $check->code, $check->data);
             }
-            $rows = Schema::sanitizeMcpServers($input['toolkits.mcp_servers'], $stored);
-            $refused = $this->servers->refusals($rows, $stored);
-            if ($refused !== []) {
-                // Nothing is written, so no write's action clears what passed on the way.
-                $this->servers->forgetPassed();
-                $reasons = [];
-                foreach ($refused as $i => $reason) {
-                    /* translators: 1: an MCP server's URL, 2: why its address was refused */
-                    $reasons[] = sprintf(__('%1$s: %2$s', 'alpaca-bot'), $rows[$i]['url'], $reason);
-                }
-                return Errors::badRequest(__('Nothing was saved: an MCP server\'s address did not pass the check.', 'alpaca-bot') . ' ' . implode(' ', $reasons), 'alpaca_bot_mcp_address');
-            }
-            $cleared = $this->servers->clearedByMove($rows, $stored);
+            $cleared = $check->cleared;
         }
+        $keyCleared = Schema::providerKeyClearedByMove($input, $this->store->all());
         $this->store->replace($input);
         $response = new \WP_REST_Response($this->masked($this->store->all()));
         if ($cleared !== []) {
             $response->header('X-Alpaca-Bot-Mcp-Cleared', implode(',', $cleared));
         }
-        return $response;
-    }
-
-    /**
-     * The rows of a posted `toolkits.mcp_servers` that the schema would drop and that a PUT must
-     * not lose quietly: one that names a stored server's id, and a new one with a URL. A row whose
-     * `remove` is ticked, and a blank row, are not among them (Schema::droppedMcpRows()). Each is
-     * `{index, id, url, reason}`: its key in the posted list, the id it posted when that is a
-     * string, the URL it posted with any user name and password taken out
-     * (Schema::withoutUserinfo()), so a refused credential is not answered back, and why. The
-     * header value is not read.
-     *
-     * @return list<array{index: array-key, id: string|null, url: string, reason: string}>
-     */
-    private static function droppedRows(#[\SensitiveParameter] mixed $raw, mixed $stored): array
-    {
-        $storedIds = Schema::serverIds($stored);
-        $out = [];
-        foreach (Schema::droppedMcpRows($raw) as $key => $fault) {
-            /** @var array<array-key, mixed> $row droppedMcpRows() lists arrays only */
-            $row = is_array($raw) ? $raw[$key] : [];
-            $id = is_string($row['id'] ?? null) ? $row['id'] : null;
-            $url = is_string($row['url'] ?? null) ? Schema::withoutUserinfo($row['url']) : '';
-            if (!in_array($id, $storedIds, true) && trim($url) === '') {
-                continue;
-            }
-            $prefix = is_string($row['prefix'] ?? null) ? $row['prefix'] : '';
-            $out[] = ['index' => $key, 'id' => $id, 'url' => $url, 'reason' => match ($fault) {
-                'url' => __('the URL has to be https with a host.', 'alpaca-bot'),
-                'userinfo' => __('the URL may not carry a user name or password; send a credential as the header value, which reads back masked.', 'alpaca-bot'),
-                /* translators: %s: what a header name has to be (Schema::mcpHeaderNameRule()) */
-                'header' => sprintf(__('the header name has to be %s.', 'alpaca-bot'), Schema::mcpHeaderNameRule()),
-                /* translators: %s: what a prefix has to be (Schema::mcpPrefixRule()) */
-                'prefix' => sprintf(__('the prefix has to be %s.', 'alpaca-bot'), Schema::mcpPrefixRule()),
-                /* translators: %s: a tool-name prefix */
-                'taken' => sprintf(__('the prefix %s is already used by an earlier row of this request.', 'alpaca-bot'), $prefix),
-            }];
+        if ($keyCleared) {
+            $response->header('X-Alpaca-Bot-Cleared', 'provider.api_key');
         }
-        return $out;
+        return $response;
     }
 
     /**

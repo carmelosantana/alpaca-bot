@@ -46,15 +46,41 @@ use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Tool\ToolResult;
  * the model is not handed them as tools. Schema::sanitizeAbilities() refuses them on the way
  * into the option, and listed() and allowed() drop them on the way out, because what Store
  * hands back is what is stored, not what the schema would make of it (Registry's docblock makes
- * the same point about `toolkits.enabled`). That is all this class does about them. The
- * allowlist decides which abilities the model may call directly; an allowlisted ability that
- * runs other abilities itself (a "run any ability" tool) reaches whatever those can reach,
- * Alpaca Bot's own included, and an administrator should allowlist such an ability only knowing
- * that. What keeps a turn from starting another through one is not here: `alpaca-bot/chat` and
- * `alpaca-bot/summarize` refuse while a turn is running (Abilities\Register), and run() passes
- * their refusal's message on as the tool's error. And allowlisted abilities that share a tool
- * name (collisions(); ToolName says how that can happen) are all left out, since the model would
- * have one name for more than one tool; the Tools tab marks each of them.
+ * the same point about `toolkits.enabled`). And allowlisted abilities that share a tool name
+ * (collisions(); ToolName says how that can happen) are all left out, since the model would have
+ * one name for more than one tool; the Tools tab marks each of them.
+ *
+ * What an offered ability may run (Kanboard #4538). The allowlist also binds the abilities an
+ * offered one runs itself, as a "run any ability" tool such as the MCP Adapter's does: while
+ * run() is executing an ability, any ability executed inside it through WP_Ability::execute(),
+ * at any depth, runs only if allowed() names it, so never an `alpaca-bot/*` one. The guard goes
+ * up just before execute() and comes down in the `finally` that restores the user, so nothing
+ * outside the call is guarded. Guards stack, and a name must be on the list of every guard that
+ * is up, so a nested run() can narrow what may run and never widen it. On WordPress 7.1 core's
+ * `wp_pre_execute_ability` filter answers for a name the list leaves out, before the ability's
+ * input or permission checks. It is hooked at PHP_INT_MAX just before execute(), so it runs
+ * after every listener hooked before the call, and a short-circuit one of those returns (a
+ * cache) cannot answer for the refused name. A listener hooked at PHP_INT_MAX during the call
+ * runs after it; if that one puts core's sentinel back, the call goes on to
+ * `wp_before_execute_ability` and the throw below stops it there. The answer is a WP_Error,
+ * `alpaca_bot_ability_not_allowed`, naming the ability. A caller that hands back what execute()
+ * answered passes it up, run() passes its message on as the tool's error, and
+ * `wp_before_execute_ability` never fires for the refused name. Before 7.1 there is no such
+ * filter, so the guard throws from `wp_before_execute_ability`, which core fires after the
+ * ability's input and permission checks and before its callback. On 7.0 core catches that throw
+ * where it leaves the calling ability's callback and answers `ability_callback_exception`, which
+ * gets the fixed text below; on 6.9 nothing in core catches it, and it reaches
+ * SchemaTool::execute(), which answers the same fixed text. The model reads that text there, not
+ * the refusal, and an earlier `wp_before_execute_ability` listener has already heard of the call.
+ * The throw unwinds through core's hook code, which does not tidy up after a throw; run()'s
+ * `finally` does (mend()), so the request's hook state is as the call found it once run() is
+ * done. Until then, while a caller that caught the throw goes on, doing_action() still answers
+ * true for `wp_before_execute_ability`.
+ * What the guard does not reach: code that does another ability's work itself (calls the same
+ * function, runs the same query) rather than going through execute(), and, before 7.1, a caller
+ * that catches the throw and carries on, though the refused ability has not run. Separately,
+ * `alpaca-bot/chat` and `alpaca-bot/summarize` refuse while a turn is running, however they are
+ * reached (Abilities\Register).
  *
  * Descriptions are other plugins' text and the model reads them, so they go through
  * SchemaTool::describe(), and the Tools tab shows the administrator that same text. The input
@@ -100,6 +126,9 @@ final class AbilitiesToolkit implements ToolkitInterface
 
     /** @var \Closure(string): bool */
     private \Closure $exists;
+
+    /** @var list<list<string>> the allowlist of each run() whose ability is executing, outermost first; [] outside one */
+    private static array $guards = [];
 
     /**
      * @param \Closure(): int               $userId the acting user's id, resolved when a tool runs
@@ -245,6 +274,123 @@ final class AbilitiesToolkit implements ToolkitInterface
             : $schema;
     }
 
+    /**
+     * `wp_pre_execute_ability` while a guard is up (WP 7.1): the refusal for a name some guard's
+     * allowlist leaves out, `$pre` as it came otherwise.
+     *
+     * @internal a hook callback, public only so core can call it
+     */
+    public static function preExecute(mixed $pre, string $name): mixed
+    {
+        return self::permits($name) ? $pre : self::refusal($name);
+    }
+
+    /**
+     * `wp_before_execute_ability` while a guard is up (6.9 and later): throws for a name some
+     * guard's allowlist leaves out, since an action cannot answer.
+     *
+     * @internal a hook callback, public only so core can call it
+     * @throws \RuntimeException carrying the refusal's message
+     */
+    public static function beforeExecute(string $name): void
+    {
+        if (!self::permits($name)) {
+            throw new \RuntimeException(self::refusal($name)->get_error_message());
+        }
+    }
+
+    /**
+     * Puts up a guard for `$allowed`, hooking both listeners in when it is the first.
+     *
+     * @param list<string> $allowed
+     */
+    private static function guard(array $allowed): void
+    {
+        if (self::$guards === []) {
+            add_filter('wp_pre_execute_ability', [self::class, 'preExecute'], PHP_INT_MAX, 2);
+            add_action('wp_before_execute_ability', [self::class, 'beforeExecute'], 10, 1);
+        }
+        self::$guards[] = $allowed;
+    }
+
+    /** Takes down the latest guard, unhooking both listeners when it was the last. */
+    private static function unguard(): void
+    {
+        array_pop(self::$guards);
+        if (self::$guards === []) {
+            remove_filter('wp_pre_execute_ability', [self::class, 'preExecute'], PHP_INT_MAX);
+            remove_action('wp_before_execute_ability', [self::class, 'beforeExecute'], 10);
+        }
+    }
+
+    /**
+     * Takes off $wp_current_filter what a throw out of execute() left there, `$running` being the
+     * list as it was before the call, and gives `wp_before_execute_ability` a fresh WP_Hook when
+     * the throw came out of it, as the guard's does before 7.1.
+     *
+     * Core's do_action() pushes the hook's name onto the list and pops it after the listeners,
+     * with no `finally`, and WP_Hook::apply_filters() leaves its nesting level up and its
+     * iteration behind (and do_action() its `doing_action` flag set) when a listener throws
+     * (6.9 plugin.php:512-524, class-wp-hook.php:321-369; the same code at 7.0 and 7.1). Left there,
+     * doing_action() would answer true for the rest of the request, current_filter() would name
+     * the wrong hook, and the next outer do_action() would pop the stale name instead of its own.
+     * Hooks that return pop what they push, so everything past `$running` is what a throw left.
+     *
+     * The hook is rebuilt, with its listeners re-added in order, through remove_all_actions() and
+     * add_action(), so the object with the stale state goes and a new one starts at level 0. When
+     * the guard's was its only listener, unguard() has already taken it away with the object.
+     * It is not rebuilt while the hook was already running when the call began (a listener of it
+     * ran the tool): remove_all_actions() would empty the list that live iteration is still
+     * walking, and the listeners after the one that ran the tool would not run. There the name is
+     * taken off the list and the stale level stays on the object, which still fires every listener
+     * each time. A throw out of any other hook has its name taken off the list and its WP_Hook
+     * left as it is.
+     *
+     * @param list<string> $running
+     */
+    private static function mend(array $running): void
+    {
+        $now = $GLOBALS['wp_current_filter'] ?? [];
+        if (!is_array($now) || count($now) <= count($running)) {
+            return;
+        }
+        $left = array_slice($now, count($running));
+        // phpcs:ignore WordPress.WP.GlobalVariablesOverride.Prohibited -- Putting core's own list back as it was before the call is the point: a throw left entries core never popped.
+        $GLOBALS['wp_current_filter'] = array_slice($now, 0, count($running));
+        $hook = 'wp_before_execute_ability';
+        $stale = $GLOBALS['wp_filter'][$hook] ?? null;
+        if (!in_array($hook, $left, true) || in_array($hook, $running, true) || !$stale instanceof \WP_Hook) {
+            return;
+        }
+        $listeners = $stale->callbacks;
+        remove_all_actions($hook);
+        foreach ($listeners as $priority => $group) {
+            foreach ($group as $listener) {
+                add_action($hook, $listener['function'], (int) $priority, (int) $listener['accepted_args']);
+            }
+        }
+    }
+
+    /** Whether every guard's allowlist names `$name`. */
+    private static function permits(string $name): bool
+    {
+        foreach (self::$guards as $allowed) {
+            if (!in_array($name, $allowed, true)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static function refusal(string $name): \WP_Error
+    {
+        return new \WP_Error(
+            'alpaca_bot_ability_not_allowed',
+            /* translators: %s: the ability's name, e.g. core/get-site-info */
+            sprintf(__('The %s ability was not run: an ability run from a chat may only run the abilities ticked under Settings › Tools.', 'alpaca-bot'), $name),
+        );
+    }
+
     private function run(string $name, mixed $input): ToolResult
     {
         $userId = ($this->userId)();
@@ -260,9 +406,14 @@ final class AbilitiesToolkit implements ToolkitInterface
         if ($previous !== $userId) {
             wp_set_current_user($userId);
         }
+        /** @var list<string> $running */
+        $running = $GLOBALS['wp_current_filter'] ?? [];
+        self::guard($this->allowed());
         try {
             $result = $ability->execute($input);
         } finally {
+            self::unguard();
+            self::mend($running);
             // Asked afresh rather than remembered: the ability may have switched user itself.
             if (get_current_user_id() !== $previous) {
                 wp_set_current_user($previous);

@@ -20,10 +20,11 @@ export function setImage(form: HTMLFormElement, dataUrl: string): void {
 
 /**
  * A turn that never reached the model, undone: its bubbles out of the transcript and what was
- * typed and attached back in the box. send() calls this from its `finally`, once, for every exit
- * before the stream is redeemed; the comment there says why one place rather than one per exit.
- * A null bubble is one that was never appended, which is why the caller may pass both without
- * checking either.
+ * typed and attached back in the box. send() reaches this from its `finally`, once, for an exit
+ * before the stream is redeemed, through boot.ts giveBack(), which calls it only while the box is
+ * still the turn's and empty (Kanboard #4692); the comment in send() says why one place rather
+ * than one per exit. A null bubble is one that was never appended, which is why the caller may
+ * pass both without checking either.
  */
 export function restoreDraft(form: HTMLFormElement, draft: Draft, ...bubbles: (HTMLElement | null)[]): void {
   for (const bubble of bubbles) bubble?.remove();
@@ -31,4 +32,20 @@ export function restoreDraft(form: HTMLFormElement, draft: Draft, ...bubbles: (H
   textarea.value = draft.text;
   grow(textarea);
   setImage(form, draft.image);
+}
+
+/**
+ * The lines that stand for a draft boot.ts could not put back (keepUnsent()): the message's text
+ * in `notSent`'s words, and a line saying to attach the image again when there was one. The text
+ * goes in with a function replacement, so a "$&" in it is not read as a pattern, and a
+ * translation that lost its {text} still gets the text, after it, so no translation can drop it.
+ */
+export function unsentLines(draft: Draft, t: (key: string) => string): string[] {
+  const lines: string[] = [];
+  if (draft.text !== '') {
+    const words = t('notSent');
+    lines.push(words.includes('{text}') ? words.replace('{text}', () => draft.text) : `${words} ${draft.text}`);
+  }
+  if (draft.image !== '') lines.push(t('notSentImage'));
+  return lines;
 }

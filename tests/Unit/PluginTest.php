@@ -22,6 +22,8 @@ use AlpacaBot\Provider\ModelCatalog;
 use AlpacaBot\Rest\StreamController;
 use AlpacaBot\Rest\ViewController;
 use AlpacaBot\Settings\Migrate04;
+use AlpacaBot\Settings\ProviderKey;
+use AlpacaBot\Settings\Schema;
 use AlpacaBot\Settings\Store;
 use AlpacaBot\Shortcodes;
 use AlpacaBot\Toolkit\DraftPostToolkit;
@@ -45,7 +47,7 @@ it('exposes a version and boots once', function (): void {
     $b = Plugin::boot();
     expect($a)->toBe($b)
         ->and($a->version())->toBe(Plugin::VERSION)
-        ->and(Plugin::VERSION)->toMatch('/^0\.6\.0/');
+        ->and(Plugin::VERSION)->toMatch('/^0\.6\.1/');
 });
 
 it('registers the settings store, provider factory, model catalog, conversation store, usage meter, cap policy, context collector and chat pipeline, hooks both post types on init, and runs the 0.4 migration on init after them, never on admin_init', function (): void {
@@ -377,8 +379,9 @@ it('puts the drawer on the other admin screens: its loader on admin_enqueue_scri
 it('hooks the MCP server settings onto the option\'s writes and hands the same instance to the settings page and the REST route', function (): void {
     Functions\when('add_shortcode')->justReturn();
     $hooked = null;
-    Filters\expectAdded('pre_update_option_' . Plugin::OPTION)->once()->with(Mockery::on(static function (mixed $cb) use (&$hooked): bool {
-        $hooked = $cb;
+    // Settings\ProviderKey adds a filter of its own on this hook; the one under test is the MCP split.
+    Filters\expectAdded('pre_update_option_' . Plugin::OPTION)->twice()->with(Mockery::on(static function (mixed $cb) use (&$hooked): bool {
+        $hooked = is_array($cb) && $cb[0] instanceof AlpacaBot\Mcp\ServerSettings ? $cb : $hooked;
         return true;
     }), 10, 2);
     $plugin = Plugin::boot();
@@ -393,6 +396,59 @@ it('hooks the MCP server settings onto the option\'s writes and hands the same i
         $settings = $controller instanceof AlpacaBot\Rest\SettingsController ? $controller : $settings;
     }
     expect((new ReflectionProperty(AlpacaBot\Rest\SettingsController::class, 'servers'))->getValue($settings))->toBe($servers);
+});
+
+// The provider key is kept out of the autoloaded row (Settings\ProviderKey, Kanboard #4384): lifted
+// out of every write of the option, moved out of a 0.6.0 row on init, and, since the row reads
+// MASK before and after a change of key, the model list is busted from the key's own option.
+it('lifts the provider key out of every write of the option, moves a 0.6.0 key on init, and busts the model catalog when the key option changes', function (): void {
+    Functions\when('add_shortcode')->justReturn();
+    $lift = null;
+    Filters\expectAdded('pre_update_option_' . Plugin::OPTION)->twice()->with(Mockery::on(static function (mixed $cb) use (&$lift): bool {
+        $lift = is_array($cb) && $cb[0] instanceof ProviderKey ? $cb : $lift;
+        return true;
+    }), 10, 2);
+    $busts = [];
+    foreach (['add_option_', 'update_option_', 'delete_option_'] as $hook) {
+        Actions\expectAdded($hook . ProviderKey::OPTION)->once()->with(Mockery::on(static function (mixed $cb) use (&$busts): bool {
+            $busts[] = $cb;
+            return $cb instanceof Closure;
+        }));
+    }
+    $onInit = null;
+    Actions\expectAdded('init')->once()->with(Mockery::on(static function (mixed $cb) use (&$onInit): bool {
+        $onInit = $cb instanceof Closure ? $cb : $onInit;
+        return $cb instanceof Closure;
+    }), 20);
+    Actions\expectAdded('init')->times(3)->with(Mockery::type('array'));
+    $plugin = Plugin::boot();
+    $plugin->register();
+    expect($lift)->toBeArray()
+        ->and($lift[1])->toBe('beforeSave')
+        ->and($busts)->toHaveCount(3);
+
+    Functions\expect('delete_transient')->times(3)->with(ModelCatalog::TRANSIENT)->andReturn(true);
+    foreach ($busts as $bust) {
+        $bust();
+    }
+
+    // Every Migrate04 step flagged done, so the only move left is the key's.
+    $stored = [Plugin::OPTION => ['provider.api_key' => 'sk-FAKE-plain']];
+    foreach ([Migrate04::FLAG, Migrate04::FLAG_RETENTION, Migrate04::FLAG_CONVERSATIONS, Migrate04::FLAG_AUTOLOAD] as $flag) {
+        $stored[$flag] = '1';
+    }
+    Functions\when('get_option')->alias(static function (string $name, mixed $default = false) use (&$stored): mixed {
+        return $stored[$name] ?? $default;
+    });
+    Functions\when('update_option')->alias(static function (string $name, mixed $value, mixed $autoload = null) use (&$stored): bool {
+        $stored[$name] = $value;
+        $stored['__autoload__' . $name] = $autoload;
+        return true;
+    });
+    $onInit();
+    expect($stored[Plugin::OPTION]['provider.api_key'])->toBe(Schema::MASK)
+        ->and($stored[ProviderKey::OPTION])->toBe('sk-FAKE-plain')
+        ->and($stored['__autoload__' . ProviderKey::OPTION])->toBeFalse();
 });
 
 // The view routes get the MCP approval fragment through a Discovery over the container's one
@@ -429,4 +485,21 @@ it('hands the view routes a Discovery over the container\'s client factory, and 
         ->and((new ReflectionProperty(AlpacaBot\Mcp\Toolkits::class, 'clients'))->getValue($mcp))->toBe($factory)
         ->and((new ReflectionProperty(AlpacaBot\Mcp\Toolkits::class, 'store'))->getValue($mcp))->toBe($plugin->get(Store::class))
         ->and((new ReflectionProperty(AlpacaBot\Mcp\Toolkits::class, 'access'))->getValue($mcp))->toBe($plugin->get(AlpacaBot\Access::class));
+});
+
+// Kanboard #4537: the Chat row's note asks each route that follows the row, and the routes are the
+// ones the site registers, so the settings page is handed Plugin::controllers() itself — the
+// `alpaca_bot/rest/controllers` filter included — and runs it only when it is called.
+it('hands the settings page the controllers the REST API registers, through the same filter, run only when asked', function (): void {
+    Functions\when('add_shortcode')->justReturn();
+    Functions\when('get_current_user_id')->justReturn(1);
+    $plugin = Plugin::boot();
+    $plugin->register();
+    $controllers = (new ReflectionProperty(SettingsPage::class, 'controllers'))->getValue($plugin->get(SettingsPage::class));
+
+    // Once: register() built the page without listing them, and this call is the one listing.
+    Filters\expectApplied('alpaca_bot/rest/controllers')->once()->andReturnFirstArg();
+    $listed = array_map(static fn(object $c): string => $c::class, [...$controllers()]);
+
+    expect($listed)->toContain(AlpacaBot\Rest\ChatController::class)->toContain(StreamController::class)->toContain(ViewController::class);
 });

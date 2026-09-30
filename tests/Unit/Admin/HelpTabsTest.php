@@ -86,8 +86,12 @@ it('describes what the chat screen does now, and points support at the wordpress
     expect($chat)->toContain('New chat')->toContain('Enter')->toContain('Shift')->toContain('image')->toContain('Copy')->toContain('Edit and resend')
         // The drawer (Admin\Drawer): where it is, and the image button it lacks where the screen has no media library.
         ->toContain('round button')->toContain('screens that have the button')->toContain('already loads the media library')
-        // The block editor's sidebar (resources/ts/editor.ts) in the drawer's place, and when it names the post.
-        ->toContain('In the block editor the same chat is a sidebar')->toContain('starts on a new chat')->toContain('once that post has been saved or autosaved')
+        // The block editor's sidebar (resources/ts/editor-start.ts) in the drawer's place, and when it names the post.
+        ->toContain('In the block editor the same chat is a sidebar')->toContain('once that post has been saved or autosaved')
+        // The two share one memory of the conversation last open (Kanboard #4527).
+        ->toContain('opens on the one you last had open in it or in the block editor')
+        ->toContain('it opens on the conversation you last had open in it or in the panel')
+        ->not->toContain('starts on a new chat')
         // The image cap is Assets::maxImageBytes(), which reads post_max_size alone; the tab must name that setting, not the upload limit that has no say.
         ->toContain('post_max_size')->not->toMatch('/is the site.s own upload limit/');
     // A question goes to the wordpress.org forum, premium help is a call booked on
@@ -151,11 +155,16 @@ it('says what each Settings › Access row decides and what "Set in code" under 
         ->toContain('Administrators')->toContain('Editors and up')->toContain('Authors and up')->toContain('Contributors and up')->toContain('Any logged-in user')
         // The tool floor: opening the chat does not hand a role the tools.
         ->toContain('as well as Chat')
-        // The Chat row's two surfaces, each behind a filter of its own, and which one a note names.
-        ->toContain('alpaca_bot/admin/menu_capability')->toContain('alpaca_bot/capability/chat')
+        // The Chat row's surfaces, each behind a filter of its own: the menu's, and every chat
+        // REST route's own key, asked once per key and verb with the first such route's path, so a
+        // route sharing both with an earlier one is not named apart (Kanboard #4537).
+        ->toContain('alpaca_bot/admin/menu_capability')->toContain('alpaca_bot/capability/{route}')->toContain('every chat REST route')->toContain('once for each route key and method')->toContain('the path of the first route that declares that pair')
+        ->toContain('is not asked or named on its own')->not->toContain('names each route and method that moved it')
+        ->not->toContain('which the note does not ask')
         ->toContain('once no filter changes it')
-        // What the note does not cover: it asks as [alpacabot] outside a post, not per post or tag.
-        ->toContain('outside any post')->toContain('<code>[alpacabot_agent]</code>, gets no note')
+        // Both shortcodes are asked, outside a post; what the note does not cover is a post or a user.
+        ->toContain('outside any post')->toContain('<code>[alpacabot]</code> and <code>[alpacabot_agent]</code>')
+        ->not->toContain('<code>[alpacabot_agent]</code>, gets no note')
         ->not->toMatch('/(?<![\\d.])1\\.\\d/');
 });
 
@@ -180,8 +189,9 @@ it('tells the person switching tools on what an ability call is: another plugin\
         ->toContain('Contributors and up by default for <code>web_fetch</code>, <code>summarize</code> and <code>draft_post</code>')
         ->toContain('Administrators for the abilities tool')
         ->not->toContain('All three')->not->toContain('three ship')
-        // The allowlist bounds only direct calls (review I2): an ability that runs others is named as the way round it.
-        ->toContain('decides only what the model may call directly')->toContain('runs other abilities')
+        // The allowlist also bounds what a ticked ability runs (Kanboard #4538), and the tab says what differs before 7.1 and what it does not reach.
+        ->toContain('also bounds what a ticked ability runs')->toContain('run any ability')->toContain('Before WordPress 7.1')
+        ->toContain('is not bounded by the list')->not->toContain('decides only what the model may call directly')
         ->not->toContain('cannot call the plugin')
         // The schema's own text (review N2): what Alpaca Bot does with it, not what a provider does.
         ->toContain('Alpaca Bot neither cleans nor caps')->not->toContain('as the plugin registered it')
@@ -199,7 +209,7 @@ it('tells the person adding an MCP server what is offered, whose text it is, who
     $mcp = str_replace('&#039;', "'", $m[0] ?? '');
     expect($mcp)->not->toContain('no MCP server is contacted')->not->toContain('php-agents')
         ->toContain('Discover tools asks the server for its tools')
-        ->toContain('checked when it is saved from this screen or over the REST API, and again each time Alpaca Bot connects to it: on Discover tools, and on a chat turn that lists its tools')
+        ->toContain('checked when it is saved from this screen, over the REST API or with wp alpaca-bot settings, and again each time Alpaca Bot connects to it: on Discover tools, and on a chat turn that lists its tools')
         ->toContain('only to an address that passed, never through a proxy, and follows no redirect')
         ->toContain('Put a credential in the header, never in the address')
         ->toContain('only the tools you tick')->toContain('prefix__tool')

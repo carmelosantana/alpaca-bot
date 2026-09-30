@@ -17,6 +17,7 @@ use AlpacaBot\RateLimit;
 use AlpacaBot\Rest\ChatController;
 use AlpacaBot\Rest\StreamBudget;
 use AlpacaBot\Settings\Migrate04;
+use AlpacaBot\Settings\ProviderKey;
 use AlpacaBot\Settings\Store;
 use AlpacaBot\Shortcodes\Chat;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Mcp\McpServer;
@@ -64,7 +65,7 @@ final class UninstallTest extends TestCase
 
     /** Options that extend one of ours, that one of ours extends, or that an unanchored or unescaped match would take. */
     private const NEIGHBOUR_OPTIONS = [
-        'alpaca_bot_settings_backup', 'alpaca_bot_mcp_secrets_old', 'xalpaca_bot_settings', 'alpaca_bot',
+        'alpaca_bot_settings_backup', 'alpaca_bot_mcp_secrets_old', 'alpaca_bot_provider_key_old', 'xalpaca_bot_settings', 'alpaca_bot',
         'alpaca_bot_stream_slot_backup', 'alpaca_bot_stream_slot_7_0_old', 'alpaca-bot-stream-slot-7-0',
         'alpaca_bot_cache_notahash', 'alpaca_bot_migrated_05', 'alpaca_bot_api_url_v2', 'other_plugin_settings',
     ];
@@ -140,6 +141,8 @@ final class UninstallTest extends TestCase
 
         // Options: the settings row exists from TestCase::set_up(); the rest are written here.
         Secrets::put(['srv' => 'Bearer token']);
+        $store->set('provider.api_key', 'sk-FAKE-uninstall');
+        $this->assertSame('sk-FAKE-uninstall', get_option(ProviderKey::OPTION));
         foreach ([Migrate04::FLAG, Migrate04::FLAG_CONVERSATIONS, Migrate04::FLAG_RETENTION, Migrate04::FLAG_AUTOLOAD] as $flag) {
             update_option($flag, '1', true);
         }
@@ -258,7 +261,7 @@ final class UninstallTest extends TestCase
         $this->assertCount(4, $slots, 'two stream slots and the two neighbours');
         $transients = $wpdb->get_col($wpdb->prepare("SELECT option_name FROM {$wpdb->options} WHERE option_name LIKE %s", $wpdb->esc_like('_transient_alpaca_bot_') . '%'));
         // Prime every cache the API would answer from, so a delete behind its back shows.
-        foreach ([...$slots, ...$transients, Plugin::OPTION, Secrets::OPTION, ...self::LEGACY_OPTIONS] as $name) {
+        foreach ([...$slots, ...$transients, Plugin::OPTION, Secrets::OPTION, ProviderKey::OPTION, ...self::LEGACY_OPTIONS] as $name) {
             get_option($name);
         }
         foreach (['conversation', 'receipt', 'stuck', 'trashed'] as $which) {
@@ -272,7 +275,7 @@ final class UninstallTest extends TestCase
         $this->uninstall();
 
         // Ours: options.
-        foreach ([Plugin::OPTION, Secrets::OPTION, Migrate04::FLAG, Migrate04::FLAG_CONVERSATIONS, Migrate04::FLAG_RETENTION, Migrate04::FLAG_AUTOLOAD, ...self::LEGACY_OPTIONS] as $name) {
+        foreach ([Plugin::OPTION, Secrets::OPTION, ProviderKey::OPTION, Migrate04::FLAG, Migrate04::FLAG_CONVERSATIONS, Migrate04::FLAG_RETENTION, Migrate04::FLAG_AUTOLOAD, ...self::LEGACY_OPTIONS] as $name) {
             $this->assertOptionGone($name);
         }
         foreach ($slots as $name) {

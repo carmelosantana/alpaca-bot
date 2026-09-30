@@ -1,0 +1,46 @@
+{
+  "description": "wp-journeys manifest for Alpaca Bot. Run with WPJ_MANIFEST_DIR pointing at this directory (tests/e2e), not at the plugin root. JSON, so the plugin's own Playwright run does not collect it.",
+  "version": 1,
+  "plugin": "alpaca-bot",
+  "gate": { "screen": "alpaca-bot" },
+  "deprecated": { "shortcodes": ["alpacabot_agent"] },
+  "journeys": [
+    {
+      "name": "alpaca-bot-welcome-round-trip",
+      "actor": "administrator",
+      "surface": "both",
+      "settings": [
+        {
+          "url": "/wp-admin/admin.php?page=alpaca-bot-settings&tab=chat",
+          "field": "#ab-chat-welcome",
+          "value": "Welcome from wp-journeys",
+          "readBack": "/?wpj_render=%5Balpacabot%5D",
+          "submit": "#submit"
+        }
+      ]
+    },
+    {
+      "name": "alpaca-bot-editor-chats-but-cannot-configure",
+      "actor": "editor",
+      "surface": "admin",
+      "screens": [
+        { "url": "/wp-admin/admin.php?page=alpaca-bot", "allow": ["editor"], "deny": [] },
+        { "url": "/wp-admin/admin.php?page=alpaca-bot-settings", "allow": [], "deny": ["editor"] }
+      ]
+    },
+    {
+      "name": "alpaca-bot-subscriber-cannot-chat",
+      "actor": "subscriber",
+      "surface": "admin",
+      "screens": [
+        { "url": "/wp-admin/admin.php?page=alpaca-bot", "allow": [], "deny": ["subscriber"] }
+      ]
+    },
+    {
+      "name": "alpaca-bot-shortcode-for-a-visitor",
+      "actor": "anonymous",
+      "surface": "frontend",
+      "shortcodes": ["alpacabot"]
+    }
+  ]
+}

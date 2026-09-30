@@ -23,3 +23,24 @@ export function watchNonce(onNonce: (nonce: string) => void): void {
     if (typeof nonce === 'string' && nonce !== '') onNonce(nonce);
   });
 }
+
+/**
+ * The page's REST nonce (`alpacaBot.nonce`) as a getter, kept fresh on the heartbeat from this
+ * call on, for a script that puts the chat into a page before the chat bundle is there: the
+ * drawer's loader (drawer-start.ts) and the block editor's sidebar (editor-start.ts). Each signs
+ * requests of its own before the first open adds the bundle, and the bundle's own watchNonce()
+ * starts only when it boots, so without this a tab left open past the nonce's life fails its
+ * first open (Kanboard #4526).
+ *
+ * The fresh nonce is written into `alpacaBot` itself, not kept here, because that object is what
+ * the bundle boots on (chat.ts hands `window.alpacaBot` to boot()), so the chat starts with it.
+ * Once the bundle has booted, its watchNonce() writes the same tick's nonce into the same object,
+ * and both ask with the same `alpaca_bot_nonce: 1`, so the second registration changes nothing.
+ */
+export function pageNonce(): () => string {
+  watchNonce((nonce) => {
+    const settings = window.alpacaBot;
+    if (settings) settings.nonce = nonce;
+  });
+  return () => window.alpacaBot?.nonce ?? '';
+}

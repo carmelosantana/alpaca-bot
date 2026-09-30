@@ -15,9 +15,10 @@ use AlpacaBot\Settings\Schema;
  * update_option() with no `$autoload`, so a site's first save takes the add_option() branch with
  * none, wp_determine_option_autoload_value() answers `auto` for an option under core's 150000-byte
  * `wp_max_autoloaded_option_size`, and the whole option is in `alloptions` on every request, front
- * end included. The provider API key lives there, and a header value put there would too. This
- * option is read only when something asks for a value: at most one query in a request that asks,
- * and none in one that does not.
+ * end included. A header value put there would be too. The provider API key is kept out of it
+ * the same way since 0.6.1, in an option of its own (Settings\ProviderKey). This option is read
+ * only when something asks for a value: at most one query in a request that asks, and none in one
+ * that does not.
  *
  * The settings row carries Schema::MASK when a value is kept here and '' when none is.
  * ServerSettings::beforeSave() writes both: this option from inside the settings option's

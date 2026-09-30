@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { expect, test, type Locator, type Page, type Request } from '@playwright/test';
 
 /**
- * The chat in the block editor (Admin\Drawer::enqueueEditor(), resources/ts/editor.ts): a
+ * The chat in the block editor (Admin\Drawer::enqueueEditor(), resources/ts/editor-start.ts): a
  * PluginSidebar mounting the fragment the drawer mounts, against the wp-env development site and
  * its fake provider (tests/e2e/chat.spec.ts says what that is and why its reply text is the
  * assertion).
@@ -16,10 +16,20 @@ import { expect, test, type Locator, type Page, type Request } from '@playwright
  *   included: a PluginSidebar unmounts its children when it closes, and the chat must not go with
  *   them. Reopening fetches no fragment and adds no second chat bundle.
  * - "New chat" starts over in the sidebar and does not leave the editor.
+ * - The sidebar and the drawer share one memory of the conversation last shown (Kanboard #4527):
+ *   the sidebar reopens the conversation it last showed, the drawer opens on it, and a New chat
+ *   in the sidebar leaves both on none. So every test starts from none (login()).
  * - On a new post the composer names no post until the post is first saved or autosaved, and
  *   then names it without a reload or a remount: the first turn carries no `post_id`, a turn after
  *   the save carries the post's. A post chip taken off stays off through the next save, and
  *   "New chat" puts it back, even when its fragment was rendered before the save.
+ *
+ * The afterAll hook deletes what the spec made with wp-cli, run by default in wp-env's development
+ * container (`pnpm exec wp-env run cli wp`). `E2E_WP_CLI` replaces that prefix for another site:
+ * a command split on whitespace (so no part of it may contain a space), to which wp-cli's own
+ * arguments are appended, and whose stdout is wp-cli's output. For a wp-harness site,
+ * `E2E_WP_CLI="node <wp-harness>/bin/wph.js wp <site> --"`, which prints docker's progress on
+ * stderr only.
  */
 const REPLY = 'Hello from the Alpaca Bot end-to-end fake provider.';
 const ADMIN_USER = process.env.WP_ADMIN_USER ?? 'admin';
@@ -34,6 +44,7 @@ type EditorGlobals = {
     media?: unknown;
   };
   alpacaBot: { nonce: string; rest: string };
+  alpacaBotMount: { prefs: string };
 };
 
 /** The start of the title this spec gives each post it saves. */
@@ -80,11 +91,28 @@ async function track(page: Page): Promise<void> {
   });
 }
 
+/**
+ * Logs in, and leaves the drawer closed and on no conversation, which the sidebar would otherwise
+ * reopen from whatever spec ran before (Kanboard #4527): stored through POST /view/drawer from the
+ * dashboard, which carries the drawer's settings.
+ */
 async function login(page: Page): Promise<void> {
   await page.goto('/wp-login.php');
   await page.fill('#user_login', ADMIN_USER);
   await page.fill('#user_pass', ADMIN_PASSWORD);
   await Promise.all([page.waitForURL(/wp-admin/), page.click('#wp-submit')]);
+  await page.goto('/wp-admin/index.php');
+  const status = await page.evaluate(async () => {
+    const wp = window as unknown as EditorGlobals;
+    const res = await fetch(wp.alpacaBotMount.prefs, {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'X-WP-Nonce': wp.alpacaBot.nonce, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ open: false, conversation_id: 0 }),
+    });
+    return res.status;
+  });
+  expect(status).toBe(200);
 }
 
 /** A new draft post with this title, made through the REST API from a screen that carries the chat's settings. */
@@ -167,15 +195,23 @@ async function send(sidebar: Locator, text: string): Promise<void> {
 
 test.beforeEach(async ({ page }) => { await track(page); });
 
+/** The wp-cli command for the site under test: `E2E_WP_CLI`, or wp-env's (file docblock). */
+function wpCliCommand(env: string | undefined = process.env.E2E_WP_CLI): [string, ...string[]] {
+  const parts = (env ?? '').trim().split(/\s+/).filter((part) => part !== '');
+  const [bin, ...rest] = parts.length > 0 ? parts : ['pnpm', 'exec', 'wp-env', 'run', 'cli', 'wp'];
+  return [bin!, ...rest];
+}
+
 /**
- * Deletes, for good, exactly the posts in `made`, with wp-cli in wp-env's development container,
- * since a usage receipt has no REST route to delete it by; `wp post delete --force` takes a post's
- * revisions with it. Then checks that none of them is left.
+ * Deletes, for good, exactly the posts in `made`, with wp-cli on the site under test
+ * (wpCliCommand()), since a usage receipt has no REST route to delete it by; `wp post delete
+ * --force` takes a post's revisions with it. Then checks that none of them is left.
  */
 test.afterAll(async () => {
   const ids = [...made].map(String);
   if (ids.length === 0) return;
-  const wpCli = (...args: string[]): string => execFileSync('pnpm', ['exec', 'wp-env', 'run', 'cli', 'wp', ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  const [bin, ...prefix] = wpCliCommand();
+  const wpCli = (...args: string[]): string => execFileSync(bin, [...prefix, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
   wpCli('post', 'delete', ...ids, '--force');
   const left = wpCli('eval', `echo 'left:' . count(array_filter(array_map('get_post', [${ids.join(',')}])));`);
   expect(left).toContain('left:0');
@@ -417,4 +453,53 @@ test('two saves that finish while the post chip is still being fetched ask for i
   await expect(sidebar.locator('#ab-form .ab-chip[data-chip="post"] .ab-chip__label')).toHaveText(`Editing: ${TITLE}twice again`);
   await page.unroute(isPanel);
   await expect(sidebar.locator('#ab-form .ab-chip')).toHaveCount(1);
+});
+
+test('the sidebar reopens the conversation it last showed, the drawer opens on it, and a New chat in the sidebar leaves both on none (Kanboard #4527)', async ({ page }) => {
+  await login(page);
+  const id = await draft(page, `${TITLE}remembered`);
+  const path = `/wp-admin/post.php?post=${id}&action=edit`;
+  const sidebar = page.locator('.ab-sidebar');
+  const stored = (): Promise<Request> => page.waitForRequest((req) => req.method() === 'POST' && /view(\/|%2F)drawer/.test(req.url()));
+  /** Opens the sidebar, unless the editor opened it itself, and waits for the chat. */
+  const open = async (): Promise<void> => {
+    const toggle = await openEditor(page, path);
+    if ((await toggle.getAttribute('aria-pressed')) !== 'true') await toggle.click();
+    await booted(sidebar);
+  };
+
+  await open();
+  await expect(sidebar.locator('#ab-form input[name="conversation_id"]')).toHaveValue('0');
+  let saved = stored();
+  await send(sidebar, 'hello');
+  await turnDone(sidebar);
+  const conversation = await sidebar.locator('#ab-form input[name="conversation_id"]').inputValue();
+  expect(Number(conversation)).toBeGreaterThan(0);
+  // The conversation, and not the drawer's open flag. Stored before the page is left: the POST is
+  // fire and forget, and a navigation could cancel it.
+  let request = await saved;
+  expect(request.postDataJSON()).toEqual({ conversation_id: Number(conversation) });
+  expect((await request.response())?.status()).toBe(200);
+
+  // Back in the editor, the sidebar opens on it, with its turn.
+  await open();
+  await expect(sidebar.locator('#ab-form input[name="conversation_id"]')).toHaveValue(conversation);
+  await expect(sidebar.locator('article.ab-msg--assistant')).toHaveCount(1);
+  await expect(sidebar.locator('#ab-form .ab-chip[data-chip="post"] .ab-chip__label')).toHaveText(`Editing: ${TITLE}remembered`);
+
+  // On another screen, the drawer holds it too, still closed.
+  await page.goto('/wp-admin/index.php');
+  await expect(page.locator('#ab-drawer')).toHaveAttribute('data-conversation', conversation);
+  await expect(page.locator('#ab-drawer')).toHaveAttribute('data-open', '0');
+
+  // A New chat in the sidebar is remembered as none, for both.
+  await open();
+  saved = stored();
+  await sidebar.locator('.page-title-action').click();
+  await expect(sidebar.locator('#ab-form input[name="conversation_id"]')).toHaveValue('0');
+  request = await saved;
+  expect(request.postDataJSON()).toEqual({ conversation_id: 0 });
+  expect((await request.response())?.status()).toBe(200);
+  await page.goto('/wp-admin/index.php');
+  await expect(page.locator('#ab-drawer')).toHaveAttribute('data-conversation', '0');
 });

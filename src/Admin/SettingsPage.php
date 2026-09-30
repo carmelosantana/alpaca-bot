@@ -13,6 +13,7 @@ use AlpacaBot\Rest\Controller;
 use AlpacaBot\Rest\RouteCapability;
 use AlpacaBot\Settings\Schema;
 use AlpacaBot\Settings\Store;
+use AlpacaBot\Shortcodes\AgentShim;
 use AlpacaBot\Shortcodes\Chat as ChatShortcode;
 use AlpacaBot\Toolkit\AbilitiesToolkit;
 use AlpacaBot\Toolkit\SchemaTool;
@@ -38,10 +39,15 @@ use AlpacaBot\View\Settings\McpTools;
  *
  * The sanitize callback is a closure, not `[Schema::class, 'sanitize']`: core calls it with the
  * option *name* second, and Schema::sanitize() wants the stored array there so a secret posted
- * back as Schema::MASK resolves to the stored key. Handing core the method itself would be a
+ * back as Schema::MASK resolves to what the row holds for it: MASK for a kept key, which
+ * Settings\ProviderKey then keeps. Handing core the method itself would be a
  * TypeError on every save; the closure reads the option and passes it. What it reads is the raw
  * stored row (get_option()), not Store's memo: the memo may be from earlier in the request, and
  * a sanitize callback should compare against what is in the database at the moment of the write.
+ * The mask keeps the key only while the Base URL keeps its origin: a save that moves it to another
+ * scheme, host or port clears the key unless a new one is typed with it, and the callback adds a
+ * notice saying so (Schema::providerKeyClearedByMove()), as heldServers() does for an MCP
+ * server's header value.
  *
  * Per-model overrides are a table with a row per model the catalog knows, posted as
  * `alpaca_bot_settings[models.overrides][<model>][<field>]`; Schema::sanitizeOverrides() drops a
@@ -60,8 +66,9 @@ use AlpacaBot\View\Settings\McpTools;
  * The Access tab is not one Schema field per control either. Every row is the capability select
  * the schema describes, on Access::stored(), and under a row whose filter moves it off that value,
  * or cannot be asked from this page, a line says "Set in code" (renderAccess()). The Chat row has
- * no filter of its own, so the menu's filter and the `/chat` route's are asked instead, and the
- * line names the one that moved. `access.mcp` has no control of its own: each MCP server
+ * no filter of its own, so the menu's filter and each chat REST route's are asked instead, and
+ * the Shortcodes row is asked for each shortcode; the lines name the surfaces that moved.
+ * `access.mcp` has no control of its own: each MCP server
  * `toolkits.mcp_servers` lists gets a row posting one entry of that map, as
  * `alpaca_bot_settings[access.mcp][<server id>]`. The carry-over leaves the map out, so a save
  * from another tab posts nothing for it and Schema::sanitize() keeps the stored map, sanitized
@@ -93,14 +100,19 @@ final class SettingsPage
 
     private ServerSettings $servers;
 
+    /** @var \Closure(): iterable<Controller> */
+    private \Closure $controllers;
+
     /**
-     * @param (callable(string): bool)|null $exists  function_exists() or a stand-in for it, as Abilities\Register takes one
-     * @param ServerSettings|null           $servers the address check a save of `toolkits.mcp_servers` runs; one over AddressCheck by default
+     * @param (callable(string): bool)|null      $exists      function_exists() or a stand-in for it, as Abilities\Register takes one
+     * @param ServerSettings|null                $servers     the address check a save of `toolkits.mcp_servers` runs; one over AddressCheck by default
+     * @param (callable(): iterable<Controller>)|null $controllers the REST controllers the site registers (Plugin::controllers()), whose Chat-row routes the Chat row asks; none by default, so a page built without them asks no route
      */
-    public function __construct(private Store $store, private ModelCatalog $catalog, private Access $access, ?callable $exists = null, ?ServerSettings $servers = null)
+    public function __construct(private Store $store, private ModelCatalog $catalog, private Access $access, ?callable $exists = null, ?ServerSettings $servers = null, ?callable $controllers = null)
     {
         $this->exists = $exists === null ? function_exists(...) : \Closure::fromCallable($exists);
         $this->servers = $servers ?? new ServerSettings();
+        $this->controllers = $controllers === null ? static fn(): array => [] : \Closure::fromCallable($controllers);
     }
 
     /** On admin_init: the setting, its sections (one page id per tab) and its fields. */
@@ -117,6 +129,9 @@ final class SettingsPage
                     $input = [];
                 }
                 $input = is_array($input) ? $input : [];
+                if (Schema::providerKeyClearedByMove($input, $stored)) {
+                    add_settings_error(Plugin::OPTION, 'provider_key_cleared', esc_html__('The API key was cleared, because the Base URL moved to another host, port or scheme. Enter it again.', 'alpaca-bot'));
+                }
                 return self::heldServers(Schema::sanitize($input, $stored), $input, $stored, $servers);
             },
             'default' => Schema::defaults(),
@@ -261,15 +276,26 @@ final class SettingsPage
      *
      * A row with a filter of its own is asked through Access, with the arguments that filter is
      * given at runtime (accessArgs()), so a listener registered for its row's arguments is called
-     * with them here too. Access::overridden() asks first: it never throws, and when resolving
-     * the row does, it leaves a line in the debug log under WP_DEBUG. effective() is then asked
-     * again for the figure, inside setInCode()'s catch, so a listener on such a row runs twice.
+     * with them here too. Those arguments are always the full count Access::expectedArgs() fixes,
+     * so effective() never refuses them. It is asked once, through ask(), which catches and logs
+     * whatever the row's filter throws, so a listener on such a row runs once each time the tab is
+     * shown, and a throwing one leaves one line (Kanboard #4694).
      *
-     * The Chat row has no filter in Access, so overridden('chat') would answer false whatever a
+     * Two rows govern more than one surface, and each surface is asked once, the answers grouped
+     * (setInCodeEach()), so a listener with side effects runs once per surface too. The Shortcodes
+     * row is asked through Access::effective() once per shortcode it governs, `[alpacabot]` and
+     * `[alpacabot_agent]`, with post id 0 and that tag, which is what Shortcodes\Chat passes for
+     * one rendered outside a post.
+     *
+     * The Chat row has no filter in Access, so effective('chat') is the stored value whatever a
      * site did. The menu's filter (Menu::capability(), which the chat screen, the drawer and the
-     * editor sidebar ask) and the `/chat` route's (Rest\RouteCapability::filtered(), with a
-     * `POST /chat` request) are asked instead, and the line names the one that moved. Every other
-     * chat route has a filter of its own, under its own route key, which this does not ask.
+     * editor sidebar ask) is asked instead, and then each route key and verb a route declaring the
+     * Chat row is registered under (RouteCapability::chatRoutes() over the site's controllers),
+     * through its own `alpaca_bot/capability/{route}` with a request of that verb and path, so a
+     * filter that answers by verb (only `DELETE /conversations`) is seen. The lines name the
+     * surfaces, verb and path, that moved. Listing the controllers is a site's code too (the
+     * `alpaca_bot/rest/controllers` filter), so a throw there is reported like a throwing filter,
+     * and logged like one (ask(), Kanboard #4694), as is a throw from the menu's.
      *
      * @param Field $f
      */
@@ -278,21 +304,40 @@ final class SettingsPage
         $stored = $this->access->stored($row);
         $html = Fields::render('access.' . $row, $f, $stored, $name);
         if ($row === 'chat') {
-            $lines = [
-                self::setInCode(esc_html__('for the chat screen, its panel on other admin screens and the block editor sidebar', 'alpaca-bot'), fn(): string => Menu::capability($this->access), $stored, $f),
-                self::setInCode(
-                    /* translators: %s: the chat route, POST /chat */
-                    sprintf(esc_html__('for the chat REST route (%s)', 'alpaca-bot'), '<code>POST /chat</code>'),
-                    static fn(): string => RouteCapability::filtered('chat', $stored, new \WP_REST_Request('POST', '/' . Controller::NAMESPACE . '/chat')),
-                    $stored,
-                    $f,
-                ),
-            ];
+            $lines = [self::setInCode(esc_html__('for the chat screen, its panel on other admin screens and the block editor sidebar', 'alpaca-bot'), self::ask($row, 'alpaca_bot/admin/menu_capability', fn(): string => Menu::capability($this->access)), $stored, $f)];
+            $routes = self::ask($row, 'alpaca_bot/rest/controllers', fn(): array => RouteCapability::chatRoutes(($this->controllers)()));
+            if ($routes instanceof \Throwable) {
+                $lines[] = self::setInCode(esc_html__('for the chat REST routes', 'alpaca-bot'), $routes, $stored, $f);
+                $routes = [];
+            }
+            $asks = [];
+            foreach ($routes as $route) {
+                $asks['<code>' . esc_html($route['method'] . ' ' . $route['path']) . '</code>'] = static fn(): string => RouteCapability::filtered($route['key'], $stored, new \WP_REST_Request($route['method'], '/' . Controller::NAMESPACE . $route['path']));
+            }
+            $lines = [...$lines, ...self::setInCodeEach(
+                /* translators: %s: one chat REST route, such as POST /chat, or a comma-separated list of them */
+                static fn(int $n): string => _n('for the chat REST route (%s)', 'for the chat REST routes (%s)', $n, 'alpaca-bot'),
+                $row,
+                $asks,
+                $stored,
+                $f,
+            )];
+        } elseif ($row === 'shortcode') {
+            $asks = [];
+            foreach ([ChatShortcode::TAG, AgentShim::TAG] as $tag) {
+                $asks['<code>' . esc_html('[' . $tag . ']') . '</code>'] = fn(): string => $this->access->effective($row, 0, $tag);
+            }
+            $lines = self::setInCodeEach(
+                /* translators: %s: one shortcode, such as [alpacabot], or a comma-separated list of them */
+                static fn(int $n): string => _n('for the shortcode %s', 'for the shortcodes %s', $n, 'alpaca-bot'),
+                $row,
+                $asks,
+                $stored,
+                $f,
+            );
         } else {
             $args = self::accessArgs($row);
-            $lines = $this->access->overridden($row, ...$args)
-                ? [self::setInCode('', fn(): string => $this->access->effective($row, ...$args), $stored, $f)]
-                : [];
+            $lines = [self::setInCode('', self::ask($row, '', fn(): string => $this->access->effective($row, ...$args)), $stored, $f)];
         }
         $lines = array_values(array_filter($lines, static fn(string $line): bool => $line !== ''));
         if ($lines === []) {
@@ -303,24 +348,86 @@ final class SettingsPage
     }
 
     /**
-     * "Set in code", for `$surface` (already-escaped HTML, or '' for a row with one surface), when
-     * what `$resolve` answers is not `$stored`: naming the capability, by its label when it is one
-     * the select offers. '' when it is `$stored`. Anything `$resolve` throws — a site's listener that
-     * throws, or one declaring more arguments than its hook fires with, which core calls into an
-     * ArgumentCountError — is reported as set in code with no figure, so a site's filter cannot
-     * take the settings page down.
+     * setInCode() over several surfaces of one row: each of `$asks` (a surface's label, already
+     * escaped HTML, => what resolves it) is called exactly once, and the surfaces whose answers
+     * match share one line, named by `$surface`'s format for that many surfaces (translated and
+     * not yet escaped, `%s` the label or the comma-separated labels). A surface whose resolver
+     * throws is grouped with the other failures, and leaves its own line in the debug log (ask()).
+     * A surface that answers the stored value gets no line.
      *
-     * @param \Closure(): string $resolve
+     * @param \Closure(int): string $surface
+     * @param array<string, \Closure(): string> $asks
+     * @param Field $f
+     * @return list<string>
+     */
+    private static function setInCodeEach(\Closure $surface, string $row, array $asks, string $stored, array $f): array
+    {
+        $groups = [];
+        foreach ($asks as $label => $resolve) {
+            $answer = self::ask($row, (string) $label, $resolve);
+            if ($answer !== $stored) {
+                $group = is_string($answer) ? 'cap:' . $answer : 'threw';
+                $groups[$group] ??= ['answer' => $answer, 'labels' => []];
+                $groups[$group]['labels'][] = (string) $label;
+            }
+        }
+        $lines = [];
+        foreach ($groups as ['answer' => $answer, 'labels' => $labels]) {
+            $lines[] = self::setInCode(
+                sprintf(esc_html($surface(count($labels))), implode(', ', $labels)),
+                $answer,
+                $stored,
+                $f,
+            );
+        }
+        return $lines;
+    }
+
+    /**
+     * What `$resolve` returns, or what it threw. Everything the Access tab's notes ask is a site's
+     * code, a filter's listener or the list of REST controllers, and this is the one place that
+     * catches it: a listener that throws, one declaring more arguments than its hook fires with
+     * (core calls it into an ArgumentCountError), anything. The page goes on and the note says
+     * asking failed (setInCode()), and under WP_DEBUG a line goes to the debug log naming `$row`,
+     * `$what` (the surface or the hook that was asked, as escaped HTML, which the line gives as
+     * plain text; '' for a row with one surface) and the message:
+     * `[alpaca-bot] resolving the <row> access row[ for <what>] threw, so it is reported as set in
+     * code: <message>`. A label that flips because of another plugin's exception never does it
+     * silently (Kanboard #4537, #4694).
+     *
+     * @template T
+     * @param \Closure(): T $resolve
+     * @return T|\Throwable
+     */
+    private static function ask(string $row, string $what, \Closure $resolve): mixed
+    {
+        try {
+            return $resolve();
+        } catch (\Throwable $e) {
+            if (defined('WP_DEBUG') && WP_DEBUG) {
+                // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log -- Deliberate diagnostic, gated on WP_DEBUG as core's own logging is: the note on the screen has nowhere to carry the reason.
+                error_log(sprintf('[alpaca-bot] resolving the %s access row%s threw, so it is reported as set in code: %s', $row, $what === '' ? '' : ' for ' . html_entity_decode(wp_strip_all_tags($what), ENT_QUOTES), $e->getMessage()));
+            }
+            return $e;
+        }
+    }
+
+    /**
+     * "Set in code", for `$surface` (already-escaped HTML, or '' for a row with one surface), when
+     * `$answer` is not `$stored`: naming the capability, by its label when it is one the select
+     * offers. '' when it is `$stored`. An `$answer` that is what asking threw (ask(), which has
+     * logged it) is reported as set in code with no figure, so a site's filter cannot take the
+     * settings page down.
+     *
      * @param Field $f
      */
-    private static function setInCode(string $surface, \Closure $resolve, string $stored, array $f): string
+    private static function setInCode(string $surface, string|\Throwable $answer, string $stored, array $f): string
     {
         $head = '<strong>' . esc_html__('Set in code', 'alpaca-bot') . '</strong>' . ($surface === '' ? '' : ' ' . $surface) . ': ';
-        try {
-            $effective = $resolve();
-        } catch (\Throwable) {
+        if ($answer instanceof \Throwable) {
             return $head . esc_html__('a filter decides this, and asking it from this page failed, so what it would return is not shown.', 'alpaca-bot');
         }
+        $effective = $answer;
         if ($effective === $stored) {
             return '';
         }
@@ -346,13 +453,12 @@ final class SettingsPage
      * an MCP row); here it is the
      * administrator viewing the page. A settings row gets a
      * WP_REST_Request of the verb it authorises on `/settings`, as SettingsController passes the
-     * request. The shortcode row gets post id 0 and the `[alpacabot]` tag, which is what
-     * Shortcodes\Chat passes for a shortcode rendered outside a post.
+     * request. The Shortcodes row is not asked through here: renderAccess() asks it once per
+     * shortcode, with post id 0 and that tag.
      *
-     * A listener that reads them answers for this administrator, this made-up request, or an
-     * `[alpacabot]` outside any post, not for everyone, so the note under a row is what the filter
-     * says here and now: one that changes the row only for another user, a post or
-     * `[alpacabot_agent]` gets no note.
+     * A listener that reads them answers for this administrator, this made-up request, or a
+     * shortcode outside any post, not for everyone, so the note under a row is what the filter
+     * says here and now: one that changes the row only for another user or a post gets no note.
      *
      * @return list<mixed>
      */
@@ -361,7 +467,6 @@ final class SettingsPage
         return match (true) {
             $row === 'settings.read' => [new \WP_REST_Request('GET', '/' . Controller::NAMESPACE . '/settings')],
             $row === 'settings.write' => [new \WP_REST_Request('PUT', '/' . Controller::NAMESPACE . '/settings')],
-            $row === 'shortcode' => [0, ChatShortcode::TAG],
             default => [get_current_user_id()],
         };
     }

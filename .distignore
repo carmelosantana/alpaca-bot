@@ -62,7 +62,10 @@
 /.phpunit.cache
 /phpcs.xml
 /phpcs.xml.dist
+/phpstan.neon
 /phpstan.neon.dist
+# PHPStan's result cache (tmpDir in phpstan.neon.dist); it records absolute paths on this machine.
+/.phpstan-cache
 /phpunit.xml
 /phpunit.integration.xml
 /playwright.config.ts

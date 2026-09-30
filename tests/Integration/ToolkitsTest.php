@@ -182,6 +182,12 @@ final class ToolkitsTest extends TestCase
         $this->assertSame(0, $requests);
     }
 
+    /**
+     * Needs a fetch to go through, which needs cURL; NoCurlTest covers the PHP without it.
+     *
+     * @requires function curl_init
+     * @requires function curl_exec
+     */
     public function test_web_fetch_sends_the_configured_user_agent_within_the_limits_and_returns_readable_text(): void
     {
         Plugin::instance()->get(Store::class)->set('toolkits.user_agent', 'Integration/1');
@@ -213,6 +219,9 @@ final class ToolkitsTest extends TestCase
      * and followed by the tool itself, with the HTTP API's own redirects off on both requests.
      * Both hops are the site's own host, the one host the tool neither looks up nor pins
      * (WebFetchToolkit::pin()), so `pre_http_request` can serve both without DNS.
+     *
+     * @requires function curl_init
+     * @requires function curl_exec
      */
     public function test_web_fetch_follows_a_relative_redirect_itself_with_the_http_apis_redirects_off(): void
     {
@@ -238,6 +247,14 @@ final class ToolkitsTest extends TestCase
      * The transport question against real Requests, and the Site Health test as core would
      * collect it: the harness and wp-env containers both have cURL with SSL and no
      * WP_PROXY_HOST, so the test registered through `site_status_tests` answers good.
+     *
+     * The other side, a PHP where WordPress would not use cURL, is NoCurlTest's, run with the
+     * cURL functions disabled (WP_NO_CURL=1, bin/test-integration.sh). This test skips there
+     * rather than being kept out of that run by its group alone, so a whole-suite run with
+     * WP_NO_CURL=1 reads as a skip here and not as a failure of a claim about another server.
+     *
+     * @requires function curl_init
+     * @requires function curl_exec
      */
     public function test_site_health_reports_that_web_fetch_can_run_pinned_here(): void
     {

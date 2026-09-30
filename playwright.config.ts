@@ -5,7 +5,10 @@ import { defineConfig, devices } from '@playwright/test';
  *
  * `WP_BASE_URL` is the wp-env *development* site (port 8888, the default below), not the tests
  * site on 8889: the PHPUnit integration suite reinstalls the database behind 8889 on every run,
- * so pointing the browser there would have the two suites overwrite each other.
+ * so pointing the browser there would have the two suites overwrite each other. Pointed at
+ * another site, set `E2E_WP_CLI` too: the command prefix that runs wp-cli there, which
+ * tests/e2e/editor.spec.ts uses to clean up what it made (default `pnpm exec wp-env run cli wp`;
+ * for a wp-harness site, `node <wp-harness>/bin/wph.js wp <site> --`). It is split on whitespace.
  *
  * No retries, on purpose. A retry would let an intermittently missing reply pass on the second
  * attempt, which is exactly the failure this test exists to catch; a flake here is a bug report,

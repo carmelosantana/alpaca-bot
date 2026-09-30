@@ -75,8 +75,9 @@ jobs:
       # vendor-prefixed/ through strauss) and its own `pnpm install --frozen-lockfile` and
       # `pnpm build`, so there is nothing to install ahead of it; the four setup steps above are
       # only there to put php, composer, pnpm and node on the PATH it needs. It ends by asserting
-      # eleven runtime paths inside the zip and the absence of the dev toolchain, so a build that
-      # produced the wrong tree fails here rather than being handed to Plugin Check.
+      # its runtime paths and the vendored tree inside the zip and the absence of the dev
+      # toolchain, so a build that produced the wrong tree fails here rather than being handed to
+      # Plugin Check.
       - name: Build the release zip
         run: bash bin/build-zip.sh
 

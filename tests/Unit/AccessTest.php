@@ -121,15 +121,7 @@ it('names each row\'s hook with its dots as slashes', function (): void {
 it('gives the Chat row no filter of its own: its hooks are the menu\'s and each chat route\'s', function (): void {
     Filters\expectApplied('alpaca_bot/capability/chat')->never();
     $access = new Access(new Store(['access.chat' => 'read']));
-    expect($access->effective('chat'))->toBe('read')
-        ->and($access->overridden('chat'))->toBeFalse();
-    // And still false with the two hooks that really do carry this capability listened on: this
-    // method cannot see them, so a screen asking it about the Chat row learns nothing and has to
-    // ask those surfaces one at a time. Pinned because the docblock says so and a screen would
-    // otherwise render "not set in code" over a site that sets it in code.
-    add_filter('alpaca_bot/admin/menu_capability', '__return_true');
-    add_filter('alpaca_bot/capability/chat', '__return_true');
-    expect($access->overridden('chat'))->toBeFalse();
+    expect($access->effective('chat'))->toBe('read');
 });
 
 it('ignores a row filter that answers anything but a capability name, as Capability::filtered() does everywhere', function (): void {
@@ -140,17 +132,6 @@ it('ignores a row filter that answers anything but a capability name, as Capabil
         Filters\expectApplied('alpaca_bot/capability/shortcode')->once()->andReturn($bad);
         expect($access->effective('shortcode', 7, 'alpacabot'))->toBe('edit_posts', var_export($bad, true));
     }
-});
-
-it('says a row is overridden only when its filter moved it off the stored value', function (): void {
-    $access = new Access(new Store(['access.tool.summarize' => 'publish_posts']));
-    Filters\expectApplied('alpaca_bot/capability/tool/summarize')->once()->andReturnFirstArg();
-    expect($access->overridden('tool.summarize', 5))->toBeFalse();
-    Filters\expectApplied('alpaca_bot/capability/tool/summarize')->once()->andReturn('manage_options');
-    expect($access->overridden('tool.summarize', 5))->toBeTrue();
-    // A guarded answer is no opinion, so it overrides nothing.
-    Filters\expectApplied('alpaca_bot/capability/tool/summarize')->once()->andReturn(true);
-    expect($access->overridden('tool.summarize', 5))->toBeFalse();
 });
 
 it('asks user_can() of the user it is given, never the logged-in one', function (): void {
@@ -199,56 +180,4 @@ it('refuses a caller that passes fewer arguments than the row fires with, naming
     expect($access->effective('chat'))->toBe('edit_posts')
         ->and($access->effective('tool.summarize', 5, 'spare'))->toBe('edit_posts')
         ->and($access->allows(5, 'shortcode', 7, 'alpacabot'))->toBeTrue();
-});
-
-// overridden() is the screen's question, and a screen must not be fatal. The settings page has no
-// post id for the shortcode row, so effective() would refuse it before any filter ran; answering
-// true regardless would label that row "set in code" on every site in the world. has_filter() is
-// what keeps the answer honest: no listener, nothing can have moved the row.
-it('asks whether a listener exists at all when the caller cannot supply the row\'s arguments', function (): void {
-    $access = new Access(new Store(['access.shortcode' => 'read']));
-    expect($access->overridden('shortcode'))->toBeFalse();
-    expect($access->overridden('settings.write'))->toBeFalse()
-        ->and($access->overridden('mcp.github'))->toBeFalse();
-    // With a listener registered the row is out of the operator's hands, and this call cannot
-    // find out what it did: true is the honest answer, and it is what stops the check above
-    // from being a blanket false.
-    add_filter('alpaca_bot/capability/shortcode', '__return_true');
-    expect($access->overridden('shortcode'))->toBeTrue();
-    // Unaffected: a caller that has the row's arguments never reaches this branch.
-    Filters\expectApplied('alpaca_bot/capability/shortcode')->once()->andReturnFirstArg();
-    expect($access->overridden('shortcode', 7, 'alpacabot'))->toBeFalse();
-});
-
-// A settings row runs two hooks, so "is there a listener at all" has to ask about both or the
-// screen tells an operator their row is theirs on a site whose 0.5 filter is still moving it.
-it('counts a listener on the 0.5 settings key as code having a say in a settings row', function (): void {
-    $access = new Access(new Store(['access.settings.read' => 'read']));
-    expect($access->overridden('settings.read'))->toBeFalse();
-    add_filter('alpaca_bot/capability/settings', '__return_true');
-    expect($access->overridden('settings.read'))->toBeTrue()
-        ->and($access->overridden('settings.write'))->toBeTrue()
-        // Only the settings rows run that key, so nothing else is labelled by it.
-        ->and($access->overridden('shortcode'))->toBeFalse();
-});
-
-// error_log() is a PHP internal, so the WP_DEBUG line this leaves cannot be asserted from here;
-// what is asserted is the answer, and that it is the same answer whatever threw.
-it('reports a row as set in code when resolving it throws, whether the throw came from a listener or from the option read', function (): void {
-    $access = new Access(new Store(['access.tool.draft_post' => 'read']));
-    // A listener that throws for reasons of its own, called with everything it asked for.
-    Filters\expectApplied('alpaca_bot/capability/tool/draft_post')->once()->andReturnUsing(static function (): string {
-        throw new RuntimeException('a listener of the site\'s own');
-    });
-    expect($access->overridden('tool.draft_post', 5))->toBeTrue();
-    // Not only a listener: `stored()` reads the option inside the same guard, and a site's
-    // pre_option_alpaca_bot_settings listener can throw. Every row would otherwise read as
-    // overridden with nothing at all to show for it.
-    Functions\when('get_option')->alias(static function (): mixed {
-        throw new RuntimeException('another plugin filtered the option and threw');
-    });
-    expect((new Access(new Store()))->overridden('tool.draft_post', 5))->toBeTrue();
-    // And it is still the plain comparison when the row does resolve.
-    Filters\expectApplied('alpaca_bot/capability/tool/draft_post')->once()->andReturnFirstArg();
-    expect($access->overridden('tool.draft_post', 5))->toBeFalse();
 });

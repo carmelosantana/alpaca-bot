@@ -76,7 +76,7 @@ async function turnDone(drawer: ReturnType<Page['locator']>): Promise<void> {
  * `form.noValidate`, which reflects to the attribute, in the same synchronous run that binds the
  * form's submit and the box's keydown handlers, so by the time anything else can see it, boot()
  * has finished. The box's focus is not the signal: a drawer that opens itself on a new screen
- * gives the focus back (drawer.ts giveFocusBack()), so the box is not focused when it has booted.
+ * gives the focus back (drawer-start.ts giveFocusBack()), so the box is not focused when it has booted.
  */
 async function booted(drawer: ReturnType<Page['locator']>): Promise<void> {
   await expect(drawer.locator('#ab-form')).toHaveAttribute('novalidate', '');
@@ -88,7 +88,7 @@ function nextContext(page: Page): Promise<Record<string, unknown>> {
     .then((req) => (req.postDataJSON() as { context: Record<string, unknown> }).context);
 }
 
-/** Whether core's media library is on this page: what drawer.ts reads to keep or hide the image button. */
+/** Whether core's media library is on this page: what drawer-start.ts reads to keep or hide the image button. */
 const media = (page: Page): Promise<string> => page.evaluate(() => typeof (window as unknown as { wp?: { media?: unknown } }).wp?.media);
 
 test('the drawer loads the chat on first open, runs a turn in it with no image button, and reopens on the next screen on the same conversation', async ({ page }) => {
