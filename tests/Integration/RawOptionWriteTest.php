@@ -460,20 +460,45 @@ final class RawOptionWriteTest extends TestCase
     public function test_autoload_on_writes_as_without_it_and_the_row_stays_autoloaded(): void
     {
         $this->wpCli();
-        $autoload = $this->autoloadOf(Plugin::OPTION);
         $this->armed('update', inCommand: false);
 
         $ended = $this->command('update', [Plugin::OPTION, '{"models.temperature":0.25}'], ['format' => 'json', 'autoload' => 'on']);
 
         $this->assertSame('halt 0', $ended);
         $this->assertSame(0.25, get_option(Plugin::OPTION)['models.temperature']);
-        $this->assertSame($autoload, $this->autoloadOf(Plugin::OPTION));
+        // 'on', as core's update_option() writes it when WP-CLI hands it --autoload=on.
+        $this->assertSame('on', $this->autoloadOf(Plugin::OPTION));
         $this->assertSame(["Success: Updated 'alpaca_bot_settings' option."], $this->said);
 
         $this->said = [];
         $this->armed('update', inCommand: false);
         $this->assertSame('halt 0', $this->command('update', [Plugin::OPTION, (string) wp_json_encode(get_option(Plugin::OPTION))], ['format' => 'json', 'autoload' => 'yes']));
         $this->assertSame(["Success: Value passed for 'alpaca_bot_settings' option is unchanged."], $this->said);
+    }
+
+    // Final review 5: `wp option set-autoload alpaca_bot_settings off` is not the plugin's to stop,
+    // so --autoload=on puts the row back on autoload, on a takeover and on an unchanged write alike.
+    public function test_autoload_on_puts_back_a_row_taken_off_autoload(): void
+    {
+        $this->wpCli();
+        $autoloaded = fn(): bool => in_array($this->autoloadOf(Plugin::OPTION), wp_autoload_values_to_autoload(), true);
+
+        wp_set_option_autoload(Plugin::OPTION, false);
+        $this->assertFalse($autoloaded());
+        $this->armed('update', inCommand: false);
+        $this->assertSame('halt 0', $this->command('update', [Plugin::OPTION, '{"models.temperature":0.35}'], ['format' => 'json', 'autoload' => 'on']));
+        $this->assertSame(0.35, get_option(Plugin::OPTION)['models.temperature']);
+        $this->assertTrue($autoloaded());
+
+        wp_set_option_autoload(Plugin::OPTION, false);
+        $this->assertFalse($autoloaded());
+        $this->armed('update', inCommand: false);
+        $this->assertSame('halt 0', $this->command('update', [Plugin::OPTION, (string) wp_json_encode(get_option(Plugin::OPTION))], ['format' => 'json', 'autoload' => 'yes']));
+        $this->assertTrue($autoloaded());
+        $this->assertSame([
+            "Success: Updated 'alpaca_bot_settings' option.",
+            "Success: Value passed for 'alpaca_bot_settings' option is unchanged.",
+        ], $this->said);
     }
 
     // Item 2: where WP-CLI would print its "unchanged" line, the takeover prints the same: here the

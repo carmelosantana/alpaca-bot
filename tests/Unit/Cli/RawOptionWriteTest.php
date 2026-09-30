@@ -395,8 +395,11 @@ it('refuses --autoload=off on an add over no row', function (): void {
         ->and($c->halted)->toBeNull();
 });
 
-it('takes --autoload=on, yes or true as the no-op it is, and writes as without it', function (mixed $autoload): void {
+// Final review 5: the row may have been taken off autoload behind the plugin's back (`wp option
+// set-autoload alpaca_bot_settings off`), so on, yes or true puts it back once the write is done.
+it('takes --autoload=on, yes or true as asking for the row autoloaded, and writes as without it', function (mixed $autoload): void {
     Functions\expect('update_option')->once()->withArgs(static fn(mixed ...$a): bool => count($a) === 2 && $a[1]['models.temperature'] === 0.4)->andReturn(true);
+    Functions\expect('wp_set_option_autoload')->once()->with(Plugin::OPTION, true)->andReturn(true);
     $c = rawWrite([], assoc: ['autoload' => $autoload]);
 
     $c->subject->sanitize(['models.temperature' => 0.4]);
@@ -408,8 +411,9 @@ it('takes --autoload=on, yes or true as the no-op it is, and writes as without i
 
 // WP-CLI hands a write of what is stored with --autoload to update_option() instead of reporting it
 // unchanged; the row stays autoloaded, so there is nothing to write, and it says so as WP-CLI does.
-it('reports a write of what is stored with --autoload=on as unchanged, and writes nothing', function (): void {
+it('reports a write of what is stored with --autoload=on as unchanged, writes nothing, and sets the row autoloaded', function (): void {
     Functions\expect('update_option')->never();
+    Functions\expect('wp_set_option_autoload')->once()->with(Plugin::OPTION, true)->andReturn(false);
     $c = rawWrite([], assoc: ['autoload' => 'on']);
 
     $c->subject->sanitize(get_option(Plugin::OPTION));
@@ -418,6 +422,22 @@ it('reports a write of what is stored with --autoload=on as unchanged, and write
         ->and($c->halted)->toBe(0)
         ->and(has_filter('sanitize_option_' . Plugin::OPTION, [$c->subject, 'sanitize']))->toBeFalse();
 });
+
+it('leaves the row\'s autoload alone without --autoload, and on a write it refuses', function (array $assoc, mixed $value): void {
+    Functions\when('update_option')->justReturn(true);
+    Functions\expect('wp_set_option_autoload')->never();
+    $noLookup = static fn(string $host, string $url): array => throw new RuntimeException('no lookup was expected');
+    $c = rawWrite([], 'patch', new ServerSettings($noLookup), assoc: $assoc);
+
+    $c->subject->sanitize($value === 'stored' ? get_option(Plugin::OPTION) : $value + get_option(Plugin::OPTION));
+
+    // Only a write of what is stored goes on to WP-CLI saying nothing; the others end here.
+    expect($c->errors === [] && $c->success === [])->toBe($value === 'stored');
+})->with([
+    'no flag, a write' => [[], ['models.temperature' => 0.4]],
+    'no flag, what is stored' => [[], 'stored'],
+    'on, a refused MCP row' => [['autoload' => 'on'], ['toolkits.mcp_servers' => [['url' => 'http://insecure.example.com/mcp', 'prefix' => 'bad']]]],
+]);
 
 it('reports a write the schema cleans to what is stored as unchanged, as WP-CLI would', function (string $mode): void {
     Functions\expect('update_option')->once()->andReturn(false);
@@ -595,6 +615,9 @@ it('without the column\'s collation, asks the stored row, and refuses only when 
     'the collation comparison errs' => [['utf8mb4', 'utf8mb4_unicode_520_ci'], ['ERROR', '0'], 'blogname', false],
     // A driver (a drop-in, say) may hand back an int.
     'the table answers an int' => [null, [1], "alp\u{00E4}ca_bot_settings", true],
+    // Final review 3: `$` alone would let a trailing newline through into the SQL.
+    'a character set with a trailing newline' => [["utf8mb4\n", 'utf8mb4_unicode_520_ci'], ['1'], "alp\u{00E4}ca_bot_settings", true],
+    'a collation with a trailing newline' => [['utf8mb4', "utf8mb4_unicode_520_ci\n"], ['1'], "alp\u{00E4}ca_bot_settings", true],
 ]);
 
 it('with no collation and no row of ours, decides by trim and ASCII case, the residual gap included', function (string $name, bool $refused): void {
@@ -626,6 +649,30 @@ it('refuses on a failed table query only for a name that is ours by trim and ASC
     'ours in other letters' => ['ALPACA_BOT_SETTINGS', true],
     'another option' => ['blogname', false],
 ]);
+
+// Final review 4: an answer is kept per name; a question the database could not answer is not,
+// so the next write under that name asks again, and is refused again while it cannot answer.
+it('asks again for a name the database could not answer, and keeps a name it did', function (): void {
+    global $wpdb;
+    // The typed name and core's are one name here, so each refusal asks it twice, unanswered.
+    $wpdb = fakeWpdb(null, ['ERROR', 'ERROR', 'ERROR', 'ERROR']);
+    $c = rawWrite([], name: 'ALPACA_BOT_SETTINGS', realDatabaseCheck: true);
+
+    $first = $c->subject->refuseSpelling('x', 'ALPACA_BOT_SETTINGS', 'y');
+    $c->subject->arm('update');
+    $second = $c->subject->refuseSpelling('x', 'ALPACA_BOT_SETTINGS', 'y');
+
+    expect([$first, $second])->toBe(['y', 'y'])
+        ->and($c->errors)->toHaveCount(2)
+        ->and(array_filter($wpdb->queries, static fn(string $q): bool => str_contains($q, 'SELECT option_name')))->toHaveCount(4);
+
+    $wpdb = fakeWpdb(null, ['0']);
+    $c = rawWrite([], name: 'blogname', realDatabaseCheck: true);
+    $c->subject->refuseSpelling('x', 'blogname', 'y');
+    $c->subject->refuseSpelling('x', 'blogname', 'y');
+
+    expect(array_filter($wpdb->queries, static fn(string $q): bool => str_contains($q, 'SELECT option_name')))->toHaveCount(1);
+});
 
 it('asks the database nothing for this option as it is spelled, or outside WP-CLI\'s command', function (string $option, bool $inCommand): void {
     global $wpdb;

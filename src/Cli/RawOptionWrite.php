@@ -56,7 +56,7 @@ use AlpacaBot\Settings\Writer;
  * reach with the trimmed name before they write. When WP-CLI's command is writing such a name,
  * the command fails with nothing written and this disarms. "Such a name" is the database's
  * answer (databaseTakes()), asked only while armed, inside WP-CLI's command, for a name that is
- * not this option byte for byte, once per name, in up to three steps:
+ * not this option byte for byte, once per name it answers, in up to three steps:
  * 1. the name and this option compared in the option_name column's own character set and
  *    collation, read from information_schema once;
  * 2. when those cannot be read (or the comparison fails), the name compared with this option's
@@ -66,19 +66,23 @@ use AlpacaBot\Settings\Writer;
  *    in ASCII case.
  * A failed step-2 query refuses the write only for a name that is this option by trim and ASCII
  * case, saying the database could not be asked; any other name passes. A write of another option
- * is never refused unless the database says the name is this one's. The one gap left: with
- * information_schema unreadable and no row of this option yet, a name the collation equates
+ * is never refused unless the database says the name is this one's, or, where it cannot say (a
+ * failed step-2 query, or step 3), the name is this one's by trim and ASCII case. An unanswered
+ * question is not remembered, so the next write under that name asks again. The one gap left:
+ * with information_schema unreadable and no row of this option yet, a name the collation equates
  * beyond ASCII case (an accent, say) is not caught.
  *
  * `--autoload` as that call has it (from the command line or wp-cli.yml) is never ignored: the
- * row stays autoloaded, so anything but on, yes or true fails the command with nothing written
- * (an `add` over a row that exists is left to add_option() before that, below), and those three
- * are the no-op they are. `update` and `patch` also run the stored row through the filter, to
- * compare; a value identical to the stored row is handed back untouched, so that pass, and a
- * write of exactly what is stored, go on as WP-CLI has them, except under an `--autoload` of on,
- * yes or true, where WP-CLI would hand the row to update_option() again and report "Could not
- * update option" when it answers false, and this reports it unchanged itself. Any other value is
- * taken over.
+ * plugin keeps the row autoloaded, so anything but on, yes or true fails the command with nothing
+ * written (an `add` over a row that exists is left to add_option() before that, below), and those
+ * three set the row autoloaded (wp_set_option_autoload()) once the write is done, an unchanged
+ * one included, since `wp option set-autoload alpaca_bot_settings off`, which this does not
+ * intercept, can have taken it off. `update` and `patch` also run the stored row through the
+ * filter, to compare; a value identical to the stored row is handed back untouched, so that pass,
+ * and a write of exactly what is stored, go on as WP-CLI has them, except under an `--autoload`
+ * of on, yes or true, where WP-CLI would hand the row to update_option() again and report "Could
+ * not update option" when it answers false, and this sets the row autoloaded and reports it
+ * unchanged itself. Any other value is taken over.
  * `update` and `patch` hand over a whole row, so first a key whose value is identical to the
  * stored row's is left out, as Store::set() leaves every other key out: an unchanged secret, a
  * plaintext key on a row ProviderKey::migrate() has not lifted included, then reads as "keep",
@@ -87,13 +91,14 @@ use AlpacaBot\Settings\Writer;
  * delete did before (Store would otherwise keep it); in `update` mode a key left out keeps its
  * value, as it does over REST. Then: a refused MCP row fails the command with the message REST
  * gives and nothing written; otherwise the value is written through Store::replace(), the
- * warnings are printed, then the line WP-CLI would print, and the command ends there with exit
- * code 0. That line is WP-CLI's "unchanged" one when the row Store wrote, the provider key and the
- * MCP header values are all as they were (a value the schema cleans to what is stored, say), and
- * its "Updated" one otherwise, a write that changed only a secret included. It has to end there:
- * when a write changed only a secret, Settings\ProviderKey or Mcp\ServerSettings lifts it out of
- * the row, the row equals the stored one, update_option() answers false, and WP-CLI would report
- * "Could not update option" for a write that happened (#4696).
+ * warnings are printed, the row is set autoloaded under an `--autoload` of on, yes or true, then
+ * the line WP-CLI would print, and the command ends there with exit code 0. That line is
+ * WP-CLI's "unchanged" one when the row Store wrote, the provider key and the MCP header values
+ * are all as they were (a value the schema cleans to what is stored, say), whatever the autoload
+ * flag did, and its "Updated" one otherwise, a write that changed only a secret included. It has
+ * to end there: when a write changed only a secret, Settings\ProviderKey or Mcp\ServerSettings
+ * lifts it out of the row, the row equals the stored one, update_option() answers false, and
+ * WP-CLI would report "Could not update option" for a write that happened (#4696).
  *
  * By default the end is WP_CLI::halt(0), which throws WP-CLI's ExitException only while its
  * private `$capture_exit` is set, and calls exit() otherwise (class-wp-cli.php, halt(), 2.12).
@@ -243,7 +248,7 @@ final class RawOptionWrite
     /**
      * refuseSpelling()'s test, and the refusal when it holds. The database is asked only while
      * armed, only inside WP-CLI's command, only for a name that is not this option byte for byte,
-     * and once per name; when it cannot answer, the write is refused.
+     * and once per name it answers; when it cannot answer, the write is refused.
      */
     private function refusesSpelling(mixed $option): bool
     {
@@ -297,13 +302,14 @@ final class RawOptionWrite
         if ($this->column === null) {
             // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- Read once per process and kept in $column; no API reports a column's collation.
             $row = $wpdb->get_row($wpdb->prepare('SELECT CHARACTER_SET_NAME, COLLATION_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s AND COLUMN_NAME = %s', $wpdb->options, 'option_name'), \ARRAY_N);
-            $this->column = is_array($row) && count($row) === 2 && preg_match('/^[A-Za-z0-9_]+$/', (string) $row[0]) === 1 && preg_match('/^[A-Za-z0-9_]+$/', (string) $row[1]) === 1
+            $this->column = is_array($row) && count($row) === 2 && preg_match('/^[A-Za-z0-9_]+$/D', (string) $row[0]) === 1 && preg_match('/^[A-Za-z0-9_]+$/D', (string) $row[1]) === 1
                 ? [(string) $row[0], (string) $row[1]]
                 : false;
         }
         if ($this->column !== false) {
             [$charset, $collation] = $this->column;
-            // Both identifiers are held to [A-Za-z0-9_]+ above; the two names go through prepare().
+            // Both identifiers are held to [A-Za-z0-9_]+ above, with D so no trailing newline gets
+            // through `$`; the two names go through prepare().
             $sql = "SELECT CONVERT(%s USING {$charset}) COLLATE {$collation} = CONVERT(%s USING {$charset}) COLLATE {$collation}";
             // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.NotPrepared -- A comparison, not a table read; the answer is kept per name in $taken; $sql carries only the two identifiers checked above, and the names go through prepare().
             $same = self::bit($wpdb->get_var($wpdb->prepare($sql, $name, Plugin::OPTION)));
@@ -364,7 +370,7 @@ final class RawOptionWrite
 
     /**
      * What `--autoload` asks of the write: null when it was not passed, true for on, yes or true
-     * (the row is autoloaded already, so a no-op), false for anything else.
+     * (the row is set autoloaded once the write is done), false for anything else.
      *
      * @param array<array-key, mixed> $assoc
      */
@@ -412,6 +418,7 @@ final class RawOptionWrite
                 return $value;
             }
             $this->disarm();
+            wp_set_option_autoload(Plugin::OPTION, true);
             ($this->success)(sprintf("Value passed for '%s' option is unchanged.", Plugin::OPTION));
             ($this->halt)(0);
             return $value;
@@ -439,6 +446,9 @@ final class RawOptionWrite
             ($this->warn)($line);
         }
         $unchanged = [$this->store->all(), get_option(ProviderKey::OPTION), get_option(Secrets::OPTION)] === $before;
+        if ($autoload === true) {
+            wp_set_option_autoload(Plugin::OPTION, true);
+        }
         ($this->success)(sprintf(match (true) {
             $mode === 'add' => "Added '%s' option.",
             $unchanged => "Value passed for '%s' option is unchanged.",
