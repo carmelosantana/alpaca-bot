@@ -5,7 +5,8 @@
  * closing only show and hide it, so a turn streaming into the drawer is never re-rendered and the
  * chat bundle's listeners are never bound twice.
  *
- * What the drawer remembers goes to POST /view/drawer and comes back on the next screen as the
+ * What the drawer remembers goes to POST /view/drawer (the conversation through mount.ts
+ * rememberConversation(), which the editor sidebar shares) and comes back on the next screen as the
  * drawer element's data attributes, where a drawer left open opens itself. That open does not
  * take the focus: the chat bundle focuses its box when it boots, which is right when the user
  * pressed the launcher and wrong on a screen they have just navigated to, so the focus is given
@@ -22,35 +23,17 @@
  * Its own module, and not the entry's, so node:test can drive it (tests/ts/drawer.test.ts): the
  * entry, drawer.ts, reads the page as it loads, and no test imports an entry (tests/ts/env.ts).
  */
-import { mountPanel, newChat, panelQuery, type MountSettings } from './mount.ts';
+import { mountPanel, newChat, panelQuery, rememberConversation, savePrefs, type MountSettings } from './mount.ts';
 import { pageNonce } from './nonce.ts';
 
 /** The drawer's behaviour, on the launcher and the drawer element Admin\Drawer::footer() prints. */
 export function startDrawer(cfg: MountSettings, launcher: HTMLElement, host: HTMLElement): void {
   let mounted: Promise<void> | null = null;
-  let remembered = host.dataset.conversation ?? '0';
   const nonce = pageNonce();
+  // The conversation the drawer shows, which the editor sidebar shares (mount.ts).
+  const remember = rememberConversation(host, cfg, nonce);
 
   host.dataset.media = window.wp?.media ? '1' : '0';
-
-  /** Fire and forget: a preference that fails to save is not worth a notice over the chat. */
-  function save(body: { open?: boolean; conversation_id?: number }): void {
-    void fetch(cfg.prefs, {
-      method: 'POST',
-      credentials: 'same-origin',
-      headers: { 'X-WP-Nonce': nonce(), 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    }).catch(() => {});
-  }
-
-  /** The conversation the drawer shows, saved when it changes rather than on every announcement of it. */
-  function remember(id: number): void {
-    const value = String(id);
-    if (value === remembered) return;
-    remembered = value;
-    host.dataset.conversation = value;
-    save({ conversation_id: id });
-  }
 
   /** Where the focus was before the chat booted, unless it was nowhere in particular. */
   function giveFocusBack(before: Element | null): void {
@@ -63,7 +46,7 @@ export function startDrawer(cfg: MountSettings, launcher: HTMLElement, host: HTM
   function setOpen(open: boolean, byUser: boolean): void {
     host.hidden = !open;
     launcher.setAttribute('aria-expanded', String(open));
-    if (byUser) save({ open });
+    if (byUser) savePrefs(cfg, nonce(), { open });
     if (!open) {
       if (byUser) launcher.focus();
       return;
@@ -97,9 +80,6 @@ export function startDrawer(cfg: MountSettings, launcher: HTMLElement, host: HTM
       e.preventDefault();
       void startOver();
     }
-  });
-  document.addEventListener('ab:conversation', (e) => {
-    if (host.contains(e.target as Node)) remember((e as CustomEvent<{ id: number }>).detail.id);
   });
   document.addEventListener('ab:new-chat', (e) => {
     if (!host.contains(e.target as Node)) return;

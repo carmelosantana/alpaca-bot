@@ -28,6 +28,13 @@
  * first time the sidebar opens, and again only after a mount that failed; chat.js is added once
  * (mount.ts).
  *
+ * The conversation is the drawer's (Kanboard #4527): the sidebar opens on the one the drawer
+ * remembers, which Admin\Drawer::enqueueEditor() hands it as `alpacaBotMount.conversation`, and
+ * the one it shows is remembered for both through POST /view/drawer (mount.ts
+ * rememberConversation()): each the chat announces from inside the sidebar, and 0 after a New
+ * chat. So each of the two opens on the conversation last shown in either. A mount that failed is
+ * tried again on the conversation remembered since.
+ *
  * The post is the editor's (`core/editor`'s getCurrentPostId()). On a new post that is an
  * auto-draft, and the panel renders no chip for an auto-draft (View\Chat\Shell), so a chat mounted
  * then names no post. Once the editor has saved or autosaved it, which takes the status off
@@ -40,14 +47,14 @@
  * ask for none once one has come.
  *
  * "New chat" starts over in place, as it does in the drawer (mount.ts newChat()): the chat
- * screen's link would leave the editor. It puts back the chips the server renders for the post,
- * a post chip the user took off included. The image button stays: the block editor loads the
+ * screen's link would leave the editor, and is remembered as no conversation. It puts back the
+ * chips the server renders for the post, a post chip the user took off included. The image button stays: the block editor loads the
  * media library (edit-form-blocks.php calls wp_enqueue_media()).
  *
  * Its own module, and not the entry's, so node:test can drive it (tests/ts/editor.test.ts): the
  * entry, editor.ts, reads the page as it loads, and no test imports an entry (tests/ts/env.ts).
  */
-import { mountPanel, newChat, panelQuery, postChip, type MountSettings } from './mount.ts';
+import { mountPanel, newChat, panelQuery, postChip, rememberConversation, type MountSettings } from './mount.ts';
 import { pageNonce } from './nonce.ts';
 
 export type CreateElement = (type: unknown, props: Record<string, unknown> | null, ...children: unknown[]) => unknown;
@@ -70,6 +77,9 @@ export function startEditor(cfg: MountSettings, wp: EditorWp): void {
   const nonce = pageNonce();
   const host = document.createElement('div');
   host.className = 'ab-sidebar';
+  // The conversation the drawer remembers, which the sidebar opens on and keeps (the file docblock).
+  host.dataset.conversation = cfg.conversation ?? '0';
+  const remember = rememberConversation(host, cfg, nonce);
   let mounted: Promise<void> | null = null;
   // Whether the composer is without the post chip a save may yet bring: set by rendered(), cleared
   // once postChip() answers that there is one (the file docblock).
@@ -105,7 +115,7 @@ export function startEditor(cfg: MountSettings, wp: EditorWp): void {
     host.hidden = false;
     if (mounted) return;
     host.dataset.post = post();
-    mounted = mountPanel(host, cfg, nonce(), panelQuery(host, '0')).then(
+    mounted = mountPanel(host, cfg, nonce(), panelQuery(host, host.dataset.conversation ?? '0')).then(
       rendered,
       (e: unknown) => { console.error(e); mounted = null; },
     );
@@ -124,7 +134,11 @@ export function startEditor(cfg: MountSettings, wp: EditorWp): void {
 
   /** "New chat" in place (the file docblock). */
   function startOver(): void {
-    void newChat(host, cfg, nonce(), panelQuery(host, '0')).then((swapped) => { if (swapped) rendered(); });
+    void newChat(host, cfg, nonce(), panelQuery(host, '0')).then((swapped) => {
+      if (!swapped) return;
+      remember(0);
+      rendered();
+    });
   }
 
   const h = wp.element.createElement;

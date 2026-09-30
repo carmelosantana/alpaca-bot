@@ -103,3 +103,61 @@ test('a nonce the heartbeat brings before the first open signs the sidebar\'s mo
   assert.equal(seen.find((r) => r.path === '/view/panel')?.nonce, 'fresh');
   assert.equal(window.alpacaBot.nonce, 'fresh');
 });
+
+/**
+ * The sidebar shares the drawer's memory (Kanboard #4527): it opens on the conversation
+ * Admin\Drawer::enqueueEditor() hands it as `alpacaBotMount.conversation`, the one the drawer
+ * remembers, and records the conversation it shows through POST /view/drawer as the drawer does,
+ * never the drawer's open flag.
+ */
+test('the sidebar opens on the conversation the drawer remembers, and remembers the one it shows (Kanboard #4527)', async (t) => {
+  installDom(PAGE);
+  heartbeat();
+  const seen = record(t);
+  window.alpacaBot = { rest: REST, nonce: 'n', offline: 'offline', i18n: {} };
+  const { startEditor } = await import('../../resources/ts/editor-start.ts');
+  const { wp, open } = editorWp();
+  startEditor({ ...MOUNT, conversation: '42' }, wp);
+
+  open();
+  await until(() => seen.some((r) => r.path === '/view/panel'));
+  assert.equal(seen.find((r) => r.path === '/view/panel')?.query, '42');
+
+  // The chat announces the conversation its transcript shows, from inside the sidebar; the
+  // one it opened on is not saved again, a new one is, once, and one from outside is not.
+  const inside = document.querySelector('.ab-sidebar') as HTMLElement;
+  const announce = (from: Element, id: number): void => { from.dispatchEvent(new CustomEvent('ab:conversation', { bubbles: true, detail: { id } })); };
+  announce(inside, 42);
+  announce(inside, 7);
+  announce(inside, 7);
+  announce(document.body, 9);
+  await until(() => seen.some((r) => r.method === 'POST'));
+  assert.deepEqual(seen.filter((r) => r.method === 'POST').map((r) => `${r.path} ${r.body}`), ['/view/drawer {"conversation_id":7}']);
+
+  // A mount that failed (this one did: no chat bundle loads here) is tried again on the next
+  // open, on the conversation remembered since.
+  open();
+  await until(() => seen.filter((r) => r.path === '/view/panel').length === 2);
+  assert.equal(seen.filter((r) => r.path === '/view/panel')[1]?.query, '7');
+});
+
+test('New chat in the sidebar remembers that it is on no conversation (Kanboard #4527)', async (t) => {
+  installDom(PAGE);
+  heartbeat();
+  const seen = record(t);
+  window.alpacaBot = { rest: REST, nonce: 'n', offline: 'offline', i18n: {} };
+  const { startEditor } = await import('../../resources/ts/editor-start.ts');
+  const { wp, open } = editorWp();
+  startEditor({ ...MOUNT, conversation: '42' }, wp);
+  open();
+  await until(() => seen.some((r) => r.path === '/view/panel'));
+
+  (document.querySelector('.ab-sidebar') as HTMLElement).dispatchEvent(new CustomEvent('ab:new-chat', { bubbles: true, cancelable: true }));
+  await until(() => seen.some((r) => r.method === 'POST'));
+  // New chat fetched the panel on no conversation, then saved that.
+  assert.deepEqual(seen.map((r) => `${r.method} ${r.path} ${r.query}${r.body}`), [
+    'GET /view/panel 42',
+    'GET /view/panel 0',
+    'POST /view/drawer {"conversation_id":0}',
+  ]);
+});

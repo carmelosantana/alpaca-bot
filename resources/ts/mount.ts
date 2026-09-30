@@ -15,8 +15,13 @@
  */
 import { fromHtml } from './dom.ts';
 
-/** What Admin\Assets::mount() localises; `title` is the chat's name, for a host that titles the panel it mounts the chat in. */
-export interface MountSettings { panel: string; prefs: string; htmx: string; htmxId: string; chat: string; css: string; title: string; failed: string }
+/**
+ * What Admin\Assets::mount() localises; `title` is the chat's name, for a host that titles the
+ * panel it mounts the chat in. `conversation` is the editor sidebar's alone
+ * (Admin\Drawer::enqueueEditor()): the conversation the drawer remembers, which the drawer reads
+ * off its own element instead.
+ */
+export interface MountSettings { panel: string; prefs: string; htmx: string; htmxId: string; chat: string; css: string; title: string; failed: string; conversation?: string }
 
 declare global {
   interface Window { alpacaBotMount?: MountSettings }
@@ -109,6 +114,43 @@ export async function mountPanel(host: HTMLElement, cfg: MountSettings, nonce: s
     host.textContent = cfg.failed;
     throw e;
   }
+}
+
+/**
+ * The user's drawer preferences, to POST /view/drawer (`cfg.prefs`): whether the drawer is open,
+ * and the conversation last shown. Fire and forget: a preference that fails to save is not worth
+ * a notice over the chat.
+ */
+export function savePrefs(cfg: MountSettings, nonce: string, body: { open?: boolean; conversation_id?: number }): void {
+  void fetch(cfg.prefs, {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { 'X-WP-Nonce': nonce, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  }).catch(() => {});
+}
+
+/**
+ * The conversation `host` shows, remembered for the user: the drawer's, and the editor sidebar's,
+ * which share the one memory (Kanboard #4527), so either reopens on the conversation last shown in
+ * either. What is remembered is the host's `data-conversation`, which the drawer's element carries
+ * from Admin\Drawer::footer() and the sidebar's is given from `alpacaBotMount.conversation`, and a
+ * mount that failed is tried again on it. It changes on each `ab:conversation` the chat announces
+ * from inside the host (resources/ts/boot.ts) and on the id the returned function is called with
+ * (the host's New chat, with 0), and is saved to POST /view/drawer when it changes rather than on
+ * every announcement. The drawer's open flag is not touched.
+ */
+export function rememberConversation(host: HTMLElement, cfg: MountSettings, nonce: () => string): (id: number) => void {
+  function remember(id: number): void {
+    const value = String(id);
+    if (value === (host.dataset.conversation ?? '0')) return;
+    host.dataset.conversation = value;
+    savePrefs(cfg, nonce(), { conversation_id: id });
+  }
+  document.addEventListener('ab:conversation', (e) => {
+    if (host.contains(e.target as Node)) remember((e as CustomEvent<{ id: number }>).detail.id);
+  });
+  return remember;
 }
 
 /**
