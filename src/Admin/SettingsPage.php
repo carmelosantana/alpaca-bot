@@ -270,7 +270,8 @@ final class SettingsPage
      * given at runtime (accessArgs()), so a listener registered for its row's arguments is called
      * with them here too. Access::overridden() asks first: it never throws, and when resolving
      * the row does, it leaves a line in the debug log under WP_DEBUG. effective() is then asked
-     * again for the figure, inside setInCode()'s catch, so a listener on such a row runs twice.
+     * again for the figure, through ask(), so a listener on such a row runs twice, and a throwing
+     * one leaves a line each time.
      *
      * Two rows govern more than one surface, and each surface is asked once, the answers grouped
      * (setInCodeEach()), so a listener with side effects runs once per surface each time the tab
@@ -285,7 +286,8 @@ final class SettingsPage
      * through its own `alpaca_bot/capability/{route}` with a request of that verb and path, so a
      * filter that answers by verb (only `DELETE /conversations`) is seen. The lines name the
      * surfaces, verb and path, that moved. Listing the controllers is a site's code too (the
-     * `alpaca_bot/rest/controllers` filter), so a throw there is reported like a throwing filter.
+     * `alpaca_bot/rest/controllers` filter), so a throw there is reported like a throwing filter,
+     * and logged like one (ask(), Kanboard #4694), as is a throw from the menu's.
      *
      * @param Field $f
      */
@@ -294,15 +296,14 @@ final class SettingsPage
         $stored = $this->access->stored($row);
         $html = Fields::render('access.' . $row, $f, $stored, $name);
         if ($row === 'chat') {
-            $lines = [self::setInCode(esc_html__('for the chat screen, its panel on other admin screens and the block editor sidebar', 'alpaca-bot'), fn(): string => Menu::capability($this->access), $stored, $f)];
-            try {
-                $routes = RouteCapability::chatRoutes(($this->controllers)());
-            } catch (\Throwable $e) {
-                $routes = null;
-                $lines[] = self::setInCode(esc_html__('for the chat REST routes', 'alpaca-bot'), static fn(): never => throw $e, $stored, $f);
+            $lines = [self::setInCode(esc_html__('for the chat screen, its panel on other admin screens and the block editor sidebar', 'alpaca-bot'), self::ask($row, 'alpaca_bot/admin/menu_capability', fn(): string => Menu::capability($this->access)), $stored, $f)];
+            $routes = self::ask($row, 'alpaca_bot/rest/controllers', fn(): array => RouteCapability::chatRoutes(($this->controllers)()));
+            if ($routes instanceof \Throwable) {
+                $lines[] = self::setInCode(esc_html__('for the chat REST routes', 'alpaca-bot'), $routes, $stored, $f);
+                $routes = [];
             }
             $asks = [];
-            foreach ($routes ?? [] as $route) {
+            foreach ($routes as $route) {
                 $asks['<code>' . esc_html($route['method'] . ' ' . $route['path']) . '</code>'] = static fn(): string => RouteCapability::filtered($route['key'], $stored, new \WP_REST_Request($route['method'], '/' . Controller::NAMESPACE . $route['path']));
             }
             $lines = [...$lines, ...self::setInCodeEach(
@@ -329,7 +330,7 @@ final class SettingsPage
         } else {
             $args = self::accessArgs($row);
             $lines = $this->access->overridden($row, ...$args)
-                ? [self::setInCode('', fn(): string => $this->access->effective($row, ...$args), $stored, $f)]
+                ? [self::setInCode('', self::ask($row, '', fn(): string => $this->access->effective($row, ...$args)), $stored, $f)]
                 : [];
         }
         $lines = array_values(array_filter($lines, static fn(string $line): bool => $line !== ''));
@@ -345,9 +346,7 @@ final class SettingsPage
      * escaped HTML, => what resolves it) is called exactly once, and the surfaces whose answers
      * match share one line, named by `$surface`'s format for that many surfaces (translated and
      * not yet escaped, `%s` the label or the comma-separated labels). A surface whose resolver
-     * throws is grouped with the other failures, and under WP_DEBUG leaves a line in the debug
-     * log naming `$row`, the surface and the message, as Access::overridden() does for a row it
-     * asks: a label that flips because of another plugin's exception must not do it silently.
+     * throws is grouped with the other failures, and leaves its own line in the debug log (ask()).
      * A surface that answers the stored value gets no line.
      *
      * @param \Closure(int): string $surface
@@ -359,15 +358,7 @@ final class SettingsPage
     {
         $groups = [];
         foreach ($asks as $label => $resolve) {
-            try {
-                $answer = $resolve();
-            } catch (\Throwable $e) {
-                $answer = $e;
-                if (defined('WP_DEBUG') && WP_DEBUG) {
-                    // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log -- Deliberate diagnostic, gated on WP_DEBUG as Access::overridden()'s is: the note on the screen has nowhere to carry the reason.
-                    error_log(sprintf('[alpaca-bot] resolving the %s access row for %s threw, so it is reported as set in code: %s', $row, html_entity_decode(wp_strip_all_tags((string) $label), ENT_QUOTES), $e->getMessage()));
-                }
-            }
+            $answer = self::ask($row, (string) $label, $resolve);
             if ($answer !== $stored) {
                 $group = is_string($answer) ? 'cap:' . $answer : 'threw';
                 $groups[$group] ??= ['answer' => $answer, 'labels' => []];
@@ -378,7 +369,7 @@ final class SettingsPage
         foreach ($groups as ['answer' => $answer, 'labels' => $labels]) {
             $lines[] = self::setInCode(
                 sprintf(esc_html($surface(count($labels))), implode(', ', $labels)),
-                static fn(): string => is_string($answer) ? $answer : throw $answer,
+                $answer,
                 $stored,
                 $f,
             );
@@ -387,24 +378,49 @@ final class SettingsPage
     }
 
     /**
-     * "Set in code", for `$surface` (already-escaped HTML, or '' for a row with one surface), when
-     * what `$resolve` answers is not `$stored`: naming the capability, by its label when it is one
-     * the select offers. '' when it is `$stored`. Anything `$resolve` throws — a site's listener that
-     * throws, or one declaring more arguments than its hook fires with, which core calls into an
-     * ArgumentCountError — is reported as set in code with no figure, so a site's filter cannot
-     * take the settings page down.
+     * What `$resolve` returns, or what it threw. Everything the Access tab's notes ask is a site's
+     * code, a filter's listener or the list of REST controllers, and this is the one place that
+     * catches it: a listener that throws, one declaring more arguments than its hook fires with
+     * (core calls it into an ArgumentCountError), anything. The page goes on and the note says
+     * asking failed (setInCode()), and under WP_DEBUG a line goes to the debug log naming `$row`,
+     * `$what` (the surface or the hook that was asked, as escaped HTML, which the line gives as
+     * plain text; '' for a row with one surface) and the message, in the format
+     * Access::overridden() writes, so a label that flips because of another plugin's exception
+     * never does it silently (Kanboard #4537, #4694).
      *
-     * @param \Closure(): string $resolve
+     * @template T
+     * @param \Closure(): T $resolve
+     * @return T|\Throwable
+     */
+    private static function ask(string $row, string $what, \Closure $resolve): mixed
+    {
+        try {
+            return $resolve();
+        } catch (\Throwable $e) {
+            if (defined('WP_DEBUG') && WP_DEBUG) {
+                // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log -- Deliberate diagnostic, gated on WP_DEBUG as Access::overridden()'s is: the note on the screen has nowhere to carry the reason.
+                error_log(sprintf('[alpaca-bot] resolving the %s access row%s threw, so it is reported as set in code: %s', $row, $what === '' ? '' : ' for ' . html_entity_decode(wp_strip_all_tags($what), ENT_QUOTES), $e->getMessage()));
+            }
+            return $e;
+        }
+    }
+
+    /**
+     * "Set in code", for `$surface` (already-escaped HTML, or '' for a row with one surface), when
+     * `$answer` is not `$stored`: naming the capability, by its label when it is one the select
+     * offers. '' when it is `$stored`. An `$answer` that is what asking threw (ask(), which has
+     * logged it) is reported as set in code with no figure, so a site's filter cannot take the
+     * settings page down.
+     *
      * @param Field $f
      */
-    private static function setInCode(string $surface, \Closure $resolve, string $stored, array $f): string
+    private static function setInCode(string $surface, string|\Throwable $answer, string $stored, array $f): string
     {
         $head = '<strong>' . esc_html__('Set in code', 'alpaca-bot') . '</strong>' . ($surface === '' ? '' : ' ' . $surface) . ': ';
-        try {
-            $effective = $resolve();
-        } catch (\Throwable) {
+        if ($answer instanceof \Throwable) {
             return $head . esc_html__('a filter decides this, and asking it from this page failed, so what it would return is not shown.', 'alpaca-bot');
         }
+        $effective = $answer;
         if ($effective === $stored) {
             return '';
         }

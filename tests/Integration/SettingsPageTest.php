@@ -400,6 +400,43 @@ final class SettingsPageTest extends TestCase
         $this->assertStringContainsString('<strong>Set in code</strong> for the shortcode <code>[alpacabot_agent]</code>: a filter decides this, and asking it from this page failed', $row('ab-access-shortcode'));
         $this->assertStringNotContainsString('Set in code', $row('ab-access-tool-draft_post'));
         $this->assertStringContainsString('<input type="submit"', $html, 'the page rendered to its end');
+        // Asked twice (Access::overridden(), then for the figure), it threw twice: a line each.
+        $this->assertSame(2, substr_count($logged, 'resolving the tool.summarize access row threw, so it is reported as set in code:'));
+        $this->assertSame(1, substr_count($logged, 'agent filter broke'));
+    }
+
+    /**
+     * Kanboard #4694: the Chat row's other two surfaces are a site's code as well, the menu's
+     * `alpaca_bot/admin/menu_capability` and the listing of the REST controllers through
+     * `alpaca_bot/rest/controllers`. A throw from either still degrades to the "asking it failed"
+     * note, and under WP_DEBUG leaves one line in the debug log naming the row, the hook and the
+     * message, as a throwing surface of the Shortcodes row does.
+     */
+    public function test_a_throwing_menu_filter_or_controllers_filter_leaves_one_debug_log_line_each(): void
+    {
+        add_filter('alpaca_bot/admin/menu_capability', static fn(): never => throw new \RuntimeException('menu filter broke'));
+        add_filter('alpaca_bot/rest/controllers', static fn(): never => throw new \RuntimeException('controllers filter broke'));
+
+        $log = (string) tempnam(sys_get_temp_dir(), 'ab-access-log');
+        $previous = ini_set('error_log', $log);
+        try {
+            $html = $this->renderAccessPage('access');
+            $logged = (string) file_get_contents($log);
+        } finally {
+            ini_set('error_log', (string) $previous);
+            unlink($log);
+        }
+
+        $this->assertSame(1, substr_count($logged, 'menu filter broke'));
+        $this->assertStringContainsString('[alpaca-bot] resolving the chat access row for alpaca_bot/admin/menu_capability threw, so it is reported as set in code: menu filter broke', $logged);
+        $this->assertSame(1, substr_count($logged, 'controllers filter broke'));
+        $this->assertStringContainsString('[alpaca-bot] resolving the chat access row for alpaca_bot/rest/controllers threw, so it is reported as set in code: controllers filter broke', $logged);
+
+        preg_match('#<tr[^>]*>(?:(?!<tr).)*id="ab-access-chat".*?</tr>#s', $html, $m);
+        $chat = $m[0] ?? '';
+        $this->assertStringContainsString('<strong>Set in code</strong> for the chat screen, its panel on other admin screens and the block editor sidebar: a filter decides this, and asking it from this page failed', $chat);
+        $this->assertStringContainsString('<strong>Set in code</strong> for the chat REST routes: a filter decides this, and asking it from this page failed', $chat);
+        $this->assertStringContainsString('<input type="submit"', $html, 'the page rendered to its end');
     }
 
     /**
