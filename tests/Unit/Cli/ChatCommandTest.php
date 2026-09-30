@@ -530,3 +530,124 @@ it('refuses a key the schema does not know', function (): void {
     expect($c->out)->toBe('')
         ->and($c->errors)->toBe(['Unknown setting "nope". Run `wp alpaca-bot settings` to list them.']);
 });
+
+// #4540: a write of toolkits.mcp_servers runs the check REST PUT /settings runs
+// (Mcp\ServerSettings::check()), so a row the schema cannot keep, or an address the egress check
+// refuses, fails the command with the message REST answers, and nothing is written. Each refusal
+// is compared against the REST route's own answer to the same rows over the same stored list,
+// which is what "the same message" means.
+function cliMcpStored(): array
+{
+    return [
+        ['id' => 'aa', 'url' => 'https://aa.example.com/mcp', 'header_name' => 'Authorization', 'header_value' => Schema::MASK, 'prefix' => 'aa', 'timeout' => 30.0, 'max_bytes' => 1048576, 'approved' => []],
+        ['id' => 'bb', 'url' => 'https://bb.example.com/mcp', 'header_name' => 'Authorization', 'header_value' => Schema::MASK, 'prefix' => 'bb', 'timeout' => 30.0, 'max_bytes' => 1048576, 'approved' => []],
+    ];
+}
+
+it('refuses an MCP server row the schema cannot keep, names it as REST does, and writes nothing', function (array $rows, string $named): void {
+    $h = pipelineWith(null, ['toolkits.mcp_servers' => cliMcpStored()]);
+    Functions\expect('update_option')->never();
+    $noLookup = static fn(string $host, string $url): array => throw new RuntimeException('no lookup was expected');
+    $c = cliCommand($h, new AlpacaBot\Mcp\ServerSettings($noLookup));
+    $rest = (new AlpacaBot\Rest\SettingsController(new AlpacaBot\Settings\Store(['toolkits.mcp_servers' => cliMcpStored()]), new AlpacaBot\Mcp\ServerSettings($noLookup)))
+        ->update(restRequest('PUT', '/settings', ['toolkits.mcp_servers' => $rows]));
+
+    $c->command->settings(['toolkits.mcp_servers', json_encode($rows)], []);
+
+    expect($rest)->toBeInstanceOf(WP_Error::class)
+        ->and($rest->get_error_code())->toBe('alpaca_bot_mcp_row')
+        ->and($c->errors)->toBe([$rest->get_error_message()])
+        ->and($c->errors[0])->toStartWith('Nothing was saved: an MCP server row could not be kept.')
+        ->and($c->errors[0])->toContain($named . ': ')
+        ->and($c->errors[0])->not->toContain('Bearer typed')
+        ->and($c->errors[0])->not->toContain('hunter2')
+        ->and($c->out)->toBe('')
+        ->and($h->store->get('toolkits.mcp_servers'))->toBe(cliMcpStored());
+})->with([
+    'a stored server given an http URL' => [[['id' => 'aa', 'url' => 'http://aa.example.com/mcp', 'prefix' => 'aa', 'header_value' => 'Bearer typed'], ['id' => 'bb', 'url' => 'https://bb.example.com/mcp', 'prefix' => 'bb']], 'http://aa.example.com/mcp'],
+    'a stored server sent with no URL, named by its row' => [[['id' => 'aa', 'url' => '', 'prefix' => 'aa'], ['id' => 'bb', 'url' => 'https://bb.example.com/mcp', 'prefix' => 'bb']], 'row 0'],
+    'a new row whose URL carries a password' => [[['id' => 'aa', 'url' => 'https://aa.example.com/mcp', 'prefix' => 'aa'], ['id' => 'bb', 'url' => 'https://bb.example.com/mcp', 'prefix' => 'bb'], ['url' => 'https://me:hunter2@new.example.com/mcp', 'prefix' => 'nw', 'header_value' => 'Bearer typed']], 'https://new.example.com/mcp'],
+    'a new row whose prefix a stored server holds' => [[['id' => 'aa', 'url' => 'https://aa.example.com/mcp', 'prefix' => 'aa'], ['id' => 'bb', 'url' => 'https://bb.example.com/mcp', 'prefix' => 'bb'], ['url' => 'https://new.example.com/mcp', 'prefix' => 'aa', 'header_value' => 'Bearer typed']], 'https://new.example.com/mcp'],
+    'a stored server given a header name the rule refuses' => [[['id' => 'aa', 'url' => 'https://aa.example.com/mcp', 'prefix' => 'aa', 'header_name' => 'X Key', 'header_value' => 'Bearer typed'], ['id' => 'bb', 'url' => 'https://bb.example.com/mcp', 'prefix' => 'bb']], 'https://aa.example.com/mcp'],
+    'a stored server given a prefix the rule refuses' => [[['id' => 'aa', 'url' => 'https://aa.example.com/mcp', 'prefix' => 'Aa'], ['id' => 'bb', 'url' => 'https://bb.example.com/mcp', 'prefix' => 'bb']], 'https://aa.example.com/mcp'],
+]);
+
+it('refuses an MCP server whose address does not pass the check, says why as REST does, and writes nothing', function (): void {
+    $h = pipelineWith(null, ['toolkits.mcp_servers' => cliMcpStored()]);
+    Functions\expect('update_option')->never();
+    $refuse = static fn(string $host, string $url): array => throw new AlpacaBot\Toolkit\AddressRefused("{$host} resolves to 10.0.0.7, a private, local or other special-purpose address.");
+    $rows = [...cliMcpStored(), ['url' => 'https://internal.example.com/mcp', 'prefix' => 'in', 'header_value' => 'Bearer do-not-echo']];
+    $c = cliCommand($h, new AlpacaBot\Mcp\ServerSettings($refuse));
+    $rest = (new AlpacaBot\Rest\SettingsController(new AlpacaBot\Settings\Store(['toolkits.mcp_servers' => cliMcpStored()]), new AlpacaBot\Mcp\ServerSettings($refuse)))
+        ->update(restRequest('PUT', '/settings', ['toolkits.mcp_servers' => $rows]));
+
+    $c->command->settings(['toolkits.mcp_servers', json_encode($rows)], []);
+
+    expect($rest->get_error_code())->toBe('alpaca_bot_mcp_address')
+        ->and($c->errors)->toBe([$rest->get_error_message()])
+        ->and($c->errors[0])->toContain('https://internal.example.com/mcp: internal.example.com resolves to 10.0.0.7')
+        ->and($c->errors[0])->not->toContain('do-not-echo')
+        ->and($c->out)->toBe('')
+        ->and($h->store->get('toolkits.mcp_servers'))->toBe(cliMcpStored());
+});
+
+it('still stores a valid MCP server list, echoes it masked, and warns of nothing', function (): void {
+    $h = pipelineWith(null, ['toolkits.mcp_servers' => cliMcpStored()]);
+    Functions\when('get_option')->alias(static fn(string $name, mixed $default = false): mixed => $name === AlpacaBot\Mcp\Secrets::OPTION ? ['aa' => 'Bearer a', 'bb' => 'Bearer b'] : $default);
+    Functions\expect('update_option')->once()->andReturn(true);
+    $c = cliCommand($h, new AlpacaBot\Mcp\ServerSettings(static fn(string $host, string $url): array => ['93.184.216.34']));
+
+    $c->command->settings(['toolkits.mcp_servers', json_encode([...cliMcpStored(), ['url' => 'https://new.example.com/mcp', 'prefix' => 'nw', 'header_value' => 'Bearer typed']])], []);
+
+    $echo = json_decode($c->out, true);
+    expect($c->errors)->toBe([])
+        ->and($c->warnings)->toBe([])
+        ->and(array_column($echo, 'id'))->toBe(['aa', 'bb', 'nw'])
+        ->and($echo[2]['header_value'])->toBe(Schema::MASK)
+        ->and($c->out)->not->toContain('Bearer typed');
+});
+
+it('warns, naming each server, when a URL move cleared the header value it kept', function (): void {
+    $h = pipelineWith(null, ['toolkits.mcp_servers' => cliMcpStored()]);
+    Functions\when('get_option')->alias(static fn(string $name, mixed $default = false): mixed => $name === AlpacaBot\Mcp\Secrets::OPTION ? ['aa' => 'Bearer a', 'bb' => 'Bearer b'] : $default);
+    Functions\expect('update_option')->once()->andReturn(true);
+    $c = cliCommand($h, new AlpacaBot\Mcp\ServerSettings(static fn(string $host, string $url): array => ['93.184.216.34']));
+    $rows = cliMcpStored();
+    $rows[0]['url'] = 'https://elsewhere.example.net/mcp';
+    $rows[1]['url'] = 'https://bb.example.com/v2';
+
+    $c->command->settings(['toolkits.mcp_servers', json_encode($rows)], []);
+
+    expect($c->errors)->toBe([])
+        ->and($c->warnings)->toBe(['The header value of MCP server aa was cleared, because its address moved to another host or port. Send it again.'])
+        ->and(array_column(json_decode($c->out, true), 'url'))->toBe(['https://elsewhere.example.net/mcp', 'https://bb.example.com/v2']);
+});
+
+it('names every server in one warning when a write moved more than one', function (): void {
+    $h = pipelineWith(null, ['toolkits.mcp_servers' => cliMcpStored()]);
+    Functions\when('get_option')->alias(static fn(string $name, mixed $default = false): mixed => $name === AlpacaBot\Mcp\Secrets::OPTION ? ['aa' => 'Bearer a', 'bb' => 'Bearer b'] : $default);
+    Functions\when('update_option')->justReturn(true);
+    $c = cliCommand($h, new AlpacaBot\Mcp\ServerSettings(static fn(string $host, string $url): array => ['93.184.216.34']));
+    $rows = cliMcpStored();
+    $rows[0]['url'] = 'https://elsewhere.example.net/mcp';
+    $rows[1]['url'] = 'https://bb.example.com:8443/mcp';
+
+    $c->command->settings(['toolkits.mcp_servers', json_encode($rows)], []);
+
+    expect($c->errors)->toBe([])
+        ->and($c->warnings)->toBe(['The header values of MCP servers aa, bb were cleared, because their addresses moved to another host or port. Send them again.']);
+});
+
+it('does not warn for a moved server whose header value the write sends again', function (): void {
+    $h = pipelineWith(null, ['toolkits.mcp_servers' => cliMcpStored()]);
+    Functions\when('get_option')->alias(static fn(string $name, mixed $default = false): mixed => $name === AlpacaBot\Mcp\Secrets::OPTION ? ['aa' => 'Bearer a', 'bb' => 'Bearer b'] : $default);
+    Functions\expect('update_option')->once()->andReturn(true);
+    $c = cliCommand($h, new AlpacaBot\Mcp\ServerSettings(static fn(string $host, string $url): array => ['93.184.216.34']));
+    $rows = cliMcpStored();
+    $rows[0]['url'] = 'https://elsewhere.example.net/mcp';
+    $rows[0]['header_value'] = 'Bearer again';
+
+    $c->command->settings(['toolkits.mcp_servers', json_encode($rows)], []);
+
+    expect($c->errors)->toBe([])->and($c->warnings)->toBe([]);
+});

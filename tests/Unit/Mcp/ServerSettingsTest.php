@@ -274,7 +274,7 @@ it('names the stored servers whose value a posted mask would drop because the or
 
 // m-5: core's add_option() runs the settings page's sanitize callback a second time on a site's
 // first save, with nothing stored yet, so every row reads as new. A URL that passed is not looked
-// up again until the option is written or a PUT is refused (R79: forgetPassed()), so the second
+// up again until the option is written or check() refuses a write (R79: forgetPassed()), so the second
 // pass cannot refuse what the first let through after its value was already kept.
 it('looks up a URL that passed no more until the option is written', function (): void {
     $asked = 0;
@@ -306,4 +306,45 @@ it('asks again for a URL that was refused', function (): void {
     $rows = [mcpRow(['url' => 'https://no.example.com/mcp'])];
     $settings->refusals($rows, []);
     expect($settings->refusals($rows, []))->toBe([0 => 'no.'])->and($asked)->toBe(2);
+});
+
+// #4540: check() is the one check REST PUT /settings and `wp alpaca-bot settings` run before a
+// write of toolkits.mcp_servers, so what it answers is what both writers say.
+it('passes a list it can keep, carrying the ids a URL move clears', function (): void {
+    $secrets = [Secrets::OPTION => ['trk' => 'Bearer t']];
+    mcpSecretsIn($secrets);
+    $check = (new ServerSettings(static fn(string $host, string $url): array => ['93.184.216.34']))
+        ->check([mcpRow(['url' => 'https://steal.example.net/mcp'])], [mcpRow()]);
+    expect($check->isRefused())->toBeFalse()
+        ->and($check->code)->toBeNull()
+        ->and($check->cleared)->toBe(['trk']);
+});
+
+it('refuses a row the schema would drop before it looks up any address, with the rows as data', function (): void {
+    $check = (new ServerSettings(static fn(string $host, string $url): array => throw new RuntimeException('no lookup was expected')))
+        ->check([mcpRow(['url' => 'https://me:pw@new.example.com/mcp', 'header_value' => 'Bearer typed', 'prefix' => 'nw', 'id' => 'nw'])], [mcpRow()]);
+    expect($check->isRefused())->toBeTrue()
+        ->and($check->code)->toBe('alpaca_bot_mcp_row')
+        ->and($check->data['rows'][0])->toMatchArray(['index' => 0, 'id' => 'nw', 'url' => 'https://new.example.com/mcp'])
+        ->and($check->cleared)->toBe([])
+        ->and(json_encode([$check->message, $check->data]))->not->toContain('Bearer typed')
+        ->and(json_encode([$check->message, $check->data]))->not->toContain(':pw@');
+});
+
+it('refuses an address with no data, and forgets what passed on the way, since nothing is written', function (): void {
+    $asked = [];
+    $settings = new ServerSettings(static function (string $host, string $url) use (&$asked): array {
+        $asked[] = $host;
+        if ($host === 'bad.example.com') {
+            throw new AddressRefused('bad.example.com resolves to 10.0.0.7.');
+        }
+        return ['93.184.216.34'];
+    });
+    $rows = [mcpRow(['id' => 'ok', 'prefix' => 'ok', 'url' => 'https://ok.example.com/mcp']), mcpRow(['id' => 'bad', 'prefix' => 'bad', 'url' => 'https://bad.example.com/mcp'])];
+    $check = $settings->check($rows, []);
+    expect($check->code)->toBe('alpaca_bot_mcp_address')
+        ->and($check->data)->toBe([])
+        ->and($check->message)->toContain('https://bad.example.com/mcp: bad.example.com resolves to 10.0.0.7.');
+    $settings->refusals([$rows[0]], []);
+    expect($asked)->toBe(['ok.example.com', 'bad.example.com', 'ok.example.com']);
 });

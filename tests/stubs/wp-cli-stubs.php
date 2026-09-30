@@ -25,4 +25,9 @@ class WP_CLI
     public static function error($message, bool|int $exit = true): void
     {
     }
+
+    /** @param string|\WP_Error $message */
+    public static function warning($message): void
+    {
+    }
 }

@@ -255,7 +255,7 @@ final class Plugin
         // WP-CLI is not a dependency: the command is only registered when WP-CLI is the
         // process running us, and the class itself never references WP_CLI until then.
         if (defined('WP_CLI') && constant('WP_CLI')) {
-            \WP_CLI::add_command('alpaca-bot', new Cli\ChatCommand($this->get(Chat\Pipeline::class), $this->get(Provider\ModelCatalog::class), $meter, $store));
+            \WP_CLI::add_command('alpaca-bot', new Cli\ChatCommand($this->get(Chat\Pipeline::class), $this->get(Provider\ModelCatalog::class), $meter, $store, servers: $this->get(Mcp\ServerSettings::class)));
         }
     }
 

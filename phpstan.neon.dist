@@ -11,7 +11,7 @@ parameters:
     scanFiles:
         - alpaca-bot.php
         # WP-CLI is not a dependency and php-stubs/wp-cli-stubs conflicts with wordpress-stubs ^7.1,
-        # so the two WP_CLI methods the plugin calls are declared here.
+        # so the WP_CLI methods the plugin calls are declared here.
         - tests/stubs/wp-cli-stubs.php
     scanDirectories: [vendor-prefixed]
     bootstrapFiles: [vendor/php-stubs/wordpress-stubs/wordpress-stubs.php]

@@ -637,16 +637,19 @@ function agentSubject(): AbstractAgent
 /**
  * ChatCommandTest: a ChatCommand over a pipelineWith() harness `$h`, sharing its pipeline,
  * catalog, meter and store: the same four instances, as Plugin::register() hands the command
- * the container's. Stdout lands in `$c->out` and failures in `$c->errors` instead of going
- * through WP_CLI::error().
+ * the container's. Stdout lands in `$c->out`, failures in `$c->errors` instead of going through
+ * WP_CLI::error(), and warnings in `$c->warnings` instead of going through WP_CLI::warning().
+ * `$servers` is the MCP write check `settings` runs; one over AddressCheck when not given.
  */
-function cliCommand(object $h): object
+function cliCommand(object $h, ?AlpacaBot\Mcp\ServerSettings $servers = null): object
 {
     $c = new class {
         public ChatCommand $command;
         public string $out = '';
         /** @var list<string> */
         public array $errors = [];
+        /** @var list<string> */
+        public array $warnings = [];
     };
     $c->command = new ChatCommand(
         $h->pipeline,
@@ -658,6 +661,10 @@ function cliCommand(object $h): object
         },
         static function (string $message) use ($c): void {
             $c->errors[] = $message;
+        },
+        servers: $servers,
+        warn: static function (string $message) use ($c): void {
+            $c->warnings[] = $message;
         },
     );
     return $c;

@@ -7,6 +7,7 @@ namespace AlpacaBot\Cli;
 use AlpacaBot\Chat\Pipeline;
 use AlpacaBot\Chat\Result;
 use AlpacaBot\Chat\UsageMeter;
+use AlpacaBot\Mcp\ServerSettings;
 use AlpacaBot\Provider\ModelCatalog;
 use AlpacaBot\Settings\Schema;
 use AlpacaBot\Settings\Store;
@@ -34,12 +35,19 @@ final class ChatCommand
     /** @var callable(string): void */
     private $fail;
 
+    /** @var callable(string): void */
+    private $warn;
+
+    private ServerSettings $servers;
+
     /** Whether the last thing emitted left stdout mid-line (a streamed delta does). */
     private bool $midLine = false;
 
     /**
-     * @param callable(string): void|null $write stdout
-     * @param callable(string): void|null $fail  reports an error and, under WP-CLI, ends the command
+     * @param callable(string): void|null $write   stdout
+     * @param callable(string): void|null $fail    reports an error and, under WP-CLI, ends the command
+     * @param ServerSettings|null         $servers the check a write of `toolkits.mcp_servers` runs; one over AddressCheck by default
+     * @param callable(string): void|null $warn    reports a warning and goes on
      */
     public function __construct(
         private Pipeline $pipeline,
@@ -48,7 +56,13 @@ final class ChatCommand
         private Store $store,
         ?callable $write = null,
         ?callable $fail = null,
+        ?ServerSettings $servers = null,
+        ?callable $warn = null,
     ) {
+        $this->servers = $servers ?? new ServerSettings();
+        $this->warn = $warn ?? static function (string $message): void {
+            \WP_CLI::warning($message);
+        };
         $this->write = $write ?? static function (string $s): void {
             // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fwrite -- Writes to the CLI process's standard output stream, not to a file; WP_Filesystem has no equivalent and is not loaded under WP-CLI anyway.
             fwrite(STDOUT, $s);
@@ -244,6 +258,14 @@ final class ChatCommand
      * so what is echoed is what was kept). An array setting takes its value as JSON: an object
      * for a map such as models.overrides, a list for toolkits.abilities.
      *
+     * A write of toolkits.mcp_servers is checked as the REST API checks it, and fails the command
+     * with nothing written when a row cannot be kept (a stored server's row, or a new row with a
+     * URL, that the schema would drop: an address that is not https with a host or that carries a
+     * user name or password, a bad header name, a bad prefix or one an earlier row holds) or when
+     * a new or changed address does not pass the address check. The error names each row, by its
+     * URL or as `row N`, and says why. A stored server whose URL moves to another host or port
+     * loses its header value unless the value is sent again, and the command warns, naming it.
+     *
      * ## OPTIONS
      *
      * [<key>]
@@ -256,6 +278,7 @@ final class ChatCommand
      *
      *     wp alpaca-bot settings provider.base_url http://host.docker.internal:11434/v1
      *     wp alpaca-bot settings models.default
+     *     wp alpaca-bot settings toolkits.mcp_servers '[{"url":"https://mcp.example.com/mcp","prefix":"docs"}]'
      *
      * @param list<string> $args
      * @param array<string, mixed> $assoc
@@ -288,6 +311,7 @@ final class ChatCommand
             $this->error(sprintf('Unknown setting "%s". Run `wp alpaca-bot settings` to list them.', $key));
             return;
         }
+        $cleared = [];
         if (isset($args[1])) {
             $value = $args[1];
             if ($field['type'] === 'array') {
@@ -297,10 +321,26 @@ final class ChatCommand
                     return;
                 }
             }
+            if ($key === 'toolkits.mcp_servers') {
+                $check = $this->servers->check($value, $this->store->get($key));
+                if ($check->isRefused()) {
+                    $this->error($check->message);
+                    return;
+                }
+                $cleared = $check->cleared;
+            }
             $this->store->set($key, $value);
         }
-        $value = $this->store->get($key);
-        $this->emit(wp_json_encode($key === 'toolkits.mcp_servers' ? Schema::maskedServers($value) : $value, self::JSON) . "\n");
+        $stored = $this->store->get($key);
+        $this->emit(wp_json_encode($key === 'toolkits.mcp_servers' ? Schema::maskedServers($stored) : $stored, self::JSON) . "\n");
+        if ($cleared !== []) {
+            ($this->warn)(sprintf(
+                count($cleared) === 1
+                    ? 'The header value of MCP server %s was cleared, because its address moved to another host or port. Send it again.'
+                    : 'The header values of MCP servers %s were cleared, because their addresses moved to another host or port. Send them again.',
+                implode(', ', $cleared),
+            ));
+        }
     }
 
     /**
