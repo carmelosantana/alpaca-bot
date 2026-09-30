@@ -64,6 +64,10 @@
 # directory is derived rather than assumed -- on a runner it is the repository name, in a git
 # worktree it is the worktree's. `wp-env run` passes no environment through, so the settings the
 # suite reads arrive as a shell prefix inside the container instead of as `docker run -e`.
+#
+# Both modes set WPH_MODE inside the container (the literal mode, never a value from outside), so
+# a test can tell it runs under this script: RawOptionWriteTest fails rather than skips there when
+# it cannot load WP-CLI's Option_Command, since both containers ship WP-CLI.
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
@@ -148,7 +152,7 @@ if [ "$MODE" = "wp-env" ]; then
         PHP_ARGS="$PHP_ARGS '${arg//\'/\'\\\'\'}'"
     done
     exec pnpm exec wp-env run tests-cli --env-cwd="wp-content/plugins/$SLUG" -- \
-        sh -c "WP_TESTS_DB_NAME='$DB_NAME' WP_TESTS_DOMAIN='$DOMAIN' WP_MULTISITE='$MULTISITE' \
+        sh -c "WPH_MODE=wp-env WP_TESTS_DB_NAME='$DB_NAME' WP_TESTS_DOMAIN='$DOMAIN' WP_MULTISITE='$MULTISITE' \
             php$PHP_ARGS tools/integration/vendor/bin/phpunit -c phpunit.integration.xml$ARGS"
 fi
 
@@ -173,5 +177,5 @@ docker compose -f "$COMPOSE" exec -T -e DB_NAME="$DB_NAME" db sh -c \
     'mariadb -uroot -p"$MARIADB_ROOT_PASSWORD" -e "CREATE DATABASE IF NOT EXISTS \`$DB_NAME\`; GRANT ALL ON \`$DB_NAME\`.* TO \"$MARIADB_USER\"@\"%\";"'
 
 docker compose -f "$COMPOSE" run --rm -T -w "$PLUGIN" \
-    -e WP_TESTS_DB_NAME="$DB_NAME" -e WP_TESTS_DOMAIN="$DOMAIN" -e WP_MULTISITE="$MULTISITE" \
+    -e WPH_MODE=harness -e WP_TESTS_DB_NAME="$DB_NAME" -e WP_TESTS_DOMAIN="$DOMAIN" -e WP_MULTISITE="$MULTISITE" \
     cli php ${PHP_FLAGS[@]+"${PHP_FLAGS[@]}"} tools/integration/vendor/bin/phpunit -c phpunit.integration.xml "$@"

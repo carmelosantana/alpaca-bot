@@ -32,13 +32,26 @@ use AlpacaBot\Settings\Store;
  *
  * Armed, it listens on `sanitize_option_alpaca_bot_settings`, which each of the three runs on
  * the value it was handed before it writes: `update` and `patch` call sanitize_option()
- * themselves, `add` through add_option(). A value is taken over only while WP-CLI's
- * Option_Command update(), patch() or add() (whichever it was armed for) is on the call stack
- * with this option as the one it writes (inCommand(), which reads the arguments that call was
- * handed, after --prompt and wp-cli.yml are merged in). A write from anywhere else, a plain
- * update_option() included, and a write of this option while the command writes another one (a
- * hook on that write, say), go through as they are and disarm it. `wp alpaca-bot settings`
- * (which writes through Store itself) never arms it.
+ * themselves, `add` through add_option(), and update_option() and add_option() run it again.
+ * A value is taken over only while WP-CLI's Option_Command update(), patch() or add()
+ * (whichever it was armed for) is on the call stack writing this option (inCommand(), which reads
+ * the arguments that call was handed, after --prompt and wp-cli.yml are merged in). WP-CLI hands
+ * the name over as typed and core trims it, so the name is compared trimmed: under a padded name
+ * WP-CLI's own sanitize_option() call names another filter, and the takeover happens in
+ * update_option()'s or add_option()'s. A write from anywhere else, a plain update_option()
+ * included, and a write of this option while the command writes another one (a hook on that
+ * write, say), go through as they are and disarm it. `wp alpaca-bot settings` (which writes
+ * through Store itself) never arms it.
+ *
+ * The option in other letters (`wp option update ALPACA_BOT_SETTINGS …`) never reaches that
+ * filter, or ProviderKey's and ServerSettings' `pre_update_option_alpaca_bot_settings`: hook
+ * names are case-sensitive. The options table's name column is not, so core would find the row
+ * and write it as handed. Taking that write over would mean writing the row through Store while
+ * core goes on to write it again under the other name, so it is refused instead
+ * (refuseSpelling()): armed, this also listens on core's generic `pre_update_option` filter and
+ * `add_option` action, which update_option() and add_option() reach with the trimmed name before
+ * they write, and a name that is this option's in other letters, while WP-CLI's command is
+ * writing that name, fails the command with nothing written and disarms it.
  *
  * `--autoload` as that call has it (from the command line or wp-cli.yml) is never ignored: the
  * row stays autoloaded, so anything but on, yes or true fails the command with nothing written
@@ -154,11 +167,17 @@ final class RawOptionWrite
         }
     }
 
-    /** Listens on the option's sanitize filter, for the command `$mode` names. */
+    /**
+     * Listens on the option's sanitize filter, for the command `$mode` names, and on core's
+     * generic `pre_update_option` filter and `add_option` action, for the option in other letters
+     * (refuseSpelling()).
+     */
     public function arm(string $mode): void
     {
         $this->mode = $mode;
         add_filter('sanitize_option_' . Plugin::OPTION, [$this, 'sanitize']);
+        add_filter('pre_update_option', [$this, 'refuseSpelling'], 10, 3);
+        add_action('add_option', [$this, 'refuseSpellingOnAdd'], 10, 2);
     }
 
     /** Stops listening. */
@@ -166,6 +185,58 @@ final class RawOptionWrite
     {
         $this->mode = null;
         remove_filter('sanitize_option_' . Plugin::OPTION, [$this, 'sanitize']);
+        remove_filter('pre_update_option', [$this, 'refuseSpelling'], 10);
+        remove_action('add_option', [$this, 'refuseSpellingOnAdd'], 10);
+    }
+
+    /**
+     * On core's `pre_update_option`, which update_option() applies to every option after it has
+     * trimmed the name and before it writes: when `$option` is this option in other letters and
+     * WP-CLI's option command is writing that spelling, fails the command with nothing written
+     * (the class docblock) and hands back the stored value, so a fail() that returned would still
+     * leave the row as it was. Any other value is handed back as it is.
+     */
+    public function refuseSpelling(#[\SensitiveParameter] mixed $value, mixed $option = null, #[\SensitiveParameter] mixed $old = null): mixed
+    {
+        return $this->refusesSpelling($option) ? $old : $value;
+    }
+
+    /** The same on core's `add_option` action, which add_option() fires before it inserts the row. */
+    public function refuseSpellingOnAdd(mixed $option, #[\SensitiveParameter] mixed $value = null): void
+    {
+        $this->refusesSpelling($option);
+    }
+
+    /** refuseSpelling()'s test, and the refusal when it holds. */
+    private function refusesSpelling(mixed $option): bool
+    {
+        if ($this->mode === null || !is_string($option) || $option === Plugin::OPTION || strcasecmp(trim($option), Plugin::OPTION) !== 0) {
+            return false;
+        }
+        $name = self::nameIn(($this->inCommand)($this->mode), $this->mode);
+        if ($name === null || strcasecmp(trim($name), Plugin::OPTION) !== 0) {
+            return false;
+        }
+        $this->disarm();
+        ($this->fail)(sprintf(
+            "'%s' is %s in other letters, which WP-CLI would write round Alpaca Bot's checks, so nothing was written. Write it as %s.",
+            $name,
+            Plugin::OPTION,
+            Plugin::OPTION,
+        ));
+        return true;
+    }
+
+    /**
+     * The option name in WP-CLI's option command's arguments (inCommand()) as typed: the first
+     * positional, the second for `patch`, whose first is its action; null when there is none.
+     *
+     * @param array{0: list<mixed>, 1: array<array-key, mixed>}|null $cli
+     */
+    private static function nameIn(?array $cli, string $mode): ?string
+    {
+        $name = $cli[0][$mode === 'patch' ? 1 : 0] ?? null;
+        return is_string($name) ? $name : null;
     }
 
     /**
@@ -207,7 +278,9 @@ final class RawOptionWrite
         }
         $mode = $this->mode;
         $cli = ($this->inCommand)($mode);
-        if ($cli === null || ($cli[0][$mode === 'patch' ? 1 : 0] ?? null) !== Plugin::OPTION) {
+        // Trimmed, as update_option() and add_option() trim it before they run this filter.
+        $name = self::nameIn($cli, $mode);
+        if ($cli === null || $name === null || trim($name) !== Plugin::OPTION) {
             $this->disarm();
             return $value;
         }

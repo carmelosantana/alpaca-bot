@@ -425,3 +425,70 @@ it('reports a write the schema cleans to what is stored as unchanged, as WP-CLI 
         ->and($c->success)->toBe(["Value passed for 'alpaca_bot_settings' option is unchanged."])
         ->and($c->halted)->toBe(0);
 })->with(['update', 'patch']);
+
+// Review fix round 1: core trims an option's name and the database matches it without regard to
+// case, while WP-CLI hands the name over as typed and filter names are case-sensitive. A name
+// padded with spaces reaches the option's own sanitize filter (update_option() and add_option()
+// trim first) and is taken over; one in other letters never does, and is refused before core
+// writes it.
+it('takes over a write whose option name WP-CLI was handed with spaces around it', function (string $mode, string $name): void {
+    Functions\expect('update_option')->once()->andReturn(true);
+    $c = rawWrite([], $mode, row: $mode === 'add' ? false : null, name: $name);
+
+    $c->subject->sanitize(['models.temperature' => 0.4]);
+
+    expect($c->success)->toBe([$mode === 'add' ? "Added 'alpaca_bot_settings' option." : "Updated 'alpaca_bot_settings' option."])
+        ->and($c->halted)->toBe(0);
+})->with([
+    'update, leading space' => ['update', ' alpaca_bot_settings'],
+    'patch, tab and newline' => ['patch', "\talpaca_bot_settings\n"],
+    'add, trailing space' => ['add', 'alpaca_bot_settings '],
+]);
+
+it('listens for another spelling of the option only while armed', function (): void {
+    $c = rawWrite([]);
+    $armed = [has_filter('pre_update_option', [$c->subject, 'refuseSpelling']), has_action('add_option', [$c->subject, 'refuseSpellingOnAdd'])];
+    $c->subject->disarm();
+
+    expect($armed)->toBe([10, 10])
+        ->and(has_filter('pre_update_option', [$c->subject, 'refuseSpelling']))->toBeFalse()
+        ->and(has_action('add_option', [$c->subject, 'refuseSpellingOnAdd']))->toBeFalse();
+});
+
+it('refuses the option under other letters before core writes it, and disarms', function (string $mode, string $typed, string $option): void {
+    $c = rawWrite([], $mode, name: $typed);
+    $message = "'{$typed}' is alpaca_bot_settings in other letters, which WP-CLI would write round Alpaca Bot's checks, so nothing was written. Write it as alpaca_bot_settings.";
+
+    if ($mode === 'add') {
+        $c->subject->refuseSpellingOnAdd($option, ['models.temperature' => 'hot']);
+        $kept = null;
+    } else {
+        $kept = $c->subject->refuseSpelling(['models.temperature' => 'hot'], $option, ['models.temperature' => 0.7]);
+    }
+
+    expect($c->errors)->toBe([$message])
+        ->and($kept)->toBe($mode === 'add' ? null : ['models.temperature' => 0.7])
+        ->and($c->success)->toBe([])
+        ->and(has_filter('sanitize_option_' . Plugin::OPTION, [$c->subject, 'sanitize']))->toBeFalse()
+        ->and(has_filter('pre_update_option', [$c->subject, 'refuseSpelling']))->toBeFalse();
+})->with([
+    'update' => ['update', 'ALPACA_BOT_SETTINGS', 'ALPACA_BOT_SETTINGS'],
+    'patch' => ['patch', 'Alpaca_Bot_Settings', 'Alpaca_Bot_Settings'],
+    'add, spaces too' => ['add', ' ALPACA_bot_settings ', 'ALPACA_bot_settings'],
+]);
+
+it('leaves other writes to core: another option, this one as it is spelled, and a write outside the command', function (string $option, string $name, bool $inCommand): void {
+    $c = rawWrite([], name: $name, inCommand: $inCommand);
+
+    $kept = $c->subject->refuseSpelling(['x' => 1], $option, ['x' => 0]);
+    $c->subject->refuseSpellingOnAdd($option, ['x' => 1]);
+
+    expect($kept)->toBe(['x' => 1])
+        ->and($c->errors)->toBe([])
+        ->and(has_filter('sanitize_option_' . Plugin::OPTION, [$c->subject, 'sanitize']))->toBe(10);
+})->with([
+    'another option' => ['blogname', 'blogname', true],
+    'this option as it is spelled' => ['alpaca_bot_settings', 'alpaca_bot_settings', true],
+    'a hook writing ours in other letters while the command writes another' => ['ALPACA_BOT_SETTINGS', 'blogname', true],
+    'plain code, no command' => ['ALPACA_BOT_SETTINGS', 'ALPACA_BOT_SETTINGS', false],
+]);

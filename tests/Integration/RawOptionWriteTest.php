@@ -73,9 +73,10 @@ final class RawOptionWriteTest extends TestCase
     /**
      * Loads WP-CLI's own Option_Command, and the parts of WP-CLI it calls, from the WP-CLI phar the
      * container runs `wp` with (WP_CLI_PHAR names another), and gives WP_CLI a logger that records
-     * what WP-CLI itself prints in `$this->said`, prefixed `WP-CLI: `. Skips where there is no phar.
-     * The class is required, not copied, so a WP-CLI that renames it, or its update(), patch() or
-     * add(), fails the tests that call it.
+     * what WP-CLI itself prints in `$this->said`, prefixed `WP-CLI: `. Skips only where there is no
+     * phar at all and the suite is not running under bin/test-integration.sh or CI; a phar without
+     * Option_Command where it was fails. The class is required, not copied, so a WP-CLI that
+     * renames or moves it, or its update(), patch() or add(), fails the tests that call it.
      *
      * Both places bin/test-integration.sh runs the suite have the phar there, so these run rather
      * than skip: the harness's `cli` service runs the `wordpress:cli-php8.4` image, and wp-env's
@@ -87,17 +88,21 @@ final class RawOptionWriteTest extends TestCase
     {
         $phar = getenv('WP_CLI_PHAR') ?: '/usr/local/bin/wp';
         $root = 'phar://' . $phar . '/vendor/wp-cli/';
-        // `wp` has no .phar extension, so PHP opens phar:// paths into it only once it is loaded.
-        if (is_file($phar) && !is_file($root . 'entity-command/src/Option_Command.php')) {
-            try {
-                \Phar::loadPhar($phar);
-            } catch (\UnexpectedValueException) {
-                // Not a phar: the check below skips.
+        if (!is_file($phar)) {
+            // Under bin/test-integration.sh (either mode sets WPH_MODE) or CI the phar is always
+            // there (the docblock), so its absence there is a failure, never a silent skip.
+            if ((string) getenv('WPH_MODE') !== '' || (string) getenv('CI') !== '') {
+                $this->fail("No WP-CLI phar at {$phar}, where bin/test-integration.sh's containers ship it; set WP_CLI_PHAR.");
             }
-        }
-        if (!is_file($phar) || !is_file($root . 'entity-command/src/Option_Command.php')) {
             $this->markTestSkipped("No WP-CLI phar at {$phar} to load Option_Command from; set WP_CLI_PHAR.");
         }
+        // `wp` has no .phar extension, so PHP opens phar:// paths into it only once it is loaded.
+        if (!is_file($root . 'wp-cli/php/class-wp-cli.php')) {
+            \Phar::loadPhar($phar);
+        }
+        // A phar that loads without Option_Command where it was is a WP-CLI that moved or renamed
+        // it: a failure, since the takeover's call-stack check names that class.
+        $this->assertFileExists($root . 'entity-command/src/Option_Command.php', 'WP-CLI no longer has Option_Command where RawOptionWrite::inCommand() expects it.');
         // WP-CLI's own classes (patch() builds its RecursiveDataStructureTraverser) from where its
         // autoloader finds them, php/WP_CLI/ for the WP_CLI namespace.
         if (!class_exists(\WP_CLI\Traverser\RecursiveDataStructureTraverser::class)) {
@@ -112,6 +117,7 @@ final class RawOptionWriteTest extends TestCase
         require_once $root . 'wp-cli/php/class-wp-cli.php';
         require_once $root . 'wp-cli/php/class-wp-cli-command.php';
         require_once $root . 'entity-command/src/Option_Command.php';
+        $this->assertTrue(class_exists(\Option_Command::class, false), 'WP-CLI\'s Option_Command.php no longer declares Option_Command.');
         $said = &$this->said;
         \WP_CLI::set_logger(new class ($said) {
             /** @param list<string> $said */
@@ -150,12 +156,12 @@ final class RawOptionWriteTest extends TestCase
      * statics. A test starts and ends with no hooks, and with WP_CLI::error() throwing its
      * ExitException, as it does inside WP_CLI::runcommand(), rather than ending PHPUnit's process.
      */
-    private static function resetWpCliHooks(bool $captureExit = true): void
+    private static function resetWpCliHooks(): void
     {
         if (class_exists('WP_CLI', false)) {
             (new \ReflectionProperty(\WP_CLI::class, 'hooks'))->setValue(null, []);
             (new \ReflectionProperty(\WP_CLI::class, 'hooks_passed'))->setValue(null, []);
-            (new \ReflectionProperty(\WP_CLI::class, 'capture_exit'))->setValue(null, $captureExit);
+            (new \ReflectionProperty(\WP_CLI::class, 'capture_exit'))->setValue(null, true);
         }
     }
 
@@ -174,7 +180,9 @@ final class RawOptionWriteTest extends TestCase
 
     public function tear_down(): void
     {
-        self::resetWpCliHooks(false);
+        // capture_exit stays set, so a stray WP_CLI::error() in a later test throws instead of
+        // ending PHPUnit's process.
+        self::resetWpCliHooks();
         delete_option(ProviderKey::OPTION);
         delete_option(Secrets::OPTION);
         $this->said = [];
@@ -506,5 +514,56 @@ final class RawOptionWriteTest extends TestCase
         $this->assertSame($row, get_option(Plugin::OPTION));
         $this->assertSame('sk-FAKE-second', ProviderKey::resolve($row['provider.api_key']));
         $this->assertSame(["Success: Updated 'alpaca_bot_settings' option."], $this->said);
+    }
+
+    /** Every row whose name core or the database would take for this option: any case, any padding. */
+    private function rowsNamedLikeTheOption(): array
+    {
+        global $wpdb;
+        return $wpdb->get_col($wpdb->prepare("SELECT option_name FROM {$wpdb->options} WHERE LOWER(TRIM(option_name)) = %s", Plugin::OPTION));
+    }
+
+    // Review fix round 1 (a): WP-CLI hands the name over untrimmed; core trims it before it runs
+    // the option's sanitize filter, so the name is compared trimmed.
+    public function test_a_name_with_spaces_around_it_is_taken_over(): void
+    {
+        $this->wpCli();
+
+        $this->armed('update', inCommand: false);
+        $this->assertSame('halt 0', $this->command('update', [' alpaca_bot_settings', '{"models.temperature":"hot","models.num_ctx":4096}'], ['format' => 'json']));
+        $this->assertSame(0.7, get_option(Plugin::OPTION)['models.temperature']);
+        $this->assertSame(4096, get_option(Plugin::OPTION)['models.num_ctx']);
+
+        delete_option(Plugin::OPTION);
+        $this->armed('add', inCommand: false);
+        $this->assertSame('halt 0', $this->command('add', ['alpaca_bot_settings ', '{"models.temperature":"hot"}'], ['format' => 'json']));
+        $this->assertSame(Schema::defaults()['models.temperature'], get_option(Plugin::OPTION)['models.temperature']);
+        $this->assertCount(count(Schema::defaults()), get_option(Plugin::OPTION));
+
+        $this->assertSame([Plugin::OPTION], $this->rowsNamedLikeTheOption());
+        $this->assertSame(["Success: Updated 'alpaca_bot_settings' option.", "Success: Added 'alpaca_bot_settings' option."], $this->said);
+    }
+
+    // Review fix round 1 (b): filter names are case-sensitive and the options table is not, so
+    // under other letters the option's own filters never run while core writes its row. Refused.
+    public function test_the_option_under_other_letters_is_refused_and_nothing_is_written(): void
+    {
+        $this->wpCli();
+        $row = get_option(Plugin::OPTION);
+        $refused = "Error: 'ALPACA_BOT_SETTINGS' is alpaca_bot_settings in other letters, which WP-CLI would write round Alpaca Bot's checks, so nothing was written. Write it as alpaca_bot_settings.";
+
+        $raw = $this->armed('update', inCommand: false);
+        $this->assertSame($refused, $this->command('update', ['ALPACA_BOT_SETTINGS', '{"models.temperature":"hot"}'], ['format' => 'json']));
+        $this->assertFalse($this->isArmed($raw));
+        $raw = $this->armed('patch', inCommand: false);
+        $this->assertSame(str_replace('ALPACA_BOT_SETTINGS', 'Alpaca_Bot_Settings', $refused), $this->command('patch', ['update', 'Alpaca_Bot_Settings', 'models.temperature', 'hot']));
+        wp_cache_flush();
+        $this->assertSame($row, get_option(Plugin::OPTION));
+
+        delete_option(Plugin::OPTION);
+        $this->armed('add', inCommand: false);
+        $this->assertSame($refused, $this->command('add', ['ALPACA_BOT_SETTINGS', '{"models.temperature":"hot"}'], ['format' => 'json']));
+        $this->assertSame([], $this->rowsNamedLikeTheOption());
+        $this->assertSame([], $this->said);
     }
 }
