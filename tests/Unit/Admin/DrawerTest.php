@@ -221,7 +221,9 @@ it('enqueues the editor sidebar on a block editor post screen, after the wp pack
         ->and($scripts)->toBe([Drawer::EDITOR_HANDLE => ['/plugins/alpaca-bot/assets/js/editor.js', ['wp-plugins', 'wp-editor', 'wp-element', 'wp-data', 'heartbeat'], Plugin::VERSION, true]])
         ->and(array_keys($localized))->toBe(['alpacaBot', 'alpacaBotMount'])
         ->and($localized['alpacaBot'])->toBe([Drawer::EDITOR_HANDLE, (new Assets())->settings()])
-        ->and($localized['alpacaBotMount'])->toBe([Drawer::EDITOR_HANDLE, (new Assets())->mount()]);
+        // The loader's, and the conversation the drawer remembers, which the sidebar reopens
+        // (Kanboard #4527): the drawer reads it off its element, which a block editor screen lacks.
+        ->and($localized['alpacaBotMount'])->toBe([Drawer::EDITOR_HANDLE, [...(new Assets())->mount(), 'conversation' => '42']]);
 
     // A page is the same screen base under its post type's own id.
     Functions\when('get_current_screen')->justReturn(($this->screen)('page', true, 'post'));
@@ -229,6 +231,14 @@ it('enqueues the editor sidebar on a block editor post screen, after the wp pack
     $scripts = [];
     adminDrawer()->enqueueEditor();
     expect(array_keys($scripts))->toBe([Drawer::EDITOR_HANDLE]);
+
+    // No conversation remembered, or one that is not a string of digits: a new chat.
+    foreach (['' => '0', 'nope' => '0', '-3' => '0'] as $stored => $expected) {
+        Functions\when('get_user_meta')->justReturn($stored);
+        Functions\expect('current_user_can')->once()->with('edit_posts')->andReturn(true);
+        adminDrawer()->enqueueEditor();
+        expect($localized['alpacaBotMount'][1]['conversation'])->toBe($expected);
+    }
 });
 
 it('enqueues no editor sidebar where enqueue_block_editor_assets fires with no post to edit, on the classic editor, or for a user who cannot open the chat', function (): void {

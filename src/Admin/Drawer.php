@@ -114,7 +114,11 @@ final class Drawer
      * are named anyway because editor.ts reads all four and a dependency of a dependency is not a
      * promise. `heartbeat` is here for the reason it is on the loader (enqueue()). Both settings
      * objects are the loader's, because the sidebar mounts the chat the way the drawer does
-     * (resources/ts/mount.ts).
+     * (resources/ts/mount.ts), and `alpacaBotMount` carries one thing more: `conversation`, the
+     * conversation the drawer remembers (Chat\UserPrefs::drawerConversation()), which the sidebar
+     * reopens and keeps up to date as the drawer does, so the two are one memory (Kanboard #4527).
+     * The drawer reads it off the element footer() prints, and a block editor screen gets no
+     * footer() (wanted()). It is user meta, which the class docblock says is in memory by now.
      */
     public function enqueueEditor(): void
     {
@@ -127,7 +131,7 @@ final class Drawer
         }
         wp_enqueue_script(self::EDITOR_HANDLE, plugins_url('assets/js/editor.js', ALPACA_BOT_FILE), ['wp-plugins', 'wp-editor', 'wp-element', 'wp-data', 'heartbeat'], Assets::version('assets/js/editor.js'), true);
         wp_localize_script(self::EDITOR_HANDLE, 'alpacaBot', $this->assets->settings());
-        wp_localize_script(self::EDITOR_HANDLE, 'alpacaBotMount', $this->assets->mount());
+        wp_localize_script(self::EDITOR_HANDLE, 'alpacaBotMount', [...$this->assets->mount(), 'conversation' => (string) $this->prefs->drawerConversation((int) get_current_user_id())]);
     }
 
     /**
