@@ -10,6 +10,7 @@ use AlpacaBot\Plugin;
 use AlpacaBot\Settings\ProviderKey;
 use AlpacaBot\Settings\Schema;
 use AlpacaBot\Settings\Store;
+use AlpacaBot\Settings\Writer;
 
 /**
  * A raw `wp option update|patch|add alpaca_bot_settings` written as `wp alpaca-bot settings`
@@ -145,6 +146,8 @@ final class RawOptionWrite
     /** @var array<string, bool> databaseTakes()'s answers so far, by name */
     private array $taken = [];
 
+    private Writer $writer;
+
     /**
      * @param callable(string): void|null $success prints the success line
      * @param callable(string): void|null $warn    prints a warning and goes on
@@ -155,7 +158,7 @@ final class RawOptionWrite
      */
     public function __construct(
         private Store $store,
-        private ServerSettings $servers,
+        ServerSettings $servers,
         ?callable $success = null,
         ?callable $warn = null,
         ?callable $fail = null,
@@ -163,6 +166,7 @@ final class RawOptionWrite
         ?\Closure $inCommand = null,
         ?\Closure $databaseTakes = null,
     ) {
+        $this->writer = new Writer($store, $servers);
         $this->inCommand = $inCommand ?? static fn(string $mode): ?array => self::inCommand($mode);
         $this->databaseTakes = $databaseTakes ?? fn(string $name): ?bool => $this->databaseTakes($name);
         $this->success = $success ?? static function (string $message): void {
@@ -419,23 +423,19 @@ final class RawOptionWrite
         }
         /** @var array<string, mixed> $value */
         $input = self::changed($value, $row, $mode === 'patch');
-        $cleared = [];
-        if (array_key_exists('toolkits.mcp_servers', $input)) {
-            $check = $this->servers->check($input['toolkits.mcp_servers'], $this->store->get('toolkits.mcp_servers'));
-            if ($check->isRefused()) {
-                $this->disarm();
-                ($this->fail)($check->message);
-                return $value;
-            }
-            $cleared = $check->cleared;
+        $before = null;
+        $written = $this->writer->write($input, function () use ($row, &$before): void {
+            $before = [$row, get_option(ProviderKey::OPTION), get_option(Secrets::OPTION)];
+            // Disarmed before the write: Store::replace()'s update_option() runs sanitize_option()
+            // on the value again, and that pass is this write, not a second raw one.
+            $this->disarm();
+        });
+        if ($written->refusal !== null) {
+            $this->disarm();
+            ($this->fail)($written->refusal->message);
+            return $value;
         }
-        $keyCleared = ProviderKey::clearedByMove($input, $this->store->all());
-        $before = [$row, get_option(ProviderKey::OPTION), get_option(Secrets::OPTION)];
-        // Disarmed before the write: Store::replace()'s update_option() runs sanitize_option() on
-        // the value again, and that pass is this write, not a second raw one.
-        $this->disarm();
-        $this->store->replace($input);
-        foreach (ClearedWarnings::lines($cleared, $keyCleared) as $line) {
+        foreach (ClearedWarnings::lines($written->mcpCleared, $written->keyCleared) as $line) {
             ($this->warn)($line);
         }
         $unchanged = [$this->store->all(), get_option(ProviderKey::OPTION), get_option(Secrets::OPTION)] === $before;
