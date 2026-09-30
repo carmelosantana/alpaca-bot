@@ -585,7 +585,7 @@ it('tells an administrator the URL is not a secret and a custom header takes the
 // calls reuse the client its listing built, so the check is not run per request (R28-11).
 it('tells an administrator the address is checked at save and again each time a connection is built', function (): void {
     expect(Schema::fields()['toolkits.mcp_servers']['description'])
-        ->toContain('The address is checked when it is saved from this screen or over the REST API, and again each time Alpaca Bot builds a connection to it: on Discover tools, and on a chat turn that lists its tools.')
+        ->toContain('The address is checked when it is saved from this screen, over the REST API or with wp alpaca-bot settings, and again each time Alpaca Bot builds a connection to it: on Discover tools, and on a chat turn that lists its tools.')
         ->not->toContain('each time Alpaca Bot connects');
 });
 

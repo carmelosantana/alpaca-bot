@@ -209,7 +209,7 @@ it('tells the person adding an MCP server what is offered, whose text it is, who
     $mcp = str_replace('&#039;', "'", $m[0] ?? '');
     expect($mcp)->not->toContain('no MCP server is contacted')->not->toContain('php-agents')
         ->toContain('Discover tools asks the server for its tools')
-        ->toContain('checked when it is saved from this screen or over the REST API, and again each time Alpaca Bot connects to it: on Discover tools, and on a chat turn that lists its tools')
+        ->toContain('checked when it is saved from this screen, over the REST API or with wp alpaca-bot settings, and again each time Alpaca Bot connects to it: on Discover tools, and on a chat turn that lists its tools')
         ->toContain('only to an address that passed, never through a proxy, and follows no redirect')
         ->toContain('Put a credential in the header, never in the address')
         ->toContain('only the tools you tick')->toContain('prefix__tool')
