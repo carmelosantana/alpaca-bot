@@ -11,6 +11,7 @@ use AlpacaBot\Mcp\ServerSettings;
 use AlpacaBot\Settings\ProviderKey;
 use AlpacaBot\Settings\Schema;
 use AlpacaBot\Settings\Store;
+use AlpacaBot\Settings\Writer;
 
 /**
  * The `alpaca_bot_settings` option over REST, for administrators by default: `GET /settings` is
@@ -84,7 +85,8 @@ use AlpacaBot\Settings\Store;
  *
  * A PUT carrying `toolkits.mcp_servers` is refused whole, 400 and nothing written, the other keys
  * of the same PUT included, in two cases, both checked before anything is stored by
- * Mcp\ServerSettings::check(), which `wp alpaca-bot settings` runs too:
+ * Mcp\ServerSettings::check(), which `wp alpaca-bot settings` runs too (both through
+ * Settings\Writer::write()):
  * - `alpaca_bot_mcp_row`: a row the schema would drop (Schema::droppedMcpRows()) that names a
  *   stored server's id, or that is new and has a URL. A client that sends a row for a server means
  *   to keep it, so a 200 that had quietly deleted it, its header value and its Access entry with
@@ -137,10 +139,13 @@ final class SettingsController extends Controller
 {
     private ServerSettings $servers;
 
+    private Writer $writer;
+
     /** @param ServerSettings|null $servers the address check a PUT of `toolkits.mcp_servers` runs; one over AddressCheck by default */
     public function __construct(private Store $store, ?ServerSettings $servers = null)
     {
         $this->servers = $servers ?? new ServerSettings();
+        $this->writer = new Writer($store, $this->servers);
     }
 
     public function routes(): array
@@ -226,21 +231,15 @@ final class SettingsController extends Controller
         if ($input === []) {
             return Errors::badRequest(__('No settings were sent. Send a JSON body of dotted keys, e.g. {"models.temperature": 0.7}.', 'alpaca-bot'));
         }
-        $cleared = [];
-        if (array_key_exists('toolkits.mcp_servers', $input)) {
-            $check = $this->servers->check($input['toolkits.mcp_servers'], $this->store->get('toolkits.mcp_servers'));
-            if ($check->isRefused()) {
-                return Errors::badRequest($check->message, (string) $check->code, $check->data);
-            }
-            $cleared = $check->cleared;
+        $written = $this->writer->write($input);
+        if ($written->refusal !== null) {
+            return Errors::badRequest($written->refusal->message, (string) $written->refusal->code, $written->refusal->data);
         }
-        $keyCleared = ProviderKey::clearedByMove($input, $this->store->all());
-        $this->store->replace($input);
         $response = new \WP_REST_Response($this->masked($this->store->all()));
-        if ($cleared !== []) {
-            $response->header('X-Alpaca-Bot-Mcp-Cleared', implode(',', $cleared));
+        if ($written->mcpCleared !== []) {
+            $response->header('X-Alpaca-Bot-Mcp-Cleared', implode(',', $written->mcpCleared));
         }
-        if ($keyCleared) {
+        if ($written->keyCleared) {
             $response->header('X-Alpaca-Bot-Cleared', 'provider.api_key');
         }
         return $response;
