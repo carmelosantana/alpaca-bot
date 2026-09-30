@@ -90,8 +90,13 @@ final class ProviderKeyTest extends TestCase
     {
         $this->seed060Row('sk-FAKE-060');
         $this->assertTrue(ProviderKey::pending(get_option(Plugin::OPTION)));
-        // Before the migration has run, the key is still read from the row.
+        // Before the migration has run, the key is still read from the row: by the sender, and by
+        // the reveal.
+        $this->assertSame('sk-FAKE-060', Plugin::instance()->get(Store::class)->get('provider.api_key'));
         $this->assertSame('sk-FAKE-060', ProviderKey::resolve(Plugin::instance()->get(Store::class)->get('provider.api_key')));
+        $this->asAdmin();
+        $this->assertSame('sk-FAKE-060', $this->rest('GET', '/settings', ['reveal' => 1])->get_data()['provider.api_key']);
+        $this->assertSame(Schema::MASK, $this->rest('GET', '/settings')->get_data()['provider.api_key']);
 
         $this->runInitMigrations();
 
@@ -108,12 +113,46 @@ final class ProviderKeyTest extends TestCase
         add_action('added_option', $count);
         add_action('deleted_option', $count);
         $this->runInitMigrations();
+        // Detection reads the row from alloptions, already loaded: no query at all.
+        global $wpdb;
+        $queries = $wpdb->num_queries;
         ProviderKey::migrate();
+        $this->assertSame($queries, $wpdb->num_queries);
 
         $this->assertSame(0, $writes);
         $this->assertSame($row, $this->rawRow());
         $this->assertSame('sk-FAKE-060', get_option(ProviderKey::OPTION));
         $this->assertSame($autoload, $this->autoloadOf(ProviderKey::OPTION));
+    }
+
+    // `wp option add` runs no pre_update_option_* filter: the key stays in the row until the next
+    // request's migration lifts it.
+    public function test_a_key_added_round_the_filter_stays_in_the_row_until_the_migration(): void
+    {
+        delete_option(Plugin::OPTION);
+        delete_option(ProviderKey::OPTION);
+        add_option(Plugin::OPTION, ['provider.api_key' => 'sk-FAKE-added'] + Schema::defaults());
+        $this->assertSame('sk-FAKE-added', get_option(Plugin::OPTION)['provider.api_key']);
+        $this->assertFalse(get_option(ProviderKey::OPTION));
+        $this->runInitMigrations();
+        $this->assertKeyKeptOutOfTheRow('sk-FAKE-added');
+    }
+
+    // The key option is written from inside the row's update_option(), before core writes the row.
+    public function test_the_key_option_is_written_before_the_row(): void
+    {
+        $seen = null;
+        $spy = static function (mixed $value) use (&$seen): mixed {
+            global $wpdb;
+            $row = maybe_unserialize((string) $wpdb->get_var($wpdb->prepare("SELECT option_value FROM {$wpdb->options} WHERE option_name = %s", Plugin::OPTION)));
+            $seen = ['held' => get_option(ProviderKey::OPTION), 'row' => is_array($row) ? $row['provider.api_key'] : null];
+            return $value;
+        };
+        add_filter('pre_update_option_' . Plugin::OPTION, $spy, PHP_INT_MAX);
+        Plugin::instance()->get(Store::class)->set('provider.api_key', 'sk-FAKE-order');
+        remove_filter('pre_update_option_' . Plugin::OPTION, $spy, PHP_INT_MAX);
+        $this->assertSame(['held' => 'sk-FAKE-order', 'row' => ''], $seen);
+        $this->assertSame(Schema::MASK, get_option(Plugin::OPTION)['provider.api_key']);
     }
 
     public function test_every_write_keeps_the_key_out_of_the_row_and_the_key_still_reaches_the_provider(): void
@@ -123,6 +162,8 @@ final class ProviderKeyTest extends TestCase
         $store->replace(['provider.base_url' => 'http://ollama:11434', 'models.default' => 'llama3.2', 'provider.kind' => 'ollama']);
         $store->set('provider.api_key', 'sk-FAKE-store');
         $this->assertKeyKeptOutOfTheRow('sk-FAKE-store');
+        // The Store's memo after a write is what the filters left: the mask.
+        $this->assertSame(Schema::MASK, $store->get('provider.api_key'));
         $store->replace(['provider.api_key' => Schema::MASK, 'models.num_ctx' => 2048]);
         $this->assertKeyKeptOutOfTheRow('sk-FAKE-store');
         // A raw update_option(), as `wp option update` makes, goes through the same filter.

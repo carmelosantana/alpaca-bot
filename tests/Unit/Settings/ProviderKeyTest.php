@@ -104,10 +104,51 @@ it('resolves the mask to the held key, and a plaintext key a row still carries t
     expect(ProviderKey::resolve(Schema::MASK))->toBe('');
 });
 
-it('reads a held value that is not a string as no key', function (): void {
+it('reads a held value that is not a string, or is the mask, as no key, so resolve() never answers the mask', function (): void {
     $stored = [ProviderKey::OPTION => ['x']];
     providerKeyIn($stored);
     expect(ProviderKey::held())->toBe('');
+    $stored[ProviderKey::OPTION] = Schema::MASK;
+    expect(ProviderKey::held())->toBe('')
+        ->and(ProviderKey::resolve(Schema::MASK))->toBe('');
+});
+
+// The row is rewritten only once the option holds the key, so a failed write of either leaves the
+// plaintext where resolve() still reads it, and the next run moves it again.
+it('leaves the row pending when the key option cannot be written, rather than lose the key', function (): void {
+    $stored = [Plugin::OPTION => ['provider.api_key' => 'sk-FAKE-plain']];
+    providerKeyIn($stored);
+    Functions\when('update_option')->alias(static function (string $name, mixed $value, mixed $autoload = null) use (&$stored): bool {
+        if ($name === ProviderKey::OPTION) {
+            return false;
+        }
+        $stored[$name] = $value;
+        return true;
+    });
+    ProviderKey::migrate();
+    expect($stored[Plugin::OPTION]['provider.api_key'])->toBe('sk-FAKE-plain')
+        ->and($stored)->not->toHaveKey(ProviderKey::OPTION);
+});
+
+it('leaves the row pending when its write fails, and moves it on the next run', function (): void {
+    $stored = [Plugin::OPTION => ['provider.api_key' => 'sk-FAKE-plain']];
+    providerKeyIn($stored);
+    $fail = true;
+    Functions\when('update_option')->alias(static function (string $name, mixed $value, mixed $autoload = null) use (&$stored, &$fail): bool {
+        if ($name === Plugin::OPTION && $fail) {
+            return false;
+        }
+        $stored[$name] = $value;
+        return true;
+    });
+    ProviderKey::migrate();
+    expect($stored[ProviderKey::OPTION])->toBe('sk-FAKE-plain')
+        ->and(ProviderKey::pending($stored[Plugin::OPTION]))->toBeTrue()
+        ->and(ProviderKey::resolve($stored[Plugin::OPTION]['provider.api_key']))->toBe('sk-FAKE-plain');
+    $fail = false;
+    ProviderKey::migrate();
+    expect($stored[Plugin::OPTION]['provider.api_key'])->toBe(Schema::MASK)
+        ->and($stored[ProviderKey::OPTION])->toBe('sk-FAKE-plain');
 });
 
 it('calls a row pending only when it carries a plaintext key', function (): void {

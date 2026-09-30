@@ -38,11 +38,14 @@ final class ProviderKey
         add_filter('pre_update_option_' . Plugin::OPTION, [$this, 'beforeSave'], 10, 2);
     }
 
-    /** The key kept in the option, or '' when there is none. A value that is not a string is not one this class wrote. */
+    /**
+     * The key kept in the option, or '' when there is none. A value that is not a string, or is
+     * MASK, is not one this class wrote, and reads as none: resolve() never answers MASK as a key.
+     */
     public static function held(): string
     {
         $key = get_option(self::OPTION, '');
-        return is_string($key) ? $key : '';
+        return is_string($key) && $key !== Schema::MASK ? $key : '';
     }
 
     /**
@@ -108,9 +111,9 @@ final class ProviderKey
     /**
      * The one-time move from a row written before 0.6.1: the plaintext key into the option, then
      * the row rewritten with MASK. Plugin::register() runs it on `init`; a row that is not pending
-     * is left alone, so a second run writes nothing. The option is written first, so a row write
-     * that fails leaves the plaintext in the row, which resolve() still reads and the next
-     * request moves again.
+     * is left alone, so a second run writes nothing. The row is rewritten only once the option
+     * holds the key, so a failed write of either leaves the plaintext in the row, which resolve()
+     * still reads and the next request moves again.
      */
     public static function migrate(): void
     {
@@ -119,6 +122,9 @@ final class ProviderKey
             return;
         }
         self::put($row['provider.api_key']);
+        if (self::held() !== $row['provider.api_key']) {
+            return;
+        }
         $row['provider.api_key'] = Schema::MASK;
         update_option(Plugin::OPTION, $row);
     }
