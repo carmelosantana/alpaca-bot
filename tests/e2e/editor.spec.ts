@@ -23,6 +23,13 @@ import { expect, test, type Locator, type Page, type Request } from '@playwright
  *   then names it without a reload or a remount: the first turn carries no `post_id`, a turn after
  *   the save carries the post's. A post chip taken off stays off through the next save, and
  *   "New chat" puts it back, even when its fragment was rendered before the save.
+ *
+ * The afterAll hook deletes what the spec made with wp-cli, run by default in wp-env's development
+ * container (`pnpm exec wp-env run cli wp`). `E2E_WP_CLI` replaces that prefix for another site:
+ * a command split on whitespace (so no part of it may contain a space), to which wp-cli's own
+ * arguments are appended, and whose stdout is wp-cli's output. For a wp-harness site,
+ * `E2E_WP_CLI="node <wp-harness>/bin/wph.js wp <site> --"`, which prints docker's progress on
+ * stderr only.
  */
 const REPLY = 'Hello from the Alpaca Bot end-to-end fake provider.';
 const ADMIN_USER = process.env.WP_ADMIN_USER ?? 'admin';
@@ -188,15 +195,23 @@ async function send(sidebar: Locator, text: string): Promise<void> {
 
 test.beforeEach(async ({ page }) => { await track(page); });
 
+/** The wp-cli command for the site under test: `E2E_WP_CLI`, or wp-env's (file docblock). */
+function wpCliCommand(env: string | undefined = process.env.E2E_WP_CLI): [string, ...string[]] {
+  const parts = (env ?? '').trim().split(/\s+/).filter((part) => part !== '');
+  const [bin, ...rest] = parts.length > 0 ? parts : ['pnpm', 'exec', 'wp-env', 'run', 'cli', 'wp'];
+  return [bin!, ...rest];
+}
+
 /**
- * Deletes, for good, exactly the posts in `made`, with wp-cli in wp-env's development container,
- * since a usage receipt has no REST route to delete it by; `wp post delete --force` takes a post's
- * revisions with it. Then checks that none of them is left.
+ * Deletes, for good, exactly the posts in `made`, with wp-cli on the site under test
+ * (wpCliCommand()), since a usage receipt has no REST route to delete it by; `wp post delete
+ * --force` takes a post's revisions with it. Then checks that none of them is left.
  */
 test.afterAll(async () => {
   const ids = [...made].map(String);
   if (ids.length === 0) return;
-  const wpCli = (...args: string[]): string => execFileSync('pnpm', ['exec', 'wp-env', 'run', 'cli', 'wp', ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  const [bin, ...prefix] = wpCliCommand();
+  const wpCli = (...args: string[]): string => execFileSync(bin, [...prefix, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
   wpCli('post', 'delete', ...ids, '--force');
   const left = wpCli('eval', `echo 'left:' . count(array_filter(array_map('get_post', [${ids.join(',')}])));`);
   expect(left).toContain('left:0');
