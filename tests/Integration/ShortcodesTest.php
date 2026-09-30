@@ -292,6 +292,12 @@ final class ShortcodesTest extends TestCase
         $this->assertTrue(wp_style_is('alpaca-bot-shortcode', 'enqueued'));
     }
 
+    /**
+     * Needs a fetch to go through, which needs cURL; NoCurlTest covers the PHP without it.
+     *
+     * @requires function curl_init
+     * @requires function curl_exec
+     */
     public function test_the_agent_shim_summarizes_a_fetched_page_with_a_prompt_beginning_summarize_and_is_doing_it_wrong(): void
     {
         $this->setExpectedIncorrectUsage('alpacabot_agent');

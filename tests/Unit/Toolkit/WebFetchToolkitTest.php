@@ -437,9 +437,11 @@ it('asks again on a redirect, so an https page that redirects to a scheme cURL c
 // the one shape that silently reopens the rebinding window on a live site. The unit runtime has
 // no Requests transport class at all (tests/Pest.php loads only an Exception stand-in), so the
 // class_exists guard is the branch this can exercise, and false is the answer it must give.
-// The other guard, Transport\Curl::test() answering false, needs a PHP without a usable cURL and
-// is not reachable from either suite; tests/Integration/ToolkitsTest.php pins the agreement
-// between this answer and the transport Requests itself would pick on a box that has one.
+// The other guard, Transport\Curl::test() answering false, needs a PHP without a usable cURL,
+// which the unit runtime cannot be made into: tests/Integration/NoCurlTest.php reaches it by
+// running the integration suite with curl_init and curl_exec disabled (WP_NO_CURL=1,
+// bin/test-integration.sh), and tests/Integration/ToolkitsTest.php pins the agreement between
+// this answer and the transport Requests itself would pick on a box that has cURL.
 it('answers false, for either scheme, when Requests has no cURL transport class to ask', function (): void {
     expect(class_exists(\WpOrg\Requests\Transport\Curl::class))->toBeFalse()
         ->and(WebFetchToolkit::curlCarries(true))->toBeFalse()
