@@ -224,6 +224,29 @@ There is a price as well as a symptom. `web_fetch`, `summarize` and `draft_post`
 
 Releases before 0.5.0 are on the [releases page](https://github.com/carmelosantana/alpaca-bot/releases).
 
+### 0.6.2
+
+WP-CLI and settings-storage fixes for 0.6.1. **Breaking** is what an upgrading site may have to act on.
+
+<details>
+<summary>Breaking</summary>
+
+- **A raw WP-CLI write of `alpaca_bot_settings` goes through the settings checks.** `wp option update|set|patch|add alpaca_bot_settings` is now cleaned by the schema, clears the API key when the provider address moves, and checks MCP rows and addresses, however the option's name reaches WP-CLI: typed, read by `--prompt`, or a `wp-cli.yml` default. A refused row exits non-zero and writes nothing, and so does another spelling the database treats as the same option (Kanboard #4695).
+- **A partial raw `wp option update` keeps the keys it leaves out**, so `'{}'` no longer resets the settings. `wp option patch delete alpaca_bot_settings <key>` resets one key, and `wp option delete alpaca_bot_settings` resets them all (Kanboard #4695).
+- **`--autoload=off` is refused on that option**, since the settings row stays autoloaded; `--autoload=on` is honoured.
+
+</details>
+
+<details>
+<summary>Fixed</summary>
+
+- A WP-CLI write that changes only the provider key or an MCP header value reports success, where it stored the value and said "Could not update option" (Kanboard #4696); one that changes nothing once cleaned says it is unchanged, as WP-CLI does.
+- When the settings row claims a key that is no longer stored, the settings page, REST and `wp alpaca-bot settings` all show no key (Kanboard #4699).
+- The cached model list is flushed on every change to the key in use, including a save that clears a key stored before 0.6.1 (Kanboard #4700).
+- `bin/test-integration.sh -- --filter X` works on a WP Harness site (Kanboard #4697), and the CI step without cURL is named for everything it covers (Kanboard #4698).
+
+</details>
+
 ### 0.6.1
 
 Security and reliability fixes for 0.6.0. **Breaking** is what an upgrading site may have to act on.
