@@ -135,10 +135,11 @@ export function boot(cfg: Settings, form: HTMLFormElement): void {
     mutate();
     if (stuck) s.scrollTop = s.scrollHeight;
   }
-  function append(node: HTMLElement): void {
+  /** Adds a turn's bubble to the transcript the turn was sent from (send() says why not the one shown). */
+  function append(node: HTMLElement, transcript: HTMLElement): void {
     withScroll(() => {
-      $('.ab-welcome', messages())?.remove();
-      messages().append(node);
+      $('.ab-welcome', transcript)?.remove();
+      transcript.append(node);
     });
   }
 
@@ -148,6 +149,22 @@ export function boot(cfg: Settings, form: HTMLFormElement): void {
     const images = image ? [image] : [];
     if (busy || expired || !navigator.onLine || (text === '' && image === '')) return;
     busy = true;
+    // The transcript this turn belongs to, and whether it is still the one shown (Kanboard
+    // #4525). A turn outlives what the user does meanwhile: the history select swaps #ab-messages
+    // whole (HistorySelect's outerHTML swap) and a host's New chat replaces it (mount.ts
+    // newChat()), and either then sets the conversation field for the transcript it brought in.
+    // Every switch replaces the element, and nothing else does (setConversation() only rewrites
+    // its data attribute), so "the element this turn was sent from is still #ab-messages" is
+    // exactly "the user has not moved on". Once it is not, the turn's frames stop speaking for
+    // the page: `start` and `done` would put the old conversation's id back in the field (and
+    // announce it as `ab:conversation`, which the drawer remembers), so the next message would
+    // land in a conversation the transcript does not show. The element is the key rather than
+    // the conversation id because the id cannot tell two new chats apart: a first turn is sent
+    // on 0, and a New chat before its `start` frame is on 0 too. Its bubbles go into that
+    // element as well, shown or not, so a switch before they arrive cannot put this turn's
+    // messages, or a streaming bubble nothing will finish, into the transcript now shown.
+    const transcript = messages();
+    const shown = (): boolean => messages() === transcript;
     sendButton.disabled = true;
     notice('info', '');
     textarea.value = '';
@@ -176,7 +193,7 @@ export function boot(cfg: Settings, form: HTMLFormElement): void {
       const bad = userRes.ok ? (emptyRes.ok ? null : emptyRes) : userRes;
       if (bad) return refused(bad.status, await restError(bad));
       user = fromHtml(await userRes.text());
-      if (user) append(user);
+      if (user) append(user, transcript);
       const ticketRes = await request('POST', api('/chat'), {
         message: text, conversation_id: asId(field('conversation_id').value) ?? 0, model: field('model').value, images, context: contextFrom(form), stream: true,
       });
@@ -184,14 +201,14 @@ export function boot(cfg: Settings, form: HTMLFormElement): void {
       const ticket = await ticketRes.json() as { stream_url: string };
       const bubble = fromHtml(await emptyRes.text());
       if (!bubble) throw new Error('No streaming bubble.');
-      append(bubble);
+      append(bubble, transcript);
       assistant = bubble;
       const redeemed = await redeem(ticket.stream_url, cfg.nonce);
       if (!redeemed.ok) return refused(redeemed.status, redeemed.error);
       // From here the turn is the server's: a stream that then drops mid-reply is stored as a
       // partial reply, and the composer must not offer the message back as if nothing ran.
       sent = true;
-      await consume(redeemed.stream, bubble);
+      await consume(redeemed.stream, bubble, shown);
     } catch (e) {
       console.error(e);
       notice('error', t('failed'));
@@ -203,8 +220,8 @@ export function boot(cfg: Settings, form: HTMLFormElement): void {
     }
   }
 
-  /** Reads one turn's frames into the streaming bubble (docs/api.md section 4). */
-  async function consume(res: Response, bubble: HTMLElement): Promise<void> {
+  /** Reads one turn's frames into the streaming bubble (docs/api.md section 4); `shown` is send()'s, and says whether the frames still speak for the page. */
+  async function consume(res: Response, bubble: HTMLElement, shown: () => boolean): Promise<void> {
     const content = $('.ab-msg__content', bubble) as HTMLElement;
     let reasoning: HTMLElement | null = null;
     let answered = false;
@@ -212,7 +229,7 @@ export function boot(cfg: Settings, form: HTMLFormElement): void {
       for await (const { event, data } of readSse(res)) {
         const d = data as Json;
         if (event === 'start') {
-          setConversation(d.conversation_id);
+          if (shown()) setConversation(d.conversation_id);
         } else if (event === 'delta') {
           withScroll(() => {
             if (typeof d.reasoning === 'string' && d.reasoning !== '') {
@@ -229,7 +246,7 @@ export function boot(cfg: Settings, form: HTMLFormElement): void {
             }
           });
         } else if (event === 'done') {
-          return finish(d, bubble);
+          return finish(d, bubble, shown);
         } else if (event === 'error') {
           notice('error', typeof d.message === 'string' && d.message ? d.message : t('failed'));
           return settle(bubble, answered);
@@ -256,8 +273,18 @@ export function boot(cfg: Settings, form: HTMLFormElement): void {
     bubble.dataset.partial = '1';
     $('.ab-msg__content', bubble)?.removeAttribute('aria-live');
   }
-  /** Swaps the streamed text for the server's rendering of the finished reply and reloads the history. */
-  async function finish(d: Json, bubble: HTMLElement): Promise<void> {
+  /**
+   * Swaps the streamed text for the server's rendering of the finished reply and reloads the
+   * history. A turn the user moved away from (send()'s `shown`) records nothing and renders
+   * nothing: its bubble is in a transcript no longer in the document. The history is reloaded
+   * either way, because the conversation it finished in has a new reply (or, for a new chat, is
+   * new), and the reload asks with the field, which is the conversation now shown.
+   */
+  async function finish(d: Json, bubble: HTMLElement, shown: () => boolean): Promise<void> {
+    if (!shown()) {
+      window.htmx?.trigger(document.body, 'ab:refresh');
+      return;
+    }
     const m = (d.message ?? {}) as Json;
     const receipt = (d.receipt ?? {}) as Json;
     setConversation(d.conversation_id);

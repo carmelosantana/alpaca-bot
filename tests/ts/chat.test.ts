@@ -229,3 +229,183 @@ test('taking the last chip off takes the chips row with it, and not before', asy
   assert.equal(form.querySelectorAll('.ab-chip').length, 0);
   assert.equal(form.querySelectorAll('.ab-composer__chips').length, 0);
 });
+
+/**
+ * A turn whose stream this case feeds by hand, so a conversation switch can land between its
+ * frames (Kanboard #4525). Every request is answered from here: the streaming bubble, the
+ * finished reply's rendering (marked `.ab-rendered`, so a case can count whether one was swapped
+ * in), the ticket, the stream itself, and GET /view/panel for mount.ts newChat(), whose fresh
+ * transcript is on conversation 0. The ticket is answered once `ticket` settles, so a case can
+ * switch while it is outstanding; this returns once it has been asked for. `window.htmx` is a
+ * stub that records what boot() triggers.
+ * `ids` collects every `ab:conversation` the form announces, in order.
+ */
+async function heldTurn(t: TestContext, conversation: string, ticket: Promise<void> = Promise.resolve()): Promise<{
+  form: HTMLFormElement;
+  push: (event: string, data: object) => void;
+  close: () => void;
+  ids: number[];
+  seen: string[];
+  triggers: string[];
+  finished: () => Promise<void>;
+}> {
+  const win = installDom(SHELL.replaceAll('data-conversation="0"', `data-conversation="${conversation}"`).replace('name="conversation_id" value="0"', `name="conversation_id" value="${conversation}"`));
+  const real = globalThis.fetch;
+  t.after(() => { globalThis.fetch = real; });
+  let controller!: ReadableStreamDefaultController<Uint8Array>;
+  const body = new ReadableStream<Uint8Array>({ start(c) { controller = c; } });
+  const encoder = new TextEncoder();
+  const seen: string[] = [];
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = new URL(String(input));
+    const method = init?.method ?? 'GET';
+    seen.push(`${method} ${url.pathname}`);
+    const html = (markup: string): Response => new Response(markup, { headers: { 'content-type': 'text/html' } });
+    if (url.pathname.endsWith('/view/bubble')) {
+      if (method === 'GET') return html('<article class="ab-msg ab-msg--assistant" data-streaming="1"><div class="ab-msg__content"></div></article>');
+      const role = (JSON.parse(String(init?.body)) as { role: string }).role;
+      return html(`<article class="ab-msg ab-msg--${role}${role === 'assistant' ? ' ab-rendered' : ''}"><div class="ab-msg__content">${role}</div></article>`);
+    }
+    if (url.pathname.endsWith('/view/panel')) {
+      return html('<div><div id="ab-history"><select id="ab-history-select"><option data-id="0">New chat</option></select></div><div id="ab-messages" class="ab-messages" data-conversation="0"></div></div>');
+    }
+    if (url.pathname.endsWith('/alpaca-bot/v1/chat')) {
+      await ticket;
+      return Response.json({ stream_url: `${REST}/chat/1/stream?token=t` });
+    }
+    if (url.pathname.includes('/chat/1/stream')) return new Response(body, { headers: { 'content-type': 'text/event-stream; charset=utf-8' } });
+    return new Response('', { status: 404 });
+  }) as typeof fetch;
+  const triggers: string[] = [];
+  (win as unknown as Record<string, unknown>).htmx = { trigger: (_: Element, name: string) => { triggers.push(name); }, ajax: async () => {}, process: () => {} };
+
+  const { boot } = await import('../../resources/ts/boot.ts');
+  const form = document.querySelector('#ab-form') as HTMLFormElement;
+  const ids: number[] = [];
+  form.addEventListener('ab:conversation', (e) => { ids.push((e as CustomEvent<{ id: number }>).detail.id); });
+  boot(CFG, form);
+  const send = form.querySelector('[data-action="send"]') as HTMLButtonElement;
+  (form.querySelector('#ab-message') as HTMLTextAreaElement).value = 'hello';
+  form.dispatchEvent(new win.Event('submit', { cancelable: true }) as unknown as Event);
+  await until(() => seen.includes('POST /wp-json/alpaca-bot/v1/chat'));
+  return {
+    form,
+    push: (event, data) => controller.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)),
+    close: () => controller.close(),
+    ids,
+    seen,
+    triggers,
+    // send()'s finally gives the send button back once the turn is over, whichever way it ended.
+    finished: () => until(() => !send.disabled),
+  };
+}
+
+/** The history select's switch on the chat screen: htmx swaps #ab-messages whole (outerHTML) and fires htmx:afterSwap. */
+function historySwap(win: typeof globalThis, id: string): void {
+  const next = document.createElement('div');
+  next.id = 'ab-messages';
+  next.className = 'ab-messages';
+  next.dataset.conversation = id;
+  next.innerHTML = `<article class="ab-msg ab-msg--user"><div class="ab-msg__content">conversation ${id}</div></article>`;
+  (document.querySelector('#ab-messages') as HTMLElement).replaceWith(next);
+  next.dispatchEvent(new win.CustomEvent('htmx:afterSwap', { bubbles: true }));
+}
+
+/** mount.ts newChat() against the fake GET /view/panel: the drawer's "New chat". */
+async function drawerNewChat(): Promise<void> {
+  const { newChat } = await import('../../resources/ts/mount.ts');
+  const host = document.querySelector('.ab-wrap') as HTMLElement;
+  assert.equal(await newChat(host, { panel: `${REST}/view/panel`, prefs: '', htmx: '', htmxId: '', chat: '', css: '', title: '', failed: '' }, 'n', {}), true);
+}
+
+const field = (form: HTMLFormElement): string => (form.elements.namedItem('conversation_id') as HTMLInputElement).value;
+
+test('a new chat\'s first turn records the id its start frame names, and its reply replaces the streaming bubble', async (t) => {
+  const turn = await heldTurn(t, '0');
+  turn.push('start', { conversation_id: 42 });
+  turn.push('done', { conversation_id: 42, message: { content: 'hi', model: 'llama3.2' }, receipt: {} });
+  turn.close();
+  await turn.finished();
+
+  assert.equal(field(turn.form), '42');
+  assert.equal((document.querySelector('#ab-messages') as HTMLElement).dataset.conversation, '42');
+  assert.equal((document.querySelector('#ab-chat') as HTMLElement).dataset.conversation, '42');
+  assert.deepEqual(turn.ids, [42, 42]);
+  assert.equal(document.querySelectorAll('#ab-messages .ab-rendered').length, 1);
+  assert.equal(document.querySelectorAll('#ab-messages [data-streaming]').length, 0);
+  assert.deepEqual(turn.triggers, ['ab:refresh']);
+});
+
+test('switching conversation through the history select mid-turn: the turn\'s done frame does not take the field back (Kanboard #4525)', async (t) => {
+  const turn = await heldTurn(t, '7');
+  turn.push('start', { conversation_id: 7 });
+  await until(() => turn.ids.length === 1);
+  historySwap(globalThis, '9');
+  assert.equal(field(turn.form), '9');
+  turn.push('done', { conversation_id: 7, message: { content: 'the reply to 7', model: 'llama3.2' }, receipt: {} });
+  turn.close();
+  await turn.finished();
+
+  // The field, the data attributes and the host all stay on the conversation now shown.
+  assert.equal(field(turn.form), '9');
+  assert.equal((document.querySelector('#ab-messages') as HTMLElement).dataset.conversation, '9');
+  assert.equal((document.querySelector('#ab-chat') as HTMLElement).dataset.conversation, '9');
+  assert.deepEqual(turn.ids, [7, 9]);
+  // Conversation 7's reply is not rendered into conversation 9's transcript, nor asked for.
+  assert.equal(document.querySelectorAll('.ab-msg--assistant').length, 0);
+  assert.equal(turn.seen.filter((path) => path === 'POST /wp-json/alpaca-bot/v1/view/bubble').length, 1);
+  // The history is still reloaded: conversation 7 has a new reply, and the reload asks with the field (9).
+  assert.deepEqual(turn.triggers, ['ab:refresh']);
+});
+
+test('the drawer\'s New chat mid-turn: the done frame for the old conversation leaves the field on 0 (Kanboard #4525)', async (t) => {
+  const turn = await heldTurn(t, '0');
+  turn.push('start', { conversation_id: 42 });
+  await until(() => turn.ids.length === 1);
+  await drawerNewChat();
+  assert.equal(field(turn.form), '0');
+  turn.push('done', { conversation_id: 42, message: { content: 'the reply to 42', model: 'llama3.2' }, receipt: {} });
+  turn.close();
+  await turn.finished();
+
+  assert.equal(field(turn.form), '0');
+  assert.equal((document.querySelector('#ab-chat') as HTMLElement).dataset.conversation, '0');
+  assert.deepEqual(turn.ids, [42]);
+  assert.equal(document.querySelectorAll('.ab-msg--assistant').length, 0);
+});
+
+test('the drawer\'s New chat before the start frame: a new chat left for another new chat does not take the first one\'s id', async (t) => {
+  // Both conversations are "0" when the turn is sent and when the start frame arrives, so a guard
+  // that compared ids would let this through; the transcript the turn was sent from is gone.
+  const turn = await heldTurn(t, '0');
+  await drawerNewChat();
+  turn.push('start', { conversation_id: 42 });
+  turn.push('done', { conversation_id: 42, message: { content: 'the reply to 42', model: 'llama3.2' }, receipt: {} });
+  turn.close();
+  await turn.finished();
+
+  assert.equal(field(turn.form), '0');
+  assert.deepEqual(turn.ids, []);
+  assert.equal(document.querySelectorAll('.ab-msg--assistant').length, 0);
+});
+
+test('switching while the ticket is outstanding: the turn\'s bubbles stay out of the transcript now shown', async (t) => {
+  // The streaming bubble is appended after the ticket answers, which is after the switch here; it
+  // belongs to the transcript the turn was sent from, not the one on screen, where nothing would
+  // ever finish it.
+  let answer!: () => void;
+  const turn = await heldTurn(t, '7', new Promise<void>((resolve) => { answer = resolve; }));
+  historySwap(globalThis, '9');
+  answer();
+  await until(() => turn.seen.some((path) => path.includes('/chat/1/stream')));
+  turn.push('start', { conversation_id: 7 });
+  turn.push('done', { conversation_id: 7, message: { content: 'the reply to 7', model: 'llama3.2' }, receipt: {} });
+  turn.close();
+  await turn.finished();
+
+  assert.equal(field(turn.form), '9');
+  assert.deepEqual(turn.ids, [9]);
+  // Only conversation 9's own message: neither this turn's user bubble nor its assistant bubble.
+  assert.equal(document.querySelectorAll('#ab-messages .ab-msg').length, 1);
+  assert.equal(document.querySelectorAll('[data-streaming]').length, 0);
+});
