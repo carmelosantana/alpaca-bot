@@ -347,16 +347,8 @@ final class ChatCommand
             default => $stored,
         };
         $this->emit(wp_json_encode($stored, self::JSON) . "\n");
-        if ($cleared !== []) {
-            ($this->warn)(sprintf(
-                count($cleared) === 1
-                    ? 'The header value of MCP server %s was cleared, because its address moved to another host or port. Send it again.'
-                    : 'The header values of MCP servers %s were cleared, because their addresses moved to another host or port. Send them again.',
-                implode(', ', $cleared),
-            ));
-        }
-        if ($keyCleared) {
-            ($this->warn)('provider.api_key was cleared, because provider.base_url moved to another host, port or scheme. Set it again: wp alpaca-bot settings provider.api_key <key>');
+        foreach (ClearedWarnings::lines($cleared, $keyCleared) as $line) {
+            ($this->warn)($line);
         }
     }
 
