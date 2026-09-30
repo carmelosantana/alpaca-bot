@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace AlpacaBot\Cli;
 
+use AlpacaBot\Chat\CapExceeded;
 use AlpacaBot\Chat\Pipeline;
 use AlpacaBot\Chat\Result;
 use AlpacaBot\Chat\UsageMeter;
@@ -176,6 +177,16 @@ final class ChatCommand
             if ($this->midLine) {
                 // Close the partial reply so the error does not land on it.
                 $this->emit("\n");
+            }
+            if ($e instanceof CapExceeded && $e->stopped) {
+                // A tool turn the cap stopped mid-way kept what it wrote on a conversation, and
+                // this error is the only place the caller can learn which (Kanboard #4701).
+                $saved = $e->conversationId > 0 ? sprintf(' What it wrote so far is saved on conversation %d.', $e->conversationId) : '';
+                if ($json) {
+                    $this->json(['error' => $e->getMessage(), 'conversation_id' => $e->conversationId]);
+                }
+                ($this->fail)($e->getMessage() . $saved);
+                return;
             }
             $this->error($e->getMessage(), $json);
             return;
@@ -425,7 +436,8 @@ final class ChatCommand
     }
 
     /**
-     * Reports a failure. With `--json` the error also goes to stdout as `{"error": ...}`, so a
+     * Reports a failure. With `--json` the error also goes to stdout as `{"error": ...}` (chat()
+     * adds `conversation_id` for a tool turn the cap stopped mid-way), so a
      * consumer parsing stdout sees it there; the report itself (stderr and exit 1 under WP-CLI)
      * happens either way.
      */
