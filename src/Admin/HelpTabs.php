@@ -226,12 +226,14 @@ final class HelpTabs
                 '<code>[alpacabot_agent]</code>',
             ))
             . self::p(sprintf(
-                /* translators: 1: alpaca_bot/admin/menu_capability, 2: alpaca_bot/capability/{route}, 3: alpaca_bot/capability/chat, 4: POST /chat */
-                esc_html__('The Chat row has no filter of that kind. The note under it asks %1$s, which filters the chat screen, its panel and the editor sidebar, and the filter of every chat REST route, %2$s (%3$s for the %4$s route, and one per route besides), once for each method the route takes, such as GET and DELETE, and names each route and method that moved it.', 'alpaca-bot'),
+                /* translators: 1: alpaca_bot/admin/menu_capability, 2: alpaca_bot/capability/{route}, 3: alpaca_bot/capability/chat, 4: POST /chat, 5: GET /conversations/{id}, 6: GET /conversations */
+                esc_html__('The Chat row has no filter of that kind. The note under it asks %1$s, which filters the chat screen, its panel and the editor sidebar, and the filter of every chat REST route, %2$s (%3$s for the %4$s route, and one per route besides), once for each route key and method, such as GET and DELETE, with a request of that method and the path of the first route that declares that pair, and names each method and path that moved it. A route that shares its key and method with an earlier one, as %5$s does with %6$s, is not asked or named on its own.', 'alpaca-bot'),
                 '<code>alpaca_bot/admin/menu_capability</code>',
                 '<code>alpaca_bot/capability/{route}</code>',
                 '<code>alpaca_bot/capability/chat</code>',
                 '<code>POST /chat</code>',
+                '<code>GET /conversations/{id}</code>',
+                '<code>GET /conversations</code>',
             ));
     }
 

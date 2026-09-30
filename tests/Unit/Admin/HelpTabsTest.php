@@ -156,8 +156,10 @@ it('says what each Settings › Access row decides and what "Set in code" under 
         // The tool floor: opening the chat does not hand a role the tools.
         ->toContain('as well as Chat')
         // The Chat row's surfaces, each behind a filter of its own: the menu's, and every chat
-        // REST route's own key, each asked and named (Kanboard #4537).
-        ->toContain('alpaca_bot/admin/menu_capability')->toContain('alpaca_bot/capability/{route}')->toContain('every chat REST route')->toContain('once for each method the route takes')
+        // REST route's own key, asked once per key and verb with the first such route's path, so a
+        // route sharing both with an earlier one is not named apart (Kanboard #4537).
+        ->toContain('alpaca_bot/admin/menu_capability')->toContain('alpaca_bot/capability/{route}')->toContain('every chat REST route')->toContain('once for each route key and method')->toContain('the path of the first route that declares that pair')
+        ->toContain('is not asked or named on its own')->not->toContain('names each route and method that moved it')
         ->not->toContain('which the note does not ask')
         ->toContain('once no filter changes it')
         // Both shortcodes are asked, outside a post; what the note does not cover is a post or a user.
