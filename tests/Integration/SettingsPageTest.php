@@ -369,8 +369,8 @@ final class SettingsPageTest extends TestCase
         // Declares one argument more than its row fires with.
         add_filter('alpaca_bot/capability/tool/summarize', static fn(string $cap, int $userId, string $extra): string => 'read', 10, 3);
 
-        // Access::overridden() leaves a line in the debug log when resolving a row throws; the
-        // page asks it first so that a row flipping to "set in code" is never silent there.
+        // The page leaves a line in the debug log when resolving a row throws (SettingsPage::ask()),
+        // so a row flipping to "set in code" is never silent there.
         $log = (string) tempnam(sys_get_temp_dir(), 'ab-access-log');
         $previous = ini_set('error_log', $log);
         try {
@@ -400,9 +400,27 @@ final class SettingsPageTest extends TestCase
         $this->assertStringContainsString('<strong>Set in code</strong> for the shortcode <code>[alpacabot_agent]</code>: a filter decides this, and asking it from this page failed', $row('ab-access-shortcode'));
         $this->assertStringNotContainsString('Set in code', $row('ab-access-tool-draft_post'));
         $this->assertStringContainsString('<input type="submit"', $html, 'the page rendered to its end');
-        // Asked twice (Access::overridden(), then for the figure), it threw twice: a line each.
-        $this->assertSame(2, substr_count($logged, 'resolving the tool.summarize access row threw, so it is reported as set in code:'));
+        // Asked once, it threw once: one line (Kanboard #4694).
+        $this->assertSame(1, substr_count($logged, 'resolving the tool.summarize access row threw, so it is reported as set in code:'));
         $this->assertSame(1, substr_count($logged, 'agent filter broke'));
+    }
+
+    /**
+     * Kanboard #4694: a row with one surface is asked once per render, as each surface of the
+     * Chat and Shortcodes rows is, so a listener with side effects runs once each time the tab
+     * is shown, and one that moves the row still gets its note.
+     */
+    public function test_a_single_surface_rows_listener_runs_once_per_render(): void
+    {
+        $calls = 0;
+        add_filter('alpaca_bot/capability/tool/web_fetch', static function (string $cap) use (&$calls): string {
+            $calls++;
+            return 'manage_options';
+        });
+        $html = $this->renderAccessPage('access');
+
+        $this->assertSame(1, $calls);
+        $this->assertStringContainsString('<strong>Set in code</strong>: a filter changes this to Administrators (<code>manage_options</code>).', $html);
     }
 
     /**

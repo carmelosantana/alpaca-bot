@@ -34,10 +34,9 @@ use AlpacaBot\Settings\Store;
  * arguments than its row passes raises an ArgumentCountError when the hook fires.
  *
  * That is the half of the contract that crashes, so this class owns it too: ARGS fixes how many
- * arguments each row fires with, expectedArgs() reads it, effective() refuses a caller that
- * passes fewer, and overridden() — the question a screen asks — answers rather than fatals when
- * a listener cannot be called. The *values* are the asking surface's; the *count* is this
- * class's, and a site registering a listener can rely on it.
+ * arguments each row fires with, expectedArgs() reads it, and effective() refuses a caller that
+ * passes fewer. The *values* are the asking surface's; the *count* is this class's, and a site
+ * registering a listener can rely on it.
  *
  * `chat` has no filter here, and must not: that capability is already filtered by the two hooks
  * that were there before this tab — the menu's `alpaca_bot/admin/menu_capability` and each chat
@@ -172,8 +171,8 @@ final class Access
      * An enforcement caller does not need this. It knows its own row and its own arguments, so
      * it passes them and lets effective() be the one that checks; branching on this number in a
      * path that has the arguments only adds a second place to be wrong about the count. It is
-     * here for the opposite case — a surface that may not be able to supply a row's arguments
-     * and has to know that before it asks, which is what overridden() does with it.
+     * here for effective()'s own check, and for a site registering a listener, whose
+     * `accepted_args` it fixes.
      */
     public static function expectedArgs(string $row): int
     {
@@ -193,8 +192,8 @@ final class Access
      * error and nothing else. Falling back to the stored value instead would throw away whatever
      * the site's filter had to say — including a filter that *tightens* the row — and hand back
      * a looser capability than the site asked for, with no symptom. A fatal in development is
-     * the cheap end of that trade; overridden() is where the loud version is not wanted, and it
-     * is guarded there and only there. Extra arguments are passed on untouched, so a row may
+     * the cheap end of that trade. A screen, which must not be fatal, catches what this throws
+     * itself (Admin\SettingsPage::ask(), which passes every row its full count). Extra arguments are passed on untouched, so a row may
      * grow one without breaking its callers.
      *
      * @param mixed ...$args extra arguments the row's filter receives after the capability
@@ -270,74 +269,6 @@ final class Access
          * @param mixed  ...$args    what the asking surface passes: Access::expectedArgs() of them, the row's own contract, and none at all for a row that declares none
          */
         return Capability::filtered("alpaca_bot/capability/{$hook}", $stored, ...$args);
-    }
-
-    /**
-     * Whether code moved this row off what the site saved.
-     *
-     * True means the screen is not the whole story about this row, which is what the question is
-     * for. Three ways it gets there: a listener changed the value; a listener exists that this
-     * call site cannot supply the arguments for; or resolving the row threw, which the catch
-     * below is about. False says only that nothing moved the row *here*, which for a row with a
-     * filter of its own is the whole story.
-     *
-     * `chat` is the row it is not. It has no filter here (effective() returns the stored value
-     * before any hook), so this comparison is always false for it — on a site that names a
-     * capability in code as much as on one that does not. What filters that capability is the
-     * menu's `alpaca_bot/admin/menu_capability` and each chat route's
-     * `alpaca_bot/capability/{route}`, separately, so a screen wanting to know whether the Chat
-     * row is set in code has to ask those surfaces, one at a time. This method cannot answer it
-     * and does not pretend to.
-     *
-     * The second case is why this is the guarded one, and the only one. It is the question a
-     * screen asks, and a screen must not be fatal — but a screen also may not have a row's
-     * arguments (one with no post in hand has no post id for the shortcode row), and effective()
-     * refuses a short argument list before any filter runs. Asking has_filter() first is what
-     * keeps that from becoming a blanket answer: with no listener registered nothing can have
-     * moved the row, so it is false, and the label does not appear on every site in the world;
-     * with one registered the honest answer is that code has a say here and this call cannot
-     * find out what it is. A settings row has two hooks — `alpaca_bot/capability/settings` runs
-     * before its own — and both are asked, or a site still filtering 0.5's key would be told its
-     * settings rows are the screen's alone. Counting a listener that leaves the row where it was
-     * is the cost —
-     * one that returns the stored value, and equally one whose return Capability::filtered()
-     * discards (a bool, a number, '', null, an array), which lands on the stored value too. That
-     * is the price of not running the filter, and it is particular to this branch: nothing can
-     * tell a filter that changes nothing from an absent one without calling it, and this is the
-     * one path that cannot call it. Given the arguments, both read false, correctly.
-     *
-     * The catch is the rest: a listener that throws, one registered with more `accepted_args`
-     * than its row fires with (core raises an ArgumentCountError), and anything else thrown
-     * under this call, `stored()`'s own read of the option included — a site's
-     * `pre_option_alpaca_bot_settings` listener can throw, and then every row would read as
-     * overridden with no other symptom. So it is `\Throwable`, deliberately wide, and it leaves
-     * a line in the debug log behind WP_DEBUG: a security-relevant label that flips because of
-     * an unrelated plugin's exception should not do it silently. True rather than a third state,
-     * so the return stays a plain bool no caller can forget to unpack.
-     */
-    public function overridden(string $row, mixed ...$args): bool
-    {
-        try {
-            if (count($args) < self::expectedArgs($row)) {
-                // The prefix is spelled again rather than shared with effective()'s: a hook name
-                // handed to Capability::filtered() has to be a string literal or bin/hooks-doc.php
-                // fails the run, so that one cannot be built from a constant, and a constant used
-                // only here would be the odd half of a pair.
-                //
-                // Both of a settings row's hooks are asked, because either can move it and this
-                // branch is the one a screen takes for those rows: the settings rows fire with a
-                // WP_REST_Request, which no admin screen has.
-                return (bool) has_filter('alpaca_bot/capability/' . self::hook($row))
-                    || (str_starts_with($row, self::SETTINGS_PREFIX) && (bool) has_filter('alpaca_bot/capability/settings'));
-            }
-            return $this->effective($row, ...$args) !== $this->stored($row);
-        } catch (\Throwable $e) {
-            if (defined('WP_DEBUG') && WP_DEBUG) {
-                // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log -- Deliberate diagnostic, gated on WP_DEBUG as core's own logging is; this is the only record left, since the answer returned to the screen is a bool with nowhere to carry a reason.
-                error_log(sprintf('[alpaca-bot] resolving the %s access row threw, so it is reported as set in code: %s', $row, $e->getMessage()));
-            }
-            return true;
-        }
     }
 
     /**

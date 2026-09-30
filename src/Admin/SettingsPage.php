@@ -268,18 +268,17 @@ final class SettingsPage
      *
      * A row with a filter of its own is asked through Access, with the arguments that filter is
      * given at runtime (accessArgs()), so a listener registered for its row's arguments is called
-     * with them here too. Access::overridden() asks first: it never throws, and when resolving
-     * the row does, it leaves a line in the debug log under WP_DEBUG. effective() is then asked
-     * again for the figure, through ask(), so a listener on such a row runs twice, and a throwing
-     * one leaves a line each time.
+     * with them here too. Those arguments are always the full count Access::expectedArgs() fixes,
+     * so effective() never refuses them. It is asked once, through ask(), which catches and logs
+     * whatever it throws (the option read in stored() included), so a listener on such a row runs
+     * once each time the tab is shown, and a throwing one leaves one line (Kanboard #4694).
      *
      * Two rows govern more than one surface, and each surface is asked once, the answers grouped
-     * (setInCodeEach()), so a listener with side effects runs once per surface each time the tab
-     * is shown, and not twice as above. The Shortcodes row is asked through Access::effective()
+     * (setInCodeEach()), so a listener with side effects runs once per surface too. The Shortcodes row is asked through Access::effective()
      * once per shortcode it governs, `[alpacabot]` and `[alpacabot_agent]`, with post id 0 and
      * that tag, which is what Shortcodes\Chat passes for one rendered outside a post.
      *
-     * The Chat row has no filter in Access, so overridden('chat') would answer false whatever a
+     * The Chat row has no filter in Access, so effective('chat') is the stored value whatever a
      * site did. The menu's filter (Menu::capability(), which the chat screen, the drawer and the
      * editor sidebar ask) is asked instead, and then each route key and verb a route declaring the
      * Chat row is registered under (RouteCapability::chatRoutes() over the site's controllers),
@@ -329,9 +328,7 @@ final class SettingsPage
             );
         } else {
             $args = self::accessArgs($row);
-            $lines = $this->access->overridden($row, ...$args)
-                ? [self::setInCode('', self::ask($row, '', fn(): string => $this->access->effective($row, ...$args)), $stored, $f)]
-                : [];
+            $lines = [self::setInCode('', self::ask($row, '', fn(): string => $this->access->effective($row, ...$args)), $stored, $f)];
         }
         $lines = array_values(array_filter($lines, static fn(string $line): bool => $line !== ''));
         if ($lines === []) {
@@ -384,9 +381,10 @@ final class SettingsPage
      * (core calls it into an ArgumentCountError), anything. The page goes on and the note says
      * asking failed (setInCode()), and under WP_DEBUG a line goes to the debug log naming `$row`,
      * `$what` (the surface or the hook that was asked, as escaped HTML, which the line gives as
-     * plain text; '' for a row with one surface) and the message, in the format
-     * Access::overridden() writes, so a label that flips because of another plugin's exception
-     * never does it silently (Kanboard #4537, #4694).
+     * plain text; '' for a row with one surface) and the message:
+     * `[alpaca-bot] resolving the <row> access row[ for <what>] threw, so it is reported as set in
+     * code: <message>`. A label that flips because of another plugin's exception never does it
+     * silently (Kanboard #4537, #4694).
      *
      * @template T
      * @param \Closure(): T $resolve
@@ -398,7 +396,7 @@ final class SettingsPage
             return $resolve();
         } catch (\Throwable $e) {
             if (defined('WP_DEBUG') && WP_DEBUG) {
-                // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log -- Deliberate diagnostic, gated on WP_DEBUG as Access::overridden()'s is: the note on the screen has nowhere to carry the reason.
+                // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log -- Deliberate diagnostic, gated on WP_DEBUG as core's own logging is: the note on the screen has nowhere to carry the reason.
                 error_log(sprintf('[alpaca-bot] resolving the %s access row%s threw, so it is reported as set in code: %s', $row, $what === '' ? '' : ' for ' . html_entity_decode(wp_strip_all_tags($what), ENT_QUOTES), $e->getMessage()));
             }
             return $e;
