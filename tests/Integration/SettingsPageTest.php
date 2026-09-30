@@ -256,6 +256,59 @@ final class SettingsPageTest extends TestCase
     }
 
     /**
+     * #4699 on the settings page: a row that says MASK while `alpaca_bot_provider_key` is gone (the
+     * option deleted outside the plugin) holds no key, and nothing is sent. The Provider tab shows
+     * the field empty, the carry-over of every other tab posts '' for it, and a save that moves the
+     * Base URL names no cleared key, since there was none to clear.
+     */
+    public function test_a_row_that_says_mask_with_no_key_held_shows_no_key_and_a_move_names_none_cleared(): void
+    {
+        Plugin::instance()->get(Store::class)->replace(['provider.api_key' => 'sk-FAKE-gone', 'provider.base_url' => 'https://openrouter.ai/api/v1']);
+        delete_option(ProviderKey::OPTION);
+        $this->assertSame(Schema::MASK, get_option(Plugin::OPTION)['provider.api_key']);
+
+        set_current_screen('alpaca-bot_page_alpaca-bot-settings');
+        foreach (['provider', 'chat'] as $tab) {
+            $_GET['tab'] = $tab;
+            ob_start();
+            Plugin::instance()->get(SettingsPage::class)->render();
+            $posted = self::formPost((string) ob_get_clean());
+            $this->assertSame('', $posted['provider.api_key'], $tab);
+        }
+
+        $_GET['tab'] = 'provider';
+        ob_start();
+        Plugin::instance()->get(SettingsPage::class)->render();
+        $posted = self::formPost((string) ob_get_clean());
+        // What an older page, rendered while the key was still held, posts back.
+        $posted['provider.api_key'] = Schema::MASK;
+        $posted['provider.base_url'] = 'https://steal.example.net/v1';
+        self::save($posted);
+        $this->assertStoredProviderKey('', get_option(Plugin::OPTION));
+        $this->assertSame('https://steal.example.net/v1', get_option(Plugin::OPTION)['provider.base_url']);
+        $this->assertSame([], get_settings_errors(Plugin::OPTION));
+    }
+
+    // #4699's cost on this screen: the Provider tab shows the key once, and reads its option once.
+    public function test_the_provider_tab_reads_the_key_option_once(): void
+    {
+        Plugin::instance()->get(Store::class)->set('provider.api_key', 'sk-FAKE-cost');
+        $reads = 0;
+        $count = static function (mixed $pre) use (&$reads): mixed {
+            ++$reads;
+            return $pre;
+        };
+        add_filter('pre_option_' . ProviderKey::OPTION, $count);
+        $_GET['tab'] = 'provider';
+        set_current_screen('alpaca-bot_page_alpaca-bot-settings');
+        ob_start();
+        Plugin::instance()->get(SettingsPage::class)->render();
+        $posted = self::formPost((string) ob_get_clean());
+        $this->assertSame(Schema::MASK, $posted['provider.api_key']);
+        $this->assertSame(1, $reads);
+    }
+
+    /**
      * The Access tab arrives with the section: SettingsPage builds a tab per Schema section and a
      * control per field, `access.mcp` aside, so a row added to Schema is a select on this screen
      * with nothing else written. Asserted by rendering it rather than by counting tabs, because an

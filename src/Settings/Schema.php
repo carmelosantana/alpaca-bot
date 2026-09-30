@@ -15,7 +15,8 @@ use AlpacaBot\Toolkit\AbilitiesToolkit;
  * consumed by the settings screen that arrives in a later phase.
  *
  * SECRETS are the fields whose stored value must never be shown back or lost by accident
- * (today the provider API key). They read out as MASK wherever they are shown, and a write that
+ * (today the provider API key). They read out as MASK wherever they are shown while the row's key
+ * resolves to one (Settings\ProviderKey::shown(); '' when it does not), and a write that
  * carries MASK back means "keep what is stored"; sanitize() owns that rule so every writer of the
  * option (the REST route, the Settings API's sanitize callback, Store) resolves it the same way.
  * The key itself is kept out of this option, in Settings\ProviderKey's, which takes it out on
@@ -261,7 +262,9 @@ final class Schema
      * through the same decision, and the writers that can tell someone (the REST route's
      * `X-Alpaca-Bot-Cleared` header, the settings page's notice, the warning from
      * `wp alpaca-bot settings` and from a raw `wp option update|patch|add`) ask it with the same
-     * two arrays before they write. The reason is the one Mcp\ServerSettings gives for a header
+     * two arrays before they write, through Settings\ProviderKey::clearedByMove(), which also
+     * asks whether the key resolves to one: this reads no option, so a MASK with no key held
+     * counts here. The reason is the one Mcp\ServerSettings gives for a header
      * value: the `settings.write` row can be lowered below `manage_options`, and a writer who may
      * change the URL but not reveal the key could otherwise point the URL at their own host, send
      * the mask, and be sent the key on the next turn.

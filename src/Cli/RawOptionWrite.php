@@ -6,6 +6,7 @@ namespace AlpacaBot\Cli;
 
 use AlpacaBot\Mcp\ServerSettings;
 use AlpacaBot\Plugin;
+use AlpacaBot\Settings\ProviderKey;
 use AlpacaBot\Settings\Schema;
 use AlpacaBot\Settings\Store;
 
@@ -216,7 +217,7 @@ final class RawOptionWrite
             }
             $cleared = $check->cleared;
         }
-        $keyCleared = Schema::providerKeyClearedByMove($input, $this->store->all());
+        $keyCleared = ProviderKey::clearedByMove($input, $this->store->all());
         $this->disarm();
         $this->writing = true;
         try {

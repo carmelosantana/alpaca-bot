@@ -17,8 +17,9 @@ use AlpacaBot\Settings\Store;
  * the full array (every Schema key, defaults filled in), `PUT /settings` a partial update of it,
  * and `GET /settings/schema` the field list a client renders a form from.
  *
- * Secrets (Schema::SECRETS, today the provider API key) read back as Schema::MASK when set and
- * as '' when not, so a client can show "there is a key" without holding it. The mask is also
+ * Secrets (Schema::SECRETS, today the provider API key) read back as Schema::MASK when the row's
+ * key resolves to one and as '' when not (Settings\ProviderKey::shown(): a row that says MASK with the key option
+ * gone reads ''), so a client can show "there is a key" without holding it. The mask is also
  * what a client sends back when it has not touched the field: a PUT whose secret is MASK keeps
  * the stored value, one whose secret is '' clears it, and any other string is the new value. The
  * three cases are distinct on the wire, so "clear the key" is always reachable and an untouched
@@ -29,7 +30,8 @@ use AlpacaBot\Settings\Store;
  * PUT that moves `provider.base_url` to another scheme, host or port clears the stored key unless
  * it sends a new one, whether it sent the mask, a non-string or no key at all
  * (Schema::providerKeyClearedByMove()). The write is not refused for it; the key reads back '',
- * and the reply carries `X-Alpaca-Bot-Cleared: provider.api_key`, because '' alone cannot tell a
+ * and the reply carries `X-Alpaca-Bot-Cleared: provider.api_key` when there was a key
+ * to clear (Settings\ProviderKey::clearedByMove()), because '' alone cannot tell a
  * key just dropped from one never set. An MCP server's header value reads back the same way, MASK or '', in
  * each row of `toolkits.mcp_servers` (masked()), and takes the same three values on the way in;
  * Mcp\ServerSettings leaves only MASK or '' there on each update_option() of the option once the
@@ -232,7 +234,7 @@ final class SettingsController extends Controller
             }
             $cleared = $check->cleared;
         }
-        $keyCleared = Schema::providerKeyClearedByMove($input, $this->store->all());
+        $keyCleared = ProviderKey::clearedByMove($input, $this->store->all());
         $this->store->replace($input);
         $response = new \WP_REST_Response($this->masked($this->store->all()));
         if ($cleared !== []) {
@@ -273,9 +275,7 @@ final class SettingsController extends Controller
     private function masked(array $settings): array
     {
         foreach (Schema::SECRETS as $key) {
-            if (($settings[$key] ?? '') !== '') {
-                $settings[$key] = Schema::MASK;
-            }
+            $settings[$key] = ProviderKey::shown($settings[$key] ?? '');
         }
         if (array_key_exists('toolkits.mcp_servers', $settings)) {
             $settings['toolkits.mcp_servers'] = Schema::maskedServers($settings['toolkits.mcp_servers']);

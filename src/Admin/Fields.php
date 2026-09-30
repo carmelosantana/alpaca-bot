@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace AlpacaBot\Admin;
 
 use AlpacaBot\Plugin;
+use AlpacaBot\Settings\ProviderKey;
 use AlpacaBot\Settings\Schema;
 
 /**
@@ -13,7 +14,8 @@ use AlpacaBot\Settings\Schema;
  * `register_setting()` sanitize callback receives the whole option as one array.
  *
  * A secret (Schema::SECRETS) is never written into the page: the control and the hidden carry
- * over both show Schema::MASK when a value is stored and '' when not. An MCP server's header
+ * over both show Schema::MASK when the row's key resolves to one and '' when not (Settings\ProviderKey::shown(),
+ * so a row that says MASK with the key option gone shows ''). An MCP server's header
  * value gets the same treatment in the carry-over of `toolkits.mcp_servers`. Schema::sanitize() reads
  * the mask back as "keep what is stored", so a form saved without touching the key keeps it,
  * unless the same save moves the Base URL to another scheme, host or port
@@ -205,11 +207,11 @@ final class Fields
         ) . '</strong></p>';
     }
 
-    /** What the page shows for a value: the mask for a stored secret, the MCP server rows with their header values masked (Schema::maskedServers()), the value for anything else. */
+    /** What the page shows for a value: the mask for a secret whose key resolves (ProviderKey::shown()), the MCP server rows with their header values masked (Schema::maskedServers()), the value for anything else. */
     private static function display(string $key, mixed $value): mixed
     {
         if (in_array($key, Schema::SECRETS, true)) {
-            return is_string($value) && $value !== '' ? Schema::MASK : '';
+            return ProviderKey::shown($value);
         }
         return $key === 'toolkits.mcp_servers' ? Schema::maskedServers($value) : $value;
     }

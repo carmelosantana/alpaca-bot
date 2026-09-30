@@ -7,7 +7,7 @@ namespace AlpacaBot\Cli;
 /**
  * What a command-line write says when it cleared a secret by moving its URL: one line naming the
  * MCP servers whose header value went (Mcp\WriteCheck's `$cleared`), and one for the provider key
- * (Schema::providerKeyClearedByMove()). `wp alpaca-bot settings` (ChatCommand::settings()) and a
+ * (Settings\ProviderKey::clearedByMove()). `wp alpaca-bot settings` (ChatCommand::settings()) and a
  * raw `wp option update|patch|add alpaca_bot_settings` (RawOptionWrite) both print these, so the
  * two say the same thing.
  *

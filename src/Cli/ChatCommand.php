@@ -293,18 +293,17 @@ final class ChatCommand
         if (!isset($args[0])) {
             $all = $this->store->all();
             // Schema::SECRETS is the list of top-level credential-holding keys, and Schema::MASK
-            // the one stand-in for a stored one: the settings screen (Admin\Fields::display()),
-            // the REST read (Rest\SettingsController::masked()) and this dump all read them, so a
-            // second secret added to that list is hidden here too. The whole dump is what ends
+            // the one stand-in for a key the row resolves to (ProviderKey::shown(): '' when the row
+            // says MASK but no key is held): the settings screen (Admin\Fields::display()), the REST read
+            // (Rest\SettingsController::masked()) and this dump all read them, so a second secret
+            // added to that list is hidden here too. The whole dump is what ends
             // up in CI logs and shell history; asking for one by name
             // (`wp alpaca-bot settings provider.api_key`) still prints it, since that is an
             // operator deliberately asking. An MCP server's header value is the other credential,
             // nested in its row; Schema::maskedServers() masks it here and read by name alike.
             foreach (Schema::SECRETS as $secret) {
                 // An unset key stays visibly empty: "is one configured?" is still answerable.
-                if (($all[$secret] ?? '') !== '') {
-                    $all[$secret] = Schema::MASK;
-                }
+                $all[$secret] = ProviderKey::shown($all[$secret] ?? '');
             }
             $all['toolkits.mcp_servers'] = Schema::maskedServers($all['toolkits.mcp_servers'] ?? []);
             $this->json($all);
@@ -335,7 +334,7 @@ final class ChatCommand
                 }
                 $cleared = $check->cleared;
             }
-            $keyCleared = Schema::providerKeyClearedByMove([$key => $value], $this->store->all());
+            $keyCleared = ProviderKey::clearedByMove([$key => $value], $this->store->all());
             $this->store->set($key, $value);
         }
         $stored = $this->store->get($key);

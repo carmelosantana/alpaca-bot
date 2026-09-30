@@ -61,6 +61,34 @@ final class ProviderKey
         return is_string($stored) ? $stored : '';
     }
 
+    /**
+     * What a screen shows for a row's `provider.api_key`: MASK when resolve() finds a key, '' when
+     * it finds none, so a row that says MASK while the option is gone reads as no key, as it
+     * sends none. The settings page (Admin\Fields), the REST read and the `wp alpaca-bot settings`
+     * dump show this. It reads the option only for MASK (resolve()), so it costs those three one
+     * option read and the front end, which shows none of them, nothing extra.
+     */
+    public static function shown(#[\SensitiveParameter] mixed $stored): string
+    {
+        return self::resolve($stored) !== '' ? Schema::MASK : '';
+    }
+
+    /**
+     * Schema::providerKeyClearedByMove(), for a writer that says so: true only when that answers
+     * true and `$current`'s key resolves to one, so a row that says MASK with no key held names no
+     * cleared key. The REST route, the settings page, `wp alpaca-bot settings` and Cli\RawOptionWrite
+     * ask this before they write. Schema::sanitize() asks Schema's own, which reads no option, and clears the
+     * MASK all the same; with nothing held that stores what beforeSave() would have stored anyway.
+     * The option is read only on a move over a row that says MASK.
+     *
+     * @param array<string, mixed> $input   what the write sends
+     * @param array<string, mixed> $current the stored settings this write replaces
+     */
+    public static function clearedByMove(#[\SensitiveParameter] array $input, #[\SensitiveParameter] array $current): bool
+    {
+        return Schema::providerKeyClearedByMove($input, $current) && self::resolve($current['provider.api_key'] ?? '') !== '';
+    }
+
     /** Stores `$key`, autoload off; '' deletes the option, so a site with no key has no row. */
     public static function put(#[\SensitiveParameter] string $key): void
     {

@@ -6,6 +6,7 @@ use AlpacaBot\Cli\RawOptionWrite;
 use AlpacaBot\Mcp\Secrets;
 use AlpacaBot\Mcp\ServerSettings;
 use AlpacaBot\Plugin;
+use AlpacaBot\Settings\ProviderKey;
 use AlpacaBot\Settings\Schema;
 use AlpacaBot\Settings\Store;
 use Brain\Monkey\Functions;
@@ -18,13 +19,13 @@ use Brain\Monkey\Functions;
 
 /**
  * A RawOptionWrite over `$stored` (the settings row as the Store and get_option() see it) and
- * `$secrets` (Mcp\Secrets' option), armed for `$command`. What it reports lands in the returned
+ * `$secrets` (Mcp\Secrets' option) and `$held` (Settings\ProviderKey's option, false for none), armed for `$command`. What it reports lands in the returned
  * object instead of going through WP_CLI; `halted` is the exit code halt() was handed.
  *
  * @param array<string, mixed>  $stored
  * @param array<string, string> $secrets
  */
-function rawWrite(array $stored, string $command = 'update', ?ServerSettings $servers = null, array $secrets = [], mixed $row = null, bool $inCommand = true): object
+function rawWrite(array $stored, string $command = 'update', ?ServerSettings $servers = null, array $secrets = [], mixed $row = null, bool $inCommand = true, string|false $held = false): object
 {
     $c = new class {
         public RawOptionWrite $subject;
@@ -41,6 +42,7 @@ function rawWrite(array $stored, string $command = 'update', ?ServerSettings $se
     Functions\when('get_option')->alias(static fn(string $name, mixed $default = false): mixed => match ($name) {
         Plugin::OPTION => $row,
         Secrets::OPTION => $secrets,
+        ProviderKey::OPTION => $held === false ? $default : $held,
         default => $default,
     });
     $c->store = new Store($stored);
@@ -118,10 +120,11 @@ it('reports success for a write that changed only a secret, although update_opti
 
 // #4539 over a raw write: the stored row carries MASK for the kept key, so a patch of the base URL
 // hands the whole row back with MASK in it, which reads as "keep", and keep does not survive a move.
+// The warning names the key only while one is held (#4699): with none, the move clears nothing.
 it('clears the provider key when the write moves the base URL, and warns as wp alpaca-bot settings does', function (): void {
     $stored = ['provider.base_url' => 'https://openrouter.ai/api/v1', 'provider.api_key' => Schema::MASK];
     Functions\expect('update_option')->once()->with(Plugin::OPTION, Mockery::on(static fn(array $v): bool => $v['provider.api_key'] === '' && $v['provider.base_url'] === 'https://steal.example.net/v1'))->andReturn(true);
-    $c = rawWrite($stored, 'patch');
+    $c = rawWrite($stored, 'patch', held: 'sk-FAKE-held');
 
     $c->subject->sanitize(['provider.base_url' => 'https://steal.example.net/v1'] + get_option(Plugin::OPTION));
 
@@ -129,6 +132,18 @@ it('clears the provider key when the write moves the base URL, and warns as wp a
         ->and($c->warnings)->toBe(['provider.api_key was cleared, because provider.base_url moved to another host, port or scheme. Set it again: wp alpaca-bot settings provider.api_key <key>'])
         ->and($c->success)->toBe(["Updated 'alpaca_bot_settings' option."])
         ->and($c->halted)->toBe(0);
+});
+
+it('names no cleared provider key when the row carries MASK but no key is held', function (): void {
+    $stored = ['provider.base_url' => 'https://openrouter.ai/api/v1', 'provider.api_key' => Schema::MASK];
+    Functions\expect('update_option')->once()->andReturn(true);
+    $c = rawWrite($stored, 'patch');
+
+    $c->subject->sanitize(['provider.base_url' => 'https://steal.example.net/v1'] + get_option(Plugin::OPTION));
+
+    expect($c->errors)->toBe([])
+        ->and($c->warnings)->toBe([])
+        ->and($c->success)->toBe(["Updated 'alpaca_bot_settings' option."]);
 });
 
 it('warns, naming the server, when a URL move clears an MCP header value', function (): void {
