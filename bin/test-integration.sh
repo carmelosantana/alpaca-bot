@@ -38,7 +38,8 @@
 # WP_NO_CURL=1 runs PHP with `-d disable_functions=curl_init,curl_exec`, the configuration shared
 # hosts ship, so Requests' Transport\Curl::test() answers false through its own function_exists()
 # check, WordPress would send requests through Fsockopen, and web_fetch must refuse (Kanboard
-# #4484). disable_functions rather than a PHP without ext-curl: both containers' PHP has cURL
+# #4484) while the provider and MCP clients take Symfony's Native client (HttpTransport, Kanboard
+# #4690). disable_functions rather than a PHP without ext-curl: both containers' PHP has cURL
 # compiled in, not loaded from a shared .so, so there is no extension to leave out, and disabling
 # the two functions is what those hosts do anyway (extension_loaded('curl') stays true there
 # too). Only the php running phpunit gets the flag; core's install.php subprocess does not need

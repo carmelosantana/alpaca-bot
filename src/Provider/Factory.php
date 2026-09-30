@@ -4,12 +4,12 @@ declare(strict_types=1);
 
 namespace AlpacaBot\Provider;
 
+use AlpacaBot\HttpTransport;
 use AlpacaBot\Settings\ProviderKey;
 use AlpacaBot\Settings\Schema;
 use AlpacaBot\Settings\Store;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Contract\ProviderInterface;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Provider\OllamaProvider;
-use AlpacaBot\Vendor\Symfony\Component\HttpClient\HttpClient;
 
 /**
  * Builds the php-agents provider the plugin talks to, from settings.
@@ -123,8 +123,10 @@ final class Factory
     private function ollama(string $model): OllamaProvider
     {
         // Symfony's `timeout` is the idle timeout between chunks, which is the one that
-        // matters for a streamed reply; the library default would be 300s.
-        $http = HttpClient::create(['timeout' => (int) $this->store->get('provider.timeout')]);
+        // matters for a streamed reply; the library default would be 300s. HttpTransport, not
+        // Symfony's HttpClient::create(), because create() picks its Curl client on a host that
+        // has disabled curl_init, and the turn would die with an Error (HttpTransport says why).
+        $http = HttpTransport::create(['timeout' => (int) $this->store->get('provider.timeout')]);
 
         // OllamaProvider pins 'ollama-local' as its Bearer token on every request, so a
         // configured key is swapped in at the wire: the provider (and the tool-schema
