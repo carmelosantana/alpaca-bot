@@ -430,3 +430,20 @@ it('hands the view routes a Discovery over the container\'s client factory, and 
         ->and((new ReflectionProperty(AlpacaBot\Mcp\Toolkits::class, 'store'))->getValue($mcp))->toBe($plugin->get(Store::class))
         ->and((new ReflectionProperty(AlpacaBot\Mcp\Toolkits::class, 'access'))->getValue($mcp))->toBe($plugin->get(AlpacaBot\Access::class));
 });
+
+// Kanboard #4537: the Chat row's note asks each route that follows the row, and the routes are the
+// ones the site registers, so the settings page is handed Plugin::controllers() itself — the
+// `alpaca_bot/rest/controllers` filter included — and runs it only when it is called.
+it('hands the settings page the controllers the REST API registers, through the same filter, run only when asked', function (): void {
+    Functions\when('add_shortcode')->justReturn();
+    Functions\when('get_current_user_id')->justReturn(1);
+    $plugin = Plugin::boot();
+    $plugin->register();
+    $controllers = (new ReflectionProperty(SettingsPage::class, 'controllers'))->getValue($plugin->get(SettingsPage::class));
+
+    // Once: register() built the page without listing them, and this call is the one listing.
+    Filters\expectApplied('alpaca_bot/rest/controllers')->once()->andReturnFirstArg();
+    $listed = array_map(static fn(object $c): string => $c::class, [...$controllers()]);
+
+    expect($listed)->toContain(AlpacaBot\Rest\ChatController::class)->toContain(StreamController::class)->toContain(ViewController::class);
+});

@@ -161,10 +161,26 @@ function freshProcess(string $script, array $args): string
  * @param array<string, mixed> $settings
  * @param (callable(string): bool)|null $exists
  */
-function settingsPage(array $settings = [], ?callable $exists = null): AlpacaBot\Admin\SettingsPage
+function settingsPage(array $settings = [], ?callable $exists = null, ?callable $controllers = null): AlpacaBot\Admin\SettingsPage
 {
     $store = new Store($settings);
-    return new AlpacaBot\Admin\SettingsPage($store, new ModelCatalog(new Factory($store)), new AlpacaBot\Access($store), $exists);
+    return new AlpacaBot\Admin\SettingsPage($store, new ModelCatalog(new Factory($store)), new AlpacaBot\Access($store), $exists, null, $controllers);
+}
+
+/**
+ * Admin\SettingsPageTest: what Plugin hands SettingsPage as the REST controllers, in their
+ * shape: `POST /chat`, the `conversations` collection and item under both verbs, the stream route
+ * with its id group, and one route that declares a capability of its own rather than the Chat row.
+ *
+ * @return Closure(): list<Controller>
+ */
+function chatRouteControllers(): Closure
+{
+    $route = static fn(string $path, string $methods, string $capability = Controller::CHAT): array => ['path' => $path, 'methods' => $methods, 'callback' => '__return_null', 'capability' => $capability];
+    return static fn(): array => [
+        restController([$route('/chat', 'POST')]),
+        restController([$route('/chat/(?P<id>\d+)/stream', 'GET'), $route('/conversations', 'GET, DELETE'), $route('/conversations/(?P<id>\d+)', 'GET'), $route('/view/mcp-tools/(?P<id>[a-z]+)', 'GET', 'manage_options')]),
+    ];
 }
 
 /** core's selected() with $echo false: the attribute when the two values match as strings, else ''. */
@@ -181,9 +197,10 @@ function stubSelected(): void
  *
  * @param array<string, mixed> $settings
  * @param (callable(string): bool)|null $exists passed to settingsPage()
+ * @param (callable(): list<Controller>)|null $controllers passed to settingsPage(): the REST controllers whose Chat-row routes the Chat row asks
  * @return array<string, array{title: string, render: Closure(): string}>
  */
-function settingsFields(array $settings = [], ?callable $exists = null): array
+function settingsFields(array $settings = [], ?callable $exists = null, ?callable $controllers = null): array
 {
     $fields = [];
     Functions\when('register_setting')->justReturn(null);
@@ -195,7 +212,7 @@ function settingsFields(array $settings = [], ?callable $exists = null): array
             return (string) ob_get_clean();
         }];
     });
-    settingsPage($settings, $exists)->register();
+    settingsPage($settings, $exists, $controllers)->register();
     return $fields;
 }
 

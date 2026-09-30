@@ -286,7 +286,7 @@ it('renders an unreadable tools cell as inherit rather than casting it to a stri
 it('renders every Access row as its capability select on the stored value, and says nothing about code when nothing changed it', function (): void {
     stubSelected();
     Functions\when('get_current_user_id')->justReturn(7);
-    $fields = settingsFields(['access.chat' => 'publish_posts']);
+    $fields = settingsFields(['access.chat' => 'publish_posts'], null, chatRouteControllers());
 
     $chat = ($fields['alpaca_bot_access.chat']['render'])();
     expect($chat)->toContain('<select id="ab-access-chat" name="alpaca_bot_settings[access.chat]">')
@@ -330,6 +330,7 @@ it('asks a settings row with the REST request its route authorises, and a shortc
         ->andReturn('manage_options');
     // A capability that is not one of the five is named as itself.
     Filters\expectApplied('alpaca_bot/capability/shortcode')->atLeast()->once()->with('edit_posts', 0, 'alpacabot')->andReturn('exist');
+    Filters\expectApplied('alpaca_bot/capability/shortcode')->atLeast()->once()->with('edit_posts', 0, 'alpacabot_agent')->andReturnFirstArg();
     $fields = settingsFields();
 
     expect(($fields['alpaca_bot_access.settings.write']['render'])())->toContain('a filter changes this to Editors and up (<code>edit_others_posts</code>).')
@@ -361,7 +362,7 @@ it('asks the Chat row of each surface that reads it, and names the surface a fil
         ->with('edit_posts', Mockery::on(static fn(mixed $r): bool => $r instanceof WP_REST_Request && $r->get_method() === 'POST' && $r->get_route() === '/alpaca-bot/v1/chat'))
         ->andReturn('edit_posts');
 
-    $screen = (settingsFields()['alpaca_bot_access.chat']['render'])();
+    $screen = (settingsFields([], null, chatRouteControllers())['alpaca_bot_access.chat']['render'])();
 
     expect($screen)->toContain('<strong>Set in code</strong> for the chat screen, its panel on other admin screens and the block editor sidebar: a filter changes this to Any logged-in user (<code>read</code>).')
         ->not->toContain('POST /chat');
@@ -372,10 +373,129 @@ it('says when a filter changed the Chat row for the chat REST route and not for 
     Filters\expectApplied('alpaca_bot/admin/menu_capability')->atLeast()->once()->with('edit_posts')->andReturn('edit_posts');
     Filters\expectApplied('alpaca_bot/capability/chat')->atLeast()->once()->andReturn('manage_options');
 
-    $api = (settingsFields()['alpaca_bot_access.chat']['render'])();
+    $api = (settingsFields([], null, chatRouteControllers())['alpaca_bot_access.chat']['render'])();
 
     expect($api)->toContain('<strong>Set in code</strong> for the chat REST route (<code>POST /chat</code>): a filter changes this to Administrators (<code>manage_options</code>).')
         ->not->toContain('for the chat screen');
+});
+
+// Kanboard #4537: the Chat row is every REST route that declares Controller::CHAT, each under its
+// own `alpaca_bot/capability/{route}` key, so a site that filters only one of them other than
+// `chat` has moved the row for that route. Each key is asked once, with a request of the verb
+// and path its first Chat-row route declares; a route declaring a capability of its own is not
+// the Chat row's and is not asked.
+it('asks every REST route that follows the Chat row, once per route key, and names the one a filter changed', function (): void {
+    stubSelected();
+    $request = static fn(string $method, string $route): Mockery\Matcher\Closure => Mockery::on(static fn(mixed $r): bool => $r instanceof WP_REST_Request && $r->get_method() === $method && $r->get_route() === $route);
+    Filters\expectApplied('alpaca_bot/admin/menu_capability')->once()->andReturnFirstArg();
+    Filters\expectApplied('alpaca_bot/capability/chat')->once()->with('edit_posts', $request('POST', '/alpaca-bot/v1/chat'))->andReturnFirstArg();
+    Filters\expectApplied('alpaca_bot/capability/chat/stream')->once()->with('edit_posts', $request('GET', '/alpaca-bot/v1/chat/{id}/stream'))->andReturnFirstArg();
+    Filters\expectApplied('alpaca_bot/capability/conversations')->once()->with('edit_posts', $request('GET', '/alpaca-bot/v1/conversations'))->andReturn('read');
+    Filters\expectApplied('alpaca_bot/capability/view/mcp-tools')->never();
+
+    $html = (settingsFields([], null, chatRouteControllers())['alpaca_bot_access.chat']['render'])();
+
+    expect($html)->toContain('<strong>Set in code</strong> for the chat REST route (<code>GET /conversations</code>): a filter changes this to Any logged-in user (<code>read</code>).')
+        ->not->toContain('POST /chat')
+        ->not->toContain('for the chat screen')
+        ->and(substr_count($html, 'Set in code'))->toBe(1);
+});
+
+it('lists the REST routes a filter changed to the same capability in one note, and each other answer in a note of its own', function (): void {
+    stubSelected();
+    Filters\expectApplied('alpaca_bot/capability/chat')->once()->andReturn('read');
+    Filters\expectApplied('alpaca_bot/capability/chat/stream')->once()->andReturn('read');
+    Filters\expectApplied('alpaca_bot/capability/conversations')->once()->andReturn('manage_options');
+
+    $html = (settingsFields([], null, chatRouteControllers())['alpaca_bot_access.chat']['render'])();
+
+    expect($html)->toContain('<strong>Set in code</strong> for the chat REST routes (<code>POST /chat</code>, <code>GET /chat/{id}/stream</code>): a filter changes this to Any logged-in user (<code>read</code>).')
+        ->toContain('<strong>Set in code</strong> for the chat REST route (<code>GET /conversations</code>): a filter changes this to Administrators (<code>manage_options</code>).')
+        ->and(substr_count($html, 'Set in code'))->toBe(2);
+});
+
+it('reports a chat route whose filter throws as set in code without a figure, and asks the other routes anyway', function (): void {
+    stubSelected();
+    Filters\expectApplied('alpaca_bot/capability/chat/stream')->once()->andReturnUsing(static function (): never {
+        throw new ArgumentCountError('Too few arguments to function {closure}(), 2 passed and exactly 3 expected');
+    });
+    Filters\expectApplied('alpaca_bot/capability/conversations')->once()->andReturn('read');
+
+    $html = (settingsFields([], null, chatRouteControllers())['alpaca_bot_access.chat']['render'])();
+
+    expect($html)->toContain('<select id="ab-access-chat"')
+        ->toContain('<strong>Set in code</strong> for the chat REST route (<code>GET /chat/{id}/stream</code>): a filter decides this, and asking it from this page failed')
+        ->toContain('for the chat REST route (<code>GET /conversations</code>): a filter changes this to Any logged-in user (<code>read</code>).');
+});
+
+// The controllers come through `alpaca_bot/rest/controllers` (Plugin::controllers()), which is a
+// site's code as much as a capability filter is.
+it('says the chat REST routes could not be asked when listing the controllers throws, and still asks the menu', function (): void {
+    stubSelected();
+    Filters\expectApplied('alpaca_bot/admin/menu_capability')->once()->andReturn('read');
+
+    $html = (settingsFields([], null, static function (): never {
+        throw new RuntimeException('a controllers filter broke');
+    })['alpaca_bot_access.chat']['render'])();
+
+    expect($html)->toContain('<select id="ab-access-chat"')
+        ->toContain('<strong>Set in code</strong> for the chat REST routes: a filter decides this, and asking it from this page failed')
+        ->toContain('for the chat screen, its panel on other admin screens and the block editor sidebar: a filter changes this to Any logged-in user');
+});
+
+// The list is the plugin's own route declarations, not a copy of them: every route key a
+// controller declares Controller::CHAT under is asked, and nothing else.
+it('asks the chat route keys the plugin\'s own controllers declare', function (): void {
+    stubSelected();
+    $h = pipelineWith(null);
+    $controllers = static fn(): array => [
+        new AlpacaBot\Rest\ChatController($h->pipeline),
+        new AlpacaBot\Rest\StreamController($h->pipeline, $h->store),
+        new AlpacaBot\Rest\ConversationsController(new AlpacaBot\Chat\ConversationStore($h->store), $h->store),
+        new AlpacaBot\Rest\ModelsController($h->catalog, $h->store),
+        new AlpacaBot\Rest\SettingsController($h->store),
+        new AlpacaBot\Rest\UsageController($h->meter, $h->store),
+        new AlpacaBot\Rest\ViewController(new AlpacaBot\Chat\ConversationStore($h->store), $h->store, $h->catalog, new AlpacaBot\View\Markdown(), new AlpacaBot\Chat\UserPrefs()),
+    ];
+    $asked = [];
+    Functions\when('apply_filters')->alias(static function (string $hook, mixed $value, mixed ...$args) use (&$asked): mixed {
+        if (str_starts_with($hook, 'alpaca_bot/capability/')) {
+            $asked[] = substr($hook, strlen('alpaca_bot/capability/'));
+            return 'read';
+        }
+        return $value;
+    });
+
+    $html = (settingsFields([], null, $controllers)['alpaca_bot_access.chat']['render'])();
+
+    expect($asked)->toBe(['chat', 'chat/stream', 'conversations', 'models', 'usage', 'view/messages', 'view/history', 'view/models', 'view/default-model', 'view/bubble', 'view/panel', 'view/drawer'])
+        ->and($html)->toContain('for the chat REST routes (<code>POST /chat</code>, <code>GET /chat/{id}/stream</code>, <code>GET /conversations</code>, <code>GET /models</code>, <code>GET /usage</code>, <code>GET /view/messages/{id}</code>,');
+});
+
+// The Shortcodes row governs both shortcodes, and Shortcodes\Chat hands the row's filter the tag
+// it is rendering, so a filter can move one and not the other: each tag is asked, once.
+it('asks the Shortcodes row for each shortcode, and names the one a filter changed', function (): void {
+    stubSelected();
+    Filters\expectApplied('alpaca_bot/capability/shortcode')->once()->with('edit_posts', 0, 'alpacabot')->andReturnFirstArg();
+    Filters\expectApplied('alpaca_bot/capability/shortcode')->once()->with('edit_posts', 0, 'alpacabot_agent')->andReturn('manage_options');
+
+    $html = (settingsFields()['alpaca_bot_access.shortcode']['render'])();
+
+    expect($html)->toContain('<strong>Set in code</strong> for the shortcode <code>[alpacabot_agent]</code>: a filter changes this to Administrators (<code>manage_options</code>).')
+        ->not->toContain('<code>[alpacabot]</code>')
+        ->and(substr_count($html, 'Set in code'))->toBe(1);
+});
+
+it('reports a Shortcodes filter that throws as set in code without a figure, for both shortcodes, and still renders the select', function (): void {
+    stubSelected();
+    Filters\expectApplied('alpaca_bot/capability/shortcode')->twice()->andReturnUsing(static function (): never {
+        throw new RuntimeException('broken');
+    });
+
+    $html = (settingsFields()['alpaca_bot_access.shortcode']['render'])();
+
+    expect($html)->toContain('<select id="ab-access-shortcode"')
+        ->toContain('<strong>Set in code</strong> for the shortcodes <code>[alpacabot]</code>, <code>[alpacabot_agent]</code>: a filter decides this, and asking it from this page failed');
 });
 
 it('adds an Access row for each MCP server the settings hold, and none for the access.mcp map itself', function (): void {

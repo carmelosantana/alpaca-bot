@@ -155,11 +155,14 @@ it('says what each Settings › Access row decides and what "Set in code" under 
         ->toContain('Administrators')->toContain('Editors and up')->toContain('Authors and up')->toContain('Contributors and up')->toContain('Any logged-in user')
         // The tool floor: opening the chat does not hand a role the tools.
         ->toContain('as well as Chat')
-        // The Chat row's two surfaces, each behind a filter of its own, and which one a note names.
-        ->toContain('alpaca_bot/admin/menu_capability')->toContain('alpaca_bot/capability/chat')
+        // The Chat row's surfaces, each behind a filter of its own: the menu's, and every chat
+        // REST route's own key, each asked and named (Kanboard #4537).
+        ->toContain('alpaca_bot/admin/menu_capability')->toContain('alpaca_bot/capability/{route}')->toContain('every chat REST route')
+        ->not->toContain('which the note does not ask')
         ->toContain('once no filter changes it')
-        // What the note does not cover: it asks as [alpacabot] outside a post, not per post or tag.
-        ->toContain('outside any post')->toContain('<code>[alpacabot_agent]</code>, gets no note')
+        // Both shortcodes are asked, outside a post; what the note does not cover is a post or a user.
+        ->toContain('outside any post')->toContain('<code>[alpacabot]</code> and <code>[alpacabot_agent]</code>')
+        ->not->toContain('<code>[alpacabot_agent]</code>, gets no note')
         ->not->toMatch('/(?<![\\d.])1\\.\\d/');
 });
 

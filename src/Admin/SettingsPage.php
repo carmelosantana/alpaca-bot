@@ -13,6 +13,7 @@ use AlpacaBot\Rest\Controller;
 use AlpacaBot\Rest\RouteCapability;
 use AlpacaBot\Settings\Schema;
 use AlpacaBot\Settings\Store;
+use AlpacaBot\Shortcodes\AgentShim;
 use AlpacaBot\Shortcodes\Chat as ChatShortcode;
 use AlpacaBot\Toolkit\AbilitiesToolkit;
 use AlpacaBot\Toolkit\SchemaTool;
@@ -60,8 +61,9 @@ use AlpacaBot\View\Settings\McpTools;
  * The Access tab is not one Schema field per control either. Every row is the capability select
  * the schema describes, on Access::stored(), and under a row whose filter moves it off that value,
  * or cannot be asked from this page, a line says "Set in code" (renderAccess()). The Chat row has
- * no filter of its own, so the menu's filter and the `/chat` route's are asked instead, and the
- * line names the one that moved. `access.mcp` has no control of its own: each MCP server
+ * no filter of its own, so the menu's filter and each chat REST route's are asked instead, and
+ * the Shortcodes row is asked for each shortcode; the lines name the surfaces that moved.
+ * `access.mcp` has no control of its own: each MCP server
  * `toolkits.mcp_servers` lists gets a row posting one entry of that map, as
  * `alpaca_bot_settings[access.mcp][<server id>]`. The carry-over leaves the map out, so a save
  * from another tab posts nothing for it and Schema::sanitize() keeps the stored map, sanitized
@@ -93,14 +95,19 @@ final class SettingsPage
 
     private ServerSettings $servers;
 
+    /** @var \Closure(): iterable<Controller> */
+    private \Closure $controllers;
+
     /**
-     * @param (callable(string): bool)|null $exists  function_exists() or a stand-in for it, as Abilities\Register takes one
-     * @param ServerSettings|null           $servers the address check a save of `toolkits.mcp_servers` runs; one over AddressCheck by default
+     * @param (callable(string): bool)|null      $exists      function_exists() or a stand-in for it, as Abilities\Register takes one
+     * @param ServerSettings|null                $servers     the address check a save of `toolkits.mcp_servers` runs; one over AddressCheck by default
+     * @param (callable(): iterable<Controller>)|null $controllers the REST controllers the site registers (Plugin::controllers()), whose Chat-row routes the Chat row asks; none by default, so a page built without them asks no route
      */
-    public function __construct(private Store $store, private ModelCatalog $catalog, private Access $access, ?callable $exists = null, ?ServerSettings $servers = null)
+    public function __construct(private Store $store, private ModelCatalog $catalog, private Access $access, ?callable $exists = null, ?ServerSettings $servers = null, ?callable $controllers = null)
     {
         $this->exists = $exists === null ? function_exists(...) : \Closure::fromCallable($exists);
         $this->servers = $servers ?? new ServerSettings();
+        $this->controllers = $controllers === null ? static fn(): array => [] : \Closure::fromCallable($controllers);
     }
 
     /** On admin_init: the setting, its sections (one page id per tab) and its fields. */
@@ -265,11 +272,19 @@ final class SettingsPage
      * the row does, it leaves a line in the debug log under WP_DEBUG. effective() is then asked
      * again for the figure, inside setInCode()'s catch, so a listener on such a row runs twice.
      *
+     * Two rows govern more than one surface, and each surface is asked once, the answers grouped
+     * (setInCodeEach()), so a listener with side effects runs once per surface each time the tab
+     * is shown, and not twice as above. The Shortcodes row is asked through Access::effective()
+     * once per shortcode it governs, `[alpacabot]` and `[alpacabot_agent]`, with post id 0 and
+     * that tag, which is what Shortcodes\Chat passes for one rendered outside a post.
+     *
      * The Chat row has no filter in Access, so overridden('chat') would answer false whatever a
      * site did. The menu's filter (Menu::capability(), which the chat screen, the drawer and the
-     * editor sidebar ask) and the `/chat` route's (Rest\RouteCapability::filtered(), with a
-     * `POST /chat` request) are asked instead, and the line names the one that moved. Every other
-     * chat route has a filter of its own, under its own route key, which this does not ask.
+     * editor sidebar ask) is asked instead, and then each route key whose routes declare the Chat
+     * row (RouteCapability::chatRoutes() over the site's controllers), through its own
+     * `alpaca_bot/capability/{route}` with a request of that route's verb and path. The lines
+     * name the surfaces that moved. Listing the controllers is a site's code too (the
+     * `alpaca_bot/rest/controllers` filter), so a throw there is reported like a throwing filter.
      *
      * @param Field $f
      */
@@ -278,16 +293,36 @@ final class SettingsPage
         $stored = $this->access->stored($row);
         $html = Fields::render('access.' . $row, $f, $stored, $name);
         if ($row === 'chat') {
-            $lines = [
-                self::setInCode(esc_html__('for the chat screen, its panel on other admin screens and the block editor sidebar', 'alpaca-bot'), fn(): string => Menu::capability($this->access), $stored, $f),
-                self::setInCode(
-                    /* translators: %s: the chat route, POST /chat */
-                    sprintf(esc_html__('for the chat REST route (%s)', 'alpaca-bot'), '<code>POST /chat</code>'),
-                    static fn(): string => RouteCapability::filtered('chat', $stored, new \WP_REST_Request('POST', '/' . Controller::NAMESPACE . '/chat')),
-                    $stored,
-                    $f,
-                ),
-            ];
+            $lines = [self::setInCode(esc_html__('for the chat screen, its panel on other admin screens and the block editor sidebar', 'alpaca-bot'), fn(): string => Menu::capability($this->access), $stored, $f)];
+            try {
+                $routes = RouteCapability::chatRoutes(($this->controllers)());
+            } catch (\Throwable $e) {
+                $routes = null;
+                $lines[] = self::setInCode(esc_html__('for the chat REST routes', 'alpaca-bot'), static fn(): never => throw $e, $stored, $f);
+            }
+            $asks = [];
+            foreach ($routes ?? [] as $key => $route) {
+                $asks['<code>' . esc_html($route['method'] . ' ' . $route['path']) . '</code>'] = static fn(): string => RouteCapability::filtered($key, $stored, new \WP_REST_Request($route['method'], '/' . Controller::NAMESPACE . $route['path']));
+            }
+            $lines = [...$lines, ...self::setInCodeEach(
+                /* translators: %s: one chat REST route, such as POST /chat, or a comma-separated list of them */
+                static fn(int $n): string => _n('for the chat REST route (%s)', 'for the chat REST routes (%s)', $n, 'alpaca-bot'),
+                $asks,
+                $stored,
+                $f,
+            )];
+        } elseif ($row === 'shortcode') {
+            $asks = [];
+            foreach ([ChatShortcode::TAG, AgentShim::TAG] as $tag) {
+                $asks['<code>' . esc_html('[' . $tag . ']') . '</code>'] = fn(): string => $this->access->effective($row, 0, $tag);
+            }
+            $lines = self::setInCodeEach(
+                /* translators: %s: one shortcode, such as [alpacabot], or a comma-separated list of them */
+                static fn(int $n): string => _n('for the shortcode %s', 'for the shortcodes %s', $n, 'alpaca-bot'),
+                $asks,
+                $stored,
+                $f,
+            );
         } else {
             $args = self::accessArgs($row);
             $lines = $this->access->overridden($row, ...$args)
@@ -300,6 +335,46 @@ final class SettingsPage
         }
         return $html . '<p class="description">' . implode('<br>', $lines) . ' '
             . esc_html__('Your choice above is still saved, and is what applies once no filter changes it.', 'alpaca-bot') . '</p>';
+    }
+
+    /**
+     * setInCode() over several surfaces of one row: each of `$asks` (a surface's label, already
+     * escaped HTML, => what resolves it) is called exactly once, and the surfaces whose answers
+     * match share one line, named by `$surface`'s format for that many surfaces (translated and
+     * not yet escaped, `%s` the label or the comma-separated labels). A surface whose resolver
+     * throws is grouped with the other failures. A surface that answers the stored value gets no
+     * line.
+     *
+     * @param \Closure(int): string $surface
+     * @param array<string, \Closure(): string> $asks
+     * @param Field $f
+     * @return list<string>
+     */
+    private static function setInCodeEach(\Closure $surface, array $asks, string $stored, array $f): array
+    {
+        $groups = [];
+        foreach ($asks as $label => $resolve) {
+            try {
+                $answer = $resolve();
+            } catch (\Throwable $e) {
+                $answer = $e;
+            }
+            if ($answer !== $stored) {
+                $group = is_string($answer) ? 'cap:' . $answer : 'threw';
+                $groups[$group] ??= ['answer' => $answer, 'labels' => []];
+                $groups[$group]['labels'][] = (string) $label;
+            }
+        }
+        $lines = [];
+        foreach ($groups as ['answer' => $answer, 'labels' => $labels]) {
+            $lines[] = self::setInCode(
+                sprintf(esc_html($surface(count($labels))), implode(', ', $labels)),
+                static fn(): string => is_string($answer) ? $answer : throw $answer,
+                $stored,
+                $f,
+            );
+        }
+        return $lines;
     }
 
     /**
@@ -346,13 +421,12 @@ final class SettingsPage
      * an MCP row); here it is the
      * administrator viewing the page. A settings row gets a
      * WP_REST_Request of the verb it authorises on `/settings`, as SettingsController passes the
-     * request. The shortcode row gets post id 0 and the `[alpacabot]` tag, which is what
-     * Shortcodes\Chat passes for a shortcode rendered outside a post.
+     * request. The Shortcodes row is not asked through here: renderAccess() asks it once per
+     * shortcode, with post id 0 and that tag.
      *
-     * A listener that reads them answers for this administrator, this made-up request, or an
-     * `[alpacabot]` outside any post, not for everyone, so the note under a row is what the filter
-     * says here and now: one that changes the row only for another user, a post or
-     * `[alpacabot_agent]` gets no note.
+     * A listener that reads them answers for this administrator, this made-up request, or a
+     * shortcode outside any post, not for everyone, so the note under a row is what the filter
+     * says here and now: one that changes the row only for another user or a post gets no note.
      *
      * @return list<mixed>
      */
@@ -361,7 +435,6 @@ final class SettingsPage
         return match (true) {
             $row === 'settings.read' => [new \WP_REST_Request('GET', '/' . Controller::NAMESPACE . '/settings')],
             $row === 'settings.write' => [new \WP_REST_Request('PUT', '/' . Controller::NAMESPACE . '/settings')],
-            $row === 'shortcode' => [0, ChatShortcode::TAG],
             default => [get_current_user_id()],
         };
     }

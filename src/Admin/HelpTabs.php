@@ -219,19 +219,19 @@ final class HelpTabs
             ])
             . self::p('<strong>' . esc_html__('Set in code', 'alpaca-bot') . '</strong> ' . sprintf(
                 /* translators: 1: the alpaca_bot/capability/… filter names, 2: alpaca_bot/capability/settings, 3: [alpacabot], 4: [alpacabot_agent] */
-                esc_html__('under a row means a filter in a plugin, a theme or an mu-plugin moves that row off what you chose, and the note names the capability checked instead, or says the filter could not be asked from this page. A row\'s filter is %1$s, named after the row; the settings rows run 0.5\'s %2$s first. The filter wins. What you choose is still saved, and is what applies once no filter changes it. The note is what the filter answers when this page asks it: for you, with a request the page builds, and for the Shortcodes row as %3$s outside any post. A filter that answers differently for another user, request or post, or for %4$s, gets no note for that.', 'alpaca-bot'),
+                esc_html__('under a row means a filter in a plugin, a theme or an mu-plugin moves that row off what you chose, and the note names the capability checked instead, or says the filter could not be asked from this page. A row\'s filter is %1$s, named after the row; the settings rows run 0.5\'s %2$s first. The filter wins. What you choose is still saved, and is what applies once no filter changes it. The note is what the filter answers when this page asks it: for you, with a request the page builds, and for the Shortcodes row as %3$s and %4$s outside any post, each asked and named on its own. A filter that answers differently for another user, request or post gets no note for that.', 'alpaca-bot'),
                 '<code>alpaca_bot/capability/…</code>',
                 '<code>alpaca_bot/capability/settings</code>',
                 '<code>[alpacabot]</code>',
                 '<code>[alpacabot_agent]</code>',
             ))
             . self::p(sprintf(
-                /* translators: 1: alpaca_bot/admin/menu_capability, 2: alpaca_bot/capability/chat, 3: POST /chat, 4: alpaca_bot/capability/{route} */
-                esc_html__('The Chat row has no filter of that kind. The note under it asks %1$s, which filters the chat screen, its panel and the editor sidebar, and %2$s, which filters the %3$s route, and says which of them moved it. Every other chat route has a filter of its own, %4$s, which the note does not ask.', 'alpaca-bot'),
+                /* translators: 1: alpaca_bot/admin/menu_capability, 2: alpaca_bot/capability/{route}, 3: alpaca_bot/capability/chat, 4: POST /chat */
+                esc_html__('The Chat row has no filter of that kind. The note under it asks %1$s, which filters the chat screen, its panel and the editor sidebar, and the filter of every chat REST route, %2$s (%3$s for the %4$s route, and one per route besides), and names each of them that moved it.', 'alpaca-bot'),
                 '<code>alpaca_bot/admin/menu_capability</code>',
+                '<code>alpaca_bot/capability/{route}</code>',
                 '<code>alpaca_bot/capability/chat</code>',
                 '<code>POST /chat</code>',
-                '<code>alpaca_bot/capability/{route}</code>',
             ));
     }
 

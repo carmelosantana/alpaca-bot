@@ -213,7 +213,9 @@ final class Plugin
         // are built, and it would decide wrong where is_admin() is false at plugins_loaded but a
         // test (wp-phpunit sets no screen until a test does) later fires the actions itself.
         // options.php, which every save posts to, is wp-admin and fires admin_init as any screen.
-        $settingsPage = new Admin\SettingsPage($store, $this->get(Provider\ModelCatalog::class), $this->get(Access::class), null, $servers);
+        // The page is handed controllers() itself, uncalled, so the Chat row's note asks the routes
+        // the REST API registers (Kanboard #4537), and lists them only when that row is rendered.
+        $settingsPage = new Admin\SettingsPage($store, $this->get(Provider\ModelCatalog::class), $this->get(Access::class), null, $servers, $this->controllers(...));
         $this->set(Admin\SettingsPage::class, $settingsPage);
         add_action('admin_init', [$settingsPage, 'register']);
         $chatScreen = new Admin\ChatScreen($store, $this->get(Provider\ModelCatalog::class), $conversations, $prefs);
@@ -275,7 +277,8 @@ final class Plugin
      * rest_api_init, not at register(), so a filter added on plugins_loaded or init is seen, and
      * the controllers are built then too: they hold the container's services, which all exist by
      * plugins_loaded, but building them only for a REST request keeps every other request free
-     * of them. Anything that is not a Controller is dropped rather than left to fatal inside
+     * of them. The one other caller is Settings › Access, which lists them when it renders the
+     * Chat row, to ask each route that follows that row (Admin\SettingsPage::renderAccess()). Anything that is not a Controller is dropped rather than left to fatal inside
      * register(). Every controller that survives is handed the container's Access, a third
      * party's included, so a route registered *through this filter* may declare
      * Rest\Controller::CHAT and resolve to the Chat row this site saved. A controller registered
@@ -288,7 +291,8 @@ final class Plugin
     private function controllers(): array
     {
         /**
-         * Filters the REST controllers registered under `alpaca-bot/v1`, on `rest_api_init`. Append
+         * Filters the REST controllers registered under `alpaca-bot/v1`, on `rest_api_init`, and
+         * on Settings › Access, which lists their Chat-row routes to ask each one's filter. Append
          * a Rest\Controller subclass to get the namespace, the `alpaca_bot/capability/{route}`
          * permission filters and the rate limit without writing them, and the Chat row for a route
          * that declares `Controller::CHAT` — or drop one of the plugin's to unregister its routes

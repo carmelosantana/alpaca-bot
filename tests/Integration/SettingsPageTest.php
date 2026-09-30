@@ -253,7 +253,10 @@ final class SettingsPageTest extends TestCase
     {
         unregister_setting(SettingsPage::GROUP, Plugin::OPTION);
         $store = new Store();
-        $page = new SettingsPage($store, Plugin::instance()->get(\AlpacaBot\Provider\ModelCatalog::class), new Access($store));
+        // The controllers the plugin hands its own page (Plugin::controllers()), so the Chat row
+        // asks the routes the REST API registers.
+        $controllers = static fn(): array => (new \ReflectionMethod(Plugin::class, 'controllers'))->invoke(Plugin::instance());
+        $page = new SettingsPage($store, Plugin::instance()->get(\AlpacaBot\Provider\ModelCatalog::class), new Access($store), null, null, $controllers);
         $page->register();
         $_GET['tab'] = $tab;
         set_current_screen('alpaca-bot_page_alpaca-bot-settings');
@@ -350,7 +353,7 @@ final class SettingsPageTest extends TestCase
      * Merge point 5, over real core hooks: a listener registered for its row's arguments is
      * asked with them from this page, and one that cannot be called with them (core raises an
      * ArgumentCountError when it declares more than its row fires with) is reported as set in
-     * code without a figure, rather than taking the page down. The Chat row is asked of both its
+     * code without a figure, rather than taking the page down. The Chat row is asked of each of its
      * surfaces, each through its own hook, and the note says which one moved.
      */
     public function test_the_access_tab_asks_each_filter_with_its_rows_arguments_and_survives_one_that_cannot_be_called(): void
@@ -360,6 +363,8 @@ final class SettingsPageTest extends TestCase
         add_filter('alpaca_bot/capability/shortcode', static fn(string $cap, int $postId, string $tag): string => $tag === 'alpacabot' ? 'edit_others_posts' : $cap, 10, 3);
         add_filter('alpaca_bot/capability/settings/write', static fn(string $cap, \WP_REST_Request $request): string => $request->get_method() === 'PUT' ? 'edit_others_posts' : $cap, 10, 2);
         add_filter('alpaca_bot/capability/chat', static fn(string $cap, \WP_REST_Request $request): string => $request->get_route() === '/alpaca-bot/v1/chat' ? 'read' : $cap, 10, 2);
+        // Kanboard #4537: a chat route other than /chat is asked too, and named on its own.
+        add_filter('alpaca_bot/capability/view/history', static fn(string $cap, \WP_REST_Request $request): string => $request->get_method() === 'GET' ? 'manage_options' : $cap, 10, 2);
         // Declares one argument more than its row fires with.
         add_filter('alpaca_bot/capability/tool/summarize', static fn(string $cap, int $userId, string $extra): string => 'read', 10, 3);
 
@@ -388,6 +393,9 @@ final class SettingsPageTest extends TestCase
         $chat = $row('ab-access-chat');
         $this->assertStringContainsString('for the chat REST route (<code>POST /chat</code>): a filter changes this to Any logged-in user (<code>read</code>).', $chat);
         $this->assertStringNotContainsString('for the chat screen', $chat);
+        $this->assertStringContainsString('for the chat REST route (<code>GET /view/history</code>): a filter changes this to Administrators (<code>manage_options</code>).', $chat);
+        $this->assertStringContainsString('<strong>Set in code</strong> for the shortcode <code>[alpacabot]</code>: a filter changes this to Editors and up', $row('ab-access-shortcode'));
+        $this->assertStringNotContainsString('[alpacabot_agent]</code>:', $row('ab-access-shortcode'));
         $this->assertStringNotContainsString('Set in code', $row('ab-access-tool-draft_post'));
         $this->assertStringContainsString('<input type="submit"', $html, 'the page rendered to its end');
     }

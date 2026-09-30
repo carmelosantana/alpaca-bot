@@ -262,7 +262,8 @@ final class Access
          * runs, so a listener registered for its row's arguments is always called with them.
          * Settings › Access also fires each of these rows it shows, to say which code has moved, with
          * arguments of the same shape built for that screen: the administrator viewing it as the
-         * user, a request built for the route it authorises, post id 0 and the `alpacabot` tag.
+         * user, a request built for the route it authorises, post id 0 with each of the
+         * `alpacabot` and `alpacabot_agent` tags.
          *
          * @since 0.6.0
          * @param string $capability the row as the site saved it, its default when it never was
