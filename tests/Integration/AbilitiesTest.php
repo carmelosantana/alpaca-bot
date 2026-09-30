@@ -262,12 +262,15 @@ final class AbilitiesTest extends TestCase
      * Kanboard #4538 over core's registry: a turn on `POST /chat` is offered a test-only
      * "execute any ability" ability, shaped like the MCP Adapter's `mcp-adapter/execute-ability`
      * (it runs wp_get_ability($name)->execute($input) and hands back what that answers), and
-     * the model calls it once for alpaca-bot/chat and once for alpaca-bot/summarize. Core
-     * reaches both callbacks (the caller may run them), both refuse, the refusal is what the
-     * model reads back, and the outer turn completes: one conversation, one receipt, one turn's
-     * worth of provider calls. Afterwards, with no turn running, the ability runs as it always did.
+     * the model calls it for a test ability the allowlist leaves out (with a cache in front of it that
+     * would short-circuit it), for alpaca-bot/chat and for
+     * alpaca-bot/summarize. Core would let the caller run all three, but none of their callbacks
+     * runs: core's `wp_pre_execute_ability` answers the toolkit's refusal first, so
+     * `wp_before_execute_ability` never fires for them, the refusal is what the model reads back,
+     * and the outer turn completes: one conversation, one receipt, one turn's worth of provider
+     * calls. Afterwards, outside the toolkit, both abilities run as they always did.
      */
-    public function test_a_turn_cannot_start_another_through_an_execute_any_ability_tool_and_completes_itself(): void
+    public function test_an_execute_any_ability_tool_runs_nothing_the_allowlist_leaves_out_and_the_turn_completes(): void
     {
         $admin = $this->asAdmin();
         $GLOBALS['wp_current_filter'][] = 'wp_abilities_api_init';
@@ -283,9 +286,29 @@ final class AbilitiesTest extends TestCase
                 },
                 'permission_callback' => static fn(): bool => current_user_can('manage_options'),
             ]);
+            $secretRuns = 0;
+            wp_register_ability('alpaca-bot-test/secret', [
+                'label' => 'Secret',
+                'description' => 'Not on the allowlist.',
+                'category' => 'alpaca-bot',
+                'execute_callback' => static function () use (&$secretRuns): string {
+                    ++$secretRuns;
+                    return 'the secret';
+                },
+                'permission_callback' => static fn(): bool => current_user_can('manage_options'),
+            ]);
         } finally {
             array_pop($GLOBALS['wp_current_filter']);
         }
+        $before = [];
+        $listen = static function (string $name) use (&$before): void {
+            $before[] = $name;
+        };
+        add_action('wp_before_execute_ability', $listen);
+        // A cache in front of the secret ability, at a late priority of its own: the toolkit's
+        // refusal still has the last word, so the cached answer does not reach the model either.
+        $cache = static fn(mixed $pre, string $name): mixed => $name === 'alpaca-bot-test/secret' ? 'the cached secret' : $pre;
+        add_filter('wp_pre_execute_ability', $cache, 1000, 2);
         try {
             $store = Plugin::instance()->get(Store::class);
             $store->replace([
@@ -310,6 +333,7 @@ final class AbilitiesTest extends TestCase
                         $this->calls[] = ['messages' => $messages, 'tools' => $tools];
                         if (count($this->calls) === 1) {
                             yield new Response('', ProviderFinishReason::ToolUse, [
+                                new ToolCall('c0', $this->tool, ['ability' => 'alpaca-bot-test/secret']),
                                 new ToolCall('c1', $this->tool, ['ability' => 'alpaca-bot/chat', 'input' => ['message' => 'Ask yourself again.']]),
                                 new ToolCall('c2', $this->tool, ['ability' => 'alpaca-bot/summarize', 'input' => ['text' => 'Some long text.']]),
                             ], usage: new Usage(3, 1, 4));
@@ -348,29 +372,43 @@ final class AbilitiesTest extends TestCase
 
             $response = $this->rest('POST', '/chat', ['message' => 'Use the tool.']);
             $this->assertSame(200, $response->get_status(), (string) wp_json_encode($response->get_data()));
-            $refusal = 'A chat turn is already running, and Alpaca Bot does not start another one inside it. Answer in the turn that is running instead.';
+            $refusals = array_map(
+                static fn(string $name): string => 'The ' . $name . ' ability was not run: an ability run from a chat may only run the abilities ticked under Settings › Tools.',
+                ['alpaca-bot-test/secret', 'alpaca-bot/chat', 'alpaca-bot/summarize'],
+            );
             // A tool turn: the model was offered the test ability, and asked the provider twice, not a third time for a nested turn.
             $this->assertCount(2, $calls);
             $this->assertContains($tool, array_map(static fn(object $t): string => $t->name(), $calls[0]['tools']));
-            $results = array_values(array_filter(array_map(static fn(object $m): string => (string) $m->content(), $calls[1]['messages']), static fn(string $c): bool => $c === $refusal));
-            $this->assertCount(2, $results, 'both nested calls read the refusal back');
+            $results = array_values(array_filter(array_map(static fn(object $m): string => (string) $m->content(), $calls[1]['messages']), static fn(string $c): bool => in_array($c, $refusals, true)));
+            $this->assertSame($refusals, $results, 'each nested call reads its refusal back');
+            $this->assertSame(0, $secretRuns, 'the ability the allowlist leaves out never ran');
+            // Only the allowlisted ability got as far as core's before-execute action: the refused ones were answered by the pre filter first.
+            $this->assertSame(array_fill(0, 3, 'alpaca-bot-test/execute-ability'), $before);
             $data = $response->get_data();
             $this->assertSame('Done.', $data['message']['content']);
             // The reply's meta is an object on the wire; read it as a client would.
             $meta = json_decode((string) wp_json_encode($data['message']['meta']), true);
-            $this->assertSame([false, false], array_column($meta['tool_calls'], 'ok'));
-            $this->assertSame([$refusal, $refusal], array_column($meta['tool_calls'], 'result_excerpt'));
+            $this->assertSame([false, false, false], array_column($meta['tool_calls'], 'ok'));
+            $this->assertSame($refusals, array_column($meta['tool_calls'], 'result_excerpt'));
             $this->assertCount(1, $this->posts(ConversationStore::POST_TYPE, $admin));
             $this->assertCount(1, $this->posts(UsageMeter::POST_TYPE, $admin));
+            $this->assertFalse(has_filter('wp_pre_execute_ability', [AbilitiesToolkit::class, 'preExecute']));
+            $this->assertFalse(has_action('wp_before_execute_ability', [AbilitiesToolkit::class, 'beforeExecute']));
 
-            // No turn is running now: the same ability, called directly, runs its turn.
+            // Outside the toolkit nothing is guarded: both run, summarize its turn.
             $calls = [];
+            remove_filter('wp_pre_execute_ability', $cache, 1000);
+            $this->assertSame('the secret', wp_get_ability('alpaca-bot-test/secret')->execute());
+            $this->assertSame(1, $secretRuns);
             $out = wp_get_ability('alpaca-bot/summarize')->execute(['text' => 'Some long text.']);
             $this->assertIsArray($out, is_wp_error($out) ? $out->get_error_message() : '');
             $this->assertCount(1, $calls);
             $this->assertCount(2, $this->posts(UsageMeter::POST_TYPE, $admin));
         } finally {
+            remove_action('wp_before_execute_ability', $listen);
+            remove_filter('wp_pre_execute_ability', $cache, 1000);
             wp_unregister_ability('alpaca-bot-test/execute-ability');
+            wp_unregister_ability('alpaca-bot-test/secret');
         }
     }
 }

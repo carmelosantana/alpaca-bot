@@ -929,3 +929,81 @@ function abilitiesToolkit(array $abilities, array $allowed, bool $api = true, in
     cliUsers([1, 3], 1);
     return new AlpacaBot\Toolkit\AbilitiesToolkit(new Store(['toolkits.abilities' => $allowed]), static fn(): int => $userId, static fn(string $fn): bool => $api && $fn !== 'wp_prepare_json_schema_for_client');
 }
+
+/**
+ * AbilitiesToolkitTest: makes core's two execute hooks, `wp_pre_execute_ability` (a filter, 7.1)
+ * and `wp_before_execute_ability` (an action, 6.9), run what is added to them, as actionRuns()
+ * does for one action. A listener runs only while Brain Monkey still has it added, so one the
+ * code under test removed is not heard from again; a listener added twice is kept once.
+ * Priorities are ignored: the toolkit is the only listener in these tests.
+ */
+function abilityHooksRun(): void
+{
+    $filters = [];
+    $actions = [];
+    Filters\expectAdded('wp_pre_execute_ability')->zeroOrMoreTimes()->whenHappen(static function (callable $callback) use (&$filters): void {
+        if (!in_array($callback, $filters, true)) {
+            $filters[] = $callback;
+        }
+    });
+    Filters\expectApplied('wp_pre_execute_ability')->zeroOrMoreTimes()->andReturnUsing(static function (mixed $pre, mixed ...$args) use (&$filters): mixed {
+        foreach ($filters as $filter) {
+            if (has_filter('wp_pre_execute_ability', $filter) !== false) {
+                $pre = $filter($pre, ...$args);
+            }
+        }
+        return $pre;
+    });
+    Actions\expectAdded('wp_before_execute_ability')->zeroOrMoreTimes()->whenHappen(static function (callable $callback) use (&$actions): void {
+        if (!in_array($callback, $actions, true)) {
+            $actions[] = $callback;
+        }
+    });
+    Actions\expectDone('wp_before_execute_ability')->zeroOrMoreTimes()->whenHappen(static function (mixed ...$args) use (&$actions): void {
+        foreach ($actions as $action) {
+            if (has_action('wp_before_execute_ability', $action) !== false) {
+                $action(...$args);
+            }
+        }
+    });
+}
+
+/**
+ * AbilitiesToolkitTest: a siteAbility() whose execute() does what core's WP_Ability::execute()
+ * does around its callback on `$core` ('6.9', '7.0' or '7.1'), less input and output
+ * validation and the permission check: on 7.1 `wp_pre_execute_ability` first, returning what it
+ * answers when that is not the sentinel; then `wp_before_execute_ability`; then the callback,
+ * which from 7.0 has a throw caught and answered as `ability_callback_exception` quoting its
+ * message, and on 6.9 has it propagate. Each run of the callback is recorded by name in
+ * $GLOBALS['abCallbackRuns'], so a test can see a refused callback never ran. Pair it with
+ * abilityHooksRun().
+ *
+ * @param \Closure(mixed): mixed $callback
+ */
+function coreAbility(string $name, string $core, \Closure $callback): Mockery\MockInterface
+{
+    $ability = siteAbility($name);
+    $ability->shouldReceive('execute')->andReturnUsing(static function (mixed $input = null) use ($name, $core, $callback, $ability): mixed {
+        if ($core === '7.1') {
+            $sentinel = new stdClass();
+            $pre = apply_filters('wp_pre_execute_ability', $sentinel, $name, $input, $ability);
+            if ($pre !== $sentinel) {
+                return $pre;
+            }
+        }
+        do_action('wp_before_execute_ability', $name, $input);
+        $run = static function () use ($name, $input, $callback): mixed {
+            $GLOBALS['abCallbackRuns'][] = $name;
+            return $callback($input);
+        };
+        if ($core === '6.9') {
+            return $run();
+        }
+        try {
+            return $run();
+        } catch (Throwable $e) {
+            return new WP_Error('ability_callback_exception', sprintf('Ability "%1$s" callback threw an exception: %2$s', $name, $e->getMessage()));
+        }
+    });
+    return $ability;
+}
