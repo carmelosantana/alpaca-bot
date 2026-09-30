@@ -16,7 +16,7 @@ import { installDom, until } from './env.ts';
  */
 const REST = 'https://alpaca-bot.test/wp-json/alpaca-bot/v1';
 const IMAGE = 'data:image/png;base64,iVBORw0KGgo=';
-const CFG = { rest: REST, nonce: 'n', offline: 'offline', i18n: { failed: 'The request failed. Try again.', thinking: 'Thinking...', notSent: 'Your message was not sent. Its text: {text}', notSentImage: 'The image attached to it was not sent. Attach it again to retry.' } };
+const CFG = { rest: REST, nonce: 'n', offline: 'offline', i18n: { failed: 'The request failed. Try again.', thinking: 'Thinking...', notSent: 'Your message was not sent. Its text: {text}', notSentImage: 'The image attached to it was not sent. Attach it again to retry.', dismiss: 'Dismiss' } };
 const SHELL = `<div class="ab-wrap">
   <div id="ab-chat" data-conversation="0">
     <div id="ab-status" class="ab-status" role="status" aria-live="polite"></div>
@@ -514,9 +514,12 @@ for (const [ending, end] of endings) {
 /**
  * A turn that never ran gives its draft back only to the composer it came from, and only while
  * that composer is empty (Kanboard #4692). Otherwise what is in the box is the user's since, and
- * the status line says the message was not sent and carries its text, so nothing typed is lost.
+ * the draft's text goes into #ab-unsent, a slot beside the status line that no notice replaces,
+ * until the user dismisses it.
  */
-test('a turn that never ran after a switch leaves the composer on screen alone, and the status line carries its text', async (t) => {
+const unsent = (): string => (document.querySelector('#ab-unsent')?.textContent ?? '').trim();
+
+test('a turn that never ran after a switch leaves the composer on screen alone, and its text is kept beside the status line', async (t) => {
   let fail!: (e: Error) => void;
   const turn = await heldTurn(t, '7', { ticket: new Promise<void>((_, reject) => { fail = reject; }) });
   t.mock.method(console, 'error', () => {});
@@ -524,8 +527,8 @@ test('a turn that never ran after a switch leaves the composer on screen alone, 
   fail(new TypeError('network error'));
   await turn.finished();
   assert.equal((turn.form.querySelector('#ab-message') as HTMLTextAreaElement).value, '');
-  assert.equal(status(), 'The request failed. Try again.Your message was not sent. Its text: hello');
-  assert.equal(document.querySelectorAll('#ab-status .notice-error p').length, 2);
+  assert.equal(status(), 'The request failed. Try again.');
+  assert.equal(unsent(), 'Your message was not sent. Its text: hello');
   assert.equal(field(turn.form), '9');
 });
 
@@ -537,7 +540,7 @@ test('a turn that never ran does not overwrite what was typed since, in the same
   fail(new TypeError('network error'));
   await turn.finished();
   assert.equal((turn.form.querySelector('#ab-message') as HTMLTextAreaElement).value, 'a new thought');
-  assert.equal(status(), 'The request failed. Try again.Your message was not sent. Its text: hello');
+  assert.equal(unsent(), 'Your message was not sent. Its text: hello');
   // Its user bubble still leaves the transcript: the turn never happened.
   assert.equal(document.querySelectorAll('#ab-messages .ab-msg').length, 0);
 });
@@ -553,7 +556,64 @@ test('a turn that never ran does not overwrite an image picked since, and says i
   await turn.finished();
   assert.equal((turn.form.elements.namedItem('images') as HTMLInputElement).value, OTHER);
   assert.equal((turn.form.querySelector('#ab-message') as HTMLTextAreaElement).value, '');
-  assert.equal(status(), 'The request failed. Try again.Your message was not sent. Its text: helloThe image attached to it was not sent. Attach it again to retry.');
+  assert.equal(unsent(), 'Your message was not sent. Its text: helloThe image attached to it was not sent. Attach it again to retry.');
+});
+
+/**
+ * The drop that usually makes the ticket fail also fires `offline` and `online`, and connectivity()
+ * rewrites the status line for each: the kept text is outside it, so it survives either order.
+ */
+for (const order of ['offline, then the ticket fails, then online', 'the ticket fails, then offline, then online']) {
+  test(`a never-ran turn's kept text survives the connection dropping around it: ${order}`, async (t) => {
+    let fail!: (e: Error) => void;
+    const turn = await heldTurn(t, '7', { ticket: new Promise<void>((_, reject) => { fail = reject; }) });
+    t.mock.method(console, 'error', () => {});
+    let online = true;
+    Object.defineProperty(navigator, 'onLine', { get: () => online, configurable: true });
+    const go = (up: boolean): void => { online = up; window.dispatchEvent(new Event(up ? 'online' : 'offline')); };
+    historySwap(globalThis, '9');
+    if (order.startsWith('offline')) {
+      go(false);
+      fail(new TypeError('network error'));
+      await until(() => unsent() !== '');
+    } else {
+      fail(new TypeError('network error'));
+      await until(() => unsent() !== '');
+      go(false);
+      // The offline notice took the status line, which is what a note kept in it would lose.
+      assert.equal(status(), 'offline');
+    }
+    go(true);
+    await turn.finished();
+    assert.equal(status(), '');
+    assert.equal(unsent(), 'Your message was not sent. Its text: hello');
+  });
+}
+
+test('the kept text stays through the next notice and a New chat, and goes when the user dismisses it', async (t) => {
+  let fail!: (e: Error) => void;
+  const turn = await heldTurn(t, '7', { ticket: new Promise<void>((_, reject) => { fail = reject; }) });
+  t.mock.method(console, 'error', () => {});
+  historySwap(globalThis, '9');
+  fail(new TypeError('network error'));
+  await turn.finished();
+  const { notice } = await import('../../resources/ts/dom.ts');
+  notice('error', 'Copying failed.');
+  await drawerNewChat();
+  assert.equal(status(), '');
+  assert.equal(unsent(), 'Your message was not sent. Its text: hello');
+  (document.querySelector('#ab-unsent [data-action="unsent-dismiss"]') as HTMLElement).dispatchEvent(new MouseEvent('click', { bubbles: true }));
+  assert.equal(document.querySelectorAll('#ab-unsent').length, 0);
+  assert.equal(document.activeElement?.id, 'ab-message');
+});
+
+test('unsentLines fills {text} literally, and a translation without {text} still carries the text', async () => {
+  const { unsentLines } = await import('../../resources/ts/composer.ts');
+  const t = (strings: Record<string, string>) => (key: string): string => strings[key] ?? key;
+  assert.deepEqual(unsentLines({ text: 'a $& b', image: '' }, t({ notSent: 'Not sent: {text}' })), ['Not sent: a $& b']);
+  assert.deepEqual(unsentLines({ text: 'kept', image: '' }, t({ notSent: 'Not sent.' })), ['Not sent. kept']);
+  assert.deepEqual(unsentLines({ text: '', image: IMAGE }, t({ notSentImage: 'Image not sent.' })), ['Image not sent.']);
+  assert.deepEqual(unsentLines({ text: 'both', image: IMAGE }, t({ notSent: '{text}', notSentImage: 'Image not sent.' })), ['both', 'Image not sent.']);
 });
 
 test('a turn that never ran still gives its draft back to its own empty composer', async (t) => {
@@ -564,6 +624,7 @@ test('a turn that never ran still gives its draft back to its own empty composer
   await turn.finished();
   assert.equal((turn.form.querySelector('#ab-message') as HTMLTextAreaElement).value, 'hello');
   assert.equal(status(), 'The request failed. Try again.');
+  assert.equal(document.querySelectorAll('#ab-unsent').length, 0);
 });
 
 /**

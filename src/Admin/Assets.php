@@ -219,11 +219,14 @@ final class Assets
                 /* translators: {size} and {max} are filled in by the browser with figures such as "7 MB". */
                 'imagesTooLarge' => __('Those images total {size}; this site takes up to {max} per message. Attach fewer or smaller images.', 'alpaca-bot'),
                 // A turn refused before it ran, whose draft could not go back into the box because the user switched
-                // conversation or typed or picked something since (resources/ts/boot.ts giveBack()): the status line
-                // carries the message's text so it is not lost. The browser fills {text} with the message as typed.
+                // conversation or typed or picked something since (resources/ts/boot.ts giveBack()). keepUnsent() shows
+                // these in a slot beside the status line that no notice replaces, until the user dismisses it; a reload
+                // loses it, and an attached image is always lost there, which notSentImage says. The browser fills
+                // {text} with the message as typed, and adds it after a translation that has no {text}.
                 /* translators: {text} is filled in by the browser with the message the user wrote. */
                 'notSent' => __('Your message was not sent. Its text: {text}', 'alpaca-bot'),
                 'notSentImage' => __('The image attached to it was not sent. Attach it again to retry.', 'alpaca-bot'),
+                'dismiss' => __('Dismiss', 'alpaca-bot'),
                 'thinking' => __('Thinking…', 'alpaca-bot'),
                 'callingTool' => __('Calling a tool…', 'alpaca-bot'),
             ],

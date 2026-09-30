@@ -34,7 +34,7 @@ import { readSse } from './stream.ts';
 import { watchNonce } from './nonce.ts';
 import { ImageTooLarge, ImagesTooLarge, fetchDataUrl, formatBytes, imageLimit } from './image.ts';
 import { $, $$, asId, el, fromHtml, icon, notice } from './dom.ts';
-import { grow, restoreDraft, setImage, type Draft } from './composer.ts';
+import { grow, restoreDraft, setImage, unsentLines, type Draft } from './composer.ts';
 import { redeem, restError } from './redeem.ts';
 import { refusal } from './refusal.ts';
 import { appendText, releaseHeld } from './held.ts';
@@ -245,8 +245,8 @@ export function boot(cfg: Settings, form: HTMLFormElement): void {
       console.error(e);
       // A turn that ran and failed after the user switched away is not the open conversation's
       // failure (consume() says the same of its own exits). One that never ran is reported
-      // wherever the user is: giveBack() either puts its draft back or adds its text to this
-      // notice, and either way the user has to be told why.
+      // wherever the user is: giveBack() either puts its draft back or keeps its text beside
+      // this notice, and either way the user has to be told why.
       if (!sent || shown()) notice('error', t('failed'));
     } finally {
       if (!sent) giveBack(turn, shown(), assistant, user);
@@ -262,13 +262,11 @@ export function boot(cfg: Settings, form: HTMLFormElement): void {
    * the turn's transcript (`shown`, send()'s) and holds nothing, neither text nor an image, the
    * user put there since the send cleared it. Anything else is not the turn's to overwrite: after
    * a switch the box is the conversation now open, and what is in it, typed or picked, is the
-   * user's newer input. There the draft is not put back; the status line keeps the notice that
-   * says why the turn failed and gains a line saying the message was not sent, with its text, so
-   * no typed text is lost. An attached image cannot be carried that way and is lost, so its own
-   * line says to attach it again. That is the least loss of the options: restoring over input
-   * loses the newer input, restoring into another conversation's composer sends the message
-   * where it was not written, and holding the draft for a later return to the conversation has
-   * nothing to hold it on, because a switch back brings a new transcript element.
+   * user's newer input. There the draft is not put back, and keepUnsent() holds its text instead.
+   * That is the least loss of the options: restoring over input loses the newer input, restoring
+   * into another conversation's composer sends the message where it was not written, and holding
+   * the draft for a later return to the conversation has nothing to hold it on, because a switch
+   * back brings a new transcript element.
    */
   function giveBack(turn: Draft, shown: boolean, ...bubbles: (HTMLElement | null)[]): void {
     if (shown && textarea.value === '' && field('images').value === '') {
@@ -276,11 +274,31 @@ export function boot(cfg: Settings, form: HTMLFormElement): void {
       return;
     }
     for (const bubble of bubbles) bubble?.remove();
-    // A function replacement, so a "$&" in the message is not read as a pattern.
-    const lines = [...(turn.text !== '' ? [t('notSent').replace('{text}', () => turn.text)] : []), ...(turn.image !== '' ? [t('notSentImage')] : [])];
-    if (!$('#ab-status .notice')) notice('error', lines.shift() ?? '');
-    const shownNotice = $('#ab-status .notice');
-    for (const line of lines) shownNotice?.append(el('p', {}, line));
+    keepUnsent(turn);
+  }
+  /**
+   * Shows a draft giveBack() could not put back, in #ab-unsent: a slot of its own after the status
+   * line, one notice per unsent turn, each with a dismiss button. The status line is the wrong
+   * place for it, because notice() replaces the whole line and so does everything else that writes
+   * there: connectivity() on `offline` and again on `online` (the drop that usually fails the
+   * turn fires both), the next send, an attach or copy error, the model select's answer, and a
+   * host's New chat, which empties it. The slot sits outside #ab-status and #ab-messages, so none of
+   * those, nor a history switch, touches it; it goes when the user dismisses it. What still loses
+   * the text is the user's dismissing it, or anything that takes the chat off the page, a reload
+   * included. An image cannot be shown back this way and is lost, so its line says to attach it
+   * again.
+   */
+  function keepUnsent(turn: Draft): void {
+    let slot = $('#ab-unsent', shell);
+    if (!slot) {
+      slot = el('div', { id: 'ab-unsent', class: 'ab-status ab-unsent', role: 'status', 'aria-live': 'polite' });
+      const status = $('#ab-status', shell);
+      if (status) status.after(slot);
+      else form.before(slot);
+    }
+    slot.append(el('div', { class: 'notice notice-warning inline' },
+      el('div', { class: 'ab-unsent__text' }, ...unsentLines(turn, t).map((line) => el('p', {}, line))),
+      el('button', { type: 'button', class: 'ab-btn ab-btn--icon', 'data-action': 'unsent-dismiss', 'aria-label': t('dismiss') }, icon('x'))));
   }
 
   /**
@@ -476,6 +494,14 @@ export function boot(cfg: Settings, form: HTMLFormElement): void {
       // key for it; the last chip takes its row with it, which would otherwise stay as an empty
       // group with its margin. The button was focused and is gone, so the focus goes back to the box.
       case 'chip-remove': removeChip(button); textarea.focus(); break;
+      // One kept draft (keepUnsent()) goes, and the slot with its last one; the focus goes back to the box.
+      case 'unsent-dismiss': {
+        const slot = button.closest('#ab-unsent');
+        button.closest('.notice')?.remove();
+        if (slot && !slot.querySelector('.notice')) slot.remove();
+        textarea.focus();
+        break;
+      }
     }
   });
   document.addEventListener('change', (e) => {

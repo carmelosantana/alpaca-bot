@@ -80,6 +80,9 @@
 /* ---- transcript ------------------------------------------------------------------------ */
 #ab-chat { display: flex; flex: 1; flex-direction: column; min-height: 0; }
 .ab-status .notice { max-width: var(--ab-max); margin: 8px auto; }
+/* A never-ran turn's text (boot.ts keepUnsent()): kept as typed, line breaks included, beside its dismiss button. */
+.ab-unsent .notice { display: flex; align-items: flex-start; gap: 8px; }
+.ab-unsent__text { flex: 1; min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 .ab-messages { flex: 1; min-height: 0; overflow-y: auto; padding: 4px 4px 12px; }
 .ab-welcome {
     display: flex;
