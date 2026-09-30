@@ -225,7 +225,10 @@ final class Schema
         foreach (self::fields() as $key => $f) {
             $raw = array_key_exists($key, $input) ? $input[$key] : ($current[$key] ?? $f['default']);
             if (in_array($key, self::SECRETS, true)) {
-                $raw = $key === 'provider.api_key' && $keyMoved ? '' : self::secret($raw, $current[$key] ?? '');
+                $raw = self::secret($raw, $current[$key] ?? '');
+            }
+            if ($key === 'provider.api_key' && $keyMoved) {
+                $raw = '';
             }
             if ($key === 'toolkits.mcp_servers') {
                 // The one sanitizer handed something other than its field: the stored list, whose
