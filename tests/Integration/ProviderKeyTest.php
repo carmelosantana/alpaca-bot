@@ -203,6 +203,34 @@ final class ProviderKeyTest extends TestCase
         $this->assertFalse(get_transient(ModelCatalog::TRANSIENT));
     }
 
+    // The other side of the bust: a save that changes none of the provider's kind, base URL or key
+    // keeps the cached list. The row is really rewritten (its update hook fires, the temperature
+    // changes) and the key is still held afterwards, so the list surviving is the row hook's
+    // comparison at work, not a write that never happened. Two writers: Store, and a whole row
+    // posted with MASK for the key, as the settings page posts it.
+    public function test_a_save_that_keeps_the_key_keeps_the_cached_model_list(): void
+    {
+        $store = Plugin::instance()->get(Store::class);
+        $store->set('provider.api_key', 'sk-FAKE-keep');
+        $rowUpdates = 0;
+        $count = static function () use (&$rowUpdates): void {
+            ++$rowUpdates;
+        };
+        add_action('update_option_' . Plugin::OPTION, $count);
+
+        set_transient(ModelCatalog::TRANSIENT, ['kept'], 300);
+        $store->set('models.temperature', 1.2);
+        $this->assertSame(1, $rowUpdates);
+        $this->assertSame(1.2, get_option(Plugin::OPTION)['models.temperature']);
+        $this->assertSame(['kept'], get_transient(ModelCatalog::TRANSIENT));
+
+        update_option(Plugin::OPTION, array_replace(get_option(Plugin::OPTION), ['models.temperature' => 0.3, 'provider.api_key' => Schema::MASK]));
+        remove_action('update_option_' . Plugin::OPTION, $count);
+        $this->assertSame(2, $rowUpdates);
+        $this->assertSame('sk-FAKE-keep', ProviderKey::held());
+        $this->assertSame(['kept'], get_transient(ModelCatalog::TRANSIENT));
+    }
+
     // Task 4's rule over the new shape: the row holds MASK, which the move still reads as a key to
     // clear, and "cleared" is '' in the row and no key option.
     public function test_moving_the_base_url_clears_the_held_key_as_well_as_the_row(): void
