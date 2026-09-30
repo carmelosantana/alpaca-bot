@@ -27,7 +27,9 @@
 # and could, but one place is better than two), which is also why PHPUnit's cache is under /tmp
 # (phpunit.integration.xml).
 #
-# Arguments are passed to phpunit: `composer test:integration -- --filter Smoke`.
+# Arguments are passed to phpunit, the same in both modes: `composer test:integration -- --filter
+# Smoke`, or `bin/test-integration.sh --filter Smoke`. One leading `--` is dropped first, so
+# `bin/test-integration.sh -- --filter Smoke` works too.
 #
 # WP_MULTISITE=1 runs the suite on a network: core's test bootstrap reads it and installs the
 # test database as one. It is passed into the container in both modes, and only 0, 1 or unset is
@@ -114,6 +116,14 @@ fi
 if [[ ! "$DOMAIN" =~ ^[A-Za-z0-9.-]+(:[0-9]+)?$ ]]; then
     echo "bin/test-integration.sh: WP_TESTS_DOMAIN '$DOMAIN' must match ^[A-Za-z0-9.-]+(:[0-9]+)?\$" >&2
     exit 1
+fi
+
+# Composer consumes the `--` of `composer test:integration -- --filter X` itself, but a direct
+# `bin/test-integration.sh -- --filter X` keeps it, and phpunit reads it as the end of its
+# options, so --filter became a test file name (Cannot open file "--filter"). Dropped here, once,
+# before either mode builds its command line (Kanboard #4697).
+if [ "${1:-}" = "--" ]; then
+    shift
 fi
 
 composer install --working-dir=tools/integration --no-interaction
