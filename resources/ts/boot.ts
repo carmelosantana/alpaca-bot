@@ -34,7 +34,7 @@ import { readSse } from './stream.ts';
 import { watchNonce } from './nonce.ts';
 import { ImageTooLarge, ImagesTooLarge, fetchDataUrl, formatBytes, imageLimit } from './image.ts';
 import { $, $$, asId, el, fromHtml, icon, notice } from './dom.ts';
-import { grow, restoreDraft, setImage } from './composer.ts';
+import { grow, restoreDraft, setImage, type Draft } from './composer.ts';
 import { redeem, restError } from './redeem.ts';
 import { refusal } from './refusal.ts';
 import { appendText, releaseHeld } from './held.ts';
@@ -145,11 +145,39 @@ export function boot(cfg: Settings, form: HTMLFormElement): void {
     });
   }
 
-  async function send(): Promise<void> {
-    const text = textarea.value.trim();
+  /**
+   * What one turn sends, read off the composer in one go: everything POST /chat carries but the
+   * constant `stream`, and the draft (the text and the image) that goes back into the box if the
+   * turn never runs. send() takes it synchronously, before its first await, and nothing after
+   * that reads the form for the turn (Kanboard #4691). The bubble requests come first, and what
+   * the user does while they are out belongs to the next turn, not this one: a host's New chat
+   * (mount.ts newChat()) swaps in the fresh composer's chips and sets the conversation to 0, and
+   * the model select writes the model field, so a ticket that read either after awaiting the
+   * bubbles sent the fresh chips, or the model chosen meanwhile. The nonce is not
+   * here: it is the session's, not the turn's, and request() and redeem() are handed cfg.nonce
+   * as each is made, which watchNonce() keeps current.
+   */
+  interface Turn extends Draft {
+    images: string[];
+    conversation: number;
+    model: string;
+    context: Record<string, unknown>;
+  }
+  function snapshot(): Turn {
     const image = field('images').value;
-    const images = image ? [image] : [];
-    if (busy || expired || !navigator.onLine || (text === '' && image === '')) return;
+    return {
+      text: textarea.value.trim(),
+      image,
+      images: image ? [image] : [],
+      conversation: asId(field('conversation_id').value) ?? 0,
+      model: field('model').value,
+      context: contextFrom(form),
+    };
+  }
+
+  async function send(): Promise<void> {
+    const turn = snapshot();
+    if (busy || expired || !navigator.onLine || (turn.text === '' && turn.image === '')) return;
     busy = true;
     // The transcript this turn belongs to, and whether it is still the one shown (Kanboard
     // #4525). A turn outlives what the user does meanwhile: the history select swaps #ab-messages
@@ -164,22 +192,18 @@ export function boot(cfg: Settings, form: HTMLFormElement): void {
     // the conversation id because the id cannot tell two new chats apart: a first turn is sent
     // on 0, and a New chat before its `start` frame is on 0 too. Its bubbles go into that
     // element as well, shown or not, so a switch before they arrive cannot put this turn's
-    // messages, or a streaming bubble nothing will finish, into the transcript now shown. And
-    // its ticket names that transcript's conversation, read here and not when the ticket is
-    // asked for: the bubble requests come first, and a switch while they are out would otherwise
-    // send the message to the conversation opened meanwhile, or as a new one (0) that no
-    // transcript shows. Going on rather than giving the draft back keeps the turn what the user
+    // messages, or a streaming bubble nothing will finish, into the transcript now shown. Its
+    // ticket is `turn`, taken above for the same reason (snapshot() says what a switch would
+    // otherwise change). Going on rather than giving the draft back keeps the turn what the user
     // sent: the message they wrote, to the conversation they wrote it in.
     const transcript = messages();
     const shown = (): boolean => messages() === transcript;
-    const conversation = asId(field('conversation_id').value) ?? 0;
     sendButton.disabled = true;
     notice('info', '');
     textarea.value = '';
     grow(textarea);
     setImage(form, '');
     textarea.focus();
-    const draft = { text, image };
     let user: HTMLElement | null = null;
     let assistant: HTMLElement | null = null;
     // Whether the turn reached the model. Until it does, what was typed still belongs to the
@@ -195,7 +219,7 @@ export function boot(cfg: Settings, form: HTMLFormElement): void {
     let sent = false;
     try {
       const [userRes, emptyRes] = await Promise.all([
-        request('POST', api('/view/bubble'), { role: 'user', content: text, images }),
+        request('POST', api('/view/bubble'), { role: 'user', content: turn.text, images: turn.images }),
         request('GET', api('/view/bubble', { role: 'assistant', streaming: '1' })),
       ]);
       const bad = userRes.ok ? (emptyRes.ok ? null : emptyRes) : userRes;
@@ -203,7 +227,7 @@ export function boot(cfg: Settings, form: HTMLFormElement): void {
       user = fromHtml(await userRes.text());
       if (user) append(user, transcript);
       const ticketRes = await request('POST', api('/chat'), {
-        message: text, conversation_id: conversation, model: field('model').value, images, context: contextFrom(form), stream: true,
+        message: turn.text, conversation_id: turn.conversation, model: turn.model, images: turn.images, context: turn.context, stream: true,
       });
       if (!ticketRes.ok) return refused(ticketRes.status, await restError(ticketRes));
       const ticket = await ticketRes.json() as { stream_url: string };
@@ -224,7 +248,7 @@ export function boot(cfg: Settings, form: HTMLFormElement): void {
       // comes back into the composer on screen, and the notice says why.
       if (!sent || shown()) notice('error', t('failed'));
     } finally {
-      if (!sent) restoreDraft(form, draft, assistant, user);
+      if (!sent) restoreDraft(form, turn, assistant, user);
       busy = false;
       if (!expired && navigator.onLine) sendButton.disabled = false;
       textarea.focus();

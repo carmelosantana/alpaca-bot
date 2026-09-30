@@ -167,6 +167,15 @@ const SHELL_WITH_CHIPS = SHELL.replace('<textarea', `<div class="ab-composer__ch
     </div>
     <textarea`);
 
+/**
+ * SHELL_WITH_CHIPS with the box in View\Chat\Composer's `.ab-composer__row`, which is where
+ * mount.ts newChat() puts the fresh chips row (before it); without the row it swaps no chips.
+ */
+const SHELL_WITH_CHIPS_IN_ROW = SHELL_WITH_CHIPS.replace('<textarea', '<div class="ab-composer__row"><textarea').replace('</textarea>', '</textarea></div>');
+
+/** The composer of the fake GET /view/panel's fragment: the server's chips, both of them, as a fresh render has them. */
+const PANEL_CHIPS = `<form id="ab-form">${SHELL_WITH_CHIPS.slice(SHELL_WITH_CHIPS.indexOf('<div class="ab-composer__chips">'), SHELL_WITH_CHIPS.indexOf('<textarea'))}</form>`;
+
 /** Boots against `shell`, answers the ticket request from here and records its body, and sends `message`. */
 async function sentContext(t: TestContext, shell: string, before: (form: HTMLFormElement, win: ReturnType<typeof installDom>) => void): Promise<{ form: HTMLFormElement; body: Record<string, unknown> }> {
   const win = installDom(shell);
@@ -240,9 +249,12 @@ test('taking the last chip off takes the chips row with it, and not before', asy
  * outstanding; this returns once what is held has been asked for (the bubbles when they are
  * held, else the ticket). `window.htmx` is a stub that records what boot() triggers.
  * `ids` collects every `ab:conversation` the form announces, in order, and `chat()` is the
- * POST /chat body, once there is one.
+ * POST /chat body, once there is one. `composer.shell` replaces SHELL, and `composer.before` runs
+ * against the booted form before the message is sent (a chip taken off, say). The fake panel's
+ * composer has both context chips, which newChat() swaps in only for a shell whose form has an
+ * `.ab-composer__row` (SHELL has none, so its cases see no chips from it).
  */
-async function heldTurn(t: TestContext, conversation: string, hold: { ticket?: Promise<void>; bubbles?: Promise<void> } = {}): Promise<{
+async function heldTurn(t: TestContext, conversation: string, hold: { ticket?: Promise<void>; bubbles?: Promise<void> } = {}, composer: { shell?: string; before?: (form: HTMLFormElement) => void } = {}): Promise<{
   form: HTMLFormElement;
   chat: () => Record<string, unknown> | null;
   push: (event: string, data: object) => void;
@@ -253,7 +265,7 @@ async function heldTurn(t: TestContext, conversation: string, hold: { ticket?: P
   triggers: string[];
   finished: () => Promise<void>;
 }> {
-  const win = installDom(SHELL.replaceAll('data-conversation="0"', `data-conversation="${conversation}"`).replace('name="conversation_id" value="0"', `name="conversation_id" value="${conversation}"`));
+  const win = installDom((composer.shell ?? SHELL).replaceAll('data-conversation="0"', `data-conversation="${conversation}"`).replace('name="conversation_id" value="0"', `name="conversation_id" value="${conversation}"`));
   const real = globalThis.fetch;
   t.after(() => { globalThis.fetch = real; });
   let controller!: ReadableStreamDefaultController<Uint8Array>;
@@ -274,7 +286,7 @@ async function heldTurn(t: TestContext, conversation: string, hold: { ticket?: P
       return html(`<article class="ab-msg ab-msg--${role}${role === 'assistant' ? ' ab-rendered' : ''}"><div class="ab-msg__content">${role}</div></article>`);
     }
     if (url.pathname.endsWith('/view/panel')) {
-      return html('<div><div id="ab-history"><select id="ab-history-select"><option data-id="0">New chat</option></select></div><div id="ab-messages" class="ab-messages" data-conversation="0"></div></div>');
+      return html(`<div><div id="ab-history"><select id="ab-history-select"><option data-id="0">New chat</option></select></div><div id="ab-messages" class="ab-messages" data-conversation="0"></div>${PANEL_CHIPS}</div>`);
     }
     if (url.pathname.endsWith('/alpaca-bot/v1/chat')) {
       chat = JSON.parse(String(init?.body)) as Record<string, unknown>;
@@ -292,6 +304,7 @@ async function heldTurn(t: TestContext, conversation: string, hold: { ticket?: P
   const ids: number[] = [];
   form.addEventListener('ab:conversation', (e) => { ids.push((e as CustomEvent<{ id: number }>).detail.id); });
   boot(CFG, form);
+  composer.before?.(form);
   const send = form.querySelector('[data-action="send"]') as HTMLButtonElement;
   (form.querySelector('#ab-message') as HTMLTextAreaElement).value = 'hello';
   form.dispatchEvent(new win.Event('submit', { cancelable: true }) as unknown as Event);
@@ -508,4 +521,42 @@ test('a turn that never ran still says so after a switch, because its draft come
   assert.equal(status(), 'The request failed. Try again.');
   assert.equal((turn.form.querySelector('#ab-message') as HTMLTextAreaElement).value, 'hello');
   assert.equal(field(turn.form), '9');
+});
+
+/**
+ * Every per-turn input a ticket carries is read once, when the turn is sent (Kanboard #4691): a
+ * New chat or a model change while the turn's bubble requests are out must not reach the
+ * POST /chat that follows them.
+ */
+test('the drawer\'s New chat before the ticket: the turn sends the chips it was sent with, not the fresh ones', async (t) => {
+  let answer!: () => void;
+  const turn = await heldTurn(t, '7', { bubbles: new Promise<void>((resolve) => { answer = resolve; }) }, {
+    shell: SHELL_WITH_CHIPS_IN_ROW,
+    before: (form) => (form.querySelector('[data-chip="screen"] [data-action="chip-remove"]') as HTMLElement).dispatchEvent(new MouseEvent('click', { bubbles: true })),
+  });
+  await drawerNewChat();
+  // The fresh composer has the screen chip back, so a context read now would name it.
+  assert.equal(turn.form.querySelectorAll('[data-chip="screen"]').length, 1);
+  answer();
+  await until(() => turn.chat() !== null);
+  assert.deepEqual(turn.chat()?.context, { post_id: 12 });
+  turn.close();
+  await turn.finished();
+});
+
+test('a model chosen before the ticket: the turn sends the model it was sent with', async (t) => {
+  let answer!: () => void;
+  const turn = await heldTurn(t, '7', { bubbles: new Promise<void>((resolve) => { answer = resolve; }) });
+  const select = document.createElement('select');
+  select.id = 'ab-model';
+  select.innerHTML = '<option value="llama3.2">llama3.2</option><option value="qwen3">qwen3</option>';
+  (document.querySelector('.ab-wrap') as HTMLElement).append(select);
+  select.value = 'qwen3';
+  select.dispatchEvent(new Event('change', { bubbles: true }));
+  assert.equal((turn.form.elements.namedItem('model') as HTMLInputElement).value, 'qwen3');
+  answer();
+  await until(() => turn.chat() !== null);
+  assert.equal(turn.chat()?.model, 'llama3.2');
+  turn.close();
+  await turn.finished();
 });
