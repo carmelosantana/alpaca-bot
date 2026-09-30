@@ -266,6 +266,10 @@ final class ChatCommand
      * URL or as `row N`, and says why. A stored server whose URL moves to another host or port
      * loses its header value unless the value is sent again, and the command warns, naming it.
      *
+     * The provider API key belongs to the server it was set for in the same way: moving
+     * provider.base_url to another host, port or scheme clears the stored key, and the command
+     * warns. It writes one setting at a time, so set the URL first and the key after it.
+     *
      * ## OPTIONS
      *
      * [<key>]
@@ -312,6 +316,7 @@ final class ChatCommand
             return;
         }
         $cleared = [];
+        $keyCleared = false;
         if (isset($args[1])) {
             $value = $args[1];
             if ($field['type'] === 'array') {
@@ -329,6 +334,7 @@ final class ChatCommand
                 }
                 $cleared = $check->cleared;
             }
+            $keyCleared = Schema::providerKeyClearedByMove([$key => $value], $this->store->all());
             $this->store->set($key, $value);
         }
         $stored = $this->store->get($key);
@@ -340,6 +346,9 @@ final class ChatCommand
                     : 'The header values of MCP servers %s were cleared, because their addresses moved to another host or port. Send them again.',
                 implode(', ', $cleared),
             ));
+        }
+        if ($keyCleared) {
+            ($this->warn)('provider.api_key was cleared, because provider.base_url moved to another host, port or scheme. Set it again: wp alpaca-bot settings provider.api_key <key>');
         }
     }
 

@@ -491,6 +491,14 @@ Rules worth knowing before you write:
   is not a string at all (`null`, an array) keeps the stored key too, and the reply shows the
   mask so you can see it did. A PUT never reveals the key, whatever its body says.
 
+  The key belongs to the server it was set for. A PUT that moves `provider.base_url` to another
+  scheme, host or port clears the stored key unless the same PUT sends a new one: the mask, a
+  value that is not a string, and leaving the key out all mean "keep", and "keep" does not
+  survive the move. A new path or query on the same scheme, host and port keeps it. When a key was
+  cleared that way the reply carries `X-Alpaca-Bot-Cleared: provider.api_key`, and the key reads
+  `""`. `wp alpaca-bot settings provider.base_url …` does the same and prints a warning, so set
+  the URL first and the key after it.
+
   ```
   $ curl -s -u "admin:$PW" -H 'Content-Type: application/json' -X PUT -d '{"provider.api_key": "sk-test-1234"}' "$B/settings" | jq -c '{"provider.api_key"}'
   {"provider.api_key": "••••"}
@@ -626,7 +634,7 @@ callables are left out. Three of the fields:
 
 ```
 $ curl -s -u "admin:$PW" "$B/settings/schema"
-{"sections":{"provider":{"label":"Provider","description":"Where models run. Ollama by default; WordPress AI providers when WordPress 7.0+ has them registered."}, …},"fields":{"provider.api_key":{"type":"string","default":"","section":"provider","label":"API key","description":"Optional. Sent as a Bearer token.","secret":true},"models.temperature":{"type":"number","default":0.7,"section":"models","label":"Temperature","min":0,"max":2},"privacy.usage_retention_days":{"type":"integer","default":90,"section":"privacy","label":"Keep usage receipts for (days)","description":"A daily cleanup deletes receipts older than this. 0 keeps them forever; 3650 (ten years) is the most, and a larger number is stored as 3650. Conversations are never touched. A receipt is counted toward the caps until its month ends, so keep this at 31 or more while a cap is set.","min":0,"max":3650}, …},"mask":"••••"}
+{"sections":{"provider":{"label":"Provider","description":"Where models run. Ollama by default; WordPress AI providers when WordPress 7.0+ has them registered."}, …},"fields":{"provider.api_key":{"type":"string","default":"","section":"provider","label":"API key","description":"Optional. Sent as a Bearer token. Changing the Base URL to another host, port or scheme clears it, so it is not sent to a server it was not set for; enter it again in the same save.","secret":true},"models.temperature":{"type":"number","default":0.7,"section":"models","label":"Temperature","min":0,"max":2},"privacy.usage_retention_days":{"type":"integer","default":90,"section":"privacy","label":"Keep usage receipts for (days)","description":"A daily cleanup deletes receipts older than this. 0 keeps them forever; 3650 (ten years) is the most, and a larger number is stored as 3650. Conversations are never touched. A receipt is counted toward the caps until its month ends, so keep this at 31 or more while a cap is set.","min":0,"max":3650}, …},"mask":"••••"}
 ```
 
 ### `GET /usage`

@@ -651,3 +651,33 @@ it('does not warn for a moved server whose header value the write sends again', 
 
     expect($c->errors)->toBe([])->and($c->warnings)->toBe([]);
 });
+
+// #4539, ruling T4-c: the command writes one key at a time, so a base URL moved to another origin
+// never carries a key with it; the stored key is cleared and the command says so, and how to put
+// it back. A same-origin change, or a URL with no key stored, clears nothing and says nothing.
+it('warns that the API key was cleared when a base URL move took it', function (): void {
+    $h = pipelineWith(null, ['provider.base_url' => 'https://openrouter.ai/api/v1', 'provider.api_key' => 'sk-FAKE-stored']);
+    Functions\expect('update_option')->once()->with(Plugin::OPTION, Mockery::on(static fn(array $v): bool => $v['provider.api_key'] === ''))->andReturn(true);
+    $c = cliCommand($h);
+
+    $c->command->settings(['provider.base_url', 'https://steal.example.net/v1'], []);
+
+    expect($c->errors)->toBe([])
+        ->and($c->out)->toBe("\"https://steal.example.net/v1\"\n")
+        ->and($c->warnings)->toBe(['provider.api_key was cleared, because provider.base_url moved to another host, port or scheme. Set it again: wp alpaca-bot settings provider.api_key <key>']);
+});
+
+it('does not warn when the base URL keeps its origin, or no key is stored', function (array $settings, string $url): void {
+    $h = pipelineWith(null, $settings);
+    Functions\expect('update_option')->once()->andReturn(true);
+    $c = cliCommand($h);
+
+    $c->command->settings(['provider.base_url', $url], []);
+
+    expect($c->errors)->toBe([])
+        ->and($c->warnings)->toBe([])
+        ->and($h->store->get('provider.api_key'))->toBe($settings['provider.api_key']);
+})->with([
+    'only the path changed' => [['provider.base_url' => 'https://openrouter.ai/api/v1', 'provider.api_key' => 'sk-FAKE-stored'], 'https://openrouter.ai/v2'],
+    'no key stored' => [['provider.base_url' => 'https://openrouter.ai/api/v1', 'provider.api_key' => ''], 'https://elsewhere.example.net/v1'],
+]);
