@@ -12,6 +12,7 @@ use AlpacaBot\Provider\ModelCatalog;
 use AlpacaBot\Settings\ProviderKey;
 use AlpacaBot\Settings\Schema;
 use AlpacaBot\Settings\Store;
+use AlpacaBot\Settings\Writer;
 
 /**
  * Alpaca Bot from the command line: `wp alpaca-bot chat|models|usage|settings`.
@@ -39,7 +40,7 @@ final class ChatCommand
     /** @var callable(string): void */
     private $warn;
 
-    private ServerSettings $servers;
+    private Writer $writer;
 
     /** Whether the last thing emitted left stdout mid-line (a streamed delta does). */
     private bool $midLine = false;
@@ -60,7 +61,7 @@ final class ChatCommand
         ?ServerSettings $servers = null,
         ?callable $warn = null,
     ) {
-        $this->servers = $servers ?? new ServerSettings();
+        $this->writer = new Writer($store, $servers ?? new ServerSettings());
         $this->warn = $warn ?? static function (string $message): void {
             \WP_CLI::warning($message);
         };
@@ -327,16 +328,13 @@ final class ChatCommand
                     return;
                 }
             }
-            if ($key === 'toolkits.mcp_servers') {
-                $check = $this->servers->check($value, $this->store->get($key));
-                if ($check->isRefused()) {
-                    $this->error($check->message);
-                    return;
-                }
-                $cleared = $check->cleared;
+            $written = $this->writer->write([$key => $value]);
+            if ($written->refusal !== null) {
+                $this->error($written->refusal->message);
+                return;
             }
-            $keyCleared = ProviderKey::clearedByMove([$key => $value], $this->store->all());
-            $this->store->set($key, $value);
+            $cleared = $written->mcpCleared;
+            $keyCleared = $written->keyCleared;
         }
         $stored = $this->store->get($key);
         // The row carries the mask for a kept provider key; asked for by name, the key itself is
