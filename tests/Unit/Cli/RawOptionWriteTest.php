@@ -22,13 +22,15 @@ use Brain\Monkey\Functions;
  * `$secrets` (Mcp\Secrets' option) and `$held` (Settings\ProviderKey's option, false for none), armed for `$command`. What it reports lands in the returned
  * object instead of going through WP_CLI; `halted` is the exit code halt() was handed. Its call-stack
  * check answers as WP-CLI's Option_Command would for `wp option <command> <$name> … <$assoc>`
- * (patch's option name comes after its action), or null when `$inCommand` is false.
+ * (patch's option name comes after its action), or null when `$inCommand` is false. Whether the
+ * database takes a name for this option is answered case-insensitively, as a case-insensitive
+ * collation would, unless `$realDatabaseCheck` leaves it to the global $wpdb.
  *
  * @param array<string, mixed>  $stored
  * @param array<string, string> $secrets
  * @param array<string, mixed>  $assoc
  */
-function rawWrite(array $stored, string $command = 'update', ?ServerSettings $servers = null, array $secrets = [], mixed $row = null, bool $inCommand = true, string|false $held = false, array $assoc = [], string $name = Plugin::OPTION): object
+function rawWrite(array $stored, string $command = 'update', ?ServerSettings $servers = null, array $secrets = [], mixed $row = null, bool $inCommand = true, string|false $held = false, array $assoc = [], string $name = Plugin::OPTION, bool $realDatabaseCheck = false): object
 {
     $c = new class {
         public RawOptionWrite $subject;
@@ -65,6 +67,8 @@ function rawWrite(array $stored, string $command = 'update', ?ServerSettings $se
             $c->halted = $code;
         },
         inCommand: static fn(string $mode): ?array => $inCommand ? [$mode === 'patch' ? ['update', $name] : [$name], $assoc] : null,
+        // A case-insensitive collation's answer, unless the test asks for the real check.
+        databaseTakes: $realDatabaseCheck ? null : static fn(string $n): ?bool => strcasecmp($n, Plugin::OPTION) === 0,
     );
     $c->subject->arm($command);
     return $c;
@@ -457,7 +461,7 @@ it('listens for another spelling of the option only while armed', function (): v
 
 it('refuses the option under other letters before core writes it, and disarms', function (string $mode, string $typed, string $option): void {
     $c = rawWrite([], $mode, name: $typed);
-    $message = "'{$typed}' is alpaca_bot_settings in other letters, which WP-CLI would write round Alpaca Bot's checks, so nothing was written. Write it as alpaca_bot_settings.";
+    $message = "'{$typed}' is alpaca_bot_settings to the database, which WP-CLI would write round Alpaca Bot's checks, so nothing was written. Write it as alpaca_bot_settings.";
 
     if ($mode === 'add') {
         $c->subject->refuseSpellingOnAdd($option, ['models.temperature' => 'hot']);
@@ -491,4 +495,106 @@ it('leaves other writes to core: another option, this one as it is spelled, and 
     'this option as it is spelled' => ['alpaca_bot_settings', 'alpaca_bot_settings', true],
     'a hook writing ours in other letters while the command writes another' => ['ALPACA_BOT_SETTINGS', 'blogname', true],
     'plain code, no command' => ['ALPACA_BOT_SETTINGS', 'ALPACA_BOT_SETTINGS', false],
+]);
+
+// Fix round 2: "the same option" is what the options table's option_name column says, in its own
+// collation (an accent, a zero-width space, a trailing NBSP or a fullwidth letter can all be equal
+// there), asked of the database, with the column's character set and collation read once.
+
+/**
+ * A stand-in for $wpdb: get_row() answers the column lookup with `$column`, get_var() answers the
+ * comparisons from `$answers` in order, and every query is recorded.
+ *
+ * @param array{0: string, 1: string}|null $column
+ * @param list<string|null>                $answers
+ */
+function fakeWpdb(?array $column, array $answers = []): object
+{
+    // wp-includes/wp-db.php's constant, which the unit suite never loads; core's value.
+    if (!defined('ARRAY_N')) {
+        define('ARRAY_N', 'ARRAY_N');
+    }
+    return new class ($column, $answers) {
+        public string $options = 'wp_options';
+        /** @var list<string> */
+        public array $queries = [];
+
+        public function __construct(private ?array $column, private array $answers)
+        {
+        }
+
+        public function prepare(string $query, mixed ...$args): string
+        {
+            return vsprintf(str_replace('%s', "'%s'", $query), $args);
+        }
+
+        public function get_row(string $query, string $output = 'OBJECT'): ?array
+        {
+            $this->queries[] = $query;
+            return $this->column;
+        }
+
+        public function get_var(string $query): ?string
+        {
+            $this->queries[] = $query;
+            return array_shift($this->answers);
+        }
+    };
+}
+
+it('asks the database, in the option_name column\'s own character set and collation, whether a name is this option', function (): void {
+    global $wpdb;
+    $wpdb = fakeWpdb(['utf8mb4', 'utf8mb4_unicode_520_ci'], ['1']);
+    $c = rawWrite([], name: "alp\u{00E4}ca_bot_settings", realDatabaseCheck: true);
+
+    $kept = $c->subject->refuseSpelling(['models.temperature' => 'hot'], "alp\u{00E4}ca_bot_settings", ['models.temperature' => 0.7]);
+
+    expect($kept)->toBe(['models.temperature' => 0.7])
+        ->and($c->errors)->toBe(["'alp\u{00E4}ca_bot_settings' is alpaca_bot_settings to the database, which WP-CLI would write round Alpaca Bot's checks, so nothing was written. Write it as alpaca_bot_settings."])
+        // The column, then one comparison: the typed name and core's are the same name, asked once.
+        ->and($wpdb->queries)->toHaveCount(2)
+        ->and($wpdb->queries[0])->toContain('information_schema.COLUMNS')->toContain("'wp_options'")->toContain("'option_name'")
+        ->and($wpdb->queries[1])->toBe("SELECT CONVERT('alp\u{00E4}ca_bot_settings' USING utf8mb4) COLLATE utf8mb4_unicode_520_ci = CONVERT('alpaca_bot_settings' USING utf8mb4) COLLATE utf8mb4_unicode_520_ci");
+});
+
+it('leaves a name the database tells apart to core, and reads the column once per process', function (): void {
+    global $wpdb;
+    $wpdb = fakeWpdb(['utf8mb4', 'utf8mb4_unicode_520_ci'], ['0', '0']);
+    $c = rawWrite([], name: 'blogname', realDatabaseCheck: true);
+
+    $first = $c->subject->refuseSpelling('x', 'blogname', 'y');
+    $second = $c->subject->refuseSpelling('x', 'blogname', 'y');
+
+    expect([$first, $second])->toBe(['x', 'x'])
+        ->and($c->errors)->toBe([])
+        ->and(array_filter($wpdb->queries, static fn(string $q): bool => str_contains($q, 'information_schema')))->toHaveCount(1);
+});
+
+it('refuses, failing closed, when the database cannot say how it compares option names', function (?array $column, array $answers): void {
+    global $wpdb;
+    $wpdb = fakeWpdb($column, $answers);
+    $c = rawWrite([], name: 'blogname', realDatabaseCheck: true);
+
+    $kept = $c->subject->refuseSpelling('x', 'blogname', 'y');
+
+    expect($kept)->toBe('y')
+        ->and($c->errors)->toBe(["Alpaca Bot could not ask the database whether 'blogname' is alpaca_bot_settings, which WP-CLI would write round Alpaca Bot's checks, so nothing was written."])
+        ->and(has_filter('pre_update_option', [$c->subject, 'refuseSpelling']))->toBeFalse();
+})->with([
+    'no column found' => [null, []],
+    'a collation that is not a plain name' => [['utf8mb4', 'utf8mb4_bin; DROP'], []],
+    'the comparison errs' => [['utf8mb4', 'utf8mb4_unicode_520_ci'], [null]],
+]);
+
+it('asks the database nothing for this option as it is spelled, or outside WP-CLI\'s command', function (string $option, bool $inCommand): void {
+    global $wpdb;
+    $wpdb = fakeWpdb(['utf8mb4', 'utf8mb4_unicode_520_ci'], ['1', '1']);
+    $c = rawWrite([], inCommand: $inCommand, realDatabaseCheck: true);
+
+    expect($c->subject->refuseSpelling('x', $option, 'y'))->toBe('x')
+        ->and($wpdb->queries)->toBe([])
+        ->and($c->errors)->toBe([]);
+})->with([
+    'as spelled' => [Plugin::OPTION, true],
+    'no command' => ["alp\u{00E4}ca_bot_settings", false],
 ]);

@@ -43,15 +43,21 @@ use AlpacaBot\Settings\Store;
  * write, say), go through as they are and disarm it. `wp alpaca-bot settings` (which writes
  * through Store itself) never arms it.
  *
- * The option in other letters (`wp option update ALPACA_BOT_SETTINGS …`) never reaches that
- * filter, or ProviderKey's and ServerSettings' `pre_update_option_alpaca_bot_settings`: hook
- * names are case-sensitive. The options table's name column is not, so core would find the row
- * and write it as handed. Taking that write over would mean writing the row through Store while
- * core goes on to write it again under the other name, so it is refused instead
- * (refuseSpelling()): armed, this also listens on core's generic `pre_update_option` filter and
- * `add_option` action, which update_option() and add_option() reach with the trimmed name before
- * they write, and a name that is this option's in other letters, while WP-CLI's command is
- * writing that name, fails the command with nothing written and disarms it.
+ * Any other name the options table takes for this one (other letters, `ALPACA_BOT_SETTINGS`;
+ * or what its option_name column's collation equates, an accent, a zero-width space, a trailing
+ * no-break space or a fullwidth letter under utf8mb4_unicode_520_ci) never reaches that filter,
+ * or ProviderKey's and ServerSettings' `pre_update_option_alpaca_bot_settings`: hook names are
+ * compared byte for byte. The column is not, so core would find the row and rewrite it as
+ * handed, or add one that get_option('alpaca_bot_settings') then finds. Taking that write over
+ * would mean writing the row through Store while core goes on to write it again under the other
+ * name, so it is refused instead (refuseSpelling()): armed, this also listens on core's generic
+ * `pre_update_option` filter and `add_option` action, which update_option() and add_option()
+ * reach with the trimmed name before they write. When WP-CLI's command is writing such a name,
+ * the command fails with nothing written and this disarms. "Such a name" is the database's
+ * answer: the name and this option compared in the column's own character set and collation
+ * (databaseTakes(), which reads them from information_schema once), asked only while armed,
+ * inside WP-CLI's command, for a name that is not this option byte for byte, once per name.
+ * When the database cannot answer, the write is refused.
  *
  * `--autoload` as that call has it (from the command line or wp-cli.yml) is never ignored: the
  * row stays autoloaded, so anything but on, yes or true fails the command with nothing written
@@ -120,12 +126,22 @@ final class RawOptionWrite
     /** @var callable(int): void */
     private $halt;
 
+    /** @var \Closure(string): ?bool */
+    private \Closure $databaseTakes;
+
+    /** @var array{0: string, 1: string}|false|null the option_name column's character set and collation; false when they could not be read, null until asked */
+    private array|false|null $column = null;
+
+    /** @var array<string, bool> databaseTakes()'s answers so far, by name */
+    private array $taken = [];
+
     /**
      * @param callable(string): void|null $success prints the success line
      * @param callable(string): void|null $warn    prints a warning and goes on
      * @param callable(string): void|null $fail    reports an error and, under WP-CLI, ends the command with exit code 1
      * @param callable(int): void|null    $halt    ends the command with the given exit code
      * @param null|\Closure(string): (array{0: list<mixed>, 1: array<array-key, mixed>}|null) $inCommand what WP-CLI's option command for a mode was invoked with, while it runs; inCommand() by default
+     * @param null|\Closure(string): ?bool $databaseTakes whether the options table takes a name for this option, null when it cannot say; databaseTakes() by default
      */
     public function __construct(
         private Store $store,
@@ -135,8 +151,10 @@ final class RawOptionWrite
         ?callable $fail = null,
         ?callable $halt = null,
         ?\Closure $inCommand = null,
+        ?\Closure $databaseTakes = null,
     ) {
         $this->inCommand = $inCommand ?? static fn(string $mode): ?array => self::inCommand($mode);
+        $this->databaseTakes = $databaseTakes ?? fn(string $name): ?bool => $this->databaseTakes($name);
         $this->success = $success ?? static function (string $message): void {
             \WP_CLI::success($message);
         };
@@ -169,7 +187,8 @@ final class RawOptionWrite
 
     /**
      * Listens on the option's sanitize filter, for the command `$mode` names, and on core's
-     * generic `pre_update_option` filter and `add_option` action, for the option in other letters
+     * generic `pre_update_option` filter and `add_option` action, for another name the options
+     * table takes for this one
      * (refuseSpelling()).
      */
     public function arm(string $mode): void
@@ -191,10 +210,10 @@ final class RawOptionWrite
 
     /**
      * On core's `pre_update_option`, which update_option() applies to every option after it has
-     * trimmed the name and before it writes: when `$option` is this option in other letters and
-     * WP-CLI's option command is writing that spelling, fails the command with nothing written
-     * (the class docblock) and hands back the stored value, so a fail() that returned would still
-     * leave the row as it was. Any other value is handed back as it is.
+     * trimmed the name and before it writes: when `$option` is another name the options table
+     * takes for this one and WP-CLI's option command is writing such a name, fails the command
+     * with nothing written (the class docblock) and hands back the stored value, so a fail() that
+     * returned would still leave the row as it was. Any other value is handed back as it is.
      */
     public function refuseSpelling(#[\SensitiveParameter] mixed $value, mixed $option = null, #[\SensitiveParameter] mixed $old = null): mixed
     {
@@ -207,24 +226,76 @@ final class RawOptionWrite
         $this->refusesSpelling($option);
     }
 
-    /** refuseSpelling()'s test, and the refusal when it holds. */
+    /**
+     * refuseSpelling()'s test, and the refusal when it holds. The database is asked only while
+     * armed, only inside WP-CLI's command, only for a name that is not this option byte for byte,
+     * and once per name; when it cannot answer, the write is refused.
+     */
     private function refusesSpelling(mixed $option): bool
     {
-        if ($this->mode === null || !is_string($option) || $option === Plugin::OPTION || strcasecmp(trim($option), Plugin::OPTION) !== 0) {
+        if ($this->mode === null || !is_string($option) || $option === Plugin::OPTION) {
             return false;
         }
         $name = self::nameIn(($this->inCommand)($this->mode), $this->mode);
-        if ($name === null || strcasecmp(trim($name), Plugin::OPTION) !== 0) {
+        if ($name === null) {
+            return false;
+        }
+        $typed = trim($name) === Plugin::OPTION ? true : $this->takes(trim($name));
+        $same = $typed === false ? false : $this->takes(trim($option));
+        if ($typed === false || $same === false) {
             return false;
         }
         $this->disarm();
-        ($this->fail)(sprintf(
-            "'%s' is %s in other letters, which WP-CLI would write round Alpaca Bot's checks, so nothing was written. Write it as %s.",
-            $name,
-            Plugin::OPTION,
-            Plugin::OPTION,
-        ));
+        ($this->fail)($typed === null || $same === null
+            ? sprintf("Alpaca Bot could not ask the database whether '%s' is %s, which WP-CLI would write round Alpaca Bot's checks, so nothing was written.", $name, Plugin::OPTION)
+            : sprintf("'%s' is %s to the database, which WP-CLI would write round Alpaca Bot's checks, so nothing was written. Write it as %s.", $name, Plugin::OPTION, Plugin::OPTION));
         return true;
+    }
+
+    /** databaseTakes, remembered per name; an unanswered question is asked again. */
+    private function takes(string $name): ?bool
+    {
+        if ($name === Plugin::OPTION) {
+            return true;
+        }
+        if (!array_key_exists($name, $this->taken)) {
+            $answer = ($this->databaseTakes)($name);
+            if ($answer === null) {
+                return null;
+            }
+            $this->taken[$name] = $answer;
+        }
+        return $this->taken[$name];
+    }
+
+    /**
+     * Whether the options table takes `$name` for this option: the two compared in its
+     * option_name column's character set and collation, read from information_schema once. Null
+     * when either cannot be read or the comparison fails.
+     */
+    private function databaseTakes(string $name): ?bool
+    {
+        global $wpdb;
+        if ($this->column === null) {
+            // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- Read once per process and kept in $column; no API reports a column's collation.
+            $row = $wpdb->get_row($wpdb->prepare('SELECT CHARACTER_SET_NAME, COLLATION_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s AND COLUMN_NAME = %s', $wpdb->options, 'option_name'), \ARRAY_N);
+            $this->column = is_array($row) && count($row) === 2 && preg_match('/^[A-Za-z0-9_]+$/', (string) $row[0]) === 1 && preg_match('/^[A-Za-z0-9_]+$/', (string) $row[1]) === 1
+                ? [(string) $row[0], (string) $row[1]]
+                : false;
+        }
+        if ($this->column === false) {
+            return null;
+        }
+        [$charset, $collation] = $this->column;
+        // Both identifiers are held to [A-Za-z0-9_]+ above; the two names go through prepare().
+        $sql = "SELECT CONVERT(%s USING {$charset}) COLLATE {$collation} = CONVERT(%s USING {$charset}) COLLATE {$collation}";
+        // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.NotPrepared -- A comparison, not a table read; the answer is kept per name in $taken; $sql carries only the two identifiers checked above, and the names go through prepare().
+        $same = $wpdb->get_var($wpdb->prepare($sql, $name, Plugin::OPTION));
+        return match ((string) $same) {
+            '1' => true,
+            '0' => false,
+            default => null,
+        };
     }
 
     /**

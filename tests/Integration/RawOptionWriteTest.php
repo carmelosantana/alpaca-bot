@@ -516,11 +516,11 @@ final class RawOptionWriteTest extends TestCase
         $this->assertSame(["Success: Updated 'alpaca_bot_settings' option."], $this->said);
     }
 
-    /** Every row whose name core or the database would take for this option: any case, any padding. */
+    /** Every row the options table takes for this option: compared in the column's own collation. */
     private function rowsNamedLikeTheOption(): array
     {
         global $wpdb;
-        return $wpdb->get_col($wpdb->prepare("SELECT option_name FROM {$wpdb->options} WHERE LOWER(TRIM(option_name)) = %s", Plugin::OPTION));
+        return $wpdb->get_col($wpdb->prepare("SELECT option_name FROM {$wpdb->options} WHERE option_name = %s OR LOWER(TRIM(option_name)) = %s", Plugin::OPTION, Plugin::OPTION));
     }
 
     // Review fix round 1 (a): WP-CLI hands the name over untrimmed; core trims it before it runs
@@ -550,7 +550,7 @@ final class RawOptionWriteTest extends TestCase
     {
         $this->wpCli();
         $row = get_option(Plugin::OPTION);
-        $refused = "Error: 'ALPACA_BOT_SETTINGS' is alpaca_bot_settings in other letters, which WP-CLI would write round Alpaca Bot's checks, so nothing was written. Write it as alpaca_bot_settings.";
+        $refused = "Error: 'ALPACA_BOT_SETTINGS' is alpaca_bot_settings to the database, which WP-CLI would write round Alpaca Bot's checks, so nothing was written. Write it as alpaca_bot_settings.";
 
         $raw = $this->armed('update', inCommand: false);
         $this->assertSame($refused, $this->command('update', ['ALPACA_BOT_SETTINGS', '{"models.temperature":"hot"}'], ['format' => 'json']));
@@ -563,6 +563,37 @@ final class RawOptionWriteTest extends TestCase
         delete_option(Plugin::OPTION);
         $this->armed('add', inCommand: false);
         $this->assertSame($refused, $this->command('add', ['ALPACA_BOT_SETTINGS', '{"models.temperature":"hot"}'], ['format' => 'json']));
+        $this->assertSame([], $this->rowsNamedLikeTheOption());
+        $this->assertSame([], $this->said);
+    }
+
+    // Fix round 2: the options table's collation equates more than case. Each of these finds the
+    // real row there (a read-only SELECT on ab061srv, utf8mb4_unicode_520_ci), and none reaches
+    // the option's own filters; each is refused, asked of the real database, with nothing written.
+    public function test_every_name_the_database_takes_for_the_option_is_refused_and_nothing_is_written(): void
+    {
+        global $wpdb;
+        $this->wpCli();
+        $row = get_option(Plugin::OPTION);
+        $names = ["alp\u{00E4}ca_bot_settings", "alpaca_bot\u{200B}_settings", "alpaca_bot_settings\u{00A0}", "\u{FF41}lpaca_bot_settings"];
+        foreach ($names as $name) {
+            $this->assertSame($row, maybe_unserialize($wpdb->get_var($wpdb->prepare("SELECT option_value FROM {$wpdb->options} WHERE option_name = %s", $name))), 'the database takes ' . json_encode($name) . ' for the option');
+        }
+
+        foreach ($names as $name) {
+            $raw = $this->armed('update', inCommand: false);
+            $this->assertSame("Error: '{$name}' is alpaca_bot_settings to the database, which WP-CLI would write round Alpaca Bot's checks, so nothing was written. Write it as alpaca_bot_settings.", $this->command('update', [$name, '{"models.temperature":"hot"}'], ['format' => 'json']));
+            $this->assertFalse($this->isArmed($raw));
+        }
+        wp_cache_flush();
+        $this->assertSame($row, get_option(Plugin::OPTION));
+        $this->assertSame([Plugin::OPTION], $this->rowsNamedLikeTheOption());
+
+        delete_option(Plugin::OPTION);
+        foreach (["alp\u{00E4}ca_bot_settings", "alpaca_bot_settings\u{00A0}"] as $name) {
+            $this->armed('add', inCommand: false);
+            $this->assertStringStartsWith("Error: '{$name}' is alpaca_bot_settings to the database", $this->command('add', [$name, '{"models.temperature":"hot"}'], ['format' => 'json']));
+        }
         $this->assertSame([], $this->rowsNamedLikeTheOption());
         $this->assertSame([], $this->said);
     }
