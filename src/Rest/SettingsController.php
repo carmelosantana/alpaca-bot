@@ -48,8 +48,8 @@ use AlpacaBot\Settings\Store;
  * field is answered as stored. Two of those can hold a credential a site wrote into them. An MCP
  * server's URL keeps its query string (`?api_key=…`); a user name or password in it is refused
  * at save (Schema::sanitizeMcpServers()), so the header is where a server's credential goes.
- * `provider.base_url` keeps all of itself, a user name, password and query string included
- * (masking it is Kanboard #4539). A site that lowers the `settings.read` row answers those to
+ * `provider.base_url` is answered as stored, a user name, password and query string included:
+ * nothing masks it. A site that lowers the `settings.read` row answers those to
  * the role it admits. The write, which 0.5 gated with the read, now has a row and a key of its
  * own, so admitting a role to the read no longer admits it to the PUT.
  *

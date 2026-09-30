@@ -60,6 +60,24 @@ final class SettingsRoutesTest extends TestCase
     }
 
     /**
+     * The masked read masks only the secrets: `provider.base_url` is answered as stored, its user
+     * name, password and query string included, to the role a lowered `settings.read` row admits.
+     */
+    public function test_the_masked_read_answers_the_base_url_as_stored_userinfo_and_query_included(): void
+    {
+        $this->asAdmin();
+        $url = 'https://fakeuser:fakepass@api.example.net/v1?token=FAKE';
+        $res = $this->rest('PUT', '/settings', ['provider.base_url' => $url, 'provider.api_key' => 'sk-FAKE-read', 'access.settings.read' => 'edit_posts']);
+        $this->assertSame($url, get_option(Plugin::OPTION)['provider.base_url']);
+        $this->assertSame($url, $res->get_data()['provider.base_url']);
+        wp_set_current_user(self::factory()->user->create(['role' => 'editor']));
+
+        $read = $this->rest('GET', '/settings')->get_data();
+        $this->assertSame($url, $read['provider.base_url']);
+        $this->assertSame(Schema::MASK, $read['provider.api_key']);
+    }
+
+    /**
      * #4539, the reviewer's case: `settings.write` lowered to editors, an editor PUTs a base URL of
      * their own and the mask. The write goes through, the administrator's key is not kept for the
      * new host, and the reply says it was cleared.
