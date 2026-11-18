@@ -721,6 +721,10 @@ final class Pipeline
             }
             return new RunFailure(__('The run ended in an error the assistant did not report.', 'alpaca-bot'));
         }
+        // php-agents 0.17 announces a failed stop in words that already start with the prefix
+        // raised() adds ('Provider error: the response ended ...'); a thrown provider's
+        // announcement does not. Taken off here, the two read alike, here and in raised().
+        $announced = str_starts_with($announced, 'Provider error: ') ? substr($announced, strlen('Provider error: ')) : $announced;
         return new \RuntimeException($announced !== '' ? $announced : __('The provider gave no reason.', 'alpaca-bot'));
     }
 
