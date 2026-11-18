@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace AlpacaBot\Abilities;
 
+use AlpacaBot\Access;
 use AlpacaBot\Chat\Pipeline;
 use AlpacaBot\Errors;
 use AlpacaBot\RateLimit;
@@ -43,8 +44,9 @@ use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Enum\ToolResultStatus;
  * conversation, so the check and the act cannot disagree. Chat and summarize need
  * `edit_posts`. It is what the REST chat routes and the chat screen ask by default, through
  * the Chat row of Settings › Access, and what `[alpacabot]` and `[alpacabot_agent]` ask by
- * default, through the Shortcodes row; these two abilities ask it through no row: the
- * capability is written here. WP-CLI's `wp alpaca-bot chat` asks no capability, since whoever
+ * default, through the Shortcodes row; these two abilities ask it as written here, and chat
+ * then asks the Chat row as well (canChat()), so the row can narrow the ability as it narrows
+ * the routes, never widen it past `edit_posts`. WP-CLI's `wp alpaca-bot chat` asks no capability, since whoever
  * runs WP-CLI already has the site. A draft needs the post type's own capability, from
  * DraftPostToolkit::TYPES, which is what the editor asks before showing a New button.
  * Summarize and draft-post also answer to their tool's Settings › Access row, through the
@@ -220,6 +222,7 @@ final class Register
         private Registry $registry,
         private \Closure $userId,
         ?callable $exists = null,
+        private ?Access $access = null,
     ) {
         $this->exists = $exists === null ? function_exists(...) : \Closure::fromCallable($exists);
     }
@@ -293,7 +296,7 @@ final class Register
                 ],
                 ['conversation_id', 'reply', 'receipt'],
                 true,
-                fn(mixed $input = null): bool => $this->can('edit_posts'),
+                fn(mixed $input = null): bool => $this->canChat(),
                 fn(mixed $input = null): array|\WP_Error => $this->chat(is_array($input) ? $input : []),
             ),
             self::SUMMARIZE => $this->ability(
@@ -364,6 +367,18 @@ final class Register
     {
         $userId = ($this->userId)();
         return $capability !== '' && $userId > 0 && user_can($userId, $capability);
+    }
+
+    /**
+     * Whether the acting user may chat: `edit_posts`, and then the Chat row of Settings › Access
+     * that the REST chat routes, the chat screen and the drawer ask, so an administrator who
+     * narrows that row narrows this ability too (core's run route and every MCP adapter expose
+     * it). Asked only once `edit_posts` is held, so the row can narrow who may call and cannot
+     * widen it, as the tool rows do for summarize and draft-post.
+     */
+    private function canChat(): bool
+    {
+        return $this->can('edit_posts') && ($this->access === null || $this->access->allows(($this->userId)(), 'chat'));
     }
 
     /**
@@ -443,7 +458,7 @@ final class Register
      */
     private function chat(array $input): array|\WP_Error
     {
-        if (!$this->can('edit_posts')) {
+        if (!$this->canChat()) {
             return Errors::forbidden();
         }
         $idle = $this->idle();

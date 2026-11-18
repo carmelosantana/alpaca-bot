@@ -793,7 +793,7 @@ function shortcodeViewer(int $id, array $caps = ['edit_posts']): void
  * @param list<string> $enabled
  * @param (callable(string): bool)|null $exists
  */
-function abilitiesRegister(object $h, array $enabled = ['summarize', 'draft_post'], int $userId = 3, ?callable $exists = null): AlpacaBot\Abilities\Register
+function abilitiesRegister(object $h, array $enabled = ['summarize', 'draft_post'], int $userId = 3, ?callable $exists = null, ?AlpacaBot\Access $access = null): AlpacaBot\Abilities\Register
 {
     $user = static fn(): int => $userId;
     $registry = new AlpacaBot\Toolkit\Registry(new Store(['toolkits.enabled' => $enabled]));
@@ -801,7 +801,7 @@ function abilitiesRegister(object $h, array $enabled = ['summarize', 'draft_post
     $registry->register('summarize', $summarize);
     $draft = new AlpacaBot\Toolkit\DraftPostToolkit($user);
     $registry->register('draft_post', $draft);
-    return new AlpacaBot\Abilities\Register($h->pipeline, $registry, $user, $exists);
+    return new AlpacaBot\Abilities\Register($h->pipeline, $registry, $user, $exists, $access);
 }
 
 /**
