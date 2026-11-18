@@ -164,14 +164,27 @@ it('maps the reply: content, reasoning, tool calls (which make the finish reason
         ->and($response->usage?->totalTokens)->toBe(16);
 });
 
-it('maps core\'s finish reasons onto php-agents\': length is MaxTokens, error is Error, anything else Stop', function (string $core, ProviderFinishReason $expected): void {
+it('maps core\'s finish reasons onto php-agents\': length is MaxTokens, error is Error, content_filter is ContentFilter, anything else Stop', function (string $core, ProviderFinishReason $expected): void {
     $response = (new WpAiClientProvider('m', fakeWpAiClient(replies: [['content' => 'x', 'finish_reason' => $core]])))->chat([new UserMessage('x')]);
     expect($response->finishReason)->toBe($expected);
 })->with([
     'stop' => ['stop', ProviderFinishReason::Stop],
     'length' => ['length', ProviderFinishReason::MaxTokens],
     'error' => ['error', ProviderFinishReason::Error],
-    'content_filter' => ['content_filter', ProviderFinishReason::Stop],
+    'content_filter' => ['content_filter', ProviderFinishReason::ContentFilter],
+    'unknown' => ['tool_calls', ProviderFinishReason::Stop],
+]);
+
+it('keeps a failed stop\'s reason over the calls it carried and drops the calls, so the agent runs none of them', function (string $core, ProviderFinishReason $expected): void {
+    $client = fakeWpAiClient(replies: [['content' => 'x', 'finish_reason' => $core, 'tool_calls' => [['id' => 'c', 'name' => 'delete_post', 'arguments' => ['id' => 1]]]]]);
+    $response = (new WpAiClientProvider('m', $client))->chat([new UserMessage('x')]);
+    expect($response->finishReason)->toBe($expected)
+        ->and($response->toolCalls)->toBe([]);
+})->with([
+    // php-agents' own providers drop a truncated reply's calls too: their arguments may be cut off.
+    'length' => ['length', ProviderFinishReason::MaxTokens],
+    'error' => ['error', ProviderFinishReason::Error],
+    'content_filter' => ['content_filter', ProviderFinishReason::ContentFilter],
 ]);
 
 // Core's client has no streaming (WordPress 7.1 vendors php-ai-client 1.3.1, which has no

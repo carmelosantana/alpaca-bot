@@ -318,21 +318,26 @@ final class WpAiClientProvider implements ProviderInterface
     }
 
     /**
-     * Core's finish reasons onto php-agents': `length` is the token limit, `error` an error, a
-     * reply that carries calls is ToolUse whatever core said (the agent loop reads the calls
-     * themselves, but a consumer reading the reason should agree with them), and the rest
-     * (`stop`, `content_filter`, which still carries what the provider allowed) is Stop.
+     * Core's finish reasons onto php-agents': `length` is the token limit, `error` an error,
+     * `content_filter` the filter (it still carries what the provider allowed), and the rest Stop.
+     * Those three win over any calls the reply carried, and the calls are dropped, as php-agents'
+     * own providers drop them: the agent ends the run on a filter or an error, and a reply cut
+     * off at the limit may carry calls whose arguments are cut off too. Otherwise a reply that
+     * carries calls is ToolUse whatever core said (the agent loop reads the calls themselves, but
+     * a consumer reading the reason should agree with them).
      *
      * @param WpAiReply $reply
      */
     private function response(array $reply): Response
     {
-        $calls = array_map(static fn(array $c): ToolCall => new ToolCall($c['id'], $c['name'], $c['arguments']), $reply['tool_calls']);
-        $finish = $calls !== [] ? ProviderFinishReason::ToolUse : match ($reply['finish_reason']) {
+        $failed = match ($reply['finish_reason']) {
             'length' => ProviderFinishReason::MaxTokens,
             'error' => ProviderFinishReason::Error,
-            default => ProviderFinishReason::Stop,
+            'content_filter' => ProviderFinishReason::ContentFilter,
+            default => null,
         };
+        $calls = $failed !== null ? [] : array_map(static fn(array $c): ToolCall => new ToolCall($c['id'], $c['name'], $c['arguments']), $reply['tool_calls']);
+        $finish = $failed ?? ($calls !== [] ? ProviderFinishReason::ToolUse : ProviderFinishReason::Stop);
         return new Response(
             content: $reply['content'],
             finishReason: $finish,
