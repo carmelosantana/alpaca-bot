@@ -207,7 +207,10 @@ final class AbilitiesTest extends TestCase
         $this->assertSame('draft', $post->post_status);
         $this->assertSame('post', $post->post_type);
         $this->assertSame((string) $contributor, $post->post_author);
-        $this->assertSame('<p>Body</p>alert(1)', $post->post_content);
+        // kses drops the tag on every version; WordPress 7.2 drops the script's text as well,
+        // where 7.1 kept `alert(1)` as plain text. Either way no script survives.
+        $this->assertStringStartsWith('<p>Body</p>', $post->post_content);
+        $this->assertStringNotContainsString('<script', $post->post_content);
         $this->assertStringContainsString('post=' . $data['id'], $data['edit_url']);
 
         // A contributor may draft posts but not pages: refused at the permission gate, nothing inserted.
