@@ -4,20 +4,20 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "4c302387581d04364e6e721367d81735",
+    "content-hash": "fcdcbdff4489dd9bc7ed154e5607d9a6",
     "packages": [
         {
             "name": "carmelosantana/php-agents",
-            "version": "dev-fix/anthropic-api-gaps",
+            "version": "v0.17.0",
             "source": {
                 "type": "git",
-                "url": "git@github.com:carmelosantana/php-agents.git",
-                "reference": "054a6994434323f12d52f05d6fede87833322181"
+                "url": "https://github.com/carmelosantana/php-agents.git",
+                "reference": "f8151ae2460cfd1311885a3257b867b933796dc5"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/carmelosantana/php-agents/zipball/054a6994434323f12d52f05d6fede87833322181",
-                "reference": "054a6994434323f12d52f05d6fede87833322181",
+                "url": "https://api.github.com/repos/carmelosantana/php-agents/zipball/f8151ae2460cfd1311885a3257b867b933796dc5",
+                "reference": "f8151ae2460cfd1311885a3257b867b933796dc5",
                 "shasum": ""
             },
             "require": {
@@ -42,39 +42,7 @@
                     "CarmeloSantana\\PHPAgents\\": "src/"
                 }
             },
-            "autoload-dev": {
-                "psr-4": {
-                    "Tests\\": "tests/"
-                }
-            },
-            "scripts": {
-                "test": [
-                    "pest"
-                ],
-                "analyse": [
-                    "phpstan analyse --memory-limit=512M"
-                ],
-                "benchmark:llama-cpp-runtime": [
-                    "Composer\\Config::disableProcessTimeout",
-                    "php scripts/benchmark-llama-cpp-runtime.php"
-                ],
-                "benchmark:llama-cpp-cache": [
-                    "Composer\\Config::disableProcessTimeout",
-                    "php scripts/benchmark-llama-cpp-cache.php"
-                ],
-                "compare:llama-cpp-vs-ollama": [
-                    "Composer\\Config::disableProcessTimeout",
-                    "php scripts/compare-llama-cpp-vs-ollama.php"
-                ],
-                "setup:llama-cpp": [
-                    "Composer\\Config::disableProcessTimeout",
-                    "./scripts/setup-llama-cpp.sh"
-                ],
-                "test:llama-cpp-runtime": [
-                    "Composer\\Config::disableProcessTimeout",
-                    "./scripts/test-llama-cpp-runtime.sh"
-                ]
-            },
+            "notification-url": "https://packagist.org/downloads/",
             "license": [
                 "MIT"
             ],
@@ -91,7 +59,11 @@
                 "php-agents",
                 "tools"
             ],
-            "time": "2026-11-18T17:59:45+00:00"
+            "support": {
+                "issues": "https://github.com/carmelosantana/php-agents/issues",
+                "source": "https://github.com/carmelosantana/php-agents/tree/v0.17.0"
+            },
+            "time": "2026-11-18T20:20:10+00:00"
         },
         {
             "name": "dflydev/dot-access-data",
@@ -6128,18 +6100,9 @@
             "time": "2026-07-27T11:53:23+00:00"
         }
     ],
-    "aliases": [
-        {
-            "package": "carmelosantana/php-agents",
-            "version": "dev-fix/anthropic-api-gaps",
-            "alias": "0.16.99",
-            "alias_normalized": "0.16.99.0"
-        }
-    ],
+    "aliases": [],
     "minimum-stability": "stable",
-    "stability-flags": {
-        "carmelosantana/php-agents": 20
-    },
+    "stability-flags": {},
     "prefer-stable": false,
     "prefer-lowest": false,
     "platform": {

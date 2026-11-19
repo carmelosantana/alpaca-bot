@@ -9,15 +9,9 @@
             "email": "me@carmelosantana.com"
         }
     ],
-    "repositories": [
-        {
-            "type": "vcs",
-            "url": "https://github.com/carmelosantana/php-agents"
-        }
-    ],
     "require": {
         "php": "^8.4",
-        "carmelosantana/php-agents": "dev-fix/anthropic-api-gaps as 0.16.99",
+        "carmelosantana/php-agents": "^0.17.0",
         "league/commonmark": "^2.10.7"
     },
     "require-dev": {
