@@ -557,7 +557,9 @@ final class Register
     /**
      * The tool named `$name` in `$toolkit` (Registry::tool()) run with `$args`, as the model
      * runs it: its content on success, else its text refusal as `alpaca_bot_tool_error` (400),
-     * or a 500 when the toolkit has no such tool.
+     * or a 500 when the toolkit has no such tool. Only the arguments the tool's schema declares
+     * are passed: php-agents 0.17 refuses undeclared ones, and a toolkit swapped in through
+     * `alpaca_bot/toolkits` may not offer an optional one such as `length` or `post_type`.
      *
      * @param array<string, mixed> $args
      */
@@ -568,7 +570,8 @@ final class Register
             /* translators: %s: the tool's id, e.g. draft_post */
             return new \WP_Error('alpaca_bot_tool_error', sprintf(__('The %s tool is not available.', 'alpaca-bot'), $name), ['status' => 500]);
         }
-        $result = $tool->execute($args);
+        $declared = $tool->toFunctionSchema()['function']['parameters']['properties'] ?? [];
+        $result = $tool->execute(array_intersect_key($args, is_array($declared) ? $declared : []));
         if ($result->status !== ToolResultStatus::Success) {
             return new \WP_Error('alpaca_bot_tool_error', $result->content, ['status' => 400]);
         }

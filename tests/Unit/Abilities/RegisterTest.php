@@ -373,7 +373,8 @@ it('summarize and draft-post run whatever alpaca_bot/toolkits put under the id, 
     $defs = abilitiesRegister($h)->definitions();
     expect(($defs['alpaca-bot/summarize']['execute_callback'])(['text' => 'Long.', 'length' => 'short']))->toBe(['summary' => 'Swapped summary.'])
         ->and(($defs['alpaca-bot/draft-post']['execute_callback'])(['title' => 't', 'content' => 'c']))->toBe(['id' => 5, 'edit_url' => '/edit/5'])
-        ->and($swapped->calls)->toBe([['summarize', ['text' => 'Long.', 'length' => 'short']], ['draft_post', ['title' => 't', 'content' => 'c']]])
+        ->and($swapped->calls)->toBe([['summarize', ['text' => 'Long.']], ['draft_post', ['title' => 't', 'content' => 'c']]])
+        // The swapped summarize declares no length, so none is passed (php-agents 0.17 refuses one).
         // The plugin's own toolkits never ran: no turn, no insert.
         ->and($h->writes)->toBe([]);
 });
