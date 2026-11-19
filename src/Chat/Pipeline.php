@@ -19,6 +19,7 @@ use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Contract\MessageInterface;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Contract\ProviderInterface;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Contract\ToolkitInterface;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Enum\AgentFinishReason;
+use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Enum\ProviderFinishReason;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Enum\ToolResultStatus;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Exception\TerminationException;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Message\AssistantMessage;
@@ -359,8 +360,11 @@ final class Pipeline
                     // too, so Stop says nothing about the end of the stream: the generator is
                     // drained to exhaustion. Usage rides on the final stop chunk or on a usage-only
                     // chunk after it (both with empty content); whichever chunk carries it, it is
-                    // taken from there.
+                    // taken from there. The last chunk's reason is the stream's: plainEnding()
+                    // reads it once the stream is drained.
+                    $last = null;
                     foreach ($provider->stream($messages, [], $providerOptions) as $chunk) {
+                        $last = $chunk->finishReason;
                         if ($chunk->usage !== null) {
                             $prompt = max($prompt, $chunk->usage->promptTokens);
                             $completion = max($completion, $chunk->usage->completionTokens);
@@ -371,6 +375,12 @@ final class Pipeline
                         $content .= $chunk->content;
                         $reasoning .= $chunk->reasoning;
                         yield new Delta($chunk->content, $chunk->reasoning);
+                    }
+                    $tail = self::plainEnding($last, $content);
+                    if ($tail !== '') {
+                        $tail = AgentStreamObserver::separated($content, $tail);
+                        $content .= $tail;
+                        yield new Delta($tail, '');
                     }
                 }
                 $streamEnded = true;
@@ -696,6 +706,9 @@ final class Pipeline
      */
     private static function failure(Output $output, AgentStreamObserver $observer): ?\RuntimeException
     {
+        if ($output->finishReason === AgentFinishReason::ContextWindowExceeded) {
+            return new RunFailure(self::tooLong());
+        }
         if ($output->finishReason !== AgentFinishReason::Error) {
             return null;
         }
@@ -708,6 +721,10 @@ final class Pipeline
             }
             return new RunFailure(__('The run ended in an error the assistant did not report.', 'alpaca-bot'));
         }
+        // php-agents 0.17 announces a failed stop in words that already start with the prefix
+        // raised() adds ('Provider error: the response ended ...'); a thrown provider's
+        // announcement does not. Taken off here, the two read alike, here and in raised().
+        $announced = str_starts_with($announced, 'Provider error: ') ? substr($announced, strlen('Provider error: ')) : $announced;
         return new \RuntimeException($announced !== '' ? $announced : __('The provider gave no reason.', 'alpaca-bot'));
     }
 
@@ -913,6 +930,12 @@ final class Pipeline
             AgentFinishReason::Stop, AgentFinishReason::Done => $output->content !== '' && !str_ends_with($streamed, $output->content) ? $output->content : '',
             AgentFinishReason::MaxIterations, AgentFinishReason::BudgetExhausted => __('The assistant ran out of tool steps before it finished.', 'alpaca-bot'),
             AgentFinishReason::EmptyResponse => __('The model gave no answer.', 'alpaca-bot'),
+            // The library keeps a refusal's words as the run's answer and runs none of its tool
+            // calls; they streamed like any other text, so only a refusal with none needs a line.
+            AgentFinishReason::Refusal => $output->content === '' ? self::declined() : (str_ends_with($streamed, $output->content) ? '' : $output->content),
+            AgentFinishReason::ContentFilter => self::filtered(),
+            // failure() raises it; there is no reply to finish.
+            AgentFinishReason::ContextWindowExceeded => '',
         };
         if ($tail !== '') {
             // Through the scanner like everything else. This is the one text a streamed turn
@@ -937,6 +960,45 @@ final class Pipeline
     private static function toolCallsMeta(array $toolCalls): array
     {
         return $toolCalls === [] ? [] : ['tool_calls' => $toolCalls];
+    }
+
+    /**
+     * What the plain path adds after the stream for the reason its last chunk carried, or the
+     * failure it raises instead. It mirrors what php-agents' agent loop does on the tool path
+     * (AbstractAgent::failedStopOutput()): a stream that broke off (php-agents yields a terminal
+     * Error chunk at EOF with no finish reason), a pause it cannot continue, and a max_tokens stop
+     * with nothing written fail the turn as the provider's; a context-window overflow fails it in
+     * this plugin's words, since the user can act on it; a content filter keeps what streamed and
+     * says why it stopped; a refusal is an answer, and gets a line only when it had no words.
+     */
+    private static function plainEnding(?ProviderFinishReason $last, string $content): string
+    {
+        return match ($last) {
+            ProviderFinishReason::Error, ProviderFinishReason::PauseTurn => throw new \RuntimeException(__('The reply stopped before it finished.', 'alpaca-bot')),
+            ProviderFinishReason::MaxTokens => $content === '' ? throw new \RuntimeException(__('The model reached its token limit before writing an answer.', 'alpaca-bot')) : '',
+            ProviderFinishReason::ContextWindowExceeded => throw new RunFailure(self::tooLong()),
+            ProviderFinishReason::ContentFilter => self::filtered(),
+            ProviderFinishReason::Refusal => $content === '' ? self::declined() : '',
+            ProviderFinishReason::Stop, ProviderFinishReason::ToolUse, null => '',
+        };
+    }
+
+    /** The line a refusal with no words of its own is stored as. */
+    private static function declined(): string
+    {
+        return __('The model declined to answer.', 'alpaca-bot');
+    }
+
+    /** The line set after a reply the provider's content filter cut off. */
+    private static function filtered(): string
+    {
+        return __("The provider's content filter stopped this reply.", 'alpaca-bot');
+    }
+
+    /** The failure a conversation that outgrew the model's context window raises. */
+    private static function tooLong(): string
+    {
+        return __('This conversation is too long for the model. Start a new conversation.', 'alpaca-bot');
     }
 
     /**

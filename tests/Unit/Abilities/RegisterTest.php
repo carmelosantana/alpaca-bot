@@ -134,6 +134,23 @@ it('chat: allowed for a user who can edit_posts, refused for one who cannot, and
     expect((abilitiesRegister($h, userId: 0)->definitions()['alpaca-bot/chat']['permission_callback'])(['message' => 'hi']))->toBeFalse();
 });
 
+it('chat: answers to the Chat row of Settings › Access too, so an administrator who narrows chat narrows the ability, and nothing runs', function (): void {
+    // The REST chat routes, the chat screen and the drawer ask the Chat row; the ability is
+    // core's REST run route and every MCP adapter's, so it must not be the way around it.
+    $h = pipelineWith(null);
+    $register = abilitiesRegister($h, access: new AlpacaBot\Access(new AlpacaBot\Settings\Store(['access.chat' => 'manage_options'])));
+    $chat = $register->definitions()['alpaca-bot/chat'];
+    abilitiesCaps(['edit_posts']);
+    Functions\when('is_user_logged_in')->justReturn(true);
+
+    expect($chat['permission_callback'](['message' => 'hi']))->toBeFalse()
+        ->and($chat['execute_callback'](['message' => 'hi']))->toBeInstanceOf(\WP_Error::class)
+        ->and($h->writes)->toBe([]);
+
+    abilitiesCaps(['edit_posts', 'manage_options']);
+    expect($chat['permission_callback'](['message' => 'hi']))->toBeTrue();
+});
+
 it('chat: runs one stored turn as the acting user, continuing the conversation and with the model asked for, and answers the reply, the conversation id and the receipt', function (): void {
     $h = abilitiesFakeReply('Hello there.', $call);
     abilitiesCaps(['edit_posts']);
@@ -356,7 +373,8 @@ it('summarize and draft-post run whatever alpaca_bot/toolkits put under the id, 
     $defs = abilitiesRegister($h)->definitions();
     expect(($defs['alpaca-bot/summarize']['execute_callback'])(['text' => 'Long.', 'length' => 'short']))->toBe(['summary' => 'Swapped summary.'])
         ->and(($defs['alpaca-bot/draft-post']['execute_callback'])(['title' => 't', 'content' => 'c']))->toBe(['id' => 5, 'edit_url' => '/edit/5'])
-        ->and($swapped->calls)->toBe([['summarize', ['text' => 'Long.', 'length' => 'short']], ['draft_post', ['title' => 't', 'content' => 'c']]])
+        ->and($swapped->calls)->toBe([['summarize', ['text' => 'Long.']], ['draft_post', ['title' => 't', 'content' => 'c']]])
+        // The swapped summarize declares no length, so none is passed (php-agents 0.17 refuses one).
         // The plugin's own toolkits never ran: no turn, no insert.
         ->and($h->writes)->toBe([]);
 });

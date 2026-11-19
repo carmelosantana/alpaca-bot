@@ -70,17 +70,17 @@ it('refuses a user without the capability, and inserts nothing', function (): vo
         ->and($res->content)->toContain('cannot');
 });
 
-// The status is not a parameter: a caller (a model) that passes one is handed the same draft,
-// and the tool's schema never offers the option. Both halves are pinned: the schema and the insert.
-it('never publishes: a post_status the model sends is ignored, and the schema does not offer one', function (): void {
-    Functions\expect('user_can')->once()->andReturn(true);
-    Functions\expect('wp_insert_post')->once()->withArgs(static fn(array $p): bool => $p['post_status'] === 'draft')->andReturn(57);
-    Functions\when('get_edit_post_link')->justReturn('https://x/57');
+// The status is not a parameter: the tool's schema never offers it, and since php-agents 0.17 a
+// caller (a model) that sends one anyway is refused before anything is inserted.
+it('never publishes: the schema does not offer a post_status, and a call that sends one is refused', function (): void {
+    Functions\expect('wp_insert_post')->never();
     $asked = 0;
     $tool = draftPostTool(3, $asked);
     expect(array_keys($tool->toFunctionSchema()['function']['parameters']['properties']))->toBe(['title', 'content', 'post_type'])
         ->and($tool->toFunctionSchema()['function']['parameters']['required'])->toBe(['title', 'content']);
-    expect(json_decode($tool->execute(['title' => 'T', 'content' => 'x', 'post_status' => 'publish'])->content, true)['status'])->toBe('draft');
+    $res = $tool->execute(['title' => 'T', 'content' => 'x', 'post_status' => 'publish']);
+    expect($res->status)->toBe(ToolResultStatus::Error)
+        ->and($res->content)->toContain('Unknown parameters: post_status');
 });
 
 it('refuses when nobody is logged in, without asking the capability map', function (): void {
