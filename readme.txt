@@ -3,8 +3,8 @@ Contributors: carmelosantana
 Donate link: https://www.patreon.com/carmelosantana  
 Tags: ai, large language model, chatbot, ollama, agent  
 Requires at least: 6.9  
-Tested up to: 7.1  
-Stable tag: 0.6.3  
+Tested up to: 7.2  
+Stable tag: 0.7.0  
 Requires PHP: 8.4  
 License: GPLv2 or later  
 License URI: https://www.gnu.org/licenses/gpl-2.0.html  
@@ -112,6 +112,26 @@ There is a price as well as a symptom. `web_fetch`, `summarize` and `draft_post`
 == Changelog ==
 
 Releases before 0.5.0 are on the [releases page](https://github.com/carmelosantana/alpaca-bot/releases).
+
+= 0.7.0 =
+
+Alpaca Bot runs on php-agents 0.17.0 and ends a turn cleanly on a refusal, a content filter, a full context window or a broken stream. Tested up to WordPress 7.2.
+
+**Changed**
+
+- **php-agents 0.17.0.** A refusal is kept as the reply, or says the model declined when it gave no words. A reply a content filter stopped keeps what streamed and says the filter stopped it. A conversation too long for the model fails with a message to start a new one. A stream that broke off, or a `max_tokens` stop with no text, fails the turn instead of saving half an answer. No tool runs from a refused, filtered or failed reply, on Ollama or through the WordPress AI client.
+- **Tools refuse arguments their schema does not declare**, as php-agents 0.17 does. The `summarize` and `draft-post` abilities pass a tool only the arguments it declares, so a toolkit swapped in through `alpaca_bot/toolkits` without `length` or `post_type` still works. A `post_status` sent to `draft_post` is refused rather than ignored; a draft is still never published.
+- **Model replies no longer render images.** An image loads with no click, so a prompt-injected reply could send the conversation to another site through one. A site that wants them back can add `img` through `alpaca_bot/render/allowed_tags`.
+
+**Security**
+
+- **The `alpaca-bot/chat` ability answers to the Chat row of Settings › Access**, not only to `edit_posts`, so a role the row leaves out can no longer chat or run tools through the abilities REST route or an MCP adapter.
+- league/commonmark 2.10.7 and symfony/http-client 8.1.11, for their advisories.
+
+**Fixed**
+
+- A failed turn says `Provider error:` once, not twice.
+- Plugin Check no longer reads the guarded call to WordPress 7.1's `wp_prepare_json_schema_for_client()` as a hard dependency of a plugin that supports 6.9.
 
 = 0.6.3 =
 
@@ -236,6 +256,10 @@ A ground-up rewrite. The 0.4 code is gone rather than refactored, so the list be
 - The plugin's own dependencies are namespace-prefixed, so php-agents or CommonMark installed by another plugin cannot collide with the copies shipped here.
 
 == Upgrade Notice ==
+
+= 0.7.0 =
+
+Runs on php-agents 0.17.0. Model replies no longer show images; add `img` back through `alpaca_bot/render/allowed_tags` if your site wants them. The chat ability now follows the Chat row of Settings › Access.
 
 = 0.6.3 =
 

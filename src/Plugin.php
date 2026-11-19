@@ -9,7 +9,7 @@ use AlpacaBot\Settings\Store;
 
 final class Plugin
 {
-    public const VERSION = '0.6.3';
+    public const VERSION = '0.7.0';
     public const OPTION = 'alpaca_bot_settings';
     public const TEXT_DOMAIN = 'alpaca-bot';
 
