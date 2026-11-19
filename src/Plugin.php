@@ -9,7 +9,7 @@ use AlpacaBot\Settings\Store;
 
 final class Plugin
 {
-    public const VERSION = '0.6.3';
+    public const VERSION = '0.7.0';
     public const OPTION = 'alpaca_bot_settings';
     public const TEXT_DOMAIN = 'alpaca-bot';
 
@@ -214,7 +214,7 @@ final class Plugin
         // an ability whose category it does not know. The toolkits come from the registry when
         // a callback runs, and the same user closure, so an ability and a chat turn act as one
         // user over the same toolkits.
-        $abilities = new Abilities\Register($this->get(Chat\Pipeline::class), $registry, get_current_user_id(...));
+        $abilities = new Abilities\Register($this->get(Chat\Pipeline::class), $registry, get_current_user_id(...), access: $this->get(Access::class));
         $this->set(Abilities\Register::class, $abilities);
         add_action('wp_abilities_api_categories_init', [$abilities, 'registerCategory']);
         add_action('wp_abilities_api_init', [$abilities, 'register']);

