@@ -3,6 +3,10 @@
  * this is the entry esbuild builds, and runs when the page loads it.
  */
 import { startEditor, type EditorWp } from './editor-start.ts';
+import { ready } from './hooks.ts';
+
+// window.alpacaBotChat for a companion's script; it resolves once the sidebar is first opened (hooks.ts).
+ready();
 
 const wp = (window as unknown as { wp?: Partial<EditorWp> & { editor?: { PluginSidebar?: unknown } } }).wp;
 const cfg = window.alpacaBotMount;

@@ -35,19 +35,25 @@ final class FirstWins implements ToolkitInterface
     private function __construct(private ToolkitInterface $inner, private array $tools) {}
 
     /**
-     * @param array<array-key, ToolkitInterface> $toolkits in the order the agent is to be handed them
+     * `$wrap`, when given, is handed each tool that is kept and the key its toolkit came under,
+     * and what it returns is what the wrapper offers: how Chat\Pipeline::offered() puts every
+     * tool behind Toolkit\Guarded. The name a tool is settled by is the one asked before the
+     * wrap, so a wrap that renamed a tool could not move a call to another toolkit.
+     *
+     * @param array<array-key, ToolkitInterface>                        $toolkits in the order the agent is to be handed them
+     * @param (\Closure(ToolInterface, array-key): ToolInterface)|null $wrap
      * @return list<self> one per toolkit, in the same order
      */
-    public static function over(array $toolkits): array
+    public static function over(array $toolkits, ?\Closure $wrap = null): array
     {
         $taken = [];
         $out = [];
-        foreach ($toolkits as $toolkit) {
+        foreach ($toolkits as $key => $toolkit) {
             $kept = [];
             $names = [];
             foreach ($toolkit->tools() as $tool) {
                 if (!isset($taken[$tool->name()])) {
-                    $kept[] = $tool;
+                    $kept[] = $wrap === null ? $tool : $wrap($tool, $key);
                     $names[$tool->name()] = true;
                 }
             }

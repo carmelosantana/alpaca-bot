@@ -97,7 +97,7 @@ final class Drawer
             return;
         }
         wp_enqueue_style(self::HANDLE, plugins_url('assets/css/alpaca-bot-drawer.css', ALPACA_BOT_FILE), ['dashicons'], Assets::version('assets/css/alpaca-bot-drawer.css'));
-        wp_enqueue_script(self::HANDLE, plugins_url('assets/js/drawer.js', ALPACA_BOT_FILE), ['heartbeat'], Assets::version('assets/js/drawer.js'), true);
+        wp_enqueue_script(self::HANDLE, plugins_url('assets/js/drawer.js', ALPACA_BOT_FILE), ['heartbeat', 'wp-hooks'], Assets::version('assets/js/drawer.js'), true);
         wp_localize_script(self::HANDLE, 'alpacaBot', $this->assets->settings());
         wp_localize_script(self::HANDLE, 'alpacaBotMount', $this->assets->mount());
     }
@@ -131,7 +131,7 @@ final class Drawer
         if (!current_user_can(Menu::capability($this->access))) {
             return;
         }
-        wp_enqueue_script(self::EDITOR_HANDLE, plugins_url('assets/js/editor.js', ALPACA_BOT_FILE), ['wp-plugins', 'wp-editor', 'wp-element', 'wp-data', 'heartbeat'], Assets::version('assets/js/editor.js'), true);
+        wp_enqueue_script(self::EDITOR_HANDLE, plugins_url('assets/js/editor.js', ALPACA_BOT_FILE), ['wp-plugins', 'wp-editor', 'wp-element', 'wp-data', 'heartbeat', 'wp-hooks'], Assets::version('assets/js/editor.js'), true);
         wp_localize_script(self::EDITOR_HANDLE, 'alpacaBot', $this->assets->settings());
         wp_localize_script(self::EDITOR_HANDLE, 'alpacaBotMount', [...$this->assets->mount(), 'conversation' => (string) $this->prefs->drawerConversation((int) get_current_user_id())]);
     }

@@ -13,10 +13,12 @@ use AlpacaBot\Provider\Model;
 use AlpacaBot\Provider\ModelCatalog;
 use AlpacaBot\Settings\Store;
 use AlpacaBot\Toolkit\FirstWins;
+use AlpacaBot\Toolkit\Guarded;
 use AlpacaBot\Toolkit\Registry;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Agent\Output;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Contract\MessageInterface;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Contract\ProviderInterface;
+use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Contract\ToolInterface;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Contract\ToolkitInterface;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Enum\AgentFinishReason;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Enum\ProviderFinishReason;
@@ -299,7 +301,7 @@ final class Pipeline
             $streamEnded = false;
             try {
                 $provider = $this->factory->make($model);
-                $toolkits = self::offered($toolkits);
+                $toolkits = self::offered($toolkits, $userId);
                 if ($toolkits !== []) {
                     $bound = new BoundOptionsProvider($provider, $providerOptions);
                     // The run's spend counts toward the caps while it runs, at its own checks and
@@ -811,13 +813,17 @@ final class Pipeline
      * raised() says. Each toolkit is asked once; the wrappers answer from that list from then on,
      * and they are what agentTurn() is handed.
      *
+     * Each tool kept is put behind Toolkit\Guarded, under the id its toolkit was enabled with and
+     * the turn's user, so `alpaca_bot/tool/before_call` is asked about every call the model makes
+     * and `alpaca_bot/tool/called` hears every answer.
+     *
      * @param array<string, ToolkitInterface> $toolkits
      * @return list<FirstWins>
      */
-    private static function offered(array $toolkits): array
+    private static function offered(array $toolkits, int $userId): array
     {
         $offered = [];
-        foreach (FirstWins::over($toolkits) as $toolkit) {
+        foreach (FirstWins::over($toolkits, static fn(ToolInterface $tool, int|string $id): ToolInterface => new Guarded($tool, (string) $id, $userId)) as $toolkit) {
             if ($toolkit->tools() !== []) {
                 $offered[] = $toolkit;
             }

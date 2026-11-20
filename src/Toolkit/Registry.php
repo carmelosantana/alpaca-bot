@@ -25,10 +25,12 @@ use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Contract\ToolkitInterface;
  * because a server's id is not an option Schema knows; each is gated by its own `mcp.{id}` row
  * instead, asked of the same user id, and a server with nothing approved is not offered at all.
  * Then filter `alpaca_bot/toolkits` (array<string, ToolkitInterface>, int $userId) runs over
- * all of it, and it is the one extension point: a site adds its own toolkit there, or takes one
- * away for one user, an MCP server's included. Registering a third-party toolkit here and
- * expecting the setting to show it would not work, and that is by design: the settings page is
- * the plugin's, and a toolkit a site adds in code is the site's to gate in code. The rows run
+ * all of it, and it is the last word: a site adds its own toolkit there, or takes one away for
+ * one user, an MCP server's included. A toolkit added through the filter never shows in the
+ * settings, and is the site's to gate in code. A companion plugin that wants a box under Enabled
+ * tools and a row under Access registers through Toolkit\Registrar instead
+ * (`alpaca_bot/register_toolkits`), which calls register() here with the row `tool.{id}` and
+ * tells Settings\Schema and Access about it. The rows run
  * before the filter on purpose: the filter can still hand a toolkit back for a user, which is
  * how a site gives a tool to a role no row covers, and it can still take one away.
  *

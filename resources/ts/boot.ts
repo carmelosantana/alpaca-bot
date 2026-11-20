@@ -40,6 +40,7 @@ import { refusal } from './refusal.ts';
 import { appendText, releaseHeld } from './held.ts';
 import { contextFrom } from './context.ts';
 import type { RestError } from './redeem.ts';
+import { action, filter, ready, API_VERSION } from './hooks.ts';
 
 // wp_localize_script() ships every scalar as a string, so the byte figure arrives as one; imageLimit() reads it.
 export interface Settings { rest: string; nonce: string; i18n: Record<string, string>; offline: string; maxImageBytes?: string | number }
@@ -226,8 +227,11 @@ export function boot(cfg: Settings, form: HTMLFormElement): void {
       if (bad) return refused(bad.status, await restError(bad));
       user = fromHtml(await userRes.text());
       if (user) append(user, transcript);
+      // A companion may add to or rewrite the body (alpacaBot.chat.request, hooks.ts); the turn
+      // is a streamed one whatever it says, because this function reads it as a stream.
       const ticketRes = await request('POST', api('/chat'), {
-        message: turn.text, conversation_id: turn.conversation, model: turn.model, images: turn.images, context: turn.context, stream: true,
+        ...filter<Json>('alpacaBot.chat.request', { message: turn.text, conversation_id: turn.conversation, model: turn.model, images: turn.images, context: turn.context, stream: true }, { form }),
+        stream: true,
       });
       if (!ticketRes.ok) return refused(ticketRes.status, await restError(ticketRes));
       const ticket = await ticketRes.json() as { stream_url: string };
@@ -240,7 +244,8 @@ export function boot(cfg: Settings, form: HTMLFormElement): void {
       // From here the turn is the server's: a stream that then drops mid-reply is stored as a
       // partial reply, and the composer must not offer the message back as if nothing ran.
       sent = true;
-      await consume(redeemed.stream, bubble, shown);
+      action('alpacaBot.turn.started', { conversationId: turn.conversation, text: turn.text });
+      await consume(redeemed.stream, bubble, shown, turn.conversation);
     } catch (e) {
       console.error(e);
       // A turn that ran and failed after the user switched away is not the open conversation's
@@ -319,7 +324,7 @@ export function boot(cfg: Settings, form: HTMLFormElement): void {
    * which belongs to the conversation now open (a dropped connection is send()'s to report, and
    * it asks the same).
    */
-  async function consume(res: Response, bubble: HTMLElement, shown: () => boolean): Promise<void> {
+  async function consume(res: Response, bubble: HTMLElement, shown: () => boolean, conversation: number): Promise<void> {
     const content = $('.ab-msg__content', bubble) as HTMLElement;
     let reasoning: HTMLElement | null = null;
     let answered = false;
@@ -346,7 +351,9 @@ export function boot(cfg: Settings, form: HTMLFormElement): void {
         } else if (event === 'done') {
           return finish(d, bubble, shown);
         } else if (event === 'error') {
-          if (shown()) notice('error', typeof d.message === 'string' && d.message ? d.message : t('failed'));
+          const message = typeof d.message === 'string' && d.message ? d.message : t('failed');
+          action('alpacaBot.turn.failed', { conversationId: conversation, message });
+          if (shown()) notice('error', message);
           return settle(bubble, answered);
         }
       }
@@ -379,12 +386,14 @@ export function boot(cfg: Settings, form: HTMLFormElement): void {
    * new), and the reload asks with the field, which is the conversation now shown.
    */
   async function finish(d: Json, bubble: HTMLElement, shown: () => boolean): Promise<void> {
+    const m = (d.message ?? {}) as Json;
+    const receipt = (d.receipt ?? {}) as Json;
+    const completed = { conversationId: asId(d.conversation_id) ?? 0, message: m, receipt };
     if (!shown()) {
+      action('alpacaBot.turn.completed', completed, null);
       window.htmx?.trigger(document.body, 'ab:refresh');
       return;
     }
-    const m = (d.message ?? {}) as Json;
-    const receipt = (d.receipt ?? {}) as Json;
     setConversation(d.conversation_id);
     const meta = (m.meta ?? {}) as Json;
     // The receipt's tool badge counts the calls the reply recorded (message.meta.tool_calls).
@@ -399,6 +408,8 @@ export function boot(cfg: Settings, form: HTMLFormElement): void {
         partial(bubble);
       }
     });
+    if (rendered) action('alpacaBot.message.rendered', rendered);
+    action('alpacaBot.turn.completed', completed, rendered);
     window.htmx?.trigger(document.body, 'ab:refresh');
   }
 
@@ -537,6 +548,9 @@ export function boot(cfg: Settings, form: HTMLFormElement): void {
     const list = $('#ab-messages');
     if (list) setConversation(list.dataset.conversation);
     decorateOwn();
+    // Each message the swap brought in, for a companion that decorates messages (hooks.ts).
+    const swapped = e.target as Element;
+    for (const message of swapped.matches('.ab-msg') ? [swapped] : Array.from(swapped.querySelectorAll('.ab-msg'))) action('alpacaBot.message.rendered', message);
   });
   document.body.addEventListener('htmx:responseError', (e) => {
     if (!ours(e.target)) return;
@@ -552,4 +566,8 @@ export function boot(cfg: Settings, form: HTMLFormElement): void {
   connectivity();
   grow(textarea);
   textarea.focus();
+  // Last, so a listener finds the chat wired: window.alpacaBotChat first, so its promise is
+  // listening when the action fires (hooks.ts).
+  ready();
+  action('alpacaBot.ready', { apiVersion: API_VERSION, form, shell });
 }

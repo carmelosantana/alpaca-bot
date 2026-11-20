@@ -169,18 +169,29 @@ final class ConversationStore
         update_post_meta($c->id, self::META_MESSAGES, wp_slash($this->fit($c)));
         $first = $c->messages[0] ?? null;
         $last = $c->last();
-        if ($first === null || $last === null) {
-            return;
+        if ($first !== null && $last !== null) {
+            if ($c->title === '' || $c->title === $this->defaultTitle()) {
+                $derived = wp_trim_words(sanitize_text_field(rtrim($first->content, '?.!')), 8, '');
+                $c->title = $derived !== '' ? $derived : $c->title;
+            }
+            wp_update_post(wp_slash([
+                'ID' => $c->id,
+                'post_title' => $c->title,
+                'post_excerpt' => wp_trim_words(sanitize_text_field($last->content), 30, '…'),
+            ]));
         }
-        if ($c->title === '' || $c->title === $this->defaultTitle()) {
-            $derived = wp_trim_words(sanitize_text_field(rtrim($first->content, '?.!')), 8, '');
-            $c->title = $derived !== '' ? $derived : $c->title;
-        }
-        wp_update_post(wp_slash([
-            'ID' => $c->id,
-            'post_title' => $c->title,
-            'post_excerpt' => wp_trim_words(sanitize_text_field($last->content), 30, '…'),
-        ]));
+        /**
+         * Fires after a conversation has been written to its post: the transcript, and the title
+         * and excerpt when it has a message. A chat turn saves once its reply is in, before
+         * `alpaca_bot/chat/completed`; a turn whose conversation is ephemeral, or a save onto a
+         * post the conversation's user does not own, writes nothing and fires nothing. What was
+         * stored may be shorter than `$conversation->messages`: a transcript too large for one
+         * database packet is cut from the oldest end (ConversationStore::fit()).
+         *
+         * @since 0.8.0
+         * @param Conversation $conversation the conversation as it was handed to save(), its title derived
+         */
+        do_action('alpaca_bot/conversation/saved', $c);
     }
 
     /**
@@ -354,10 +365,21 @@ final class ConversationStore
     /** Permanently deletes the conversation; false when it is missing or not owned by $userId. */
     public function delete(int $id, int $userId): bool
     {
-        if ($this->owned($id, $userId) === null) {
+        if ($this->owned($id, $userId) === null || !wp_delete_post($id, true)) {
             return false;
         }
-        return (bool) wp_delete_post($id, true);
+        /**
+         * Fires after a conversation has been permanently deleted at its owner's request (the
+         * conversations REST route, one or all): the hook for a companion that keeps something
+         * of its own per conversation to let it go. Not fired when a failed turn takes back the
+         * empty conversation it had just created, which nobody ever saw.
+         *
+         * @since 0.8.0
+         * @param int $id     the conversation's post id, which no longer exists
+         * @param int $userId the user who owned it
+         */
+        do_action('alpaca_bot/conversation/deleted', $id, $userId);
+        return true;
     }
 
     /**

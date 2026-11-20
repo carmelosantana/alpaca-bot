@@ -57,6 +57,9 @@ uses()->beforeEach(function (): void {
     // reset it so every test's boot() starts from a cold state.
     $instance = new ReflectionProperty(Plugin::class, 'instance');
     $instance->setValue(null, null);
+    // Toolkit\Registrar keeps the companion toolkits for the request in a static list, which
+    // Settings\Schema and Access read; empty it so no test inherits another's companions.
+    (new ReflectionProperty(AlpacaBot\Toolkit\Registrar::class, 'entries'))->setValue(null, []);
 })->afterEach(function (): void {
     // Mockery expectations are the only assertions in some tests; count them
     // before tearDown() closes the container so those tests are not "risky".
