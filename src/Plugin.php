@@ -14,6 +14,18 @@ final class Plugin
     public const TEXT_DOMAIN = 'alpaca-bot';
 
     /**
+     * The version of the extension contract a companion plugin builds on: the `alpaca_bot/*`
+     * hooks, the toolkit registrar (`alpaca_bot/register_toolkits`) and the chat UI's
+     * `alpacaBot.*` JavaScript hooks. It moves only when one of those changes in a way a
+     * companion would have to change for, and independently of VERSION. `alpaca_bot/loaded`
+     * hands it over, so a companion that needs a later contract can stand down with a notice
+     * instead of calling something that is not there.
+     *
+     * @since 0.8.0
+     */
+    public const API_VERSION = 1;
+
+    /**
      * An extra argument the plugin's two post types are registered with, which core keeps as a
      * property of the WP_Post_Type: true only when no other code had registered the name before
      * the plugin did. `chat_history` and `chat_log` are not prefixed, so uninstall.php reads it
@@ -289,6 +301,18 @@ final class Plugin
             // checks (Cli\RawOptionWrite says how, and why it has to end the command itself).
             (new Cli\RawOptionWrite($store, $this->get(Mcp\ServerSettings::class)))->register();
         }
+        /**
+         * Fires once Alpaca Bot has registered everything it registers on `plugins_loaded`: the
+         * hook a companion plugin waits for. It is the plugin's own, at `plugins_loaded` priority
+         * 9, so a companion that hooks it from its main file hears it whatever order the two
+         * plugins load in, and one that never hears it knows Alpaca Bot is not active. Compare
+         * `$apiVersion` with the contract the companion was written for (Plugin::API_VERSION
+         * says when it moves) before using anything.
+         *
+         * @since 0.8.0
+         * @param int $apiVersion Plugin::API_VERSION, the extension contract this install speaks
+         */
+        do_action('alpaca_bot/loaded', self::API_VERSION);
     }
 
     /**

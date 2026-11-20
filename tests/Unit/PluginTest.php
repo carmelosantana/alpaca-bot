@@ -537,3 +537,16 @@ it('hands the settings page the controllers the REST API registers, through the 
 
     expect($listed)->toContain(AlpacaBot\Rest\ChatController::class)->toContain(StreamController::class)->toContain(ViewController::class);
 });
+
+it('fires alpaca_bot/loaded with the extension API version once everything is registered, so a companion can tell which contract it is talking to', function (): void {
+    Functions\when('add_shortcode')->justReturn();
+    Functions\when('get_option')->justReturn([]);
+    $plugin = Plugin::boot();
+    Actions\expectDone('alpaca_bot/loaded')->once()->with(Plugin::API_VERSION)->whenHappen(function () use ($plugin): void {
+        // Last: the registry and every surface already exist when a companion hears of it.
+        expect($plugin->get(Registry::class))->toBeInstanceOf(Registry::class)
+            ->and($plugin->get(Shortcodes\AgentShim::class))->toBeInstanceOf(Shortcodes\AgentShim::class);
+    });
+    $plugin->register();
+    expect(Plugin::API_VERSION)->toBe(1);
+});
