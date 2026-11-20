@@ -326,6 +326,8 @@ final class AbilitiesTest extends TestCase
             $calls = [];
             add_filter('alpaca_bot/provider', static function () use ($tool, &$calls): ProviderInterface {
                 return new class ($tool, $calls) implements ProviderInterface {
+    use \AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Provider\Stream\StreamsEventsFromResponses;
+
                     /** @param list<array{messages: array<mixed>, tools: array<mixed>}> $calls */
                     public function __construct(private string $tool, private array &$calls) {}
 

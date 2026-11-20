@@ -226,12 +226,13 @@ Releases before 0.5.0 are on the [releases page](https://github.com/carmelosanta
 
 ### 0.7.0
 
-Alpaca Bot runs on php-agents 0.17.0 and ends a turn cleanly on a refusal, a content filter, a full context window or a broken stream. Tested up to WordPress 7.2.
+Alpaca Bot runs on php-agents 0.18.0 and ends a turn cleanly on a refusal, a content filter, a full context window or a broken stream. Tested up to WordPress 7.2.
 
 <details>
 <summary>Changed</summary>
 
-- **php-agents 0.17.0.** A refusal is kept as the reply, or says the model declined when it gave no words. A reply a content filter stopped keeps what streamed and says the filter stopped it. A conversation too long for the model fails with a message to start a new one. A stream that broke off, or a `max_tokens` stop with no text, fails the turn instead of saving half an answer. No tool runs from a refused, filtered or failed reply, on Ollama or through the WordPress AI client.
+- **php-agents 0.18.0.** The agent reads a provider's stream as typed events; the site's generation options and the usage tally reach every tool-turn call through them, on Ollama and through the WordPress AI client. A tool call whose arguments are unparseable, over 4 MiB or nested more than 64 levels deep is dropped instead of run. A turn abandoned mid-reply bills the calls that finished, not the one cut off, since a call now reports its usage when it ends.
+- **Clean finishes (php-agents 0.17).** A refusal is kept as the reply, or says the model declined when it gave no words. A reply a content filter stopped keeps what streamed and says the filter stopped it. A conversation too long for the model fails with a message to start a new one. A stream that broke off, or a `max_tokens` stop with no text, fails the turn instead of saving half an answer. No tool runs from a refused, filtered or failed reply, on Ollama or through the WordPress AI client.
 - **Tools refuse arguments their schema does not declare**, as php-agents 0.17 does. The `summarize` and `draft-post` abilities pass a tool only the arguments it declares, so a toolkit swapped in through `alpaca_bot/toolkits` without `length` or `post_type` still works. A `post_status` sent to `draft_post` is refused rather than ignored; a draft is still never published.
 - **Model replies no longer render images.** An image loads with no click, so a prompt-injected reply could send the conversation to another site through one. A site that wants them back can add `img` through `alpaca_bot/render/allowed_tags`.
 

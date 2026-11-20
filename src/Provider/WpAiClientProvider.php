@@ -15,6 +15,7 @@ use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Enum\Role;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Exception\ProviderException;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Message\ToolResultMessage;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Provider\Response;
+use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Provider\Stream\StreamsEventsFromResponses;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Provider\Usage;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Tool\ToolCall;
 
@@ -28,7 +29,8 @@ use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Tool\ToolCall;
  * none. So stream() is chat() as a one-chunk generator: Chat\Pipeline and the vendored
  * AbstractAgent both iterate chunks reading `content`, `reasoning`, `toolCalls` and `usage`,
  * and the whole Response is one such chunk. The reply appears at once rather than as it is
- * produced, which is the cost of this kind; the settings copy says so.
+ * produced, which is the cost of this kind; the settings copy says so. streamEvents(), which the
+ * agent loop reads since php-agents 0.18, is that one chunk as events (StreamsEventsFromResponses).
  *
  * Tool calls are supported, mapped one-to-one: a php-agents tool's function schema becomes a
  * core function declaration, a function call part in the reply becomes a ToolCall, and the
@@ -80,6 +82,8 @@ use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Tool\ToolCall;
  */
 final class WpAiClientProvider implements ProviderInterface
 {
+    use StreamsEventsFromResponses;
+
     public function __construct(private string $model, private Client $client) {}
 
     /**

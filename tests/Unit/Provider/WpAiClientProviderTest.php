@@ -15,6 +15,10 @@ use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Message\SystemMessage;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Message\ToolResultMessage;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Message\UserMessage;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Provider\Response;
+use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Provider\Stream\Finish;
+use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Provider\Stream\ReasoningDelta;
+use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Provider\Stream\TextDelta;
+use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Provider\Stream\ToolInputEnd;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Tool\Parameter\StringParameter;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Tool\Tool;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Tool\ToolCall;
@@ -317,4 +321,31 @@ it('models() and isAvailable() read as empty and false when the client is unavai
     expect((new WpAiClientProvider('m', $broken))->models())->toBe([])
         ->and((new WpAiClientProvider('m', $broken))->isAvailable())->toBeFalse()
         ->and((new WpAiClientProvider('m', fakeWpAiClient(available: false)))->models())->toBe([]);
+});
+
+// php-agents 0.18's agent loop reads streamEvents(). Core does not stream, so the events are the
+// one chunk's: its reasoning, its text, each tool call as a start/delta/end, then one Finish
+// carrying the reason and the usage.
+it('streamEvents() turns chat()\'s one reply into events: reasoning, text, each tool call, then a Finish with the reason and usage', function (): void {
+    $client = fakeWpAiClient(replies: [[
+        'content' => 'Let me check.',
+        'reasoning' => 'thought',
+        'tool_calls' => [['id' => 'call-7', 'name' => 'lookup', 'arguments' => ['q' => 'x']]],
+        'prompt_tokens' => 11,
+        'completion_tokens' => 5,
+        'total_tokens' => 16,
+    ]]);
+    $events = iterator_to_array((new WpAiClientProvider('m', $client))->streamEvents([new UserMessage('x')], [], ['temperature' => 0.1]), false);
+
+    $ends = array_values(array_filter($events, static fn($e): bool => $e instanceof ToolInputEnd));
+    $finish = end($events);
+    expect($events[0])->toEqual(new ReasoningDelta('thought'))
+        ->and($events[1])->toEqual(new TextDelta('Let me check.'))
+        ->and($ends)->toHaveCount(1)
+        ->and($ends[0]->toToolCall()->name)->toBe('lookup')
+        ->and($ends[0]->arguments)->toBe(['q' => 'x'])
+        ->and($finish)->toBeInstanceOf(Finish::class)
+        ->and($finish->reason)->toBe(ProviderFinishReason::ToolUse)
+        ->and($finish->usage?->totalTokens)->toBe(16)
+        ->and($client->requests[0]['temperature'])->toBe(0.1);
 });

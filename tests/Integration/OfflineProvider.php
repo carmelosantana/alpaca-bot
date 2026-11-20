@@ -21,6 +21,8 @@ use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Provider\Response;
  */
 final class OfflineProvider implements ProviderInterface
 {
+    use \AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Provider\Stream\StreamsEventsFromResponses;
+
     public const MESSAGE = 'The integration suite has no model provider: call TestCase::fakeProvider() in this test.';
 
     public function chat(array $messages, array $tools = [], array $options = []): Response

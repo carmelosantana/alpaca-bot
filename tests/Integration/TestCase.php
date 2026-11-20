@@ -89,6 +89,8 @@ abstract class TestCase extends \WP_UnitTestCase
     protected function fakeProvider(?\Throwable $failure = null): void
     {
         add_filter('alpaca_bot/provider', static fn(): ProviderInterface => new class ($failure) implements ProviderInterface {
+    use \AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Provider\Stream\StreamsEventsFromResponses;
+
             public function __construct(private ?\Throwable $failure) {}
 
             public function chat(array $messages, array $tools = [], array $options = []): Response

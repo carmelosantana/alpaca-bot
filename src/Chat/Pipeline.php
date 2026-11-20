@@ -936,6 +936,9 @@ final class Pipeline
             AgentFinishReason::ContentFilter => self::filtered(),
             // failure() raises it; there is no reply to finish.
             AgentFinishReason::ContextWindowExceeded => '',
+            // php-agents 0.18 ends a run Cancelled only through a cancellation token, and the
+            // Assistant is built with none; were one ever passed, a cancelled run has no last word.
+            AgentFinishReason::Cancelled => '',
         };
         if ($tail !== '') {
             // Through the scanner like everything else. This is the one text a streamed turn

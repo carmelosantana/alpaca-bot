@@ -325,12 +325,13 @@ it('keeps the turn when anything else throws after a tool ran, the same way: the
         ->and($failed[1]->messages[1]->content)->toContain('Drafting.')->toContain('Done.')
         ->and($failed[1]->messages[1]->meta['partial'])->toBeTrue()
         ->and($failed[1]->messages[1]->meta['tool_calls'])->toBe([$record])
-        // Billed for what had arrived, read before each yield: both calls' usage, since the
-        // second stream's chunk carried its usage with the text.
-        ->and($failed[1]->messages[1]->usage)->toBe(['prompt_tokens' => 5, 'completion_tokens' => 2])
+        // Billed for what had arrived, read before each yield: the first call's usage. Since
+        // php-agents 0.18 a call's usage arrives on its Finish event, after its text, so the
+        // second call, abandoned between its text and its Finish, had reported none yet.
+        ->and($failed[1]->messages[1]->usage)->toBe(['prompt_tokens' => 3, 'completion_tokens' => 1])
         ->and(array_map(static fn(array $w): string => $w[0], $h->writes))->toBe(['wp_insert_post', 'update_post_meta', 'wp_update_post', 'wp_insert_post'])
         ->and($h->writes[1][2][1]['meta']->tool_calls)->toBe([$record])
-        ->and($h->writes[3][2]['meta_input']['total_tokens'])->toBe(7);
+        ->and($h->writes[3][2]['meta_input']['total_tokens'])->toBe(4);
 });
 
 it('finishes the turn on a tool\'s own word when a toolkit ends the run with a TerminationException, not as a provider error', function (): void {
@@ -405,7 +406,7 @@ it('stores the partial reply with the calls made so far, and lets the fiber go t
     // fiber it is suspended in is unwound, which is the release this test is about.
     $closed = false;
     $streams = 0;
-    $provider = Mockery::mock(ProviderInterface::class);
+    $provider = streamsEventsFromStream(Mockery::mock(ProviderInterface::class));
     $provider->shouldReceive('stream')->twice()->andReturnUsing(static function () use (&$streams, &$closed): \Generator {
         if (++$streams === 1) {
             yield new Response('first', ProviderFinishReason::Stop);
