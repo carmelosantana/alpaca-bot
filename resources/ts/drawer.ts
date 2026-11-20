@@ -3,6 +3,10 @@
  * entry esbuild builds, and runs when the page loads it.
  */
 import { startDrawer } from './drawer-start.ts';
+import { ready } from './hooks.ts';
+
+// window.alpacaBotChat for a companion's script; it resolves once the drawer is first opened (hooks.ts).
+ready();
 
 /**
  * Run once the document is parsed: this is a footer script, and a screen's media library may be

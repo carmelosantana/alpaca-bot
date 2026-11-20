@@ -13,7 +13,10 @@
  */
 import { boot } from './boot.ts';
 import { $ } from './dom.ts';
+import { ready } from './hooks.ts';
 
+// window.alpacaBotChat for a companion's script, before the chat boots (hooks.ts).
+ready();
 const settings = window.alpacaBot;
 const form = $<HTMLFormElement>('#ab-form');
 if (settings && form) boot(settings, form);

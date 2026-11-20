@@ -254,7 +254,7 @@ test('taking the last chip off takes the chips row with it, and not before', asy
  * composer has both context chips, which newChat() swaps in only for a shell whose form has an
  * `.ab-composer__row` (SHELL has none, so its cases see no chips from it).
  */
-async function heldTurn(t: TestContext, conversation: string, hold: { ticket?: Promise<void>; bubbles?: Promise<void> } = {}, composer: { shell?: string; before?: (form: HTMLFormElement) => void } = {}): Promise<{
+async function heldTurn(t: TestContext, conversation: string, hold: { ticket?: Promise<void>; bubbles?: Promise<void> } = {}, composer: { shell?: string; before?: (form: HTMLFormElement) => void; setup?: (win: ReturnType<typeof installDom>) => void } = {}): Promise<{
   form: HTMLFormElement;
   chat: () => Record<string, unknown> | null;
   push: (event: string, data: object) => void;
@@ -303,6 +303,7 @@ async function heldTurn(t: TestContext, conversation: string, hold: { ticket?: P
   const form = document.querySelector('#ab-form') as HTMLFormElement;
   const ids: number[] = [];
   form.addEventListener('ab:conversation', (e) => { ids.push((e as CustomEvent<{ id: number }>).detail.id); });
+  composer.setup?.(win);
   boot(CFG, form);
   composer.before?.(form);
   const send = form.querySelector('[data-action="send"]') as HTMLButtonElement;
@@ -748,4 +749,89 @@ test('a model change and the history refresh, each an htmx swap inside the shell
   // The history select's refresh, which swaps the select itself (outerHTML).
   (document.querySelector('#ab-history-select') as HTMLElement).dispatchEvent(new CustomEvent('htmx:afterSwap', { bubbles: true }));
   assert.deepEqual(ids, [5, 5]);
+});
+
+// ---- extension hooks (resources/ts/hooks.ts) -----------------------------------------------
+
+/** A recording stand-in for core's wp.hooks: every action with its arguments, and filters a case adds. */
+function recordingHooks(win: ReturnType<typeof installDom>): { heard: [string, ...unknown[]][]; filters: Record<string, (v: unknown) => unknown> } {
+  const heard: [string, ...unknown[]][] = [];
+  const filters: Record<string, (v: unknown) => unknown> = {};
+  const listeners: Record<string, ((...a: unknown[]) => void)[]> = {};
+  (win as unknown as Record<string, unknown>).wp = { hooks: {
+    applyFilters: (name: string, value: unknown) => (filters[name] ? filters[name](value) : value),
+    doAction: (name: string, ...args: unknown[]) => { heard.push([name, ...args]); for (const fn of listeners[name] ?? []) fn(...args); },
+    addAction: (name: string, _ns: string, fn: (...a: unknown[]) => void) => { (listeners[name] ??= []).push(fn); },
+  } };
+  return { heard, filters };
+}
+
+test('boot announces the chat on alpacaBot.ready with the API version, the form and the shell, and window.alpacaBotChat.ready resolves with it', async (t) => {
+  let rec!: ReturnType<typeof recordingHooks>;
+  const turn = await heldTurn(t, '0', {}, { setup: (win) => { rec = recordingHooks(win); } });
+  const ready = rec.heard.find(([name]) => name === 'alpacaBot.ready');
+  assert.ok(ready);
+  const api = ready[1] as { apiVersion: number; form: HTMLFormElement; shell: Element };
+  assert.equal(api.apiVersion, 1);
+  assert.equal(api.form === turn.form, true);
+  assert.equal(api.shell === document.querySelector('.ab-wrap'), true);
+  assert.equal(((await window.alpacaBotChat!.ready) as unknown) === api, true);
+  turn.close();
+  await turn.finished();
+});
+
+test('alpacaBot.chat.request filters the POST /chat body, and the turn still streams', async (t) => {
+  const turn = await heldTurn(t, '7', {}, { setup: (win) => {
+    recordingHooks(win).filters['alpacaBot.chat.request'] = (body) => ({ ...(body as object), stream: false, context: { kb: 'faq' } });
+  } });
+  assert.deepEqual(turn.chat()?.context, { kb: 'faq' });
+  assert.equal(turn.chat()?.stream, true);
+  assert.equal(turn.chat()?.message, 'hello');
+  turn.close();
+  await turn.finished();
+});
+
+test('a finished turn fires alpacaBot.turn.started, then alpacaBot.message.rendered and alpacaBot.turn.completed with the rendered reply', async (t) => {
+  let rec!: ReturnType<typeof recordingHooks>;
+  const turn = await heldTurn(t, '0', {}, { setup: (win) => { rec = recordingHooks(win); } });
+  turn.push('start', { conversation_id: 42 });
+  turn.push('done', { conversation_id: 42, message: { content: 'hi', model: 'llama3.2' }, receipt: { duration_ms: 5 } });
+  turn.close();
+  await turn.finished();
+  const names = rec.heard.map(([name]) => name).filter((name) => name !== 'alpacaBot.ready');
+  assert.deepEqual(names, ['alpacaBot.turn.started', 'alpacaBot.message.rendered', 'alpacaBot.turn.completed']);
+  const started = rec.heard.find(([name]) => name === 'alpacaBot.turn.started')!;
+  assert.deepEqual(started.slice(1), [{ conversationId: 0, text: 'hello' }]);
+  const rendered = rec.heard.find(([name]) => name === 'alpacaBot.message.rendered')!;
+  assert.equal((rendered[1] as Element).classList.contains('ab-rendered'), true);
+  const completed = rec.heard.find(([name]) => name === 'alpacaBot.turn.completed')!;
+  const detail = completed[1] as { conversationId: number; message: { content: string }; receipt: { duration_ms: number } };
+  assert.equal(detail.conversationId, 42);
+  assert.equal(detail.message.content, 'hi');
+  assert.equal(detail.receipt.duration_ms, 5);
+  assert.equal((completed[2] as Element).classList.contains('ab-rendered'), true);
+});
+
+test('a turn that ends on an error frame fires alpacaBot.turn.failed with the message, and no completed', async (t) => {
+  let rec!: ReturnType<typeof recordingHooks>;
+  const turn = await heldTurn(t, '3', {}, { setup: (win) => { rec = recordingHooks(win); } });
+  turn.push('error', { message: 'Provider error: boom' });
+  turn.close();
+  await turn.finished();
+  const failed = rec.heard.find(([name]) => name === 'alpacaBot.turn.failed');
+  assert.deepEqual(failed?.slice(1), [{ conversationId: 3, message: 'Provider error: boom' }]);
+  assert.equal(rec.heard.some(([name]) => name === 'alpacaBot.turn.completed'), false);
+});
+
+test('an htmx swap inside the shell fires alpacaBot.message.rendered for each message it brought in', async () => {
+  const win = installDom(SHELL);
+  const rec = recordingHooks(win);
+  const { boot } = await import('../../resources/ts/boot.ts');
+  boot(CFG, document.querySelector('#ab-form') as HTMLFormElement);
+  const next = document.createElement('div');
+  next.id = 'ab-messages';
+  next.innerHTML = '<article class="ab-msg ab-msg--user"><div class="ab-msg__content">a</div></article><article class="ab-msg ab-msg--assistant"><div class="ab-msg__content">b</div></article>';
+  (document.querySelector('#ab-messages') as HTMLElement).replaceWith(next);
+  next.dispatchEvent(new win.CustomEvent('htmx:afterSwap', { bubbles: true }) as unknown as Event);
+  assert.equal(rec.heard.filter(([name]) => name === 'alpacaBot.message.rendered').length, 2);
 });
