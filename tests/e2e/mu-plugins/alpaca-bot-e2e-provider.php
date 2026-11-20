@@ -50,6 +50,8 @@ define('ALPACA_BOT_E2E_MODEL', 'e2e-fake-model');
  */
 add_filter('alpaca_bot/provider', static function (): object {
     return new class implements \AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Contract\ProviderInterface {
+        use \AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Provider\Stream\StreamsEventsFromResponses;
+
         public function chat(array $messages, array $tools = [], array $options = []): \AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Provider\Response
         {
             return new \AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Provider\Response(
