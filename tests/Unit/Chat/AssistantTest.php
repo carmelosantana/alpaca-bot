@@ -21,7 +21,7 @@ it('is named, carries the system text as its instructions, and runs six iteratio
 });
 
 it('sends the model one system message holding the site text and every toolkit\'s guidelines, the toolkit tools, and the prior turns without their system message', function (): void {
-    $provider = Mockery::mock(ProviderInterface::class);
+    $provider = streamsEventsFromStream(Mockery::mock(ProviderInterface::class));
     $seen = null;
     $provider->shouldReceive('stream')->once()->andReturnUsing(static function (array $messages, array $tools, array $options = []) use (&$seen): \Generator {
         $seen = ['messages' => $messages, 'tools' => $tools];
@@ -57,7 +57,7 @@ it('sends the model one system message holding the site text and every toolkit\'
 // then give up with an EmptyResponse finish; a chat should show the answer the model wrote,
 // even if it wrote it as a thought, rather than a line saying it gave none.
 it('nudges a model that answers only in reasoning twice, then takes the reasoning as the answer', function (): void {
-    $provider = Mockery::mock(ProviderInterface::class);
+    $provider = streamsEventsFromStream(Mockery::mock(ProviderInterface::class));
     $nudges = [];
     $provider->shouldReceive('stream')->times(3)->andReturnUsing(static function (array $messages) use (&$nudges): \Generator {
         $last = $messages[array_key_last($messages)];

@@ -8,6 +8,8 @@ use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Contract\ProviderInterface;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Enum\ProviderFinishReason;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Message\UserMessage;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Provider\Response;
+use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Provider\Stream\Finish;
+use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Provider\Stream\TextDelta;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Provider\Usage;
 
 // AbstractAgent::run() calls stream($messages, $tools) with no options argument, so a provider
@@ -101,4 +103,45 @@ it('delegates models(), isAvailable() and getModel(), and withModel() rebinds th
         ->and($rebound)->not->toBe($bound)
         ->and($rebound->getModel())->toBe('qwen3:8b')
         ->and($rebound->chat([])->content)->toBe('ok');
+});
+
+// Since php-agents 0.18 the agent loop calls streamEvents(), not stream(), so a tool turn's
+// options and usage go through this method; forwarding it keeps the inner provider's own
+// events (tool input deltas, ticks) rather than rebuilding them from chunks.
+it('forwards streamEvents() to the inner provider with the bound options merged, passing every event through untouched', function (): void {
+    $inner = Mockery::mock(ProviderInterface::class);
+    $text = new TextDelta('hi');
+    $finish = new Finish(ProviderFinishReason::Stop);
+    $seen = null;
+    $inner->shouldReceive('streamEvents')->once()->andReturnUsing(function (array $m, array $t, array $o) use (&$seen, $text, $finish): \Generator {
+        $seen = $o;
+        yield $text;
+        yield $finish;
+    });
+    $bound = new BoundOptionsProvider($inner, ['temperature' => 0.2, 'num_ctx' => 4096]);
+
+    $events = iterator_to_array($bound->streamEvents([], [], ['temperature' => 0.9]), false);
+
+    expect($events)->toBe([$text, $finish])
+        ->and($seen)->toBe(['temperature' => 0.9, 'num_ctx' => 4096]);
+});
+
+it('tallies the usage a streamEvents() Finish reports, added to the other calls\' and not counted before it arrives', function (): void {
+    $inner = Mockery::mock(ProviderInterface::class);
+    $inner->shouldReceive('streamEvents')->twice()->andReturnUsing(function (): \Generator {
+        yield new TextDelta('a');
+        yield new Finish(ProviderFinishReason::Stop, usage: new Usage(900, 40, 940));
+    });
+    $inner->shouldReceive('chat')->once()->andReturn(new Response('ok', ProviderFinishReason::Stop, usage: new Usage(10, 5, 15)));
+    $bound = new BoundOptionsProvider($inner, []);
+
+    $events = $bound->streamEvents([]);
+    $events->current();
+    expect($bound->usage()->totalTokens)->toBe(0);
+    $events->next();
+    expect([$bound->usage()->promptTokens, $bound->usage()->completionTokens])->toBe([900, 40]);
+
+    iterator_to_array($bound->streamEvents([]), false);
+    $bound->chat([]);
+    expect([$bound->usage()->promptTokens, $bound->usage()->completionTokens, $bound->usage()->totalTokens])->toBe([1810, 85, 1895]);
 });

@@ -532,6 +532,27 @@ function streamTicket(array $changes = []): array
     ], $changes);
 }
 
+/**
+ * Since php-agents 0.18 the agent loop calls streamEvents(), not stream(). A Mockery provider
+ * set up with stream() expectations gets a streamEvents() that runs the mocked stream() through
+ * the library's own StreamsEventsFromResponses, so the stream() expectations (and their counts)
+ * still describe every call the agent makes. A plain turn calls stream() itself and never this.
+ */
+function streamsEventsFromStream(Mockery\MockInterface&ProviderInterface $provider): Mockery\MockInterface&ProviderInterface
+{
+    $provider->shouldReceive('streamEvents')->andReturnUsing(static fn(array $messages, array $tools = [], array $options = []): iterable => (new class ($provider) {
+        use \AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Provider\Stream\StreamsEventsFromResponses;
+
+        public function __construct(private ProviderInterface $provider) {}
+
+        public function stream(array $messages, array $tools = [], array $options = []): iterable
+        {
+            return $this->provider->stream($messages, $tools, $options);
+        }
+    })->streamEvents($messages, $tools, $options));
+    return $provider;
+}
+
 /** PipelineTest: a provider mock whose one stream() call yields the given chunks and captures its arguments into `$call`. */
 function pipelineProvider(array $chunks, ?array &$call = null): ProviderInterface
 {
@@ -545,7 +566,7 @@ function pipelineProvider(array $chunks, ?array &$call = null): ProviderInterfac
             yield $chunk;
         }
     });
-    return $provider;
+    return streamsEventsFromStream($provider);
 }
 
 /**
@@ -572,7 +593,7 @@ function agentProvider(array $turns, ?array &$calls = null): ProviderInterface
             yield $chunk;
         }
     });
-    return $provider;
+    return streamsEventsFromStream($provider);
 }
 
 /**

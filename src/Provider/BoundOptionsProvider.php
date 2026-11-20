@@ -6,11 +6,12 @@ namespace AlpacaBot\Provider;
 
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Contract\ProviderInterface;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Provider\Response;
+use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Provider\Stream\Finish;
 use AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Provider\Usage;
 
 /**
- * A provider with the site's generation options already bound to it: every chat(), stream()
- * and structured() call goes to the wrapped provider with those options filled in. It also
+ * A provider with the site's generation options already bound to it: every chat(), stream(),
+ * streamEvents() and structured() call goes to the wrapped provider with those options filled in. It also
  * keeps a running tally of the usage those calls report (usage()).
  *
  * The pipeline passes `temperature`, `num_ctx` and `keep_alive` (Store::modelOverrides()) as
@@ -83,6 +84,26 @@ final class BoundOptionsProvider implements ProviderInterface
         }
     }
 
+    /**
+     * The inner provider's events, with the bound options merged, passed through as they come.
+     * Since php-agents 0.18 this is the call the agent loop makes on every tool-turn iteration,
+     * so it is where the bound options must reach a tool turn. Usage arrives once, on the
+     * Finish, and is tallied when that event passes; a caller that stops before it keeps
+     * nothing for this call, as it would with a provider that reports usage on its last chunk.
+     *
+     * @return \Generator<int, \AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Provider\Stream\StreamEvent>
+     */
+    public function streamEvents(array $messages, array $tools = [], array $options = []): \Generator
+    {
+        foreach ($this->inner->streamEvents($messages, $tools, $options + $this->options) as $event) {
+            if ($event instanceof Finish && $event->usage !== null) {
+                $this->promptTokens += $event->usage->promptTokens;
+                $this->completionTokens += $event->usage->completionTokens;
+            }
+            yield $event;
+        }
+    }
+
     public function structured(array $messages, string $schema, array $options = []): mixed
     {
         return $this->inner->structured($messages, $schema, $options + $this->options);
@@ -109,7 +130,7 @@ final class BoundOptionsProvider implements ProviderInterface
     }
 
     /**
-     * The usage every chat() and stream() call through this provider has reported so far,
+     * The usage every chat(), stream() and streamEvents() call through this provider has reported so far,
      * summed; structured() reports none. Zero until the first call reports.
      */
     public function usage(): Usage
