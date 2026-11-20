@@ -220,6 +220,21 @@ final class Plugin
         $registry->register('draft_post', $draftPost);
         $abilitiesKit = new Toolkit\AbilitiesToolkit($store, get_current_user_id(...));
         $registry->register(Toolkit\AbilitiesToolkit::ID, $abilitiesKit);
+        /**
+         * Fires once the built-in toolkits are registered, with the Registrar a companion plugin adds
+         * its own toolkit through: `$toolkits->add($id, $toolkit, $label, $description, $capability)`
+         * registers it beside the built-ins, gives it a box under Settings › Tools › Enabled tools
+         * (off until an administrator ticks it) and a `tool.{id}` row under Settings › Access
+         * defaulting to `$capability`. Fires on `plugins_loaded` priority 9, before
+         * `alpaca_bot/loaded`; a companion hooks it from its main file. A companion that only
+         * registers WordPress abilities does not need it: the abilities allowlist under Settings ›
+         * Tools already offers those to the model. `alpaca_bot/toolkits` remains the last word
+         * over what one turn is offered.
+         *
+         * @since 0.8.0
+         * @param Toolkit\Registrar $toolkits the registrar over the plugin's toolkit registry
+         */
+        do_action('alpaca_bot/register_toolkits', new Toolkit\Registrar($registry));
         $this->set(Toolkit\Registry::class, $registry);
         // The abilities, on core's two hooks and no other (Abilities\Register says why there is
         // no init fallback), the category's hook first because core fires it first and refuses

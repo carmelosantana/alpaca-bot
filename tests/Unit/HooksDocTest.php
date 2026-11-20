@@ -396,7 +396,7 @@ it('lists before_send ahead of system_prompt for a real turn, and names the cron
         ->and($run['stdout'])->toContain('`alpaca_bot/usage/cleanup`')->toContain('WP-Cron');
 });
 
-it('documents exactly the twenty-eight hooks the plugin ships, the four built through Capability::filtered() included', function (): void {
+it('documents exactly the twenty-nine hooks the plugin ships, the four built through Capability::filtered() included', function (): void {
     $run = hooksDoc(dirname(__DIR__, 2));
 
     expect($run['code'])->toBe(0, $run['stderr']);
@@ -422,6 +422,7 @@ it('documents exactly the twenty-eight hooks the plugin ships, the four built th
         'alpaca_bot/models',
         'alpaca_bot/provider',
         'alpaca_bot/rate_limit',
+        'alpaca_bot/register_toolkits',
         'alpaca_bot/render/allowed_tags',
         'alpaca_bot/rest/controllers',
         'alpaca_bot/shortcode/allow_guests',

@@ -550,3 +550,20 @@ it('fires alpaca_bot/loaded with the extension API version once everything is re
     $plugin->register();
     expect(Plugin::API_VERSION)->toBe(1);
 });
+
+it('hands alpaca_bot/register_toolkits a Registrar over the container\'s registry once the built-ins are in, before alpaca_bot/loaded', function (): void {
+    Functions\when('add_shortcode')->justReturn();
+    Functions\when('get_option')->justReturn([]);
+    $plugin = Plugin::boot();
+    $order = [];
+    Actions\expectDone('alpaca_bot/register_toolkits')->once()->with(Mockery::type(AlpacaBot\Toolkit\Registrar::class))->whenHappen(function (AlpacaBot\Toolkit\Registrar $r) use (&$order): void {
+        $order[] = 'register_toolkits';
+        expect($r->add('orders', echoToolkit('lookup_order'), 'Orders'))->toBeTrue();
+    });
+    Actions\expectDone('alpaca_bot/loaded')->once()->whenHappen(function () use (&$order): void {
+        $order[] = 'loaded';
+    });
+    $plugin->register();
+    expect($order)->toBe(['register_toolkits', 'loaded'])
+        ->and($plugin->get(Registry::class)->ids())->toBe(['web_fetch', 'summarize', 'draft_post', 'abilities', 'orders']);
+});
