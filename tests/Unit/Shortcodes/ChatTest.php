@@ -278,7 +278,7 @@ it('never generates inside a REST request: an editor gets the cached answer, or 
 });
 
 it('cache="off" reads no transient and writes none, and generates on every render', function (): void {
-    $provider = Mockery::mock(ProviderInterface::class);
+    $provider = streamsEventsFromStream(Mockery::mock(ProviderInterface::class));
     $provider->shouldReceive('stream')->twice()->andReturnUsing(static function (): \Generator {
         yield from shortcodeReply('Fresh');
     });
@@ -297,7 +297,7 @@ it('keys a cache="off" shortcode apart from its cached twin, so neither one\'s m
     // Review M7: with one key for both, whichever rendered second was served from the memo; when
     // the `off` one came first, the caching twin never wrote its transient and the page
     // generated on every request for good. The duration is part of the identity.
-    $provider = Mockery::mock(ProviderInterface::class);
+    $provider = streamsEventsFromStream(Mockery::mock(ProviderInterface::class));
     $provider->shouldReceive('stream')->twice()->andReturnUsing(static function (): \Generator {
         yield from shortcodeReply('Fresh');
     });
@@ -313,7 +313,7 @@ it('keys a cache="off" shortcode apart from its cached twin, so neither one\'s m
 });
 
 it('keys the cache on the post, so the same shortcode on two pages generates twice, and the same one twice on a page generates once', function (): void {
-    $provider = Mockery::mock(ProviderInterface::class);
+    $provider = streamsEventsFromStream(Mockery::mock(ProviderInterface::class));
     $provider->shouldReceive('stream')->twice()->andReturnUsing(static function (): \Generator {
         yield from shortcodeReply('Answer');
     });

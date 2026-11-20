@@ -840,7 +840,7 @@ it('sends a caller\'s temperature option to the provider over the model\'s setti
 // so it has to hold for the whole of every turn, whoever started it, and let go however the turn
 // ended: drained, refused, thrown, or walked away from.
 it('running() is false until a turn is first advanced, true until it ends, and counts a turn started inside another', function (): void {
-    $provider = Mockery::mock(ProviderInterface::class);
+    $provider = streamsEventsFromStream(Mockery::mock(ProviderInterface::class));
     $provider->shouldReceive('stream')->twice()->andReturnUsing(static function (): \Generator {
         yield new Response('ok', ProviderFinishReason::Stop, usage: new Usage(1, 1, 2));
     });

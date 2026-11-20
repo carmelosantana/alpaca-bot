@@ -196,6 +196,8 @@ final class ChatRoutesTest extends TestCase
         $calls = 0;
         add_filter('alpaca_bot/provider', static function () use (&$calls): ProviderInterface {
             return new class ($calls) implements ProviderInterface {
+    use \AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Provider\Stream\StreamsEventsFromResponses;
+
                 public function __construct(private int &$calls) {}
 
                 public function chat(array $messages, array $tools = [], array $options = []): Response

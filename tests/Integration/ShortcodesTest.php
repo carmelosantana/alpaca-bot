@@ -305,6 +305,8 @@ final class ShortcodesTest extends TestCase
         $prompts = [];
         add_filter('alpaca_bot/provider', static function () use (&$prompts): ProviderInterface {
             return new class ($prompts) implements ProviderInterface {
+    use \AlpacaBot\Vendor\CarmeloSantana\PHPAgents\Provider\Stream\StreamsEventsFromResponses;
+
             /** @param list<string> $prompts */
             public function __construct(private array &$prompts) {}
 
