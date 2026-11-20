@@ -7,6 +7,7 @@ use AlpacaBot\Chat\ConversationStore;
 use AlpacaBot\Chat\Message;
 use AlpacaBot\Plugin;
 use AlpacaBot\Settings\Store;
+use Brain\Monkey\Actions;
 use Brain\Monkey\Functions;
 
 // Brain Monkey 2.7: Functions\expect() starts from a byDefault expectation and with() attaches
@@ -605,4 +606,36 @@ it('marks the ConversationStore registration as the plugin\'s only when the name
     Functions\when('post_type_exists')->justReturn(true);
     Functions\expect('register_post_type')->once()->withArgs(static fn(string $type, array $args): bool => $type === ConversationStore::POST_TYPE && $args[Plugin::POST_TYPE_MARK] === false);
     (new ConversationStore(new Store()))->registerPostType();
+});
+
+// ------------------------------------------------------------ lifecycle hooks
+
+it('fires alpaca_bot/conversation/saved with the conversation once it is written, the empty one included, and never for a save it refuses', function (): void {
+    Functions\when('get_post')->justReturn(conversationChatPost());
+    Functions\when('update_post_meta')->justReturn(true);
+    Functions\when('wp_update_post')->justReturn(42);
+    $s = new ConversationStore(new Store());
+    $c = new Conversation(42, 3, 'T');
+    $c->append(new Message('user', 'Hello there'));
+    $empty = new Conversation(42, 3, 'T');
+    $saved = [];
+    Actions\expectDone('alpaca_bot/conversation/saved')->twice()->whenHappen(static function (Conversation $conversation) use (&$saved): void {
+        $saved[] = $conversation;
+    });
+    $s->save($c);
+    $s->save($empty);
+    $s->save(new Conversation(42, 9, 'Not theirs'));
+    $s->save(new Conversation(0, 3, 'Unsaved'));
+    expect($saved)->toBe([$c, $empty]);
+});
+
+it('fires alpaca_bot/conversation/deleted with the id and the owner after a delete, and not when the delete is refused or fails', function (): void {
+    Functions\when('get_post')->justReturn(conversationChatPost());
+    Functions\when('wp_delete_post')->justReturn(false);
+    $s = new ConversationStore(new Store());
+    Actions\expectDone('alpaca_bot/conversation/deleted')->once()->with(42, 3);
+    expect($s->delete(42, 3))->toBeFalse() // the delete failed
+        ->and($s->delete(42, 9))->toBeFalse(); // not the owner
+    Functions\when('wp_delete_post')->justReturn(conversationChatPost());
+    expect($s->delete(42, 3))->toBeTrue();
 });
