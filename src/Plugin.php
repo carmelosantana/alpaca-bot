@@ -9,9 +9,21 @@ use AlpacaBot\Settings\Store;
 
 final class Plugin
 {
-    public const VERSION = '0.7.0';
+    public const VERSION = '0.8.0';
     public const OPTION = 'alpaca_bot_settings';
     public const TEXT_DOMAIN = 'alpaca-bot';
+
+    /**
+     * The version of the extension contract a companion plugin builds on: the `alpaca_bot/*`
+     * hooks, the toolkit registrar (`alpaca_bot/register_toolkits`) and the chat UI's
+     * `alpacaBot.*` JavaScript hooks. It moves only when one of those changes in a way a
+     * companion would have to change for, and independently of VERSION. `alpaca_bot/loaded`
+     * hands it over, so a companion that needs a later contract can stand down with a notice
+     * instead of calling something that is not there.
+     *
+     * @since 0.8.0
+     */
+    public const API_VERSION = 1;
 
     /**
      * An extra argument the plugin's two post types are registered with, which core keeps as a
@@ -208,6 +220,21 @@ final class Plugin
         $registry->register('draft_post', $draftPost);
         $abilitiesKit = new Toolkit\AbilitiesToolkit($store, get_current_user_id(...));
         $registry->register(Toolkit\AbilitiesToolkit::ID, $abilitiesKit);
+        /**
+         * Fires once the built-in toolkits are registered, with the Registrar a companion plugin adds
+         * its own toolkit through: `$toolkits->add($id, $toolkit, $label, $description, $capability)`
+         * registers it beside the built-ins, gives it a box under Settings › Tools › Enabled tools
+         * (off until an administrator ticks it) and a `tool.{id}` row under Settings › Access
+         * defaulting to `$capability`. Fires on `plugins_loaded` priority 9, before
+         * `alpaca_bot/loaded`; a companion hooks it from its main file. A companion that only
+         * registers WordPress abilities does not need it: the abilities allowlist under Settings ›
+         * Tools already offers those to the model. `alpaca_bot/toolkits` remains the last word
+         * over what one turn is offered.
+         *
+         * @since 0.8.0
+         * @param Toolkit\Registrar $toolkits the registrar over the plugin's toolkit registry
+         */
+        do_action('alpaca_bot/register_toolkits', new Toolkit\Registrar($registry));
         $this->set(Toolkit\Registry::class, $registry);
         // The abilities, on core's two hooks and no other (Abilities\Register says why there is
         // no init fallback), the category's hook first because core fires it first and refuses
@@ -289,6 +316,18 @@ final class Plugin
             // checks (Cli\RawOptionWrite says how, and why it has to end the command itself).
             (new Cli\RawOptionWrite($store, $this->get(Mcp\ServerSettings::class)))->register();
         }
+        /**
+         * Fires once Alpaca Bot has registered everything it registers on `plugins_loaded`: the
+         * hook a companion plugin waits for. It is the plugin's own, at `plugins_loaded` priority
+         * 9, so a companion that hooks it from its main file hears it whatever order the two
+         * plugins load in, and one that never hears it knows Alpaca Bot is not active. Compare
+         * `$apiVersion` with the contract the companion was written for (Plugin::API_VERSION
+         * says when it moves) before using anything.
+         *
+         * @since 0.8.0
+         * @param int $apiVersion Plugin::API_VERSION, the extension contract this install speaks
+         */
+        do_action('alpaca_bot/loaded', self::API_VERSION);
     }
 
     /**

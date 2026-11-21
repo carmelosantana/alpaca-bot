@@ -7,6 +7,7 @@ namespace AlpacaBot\Settings;
 use AlpacaBot\Access;
 use AlpacaBot\Plugin;
 use AlpacaBot\Toolkit\AbilitiesToolkit;
+use AlpacaBot\Toolkit\Registrar;
 
 /**
  * The single source of truth for what lives in the `alpaca_bot_settings` option.
@@ -123,6 +124,37 @@ final class Schema
 
     /** @return array<string, Field> */
     public static function fields(): array
+    {
+        return self::withCompanions(self::builtIn());
+    }
+
+    /**
+     * The fields with each companion toolkit (Toolkit\Registrar) added: its id as a box under
+     * Enabled tools, never in the default, so it is off until ticked, and its `access.tool.{id}`
+     * row after the built-in tool rows, defaulting to the capability it registered with.
+     *
+     * @param array<string, Field> $fields
+     * @return array<string, Field>
+     */
+    private static function withCompanions(array $fields): array
+    {
+        $companions = Registrar::all();
+        if ($companions === []) {
+            return $fields;
+        }
+        $rows = [];
+        foreach ($companions as $id => $c) {
+            $fields['toolkits.enabled']['options'][$id] = $c['label'];
+            /* translators: %s: the companion toolkit's label */
+            $rows['access.tool.' . $id] = self::access('tool.' . $id, sprintf(__('Tool: %s', 'alpaca-bot'), $c['label']), $c['description']);
+        }
+        $at = array_search('access.tool.abilities', array_keys($fields), true);
+        $at = $at === false ? count($fields) : $at + 1;
+        return array_slice($fields, 0, $at, true) + $rows + array_slice($fields, $at, null, true);
+    }
+
+    /** @return array<string, Field> */
+    private static function builtIn(): array
     {
         return [
             // Both options are always offered, whatever this WordPress has: hiding `wp-ai` when

@@ -1702,3 +1702,25 @@ it('checks nothing mid-turn when no cap is set', function (): void {
     expect($h->pipeline->complete(3, 'ping')->reply->content)->toBe('Done.')
         ->and($calls)->toHaveCount(2);
 });
+
+it('asks alpaca_bot/tool/before_call about every call the model makes, under the id the toolkit was enabled with, and hands a refusal back to the model as the tool\'s answer', function (): void {
+    $ran = 0;
+    $toolkit = echoToolkit('echo_tool', 'Use it.', static function (array $a) use (&$ran): ToolResult {
+        ++$ran;
+        return ToolResult::success('echo:' . $a['text']);
+    });
+    $provider = agentProvider([
+        [new Response('', ProviderFinishReason::ToolUse, [new ToolCall('c1', 'echo_tool', ['text' => 'ping'])])],
+        [new Response('It was refused.', ProviderFinishReason::Stop, usage: new Usage(2, 2, 4))],
+    ], $calls);
+    $h = pipelineWith($provider, [], [], TOOL_MODEL, null, registryWith(['echo' => $toolkit]));
+    Filters\expectApplied('alpaca_bot/tool/before_call')->once()->with(null, 'echo', 'echo_tool', ['text' => 'ping'], 3)->andReturn(new WP_Error('held', 'Waiting for an editor.'));
+    Actions\expectDone('alpaca_bot/tool/called')->once()->with('echo', 'echo_tool', ['text' => 'ping'], 3, Mockery::type(ToolResult::class), Mockery::type(WP_Error::class));
+
+    $r = $h->pipeline->complete(3, 'ping');
+
+    expect($ran)->toBe(0)
+        ->and($r->reply->content)->toBe('It was refused.')
+        ->and($r->reply->meta['tool_calls'][0])->toMatchArray(['name' => 'echo_tool', 'result_excerpt' => 'Waiting for an editor.', 'ok' => false])
+        ->and($calls[1]['messages'][3]->content())->toBe('Waiting for an editor.');
+});

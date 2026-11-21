@@ -47,7 +47,7 @@ it('exposes a version and boots once', function (): void {
     $b = Plugin::boot();
     expect($a)->toBe($b)
         ->and($a->version())->toBe(Plugin::VERSION)
-        ->and(Plugin::VERSION)->toMatch('/^0\.7\.0/');
+        ->and(Plugin::VERSION)->toMatch('/^0\.8\.0/');
 });
 
 it('registers the settings store, provider factory, model catalog, conversation store, usage meter, cap policy, context collector and chat pipeline, hooks both post types on init, and runs the 0.4 migration on init after them, never on admin_init', function (): void {
@@ -536,4 +536,34 @@ it('hands the settings page the controllers the REST API registers, through the 
     $listed = array_map(static fn(object $c): string => $c::class, [...$controllers()]);
 
     expect($listed)->toContain(AlpacaBot\Rest\ChatController::class)->toContain(StreamController::class)->toContain(ViewController::class);
+});
+
+it('fires alpaca_bot/loaded with the extension API version once everything is registered, so a companion can tell which contract it is talking to', function (): void {
+    Functions\when('add_shortcode')->justReturn();
+    Functions\when('get_option')->justReturn([]);
+    $plugin = Plugin::boot();
+    Actions\expectDone('alpaca_bot/loaded')->once()->with(Plugin::API_VERSION)->whenHappen(function () use ($plugin): void {
+        // Last: the registry and every surface already exist when a companion hears of it.
+        expect($plugin->get(Registry::class))->toBeInstanceOf(Registry::class)
+            ->and($plugin->get(Shortcodes\AgentShim::class))->toBeInstanceOf(Shortcodes\AgentShim::class);
+    });
+    $plugin->register();
+    expect(Plugin::API_VERSION)->toBe(1);
+});
+
+it('hands alpaca_bot/register_toolkits a Registrar over the container\'s registry once the built-ins are in, before alpaca_bot/loaded', function (): void {
+    Functions\when('add_shortcode')->justReturn();
+    Functions\when('get_option')->justReturn([]);
+    $plugin = Plugin::boot();
+    $order = [];
+    Actions\expectDone('alpaca_bot/register_toolkits')->once()->with(Mockery::type(AlpacaBot\Toolkit\Registrar::class))->whenHappen(function (AlpacaBot\Toolkit\Registrar $r) use (&$order): void {
+        $order[] = 'register_toolkits';
+        expect($r->add('orders', echoToolkit('lookup_order'), 'Orders'))->toBeTrue();
+    });
+    Actions\expectDone('alpaca_bot/loaded')->once()->whenHappen(function () use (&$order): void {
+        $order[] = 'loaded';
+    });
+    $plugin->register();
+    expect($order)->toBe(['register_toolkits', 'loaded'])
+        ->and($plugin->get(Registry::class)->ids())->toBe(['web_fetch', 'summarize', 'draft_post', 'abilities', 'orders']);
 });

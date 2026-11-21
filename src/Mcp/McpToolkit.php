@@ -161,7 +161,10 @@ final class McpToolkit implements ToolkitInterface
         /**
          * Fires after a remote MCP tool has been called, whether the server answered or not: the
          * hook for an audit trail of what the model asked another party to do on this site's
-         * behalf. It fires in-process and stores nothing.
+         * behalf. It fires in-process and stores nothing. Since 0.8.0 the same call also fires
+         * `alpaca_bot/tool/called`, which every toolkit's calls fire, with the toolkit id
+         * `mcp.<id>` and the prefixed name the model used; this one stays for the server's own name
+         * and for listeners written against 0.6, and it fires first, from inside the call.
          *
          * @since 0.6.0
          * @param string               $serverId  the server's id, as its Settings › Access row `mcp.<id>` names it

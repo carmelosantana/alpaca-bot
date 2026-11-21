@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace AlpacaBot;
 
 use AlpacaBot\Settings\Store;
+use AlpacaBot\Toolkit\Registrar;
 
 /**
  * Who may use what, per site: the rows of Settings › Access, each one capability name, and what a
@@ -80,6 +81,8 @@ final class Access
      */
     private const SETTINGS_PREFIX = 'settings.';
 
+    private const TOOL_PREFIX = 'tool.';
+
     /**
      * Row => how many arguments its filter is called with after the capability, and so how many
      * a caller of effective() must pass. Every row is listed, `0` included, because a row that
@@ -132,6 +135,9 @@ final class Access
      * tool row to match: that is Toolkit\Registry::enabled()'s floor, and it is the one behaviour
      * change these defaults carry.
      *
+     * Then each companion toolkit's row (Toolkit\Registrar), `tool.{id}`, at the capability it
+     * registered with.
+     *
      * @return array<string, string>
      */
     public static function defaults(): array
@@ -145,7 +151,10 @@ final class Access
             'settings.read' => 'manage_options',
             'settings.write' => 'manage_options',
             'shortcode' => 'edit_posts',
-        ];
+        ] + array_combine(
+            array_map(static fn(string $id): string => self::TOOL_PREFIX . $id, array_keys(Registrar::all())),
+            array_column(Registrar::all(), 'capability'),
+        );
     }
 
     /**
@@ -176,7 +185,13 @@ final class Access
      */
     public static function expectedArgs(string $row): int
     {
-        return str_starts_with($row, self::MCP_PREFIX) ? self::MCP_ARGS : (self::ARGS[$row] ?? 0);
+        return match (true) {
+            str_starts_with($row, self::MCP_PREFIX) => self::MCP_ARGS,
+            isset(self::ARGS[$row]) => self::ARGS[$row],
+            // A companion toolkit's row (Toolkit\Registrar) is a tool row: it passes the user id.
+            str_starts_with($row, self::TOOL_PREFIX) && isset(Registrar::all()[substr($row, strlen(self::TOOL_PREFIX))]) => 1,
+            default => 0,
+        };
     }
 
     /**

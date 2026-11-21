@@ -4,7 +4,7 @@ Donate link: https://www.patreon.com/carmelosantana
 Tags: ai, large language model, chatbot, ollama, agent  
 Requires at least: 6.9  
 Tested up to: 7.2  
-Stable tag: 0.7.0  
+Stable tag: 0.8.0  
 Requires PHP: 8.4  
 License: GPLv2 or later  
 License URI: https://www.gnu.org/licenses/gpl-2.0.html  
@@ -112,6 +112,19 @@ There is a price as well as a symptom. `web_fetch`, `summarize` and `draft_post`
 == Changelog ==
 
 Releases before 0.5.0 are on the [releases page](https://github.com/carmelosantana/alpaca-bot/releases).
+
+= 0.8.0 =
+
+Alpaca Bot gains an extension API, so small companion plugins can add tools, guard tool calls and extend the chat UI. Nothing changes for a site that adds no companion.
+
+**Added**
+
+- **`alpaca_bot/loaded`** fires once Alpaca Bot is ready, with the extension API version (`Plugin::API_VERSION`, now `1`).
+- **Every tool call is guarded.** `alpaca_bot/tool/before_call` can refuse a call, and the model reads why; `alpaca_bot/tool/called` reports each call with its result. They cover built-in tools, abilities, MCP servers and companion toolkits alike. `alpaca_bot/mcp/called` still fires, and on WordPress 7.1+ core's `wp_pre_execute_ability` still applies.
+- **Companion toolkits get their own settings.** A plugin that hooks `alpaca_bot/register_toolkits` gets a box under Settings › Tools (off until an administrator ticks it) and its own row in Settings › Access.
+- **`alpaca_bot/conversation/saved` and `alpaca_bot/conversation/deleted`**, for memory, export and retention plugins.
+- **Chat UI hooks** through WordPress's `wp.hooks`: `alpacaBot.ready`, `alpacaBot.chat.request`, `alpacaBot.turn.started`, `alpacaBot.turn.completed`, `alpacaBot.turn.failed` and `alpacaBot.message.rendered`. The chat, drawer and editor scripts now load `wp-hooks`.
+- **A guide for companion plugins** (`docs/extending.md`): companions ship WordPress abilities rather than implementing an Alpaca Bot PHP interface.
 
 = 0.7.0 =
 
@@ -257,6 +270,10 @@ A ground-up rewrite. The 0.4 code is gone rather than refactored, so the list be
 - The plugin's own dependencies are namespace-prefixed, so php-agents or CommonMark installed by another plugin cannot collide with the copies shipped here.
 
 == Upgrade Notice ==
+
+= 0.8.0 =
+
+Adds an extension API for companion plugins: tool-call hooks, toolkit settings and chat UI hooks. No change for sites without companions.
 
 = 0.7.0 =
 

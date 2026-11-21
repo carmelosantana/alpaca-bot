@@ -118,7 +118,7 @@ it('enqueues the loader and its stylesheet only: no chat bundle, no htmx, no med
 
     adminDrawer()->enqueue();
 
-    expect($scripts)->toBe([Drawer::HANDLE => ['/plugins/alpaca-bot/assets/js/drawer.js', ['heartbeat'], Plugin::VERSION, true]])
+    expect($scripts)->toBe([Drawer::HANDLE => ['/plugins/alpaca-bot/assets/js/drawer.js', ['heartbeat', 'wp-hooks'], Plugin::VERSION, true]])
         ->and($styles)->toBe([Drawer::HANDLE => ['/plugins/alpaca-bot/assets/css/alpaca-bot-drawer.css', ['dashicons'], Plugin::VERSION]])
         ->and(array_keys($localized))->toBe(['alpacaBot', 'alpacaBotMount'])
         ->and($localized['alpacaBot'])->toBe([Drawer::HANDLE, (new Assets())->settings()])
@@ -218,7 +218,7 @@ it('enqueues the editor sidebar on a block editor post screen, after the wp pack
     adminDrawer()->enqueueEditor();
 
     expect(Drawer::EDITOR_HANDLE)->toBe('alpaca-bot-editor')
-        ->and($scripts)->toBe([Drawer::EDITOR_HANDLE => ['/plugins/alpaca-bot/assets/js/editor.js', ['wp-plugins', 'wp-editor', 'wp-element', 'wp-data', 'heartbeat'], Plugin::VERSION, true]])
+        ->and($scripts)->toBe([Drawer::EDITOR_HANDLE => ['/plugins/alpaca-bot/assets/js/editor.js', ['wp-plugins', 'wp-editor', 'wp-element', 'wp-data', 'heartbeat', 'wp-hooks'], Plugin::VERSION, true]])
         ->and(array_keys($localized))->toBe(['alpacaBot', 'alpacaBotMount'])
         ->and($localized['alpacaBot'])->toBe([Drawer::EDITOR_HANDLE, (new Assets())->settings()])
         // The loader's, and the conversation the drawer remembers, which the sidebar reopens

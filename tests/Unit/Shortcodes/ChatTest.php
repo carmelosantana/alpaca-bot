@@ -508,7 +508,7 @@ it('renders the chat shell for an editor with no prompt, on their model, and enq
     Functions\when('selected')->alias(static fn(mixed $a, mixed $b, bool $echo = true): string => $a == $b ? ' selected' : '');
     Functions\when('number_format_i18n')->alias(static fn(mixed $n): string => (string) $n);
     Functions\expect('wp_enqueue_script')->once()->with('alpaca-bot-htmx', Mockery::type('string'), [], Assets::HTMX_VERSION, true);
-    Functions\expect('wp_enqueue_script')->once()->with('alpaca-bot-chat', Mockery::type('string'), ['alpaca-bot-htmx', 'heartbeat'], Mockery::type('string'), true);
+    Functions\expect('wp_enqueue_script')->once()->with('alpaca-bot-chat', Mockery::type('string'), ['alpaca-bot-htmx', 'heartbeat', 'wp-hooks'], Mockery::type('string'), true);
     Functions\expect('wp_localize_script')->once()->with('alpaca-bot-chat', 'alpacaBot', Mockery::type('array'));
     Functions\expect('wp_enqueue_media')->once();
     $html = $chat->render('', null, 'alpacabot');

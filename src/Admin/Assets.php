@@ -176,7 +176,7 @@ final class Assets
     private function enqueueChat(): void
     {
         self::enqueueHtmx();
-        wp_enqueue_script('alpaca-bot-chat', plugins_url('assets/js/chat.js', ALPACA_BOT_FILE), [self::HTMX_HANDLE, 'heartbeat'], self::version('assets/js/chat.js'), true);
+        wp_enqueue_script('alpaca-bot-chat', plugins_url('assets/js/chat.js', ALPACA_BOT_FILE), [self::HTMX_HANDLE, 'heartbeat', 'wp-hooks'], self::version('assets/js/chat.js'), true);
         wp_enqueue_style('alpaca-bot', plugins_url('assets/css/alpaca-bot.css', ALPACA_BOT_FILE), [], self::version('assets/css/alpaca-bot.css'));
         wp_localize_script('alpaca-bot-chat', 'alpacaBot', $this->settings());
     }
